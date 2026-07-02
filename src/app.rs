@@ -17,7 +17,6 @@ pub struct App {
 }
 
 struct Panel {
-    id: usize,
     name: String,
 }
 
@@ -46,7 +45,6 @@ impl App {
 
         App {
             panels: vec![Panel {
-                id: 0,
                 name: "Workspace 1".to_string(),
             }],
             active_panel: 0,
@@ -77,17 +75,11 @@ impl App {
     }
 
     fn process_pending(&mut self, ctx: &egui::Context) {
-        if let Some(panel_id) = self.pending_new_terminal.take() {
+        if let Some(panel_idx) = self.pending_new_terminal.take() {
             let tab_id = self.create_terminal(ctx);
 
-            // If the dock state doesn't exist yet, create it with this tab
-            if !self.dock_states.contains_key(&panel_id) {
-                self.dock_states
-                    .insert(panel_id, DockState::new(vec![tab_id]));
-                return;
-            }
-
-            if let Some(tree) = self.dock_states.get_mut(&panel_id) {
+            if let Some(tree) = self.dock_states.get_mut(&panel_idx) {
+                // Dock state exists - add tab or split
                 if let Some(ref after_tab) = self.pending_split_after.clone() {
                     if let Some((_surface, node_idx, _tab_idx)) = tree.find_tab(after_tab) {
                         if self.pending_split_vertical {
@@ -104,6 +96,10 @@ impl App {
                     tree.main_surface_mut().push_to_first_leaf(tab_id);
                 }
                 self.pending_split_after = None;
+            } else {
+                // Dock state doesn't exist yet - create it with this tab
+                self.dock_states
+                    .insert(panel_idx, DockState::new(vec![tab_id]));
             }
         }
 
@@ -114,13 +110,12 @@ impl App {
 
     fn add_panel(&mut self) {
         self.panel_counter += 1;
-        let id = self.panel_counter as usize;
         self.panels.push(Panel {
-            id,
             name: format!("Workspace {}", self.panel_counter),
         });
-        self.pending_new_terminal = Some(id);
-        self.active_panel = self.panels.len() - 1;
+        let idx = self.panels.len() - 1;
+        self.active_panel = idx;
+        self.pending_new_terminal = Some(idx);
     }
 }
 
@@ -277,9 +272,7 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
         true
     }
 
-    fn on_add(&mut self, _surface: SurfaceIndex, _node: NodeIndex) {
-        // Don't add directly, show popup instead
-    }
+    fn on_add(&mut self, _surface: SurfaceIndex, _node: NodeIndex) {}
 
     fn add_popup(&mut self, ui: &mut egui::Ui, _surface: SurfaceIndex, _node: NodeIndex) {
         ui.horizontal(|ui| {
