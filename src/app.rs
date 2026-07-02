@@ -306,12 +306,14 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                         .hint_text("Enter name..."),
                 );
 
-                // Auto-focus
-                if !response.has_focus() {
+                // Auto-focus on first render
+                if self.editing_terminal_buffer.is_empty() && !response.has_focus() {
                     response.request_focus();
                 }
 
-                if response.lost_focus() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                // Confirm on Enter or when focus is lost (clicked elsewhere)
+                let enter_pressed = ui.input(|i| i.key_pressed(egui::Key::Enter));
+                if enter_pressed || (response.lost_focus() && ui.memory(|m| m.focused().is_none())) {
                     if !self.editing_terminal_buffer.is_empty() {
                         if let Some(data) = self.terminals.get_mut(tab) {
                             data.name = self.editing_terminal_buffer.clone();
@@ -321,22 +323,23 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                 }
             });
             ui.separator();
-        }
-
-        if let Some(terminal_data) = self.terminals.get_mut(tab) {
-            if let Ok((_, PtyEvent::Exit)) = terminal_data.receiver.try_recv() {
-                ui.ctx()
-                    .send_viewport_cmd(egui::ViewportCommand::Close);
-                return;
-            }
-
-            let terminal_view = TerminalView::new(ui, &mut terminal_data.backend)
-                .set_focus(true)
-                .set_size(ui.available_size());
-
-            ui.add(terminal_view);
         } else {
-            ui.label("Terminal not found");
+            // Normal mode - show terminal
+            if let Some(terminal_data) = self.terminals.get_mut(tab) {
+                if let Ok((_, PtyEvent::Exit)) = terminal_data.receiver.try_recv() {
+                    ui.ctx()
+                        .send_viewport_cmd(egui::ViewportCommand::Close);
+                    return;
+                }
+
+                let terminal_view = TerminalView::new(ui, &mut terminal_data.backend)
+                    .set_focus(true)
+                    .set_size(ui.available_size());
+
+                ui.add(terminal_view);
+            } else {
+                ui.label("Terminal not found");
+            }
         }
     }
 
