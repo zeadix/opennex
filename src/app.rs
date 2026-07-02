@@ -1,173 +1,112 @@
-use eframe::egui;
-use egui::FontData;
+use crate::terminal::Tab;
+use crossterm::event::{KeyCode, KeyEvent};
 
 pub struct App {
-    terminals: Vec<Terminal>,
-    active_terminal: usize,
-    tab_counter: u32,
-}
-
-struct Terminal {
-    id: String,
-    title: String,
-    content: String,
-    input_buffer: String,
-}
-
-impl Default for App {
-    fn default() -> Self {
-        let mut app = App {
-            terminals: Vec::new(),
-            active_terminal: 0,
-            tab_counter: 0,
-        };
-        app.new_terminal();
-        app
-    }
+    pub tabs: Vec<Tab>,
+    pub active_tab: usize,
+    pub tab_counter: u32,
 }
 
 impl App {
-    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        Self::setup_fonts(&cc.egui_ctx);
-        Self::default()
-    }
-
-    fn setup_fonts(ctx: &egui::Context) {
-        let mut fonts = egui::FontDefinitions::default();
-        let font_paths = [
-            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-            "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
-            "/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc",
-            "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
-        ];
-        for path in &font_paths {
-            if std::path::Path::new(path).exists() {
-                if let Ok(font_data) = std::fs::read(path) {
-                    fonts.font_data.insert("chinese".to_owned(), FontData::from_owned(font_data));
-                    fonts.families.entry(egui::FontFamily::Proportional).or_default().insert(0, "chinese".to_owned());
-                    fonts.families.entry(egui::FontFamily::Monospace).or_default().insert(0, "chinese".to_owned());
-                    break;
-                }
-            }
-        }
-        ctx.set_fonts(fonts);
-    }
-
-    fn new_terminal(&mut self) {
-        self.tab_counter += 1;
-        self.terminals.push(Terminal {
-            id: format!("terminal-{}", self.tab_counter),
-            title: format!("Terminal {}", self.tab_counter),
-            content: "Welcome to OpenZoo Terminal Manager\nType 'help' for available commands\n\n".to_string(),
-            input_buffer: String::new(),
-        });
-        self.active_terminal = self.terminals.len() - 1;
-    }
-
-    fn close_terminal(&mut self, index: usize) {
-        if self.terminals.len() > 1 {
-            self.terminals.remove(index);
-            if self.active_terminal >= self.terminals.len() {
-                self.active_terminal = self.terminals.len() - 1;
-            }
-        }
-    }
-
-    fn run_command(&mut self, command: String) {
-        let cmd = command.trim().to_string();
-        if cmd.is_empty() {
-            return;
-        }
-        let output = match cmd.as_str() {
-            "help" => "Available commands:\n  help  - Show this help\n  clear - Clear screen\n  ls    - List files\n  pwd   - Print working directory\n  echo  - Echo text".to_string(),
-            "clear" => {
-                self.terminals[self.active_terminal].content.clear();
-                return;
-            }
-            "ls" => "Files:\n  src/\n  tests/\n  Cargo.toml".to_string(),
-            "pwd" => std::env::current_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default(),
-            other if other.starts_with("echo ") => other[5..].to_string(),
-            other => format!("Executed: {}", other),
+    pub fn new() -> Self {
+        let mut app = App {
+            tabs: Vec::new(),
+            active_tab: 0,
+            tab_counter: 0,
         };
-        self.terminals[self.active_terminal].content.push_str(&format!("$ {}\n{}\n\n", cmd, output));
+        app.new_tab();
+        app
     }
-}
 
-impl eframe::App for App {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        egui::TopBottomPanel::top("menu").show(ctx, |ui| {
-            egui::menu::bar(ui, |ui| {
-                ui.menu_button("File", |ui| {
-                    if ui.button("New Terminal").clicked() { self.new_terminal(); }
-                    if ui.button("Exit").clicked() { std::process::exit(0); }
-                });
-                ui.menu_button("Terminal", |ui| {
-                    if ui.button("Clear").clicked() { self.terminals[self.active_terminal].content.clear(); }
-                });
-            });
-        });
+    pub fn new_tab(&mut self) {
+        self.tab_counter += 1;
+        self.tabs.push(Tab::new(&format!("Tab {}", self.tab_counter)));
+        self.active_tab = self.tabs.len() - 1;
+    }
 
-        egui::SidePanel::left("terminals").default_width(140.0).show(ctx, |ui| {
-            ui.heading("Terminals");
-            ui.separator();
-            let mut to_close = None;
-            for (i, t) in self.terminals.iter().enumerate() {
-                if ui.selectable_label(i == self.active_terminal, &t.title).clicked() {
-                    self.active_terminal = i;
-                }
-                if i == self.active_terminal && self.terminals.len() > 1 {
-                    if ui.small_button("x").clicked() { to_close = Some(i); }
-                }
+    pub fn close_tab(&mut self) {
+        if self.tabs.len() > 1 {
+            self.tabs.remove(self.active_tab);
+            if self.active_tab >= self.tabs.len() {
+                self.active_tab = self.tabs.len() - 1;
             }
-            if let Some(i) = to_close { self.close_terminal(i); }
-            ui.separator();
-            if ui.button("+ New").clicked() { self.new_terminal(); }
-        });
+        }
+    }
 
-        egui::CentralPanel::default().show(ctx, |ui| {
-            if let Some(terminal) = self.terminals.get_mut(self.active_terminal) {
-                ui.heading(&terminal.title);
-                ui.separator();
+    pub fn split_horizontal(&mut self) {
+        if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+            tab.split_horizontal();
+        }
+    }
 
-                egui::ScrollArea::vertical().auto_shrink([false; 2]).stick_to_bottom(true).show(ui, |ui| {
-                    ui.add(egui::TextEdit::multiline(&mut terminal.content).font(egui::TextStyle::Monospace).desired_width(f32::INFINITY).interactive(false));
-                });
+    pub fn split_vertical(&mut self) {
+        if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+            tab.split_vertical();
+        }
+    }
 
-                ui.separator();
+    pub fn next_pane(&mut self) {
+        if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+            if tab.panes.len() > 1 {
+                tab.active_pane = (tab.active_pane + 1) % tab.panes.len();
+            }
+        }
+    }
 
-                ui.label("Input command:");
-                let edit_response = ui.add(
-                    egui::TextEdit::multiline(&mut terminal.input_buffer)
-                        .font(egui::TextStyle::Monospace)
-                        .desired_width(f32::INFINITY)
-                        .desired_rows(1)
-                        .frame(true),
-                );
+    pub fn prev_pane(&mut self) {
+        if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+            if tab.panes.len() > 1 {
+                tab.active_pane = if tab.active_pane == 0 {
+                    tab.panes.len() - 1
+                } else {
+                    tab.active_pane - 1
+                };
+            }
+        }
+    }
 
-                let mut should_run = false;
-                let mut command = String::new();
+    pub fn select_pane(&mut self, index: usize) {
+        if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+            if index < tab.panes.len() {
+                tab.active_pane = index;
+            }
+        }
+    }
 
-                if ui.button("Execute").clicked() {
-                    command = terminal.input_buffer.trim().to_string();
-                    should_run = true;
-                }
+    pub fn clear_active(&mut self) {
+        if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+            if let Some(pane) = tab.panes.get_mut(tab.active_pane) {
+                pane.content.clear();
+            }
+        }
+    }
 
-                if edit_response.has_focus() {
-                    let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
-                    let ctrl_enter = ui.input(|i| i.key_pressed(egui::Key::Enter) && i.modifiers.ctrl);
-                    if ctrl_enter || (enter && !terminal.input_buffer.ends_with('\n')) {
-                        command = terminal.input_buffer.trim().to_string();
-                        should_run = true;
+    pub fn handle_input(&mut self, key: KeyEvent) {
+        if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+            if let Some(pane) = tab.panes.get_mut(tab.active_pane) {
+                match key.code {
+                    KeyCode::Enter => {
+                        let cmd = pane.input.clone();
+                        pane.input.clear();
+                        pane.execute(&cmd);
                     }
-                }
-
-                if should_run && !command.is_empty() {
-                    terminal.input_buffer.clear();
-                    drop(terminal);
-                    self.run_command(command);
+                    KeyCode::Char(c) => {
+                        pane.input.push(c);
+                    }
+                    KeyCode::Backspace => {
+                        pane.input.pop();
+                    }
+                    KeyCode::Esc => {
+                        pane.input.clear();
+                    }
+                    KeyCode::Up => {
+                        if let Some(last) = pane.history.last() {
+                            pane.input = last.clone();
+                        }
+                    }
+                    _ => {}
                 }
             }
-        });
+        }
     }
 }

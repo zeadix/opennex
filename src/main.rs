@@ -1,177 +1,170 @@
+use anyhow::Result;
+use crossterm::{
+    event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
+    execute,
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+};
+use ratatui::{
+    backend::CrosstermBackend,
+    layout::{Constraint, Direction, Layout, Rect},
+    style::{Color, Modifier, Style},
+    widgets::{Block, Borders, Tabs, Wrap},
+    Frame, Terminal,
+};
+use std::io;
+
+mod app;
 mod terminal;
 mod state;
-mod config;
-mod plugin;
-mod template;
 
-use iced::widget::{button, column, container, horizontal_rule, row, scrollable, text, text_input};
-use iced::{Element, Length};
+use app::App;
 
-fn main() -> iced::Result {
+fn main() -> Result<()> {
     env_logger::init();
-    iced::run("OpenZoo - AI Terminal Manager", update, view)
-}
+    enable_raw_mode()?;
+    let mut stdout = io::stdout();
+    execute!(stdout, EnterAlternateScreen)?;
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
 
-struct State {
-    tabs: Vec<Tab>,
-    active_tab: usize,
-    tab_counter: u32,
-}
+    let mut app = App::new();
+    let result = run_app(&mut terminal, &mut app);
 
-struct Tab {
-    id: u32,
-    title: String,
-    history: String,
-    input: String,
-}
+    disable_raw_mode()?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    terminal.show_cursor()?;
 
-#[derive(Debug, Clone)]
-enum Message {
-    NewTab,
-    CloseTab(usize),
-    SelectTab(usize),
-    InputChanged(String),
-    Execute,
-    ClearScreen,
-}
-
-impl Default for State {
-    fn default() -> Self {
-        let mut state = State {
-            tabs: Vec::new(),
-            active_tab: 0,
-            tab_counter: 0,
-        };
-        state.add_tab();
-        state
+    if let Err(err) = result {
+        eprintln!("Error: {:?}", err);
     }
+    Ok(())
 }
 
-impl State {
-    fn add_tab(&mut self) {
-        self.tab_counter += 1;
-        self.tabs.push(Tab {
-            id: self.tab_counter,
-            title: format!("Terminal {}", self.tab_counter),
-            history: "Welcome to OpenZoo Terminal Manager\nType 'help' for available commands\n\n".to_string(),
-            input: String::new(),
-        });
-        self.active_tab = self.tabs.len() - 1;
-    }
+fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) -> Result<()> {
+    loop {
+        terminal.draw(|f| ui(f, app))?;
 
-    fn execute(&mut self) {
-        if let Some(tab) = self.tabs.get_mut(self.active_tab) {
-            let cmd = tab.input.trim().to_string();
-            if cmd.is_empty() {
-                return;
-            }
-            let output = match cmd.as_str() {
-                "help" => "Available commands:\n  help  - Show help\n  clear - Clear screen\n  ls    - List files\n  pwd   - Print working directory".to_string(),
-                "clear" => {
-                    tab.history.clear();
-                    tab.input.clear();
-                    return;
-                }
-                "ls" => "Files:\n  src/\n  tests/\n  Cargo.toml".to_string(),
-                "pwd" => std::env::current_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default(),
-                other if other.starts_with("echo ") => other[5..].to_string(),
-                other => format!("Executed: {}", other),
-            };
-            tab.history.push_str(&format!("$ {}\n{}\n\n", cmd, output));
-            tab.input.clear();
-        }
-    }
-}
-
-fn update(state: &mut State, message: Message) {
-    match message {
-        Message::NewTab => state.add_tab(),
-        Message::CloseTab(index) => {
-            if state.tabs.len() > 1 {
-                state.tabs.remove(index);
-                if state.active_tab >= state.tabs.len() {
-                    state.active_tab = state.tabs.len() - 1;
+        if event::poll(std::time::Duration::from_millis(100))? {
+            if let Event::Key(key) = event::read()? {
+                match (key.code, key.modifiers) {
+                    (KeyCode::Char('q'), KeyModifiers::CONTROL) => return Ok(()),
+                    (KeyCode::Char('c'), KeyModifiers::CONTROL) => return Ok(()),
+                    (KeyCode::Char('n'), KeyModifiers::CONTROL) => app.new_tab(),
+                    (KeyCode::Char('w'), KeyModifiers::CONTROL) => app.close_tab(),
+                    (KeyCode::Char('\\'), KeyModifiers::CONTROL) => app.split_horizontal(),
+                    (KeyCode::Char('|'), KeyModifiers::CONTROL) => app.split_vertical(),
+                    (KeyCode::Tab, _) => app.next_pane(),
+                    (KeyCode::BackTab, KeyModifiers::SHIFT) => app.prev_pane(),
+                    (KeyCode::Char('1'), KeyModifiers::CONTROL) => app.select_pane(0),
+                    (KeyCode::Char('2'), KeyModifiers::CONTROL) => app.select_pane(1),
+                    (KeyCode::Char('3'), KeyModifiers::CONTROL) => app.select_pane(2),
+                    (KeyCode::Char('4'), KeyModifiers::CONTROL) => app.select_pane(3),
+                    (KeyCode::Char('5'), KeyModifiers::CONTROL) => app.select_pane(4),
+                    (KeyCode::Char('6'), KeyModifiers::CONTROL) => app.select_pane(5),
+                    (KeyCode::Char('7'), KeyModifiers::CONTROL) => app.select_pane(6),
+                    (KeyCode::Char('8'), KeyModifiers::CONTROL) => app.select_pane(7),
+                    (KeyCode::Char('9'), KeyModifiers::CONTROL) => app.select_pane(8),
+                    (KeyCode::Char('l'), KeyModifiers::CONTROL) => app.clear_active(),
+                    _ => app.handle_input(key),
                 }
             }
         }
-        Message::SelectTab(index) => state.active_tab = index,
-        Message::InputChanged(value) => {
-            if let Some(tab) = state.tabs.get_mut(state.active_tab) {
-                tab.input = value;
-            }
-        }
-        Message::Execute => state.execute(),
-        Message::ClearScreen => {
-            if let Some(tab) = state.tabs.get_mut(state.active_tab) {
-                tab.history.clear();
-            }
-        }
     }
 }
 
-fn view(state: &State) -> Element<'_, Message> {
-    let tab_row: Element<Message> = state.tabs.iter().enumerate()
-        .fold(row![].spacing(4), |r, (i, tab)| {
-            let is_active = i == state.active_tab;
-            let label = text(&tab.title);
-            let tab_btn = if is_active {
-                button(label).style(button::primary)
+fn ui(f: &mut Frame, app: &mut App) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Min(1)])
+        .split(f.size());
+
+    render_tab_bar(f, chunks[0], app);
+    render_content(f, chunks[1], app);
+}
+
+fn render_tab_bar(f: &mut Frame, area: Rect, app: &App) {
+    let titles: Vec<&str> = app.tabs.iter().map(|t| t.name.as_str()).collect();
+    let tabs = Tabs::new(titles)
+        .block(Block::default().borders(Borders::ALL).title(" OpenZoo Terminal Manager "))
+        .select(app.active_tab)
+        .style(Style::default().fg(Color::White))
+        .highlight_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
+    f.render_widget(tabs, area);
+}
+
+fn render_content(f: &mut Frame, area: Rect, app: &mut App) {
+    if let Some(tab) = app.tabs.get(app.active_tab) {
+        let panes = &tab.panes;
+        let active = tab.active_pane;
+        let total = panes.len();
+
+        if total == 1 {
+            render_pane(f, area, &panes[0], 0 == active);
+        } else {
+            let direction = if total == 2 {
+                Direction::Horizontal
             } else {
-                button(label)
+                Direction::Vertical
             };
-            let close_btn = button("x").on_press(Message::CloseTab(i));
-            r.push(tab_btn.on_press(Message::SelectTab(i))).push(close_btn)
-        })
-        .into();
+            let constraints: Vec<Constraint> = panes.iter().map(|_| Constraint::Ratio(1, total as u32)).collect();
+            let chunks = Layout::default().direction(direction).constraints(constraints).split(area);
+            for (i, pane) in panes.iter().enumerate() {
+                render_pane(f, chunks[i], pane, i == active);
+            }
+        }
+    }
+}
 
-    let new_tab_btn = button("+ New").on_press(Message::NewTab);
-    let clear_btn = button("Clear").on_press(Message::ClearScreen);
-
-    let header = column![
-        horizontal_rule(1),
-        row![tab_row, new_tab_btn].spacing(4),
-        horizontal_rule(1),
-    ]
-    .spacing(4);
-
-    let content: Element<Message> = if let Some(tab) = state.tabs.get(state.active_tab) {
-        let output = scrollable(
-            text(&tab.history)
-                .font(iced::Font::MONOSPACE)
-                .width(Length::Fill)
-        )
-        .height(Length::Fill);
-
-        let input_field = text_input("$ Enter command...", &tab.input)
-            .on_submit(Message::Execute)
-            .on_input(Message::InputChanged)
-            .font(iced::Font::MONOSPACE)
-            .width(Length::Fill);
-
-        let execute_btn = button("Execute").on_press(Message::Execute);
-
-        column![
-            output,
-            horizontal_rule(1),
-            row![input_field, execute_btn].spacing(4),
-        ]
-        .spacing(4)
-        .into()
+fn render_pane(f: &mut Frame, area: Rect, pane: &terminal::Pane, is_active: bool) {
+    let border_style = if is_active {
+        Style::default().fg(Color::Yellow)
     } else {
-        column![text("No tabs")].into()
+        Style::default().fg(Color::DarkGray)
     };
 
-    let footer = column![
-        horizontal_rule(1),
-        clear_btn,
-    ]
-    .spacing(2);
+    let title = if is_active {
+        format!(" {} [ACTIVE] ", pane.name)
+    } else {
+        format!(" {} ", pane.name)
+    };
 
-    container(
-        column![header, content, footer].spacing(4)
-    )
-    .padding(8)
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .into()
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(title)
+        .style(border_style);
+
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    if pane.content.is_empty() {
+        let help = "Commands: help, ls, pwd, echo <text>, clear, calc <expr>\n\
+                     Shortcuts: Ctrl+N=New Tab, Ctrl+W=Close Tab, Ctrl+\\=Split H, Ctrl+|=Split V\n\
+                     Ctrl+1-9=Switch Pane, Tab=Next Pane, Ctrl+L=Clear, Ctrl+Q=Quit";
+        let paragraph = ratatui::widgets::Paragraph::new(help)
+            .style(Style::default().fg(Color::DarkGray))
+            .wrap(Wrap { trim: false });
+        f.render_widget(paragraph, inner);
+    } else {
+        let paragraph = ratatui::widgets::Paragraph::new(pane.content.as_str())
+            .style(Style::default().fg(Color::White))
+            .wrap(Wrap { trim: false });
+        f.render_widget(paragraph, inner);
+    }
+
+    if is_active {
+        let input_area = Rect {
+            x: inner.x,
+            y: inner.y + inner.height.saturating_sub(1),
+            width: inner.width,
+            height: 1,
+        };
+        let input_text = format!("$ {}", pane.input);
+        let input = ratatui::widgets::Paragraph::new(input_text)
+            .style(Style::default().fg(Color::Green).bg(Color::Black));
+        f.render_widget(input, input_area);
+        f.set_cursor(
+            input_area.x + 2 + pane.input.len() as u16,
+            input_area.y,
+        );
+    }
 }
