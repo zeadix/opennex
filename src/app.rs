@@ -34,10 +34,11 @@ impl App {
 
     fn new_terminal(&mut self) {
         self.tab_counter += 1;
+        let welcome_msg = "欢迎使用 OpenZoo AI 终端管理器\n输入 help 查看可用命令\n";
         self.terminals.push(Terminal {
             id: format!("terminal-{}", self.tab_counter),
             title: format!("终端 {}", self.tab_counter),
-            content: String::new(),
+            content: welcome_msg.to_string(),
             input_buffer: String::new(),
         });
         self.active_terminal = self.terminals.len() - 1;
@@ -54,22 +55,23 @@ impl App {
 
     fn execute_command(&mut self, command: &str) {
         let output = match command.trim() {
-            "help" => "可用命令: help, clear, ls, pwd, echo <text>".to_string(),
+            "help" => "可用命令:\n  help    - 显示帮助\n  clear   - 清屏\n  ls      - 列出文件\n  pwd     - 显示当前目录\n  echo    - 回显文本".to_string(),
             "clear" => {
                 self.terminals[self.active_terminal].content.clear();
                 return;
             }
-            "ls" => "文件列表: src/ tests/ Cargo.toml README.md".to_string(),
+            "ls" => "文件列表:\n  src/\n  tests/\n  Cargo.toml\n  README.md".to_string(),
             "pwd" => std::env::current_dir()
                 .map(|p| p.to_string_lossy().to_string())
                 .unwrap_or_else(|_| "/".to_string()),
             cmd if cmd.starts_with("echo ") => cmd[5..].to_string(),
-            cmd => format!("命令已执行: {}", cmd),
+            "" => return,
+            cmd => format!("已执行: {}", cmd),
         };
 
         self.terminals[self.active_terminal]
             .content
-            .push_str(&format!("$ {}\n{}\n", command, output));
+            .push_str(&format!("$ {}\n{}\n\n", command, output));
     }
 }
 
@@ -139,7 +141,8 @@ impl eframe::App for App {
                         ui.add(
                             egui::TextEdit::multiline(&mut terminal.content)
                                 .font(egui::TextStyle::Monospace)
-                                .desired_width(f32::INFINITY),
+                                .desired_width(f32::INFINITY)
+                                .interactive(false),
                         );
                     });
 
@@ -150,7 +153,8 @@ impl eframe::App for App {
                     let response = ui.add(
                         egui::TextEdit::singleline(&mut terminal.input_buffer)
                             .font(egui::TextStyle::Monospace)
-                            .desired_width(ui.available_width()),
+                            .desired_width(ui.available_width())
+                            .hint_text("输入命令..."),
                     );
 
                     if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))
@@ -158,6 +162,7 @@ impl eframe::App for App {
                         let command = terminal.input_buffer.clone();
                         terminal.input_buffer.clear();
                         self.pending_command = Some(command);
+                        response.request_focus();
                     }
                 });
             }
