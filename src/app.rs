@@ -6,7 +6,6 @@ pub struct App {
     active_terminal: usize,
     tab_counter: u32,
     pending_command: Option<String>,
-    input_focused: bool,
 }
 
 struct Terminal {
@@ -23,7 +22,6 @@ impl Default for App {
             active_terminal: 0,
             tab_counter: 0,
             pending_command: None,
-            input_focused: false,
         };
         app.new_terminal();
         app
@@ -48,33 +46,16 @@ impl App {
             "/usr/share/fonts/wqy-zenhei/wqy-zenhei.ttc",
         ];
 
-        let mut loaded = false;
         for path in &font_paths {
             if std::path::Path::new(path).exists() {
                 if let Ok(font_data) = std::fs::read(path) {
-                    fonts.font_data.insert(
-                        "chinese".to_owned(),
-                        FontData::from_owned(font_data),
-                    );
-                    fonts
-                        .families
-                        .entry(egui::FontFamily::Proportional)
-                        .or_default()
-                        .insert(0, "chinese".to_owned());
-                    fonts
-                        .families
-                        .entry(egui::FontFamily::Monospace)
-                        .or_default()
-                        .insert(0, "chinese".to_owned());
-                    loaded = true;
-                    log::info!("Loaded Chinese font from: {}", path);
+                    fonts.font_data.insert("chinese".to_owned(), FontData::from_owned(font_data));
+                    fonts.families.entry(egui::FontFamily::Proportional).or_default().insert(0, "chinese".to_owned());
+                    fonts.families.entry(egui::FontFamily::Monospace).or_default().insert(0, "chinese".to_owned());
+                    log::info!("Loaded Chinese font: {}", path);
                     break;
                 }
             }
-        }
-
-        if !loaded {
-            log::warn!("No Chinese font found");
         }
 
         ctx.set_fonts(fonts);
@@ -82,11 +63,10 @@ impl App {
 
     fn new_terminal(&mut self) {
         self.tab_counter += 1;
-        let welcome_msg = "欢迎使用 OpenZoo AI 终端管理器\n输入 help 查看可用命令\n";
         self.terminals.push(Terminal {
             id: format!("terminal-{}", self.tab_counter),
             title: format!("终端 {}", self.tab_counter),
-            content: welcome_msg.to_string(),
+            content: "欢迎使用 OpenZoo AI 终端管理器\n输入 help 查看可用命令\n\n".to_string(),
             input_buffer: String::new(),
         });
         self.active_terminal = self.terminals.len() - 1;
@@ -125,15 +105,11 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // 请求重绘以保持焦点
-        ctx.request_repaint();
-
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
                 ui.menu_button("文件", |ui| {
                     if ui.button("新建终端").clicked() {
                         self.new_terminal();
-                        ui.close_menu();
                     }
                     if ui.button("退出").clicked() {
                         std::process::exit(0);
@@ -142,7 +118,6 @@ impl eframe::App for App {
                 ui.menu_button("终端", |ui| {
                     if ui.button("清屏").clicked() {
                         self.terminals[self.active_terminal].content.clear();
-                        ui.close_menu();
                     }
                 });
             });
@@ -153,27 +128,21 @@ impl eframe::App for App {
             .show(ctx, |ui| {
                 ui.heading("终端");
                 ui.separator();
-
                 let mut to_close = None;
                 for (i, terminal) in self.terminals.iter().enumerate() {
                     let is_active = i == self.active_terminal;
-                    if ui
-                        .selectable_label(is_active, &terminal.title)
-                        .clicked()
-                    {
+                    if ui.selectable_label(is_active, &terminal.title).clicked() {
                         self.active_terminal = i;
                     }
                     if is_active && self.terminals.len() > 1 {
-                        if ui.small_button("×").clicked() {
+                        if ui.small_button("x").clicked() {
                             to_close = Some(i);
                         }
                     }
                 }
-
                 if let Some(index) = to_close {
                     self.close_terminal(index);
                 }
-
                 ui.separator();
                 if ui.button("+ 新建终端").clicked() {
                     self.new_terminal();
@@ -185,7 +154,6 @@ impl eframe::App for App {
                 ui.heading(&terminal.title);
                 ui.separator();
 
-                // 终端输出区域
                 egui::ScrollArea::vertical()
                     .auto_shrink([false; 2])
                     .stick_to_bottom(true)
@@ -200,44 +168,27 @@ impl eframe::App for App {
 
                 ui.separator();
 
-                // 输入区域
                 ui.horizontal(|ui| {
                     ui.label("$");
 
-                    let text_edit = egui::TextEdit::singleline(&mut terminal.input_buffer)
-                        .font(egui::TextStyle::Monospace)
-                        .desired_width(ui.available_width())
-                        .hint_text("输入命令后按 Enter 执行");
+                    let response = ui.add(
+                        egui::TextEdit::singleline(&mut terminal.input_buffer)
+                            .font(egui::TextStyle::Monospace)
+                            .desired_width(ui.available_width())
+                            .hint_text("输入命令..."),
+                    );
 
-                    let response = ui.add(text_edit);
-
-                    // 如果输入框没有焦点，请求焦点
-                    if !self.input_focused {
-                        response.request_focus();
-                        self.input_focused = true;
-                    }
-
-                    // 检测 Enter 键
-                    let enter_pressed = ui.input(|i| i.key_pressed(egui::Key::Enter));
-
-                    if enter_pressed {
+                    if response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                         let command = terminal.input_buffer.trim().to_string();
                         if !command.is_empty() {
                             self.pending_command = Some(command);
-                            terminal.input_buffer.clear();
                         }
-                        // 重新请求焦点
-                        response.request_focus();
-                    }
-
-                    // 如果输入框失去焦点，重新请求
-                    if response.lost_focus() && !ui.input(|i| i.key_pressed(egui::Key::Tab)) {
+                        terminal.input_buffer.clear();
                         response.request_focus();
                     }
                 });
             }
 
-            // 执行命令
             if let Some(command) = self.pending_command.take() {
                 self.execute_command(&command);
             }
