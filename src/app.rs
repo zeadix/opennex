@@ -155,9 +155,7 @@ impl eframe::App for App {
                 });
                 ui.menu_button("View", |ui| {
                     if let Some(tree) = self.dock_states.get_mut(&self.active_panel) {
-                        let active_tab = tree
-                            .find_active_focused()
-                            .map(|(_, t)| t.clone());
+                        let active_tab = tree.find_active_focused().map(|(_, t)| t.clone());
                         if let Some(ref tab) = active_tab {
                             if ui.button("Split Right").clicked() {
                                 self.pending_split_after = Some(tab.clone());
@@ -175,7 +173,6 @@ impl eframe::App for App {
             });
         });
 
-        // Level 1: Left navigation panel
         egui::SidePanel::left("navigation")
             .default_width(160.0)
             .show(ctx, |ui| {
@@ -185,10 +182,7 @@ impl eframe::App for App {
                 let mut to_select = None;
                 for (i, panel) in self.panels.iter().enumerate() {
                     let is_active = i == self.active_panel;
-                    if ui
-                        .selectable_label(is_active, &panel.name)
-                        .clicked()
-                    {
+                    if ui.selectable_label(is_active, &panel.name).clicked() {
                         to_select = Some(i);
                     }
                 }
@@ -203,18 +197,13 @@ impl eframe::App for App {
                 }
 
                 ui.separator();
-                ui.label("Level 1: Workspaces");
-                ui.label("Level 2: Dock panels");
-                ui.label("Level 3: Terminal tabs");
+                ui.label("L1: Workspaces");
+                ui.label("L2: Dock panels");
+                ui.label("L3: Terminal tabs");
             });
 
-        // Level 2 & 3: Right content area with dock
         egui::CentralPanel::default().show(ctx, |ui| {
             if let Some(tree) = self.dock_states.get_mut(&self.active_panel) {
-                if tree.find_active_focused().is_none() {
-                    // Auto-select first tab if none active
-                }
-
                 DockArea::new(tree)
                     .style(Style::from_egui(ui.style().as_ref()))
                     .show_add_buttons(true)
@@ -226,10 +215,11 @@ impl eframe::App for App {
                         pending_split_after: &mut self.pending_split_after,
                         pending_split_vertical: &mut self.pending_split_vertical,
                         active_panel: self.active_panel,
+                        current_tab: None,
                     });
             } else {
                 ui.centered_and_justified(|ui| {
-                    ui.label("No workspace selected. Click '+ New Workspace' to create one.");
+                    ui.label("Click '+ New Workspace' to create one.");
                 });
             }
         });
@@ -243,6 +233,7 @@ struct TerminalTabViewer<'a> {
     pending_split_after: &'a mut Option<String>,
     pending_split_vertical: &'a mut bool,
     active_panel: usize,
+    current_tab: Option<String>,
 }
 
 impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
@@ -256,6 +247,8 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab) {
+        self.current_tab = Some(tab.clone());
+
         if let Some(terminal_data) = self.terminals.get_mut(tab) {
             if let Ok((_, PtyEvent::Exit)) = terminal_data.receiver.try_recv() {
                 ui.ctx()
@@ -276,6 +269,31 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
     fn on_close(&mut self, tab: &mut Self::Tab) -> bool {
         *self.pending_close = Some(tab.clone());
         true
+    }
+
+    fn on_add(&mut self, _surface: SurfaceIndex, _node: NodeIndex) {
+        // Don't add directly, show popup instead
+    }
+
+    fn add_popup(&mut self, ui: &mut egui::Ui, _surface: SurfaceIndex, _node: NodeIndex) {
+        ui.horizontal(|ui| {
+            if ui.button("+ Tab").clicked() {
+                *self.pending_new_terminal = Some(self.active_panel);
+                ui.close_menu();
+            }
+            if ui.button("Split H").clicked() {
+                *self.pending_split_after = self.current_tab.clone();
+                *self.pending_split_vertical = false;
+                *self.pending_new_terminal = Some(self.active_panel);
+                ui.close_menu();
+            }
+            if ui.button("Split V").clicked() {
+                *self.pending_split_after = self.current_tab.clone();
+                *self.pending_split_vertical = true;
+                *self.pending_new_terminal = Some(self.active_panel);
+                ui.close_menu();
+            }
+        });
     }
 
     fn context_menu(
@@ -304,28 +322,5 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
             *self.pending_new_terminal = Some(self.active_panel);
             ui.close_menu();
         }
-    }
-
-    fn on_add(&mut self, _surface: SurfaceIndex, _node: NodeIndex) {
-        // Don't add terminal directly, wait for popup selection
-    }
-
-    fn add_popup(&mut self, ui: &mut egui::Ui, _surface: SurfaceIndex, _node: NodeIndex) {
-        ui.horizontal(|ui| {
-            if ui.button("+ Tab").clicked() {
-                *self.pending_new_terminal = Some(self.active_panel);
-                ui.close_menu();
-            }
-            if ui.button("Split H").clicked() {
-                *self.pending_split_vertical = false;
-                *self.pending_new_terminal = Some(self.active_panel);
-                ui.close_menu();
-            }
-            if ui.button("Split V").clicked() {
-                *self.pending_split_vertical = true;
-                *self.pending_new_terminal = Some(self.active_panel);
-                ui.close_menu();
-            }
-        });
     }
 }
