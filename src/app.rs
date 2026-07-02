@@ -80,24 +80,22 @@ impl App {
         if let Some(panel_id) = self.pending_new_terminal.take() {
             let tab_id = self.create_terminal(ctx);
             if let Some(tree) = self.dock_states.get_mut(&panel_id) {
-                tree.main_surface_mut().push_to_first_leaf(tab_id);
-            }
-        }
-
-        if let Some(after_tab) = self.pending_split_after.take() {
-            let tab_id = self.create_terminal(ctx);
-            let vertical = self.pending_split_vertical;
-
-            if let Some(tree) = self.dock_states.get_mut(&self.active_panel) {
-                if let Some((_surface, node_idx, _tab_idx)) = tree.find_tab(&after_tab) {
-                    if vertical {
-                        tree.main_surface_mut()
-                            .split_below(node_idx, 0.5, vec![tab_id]);
+                if let Some(ref after_tab) = self.pending_split_after.clone() {
+                    if let Some((_surface, node_idx, _tab_idx)) = tree.find_tab(after_tab) {
+                        if self.pending_split_vertical {
+                            tree.main_surface_mut()
+                                .split_below(node_idx, 0.5, vec![tab_id]);
+                        } else {
+                            tree.main_surface_mut()
+                                .split_right(node_idx, 0.5, vec![tab_id]);
+                        }
                     } else {
-                        tree.main_surface_mut()
-                            .split_right(node_idx, 0.5, vec![tab_id]);
+                        tree.main_surface_mut().push_to_first_leaf(tab_id);
                     }
+                } else {
+                    tree.main_surface_mut().push_to_first_leaf(tab_id);
                 }
+                self.pending_split_after = None;
             }
         }
 
@@ -106,15 +104,16 @@ impl App {
         }
     }
 
-    fn add_panel(&mut self) {
+    fn add_panel(&mut self, ctx: &egui::Context) {
         self.panel_counter += 1;
         let id = self.panel_counter as usize;
         self.panels.push(Panel {
             id,
             name: format!("Workspace {}", self.panel_counter),
         });
+        let tab_id = self.create_terminal(ctx);
         self.dock_states
-            .insert(id, DockState::new(Vec::<String>::new()));
+            .insert(id, DockState::new(vec![tab_id]));
         self.active_panel = self.panels.len() - 1;
     }
 }
@@ -147,7 +146,7 @@ impl eframe::App for App {
             egui::menu::bar(ui, |ui| {
                 ui.menu_button("File", |ui| {
                     if ui.button("New Workspace").clicked() {
-                        self.add_panel();
+                        self.add_panel(ui.ctx());
                         ui.close_menu();
                     }
                     if ui.button("Exit").clicked() {
@@ -200,7 +199,7 @@ impl eframe::App for App {
 
                 ui.separator();
                 if ui.button("+ New Workspace").clicked() {
-                    self.add_panel();
+                    self.add_panel(ui.ctx());
                 }
 
                 ui.separator();
@@ -218,10 +217,14 @@ impl eframe::App for App {
 
                 DockArea::new(tree)
                     .style(Style::from_egui(ui.style().as_ref()))
+                    .show_add_buttons(true)
+                    .show_add_popup(true)
                     .show_inside(ui, &mut TerminalTabViewer {
                         terminals: &mut self.terminals,
                         pending_close: &mut self.pending_close,
                         pending_new_terminal: &mut self.pending_new_terminal,
+                        pending_split_after: &mut self.pending_split_after,
+                        pending_split_vertical: &mut self.pending_split_vertical,
                         active_panel: self.active_panel,
                     });
             } else {
@@ -237,6 +240,8 @@ struct TerminalTabViewer<'a> {
     terminals: &'a mut HashMap<String, TerminalData>,
     pending_close: &'a mut Option<String>,
     pending_new_terminal: &'a mut Option<usize>,
+    pending_split_after: &'a mut Option<String>,
+    pending_split_vertical: &'a mut bool,
     active_panel: usize,
 }
 
@@ -278,7 +283,17 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
     }
 
     fn add_popup(&mut self, ui: &mut egui::Ui, _surface: SurfaceIndex, _node: NodeIndex) {
+        ui.label("Add Terminal");
+        ui.separator();
         if ui.button("New Terminal").clicked() {
+            *self.pending_new_terminal = Some(self.active_panel);
+        }
+        if ui.button("Split Horizontal").clicked() {
+            *self.pending_split_vertical = false;
+            *self.pending_new_terminal = Some(self.active_panel);
+        }
+        if ui.button("Split Vertical").clicked() {
+            *self.pending_split_vertical = true;
             *self.pending_new_terminal = Some(self.active_panel);
         }
     }
