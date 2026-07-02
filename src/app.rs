@@ -1,4 +1,5 @@
 use eframe::egui;
+use egui::FontData;
 
 pub struct App {
     terminals: Vec<Terminal>,
@@ -28,8 +29,54 @@ impl Default for App {
 }
 
 impl App {
-    pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        Self::setup_fonts(&cc.egui_ctx);
         Self::default()
+    }
+
+    fn setup_fonts(ctx: &egui::Context) {
+        let mut fonts = egui::FontDefinitions::default();
+
+        // 尝试加载系统中文字体
+        let font_paths = [
+            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+            "/usr/share/fonts/wqy-zenhei/wqy-zenhei.ttc",
+        ];
+
+        let mut loaded = false;
+        for path in &font_paths {
+            if std::path::Path::new(path).exists() {
+                if let Ok(font_data) = std::fs::read(path) {
+                    fonts.font_data.insert(
+                        "chinese".to_owned(),
+                        FontData::from_owned(font_data),
+                    );
+                    fonts
+                        .families
+                        .entry(egui::FontFamily::Proportional)
+                        .or_default()
+                        .insert(0, "chinese".to_owned());
+                    fonts
+                        .families
+                        .entry(egui::FontFamily::Monospace)
+                        .or_default()
+                        .insert(0, "chinese".to_owned());
+                    loaded = true;
+                    log::info!("Loaded Chinese font from: {}", path);
+                    break;
+                }
+            }
+        }
+
+        if !loaded {
+            log::warn!("No Chinese font found, Chinese characters may not display correctly");
+        }
+
+        ctx.set_fonts(fonts);
     }
 
     fn new_terminal(&mut self) {
