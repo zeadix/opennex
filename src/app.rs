@@ -272,27 +272,12 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
         true
     }
 
-    fn on_add(&mut self, _surface: SurfaceIndex, _node: NodeIndex) {}
+    fn on_add(&mut self, _surface: SurfaceIndex, _node: NodeIndex) {
+        *self.pending_new_terminal = Some(self.active_panel);
+    }
 
     fn add_popup(&mut self, ui: &mut egui::Ui, _surface: SurfaceIndex, _node: NodeIndex) {
-        ui.horizontal(|ui| {
-            if ui.button("+ Tab").clicked() {
-                *self.pending_new_terminal = Some(self.active_panel);
-                ui.close_menu();
-            }
-            if ui.button("Split H").clicked() {
-                *self.pending_split_after = self.current_tab.clone();
-                *self.pending_split_vertical = false;
-                *self.pending_new_terminal = Some(self.active_panel);
-                ui.close_menu();
-            }
-            if ui.button("Split V").clicked() {
-                *self.pending_split_after = self.current_tab.clone();
-                *self.pending_split_vertical = true;
-                *self.pending_new_terminal = Some(self.active_panel);
-                ui.close_menu();
-            }
-        });
+        ui.label("Right-click tab for split options");
     }
 
     fn context_menu(
