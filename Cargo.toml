@@ -2,20 +2,20 @@
 name = "open-zoo"
 version = "0.1.0"
 edition = "2021"
-description = "AI Terminal Manager - 跨平台控制台管理器"
+description = "AI Terminal Manager - 独立 GUI 控制台管理器"
 
 [dependencies]
-ratatui = "0.26"
-crossterm = "0.27"
-tokio = { version = "1", features = ["full"] }
+egui = "0.28"
+eframe = "0.28"
+egui_extras = "0.28"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 dirs = "5"
 anyhow = "1"
-thiserror = "1"
 log = "0.4"
 env_logger = "0.11"
 uuid = { version = "1", features = ["v4"] }
+tokio = { version = "1", features = ["full"] }
 
 [dev-dependencies]
 tempfile = "3"

@@ -1,7 +1,5 @@
 use super::AppState;
 use crate::config::paths;
-use crate::ui::layout_tree::LayoutNode;
-use crate::ui::tab_group::TabGroup;
 use anyhow::Result;
 
 pub fn load_state() -> Result<AppState> {
@@ -17,48 +15,6 @@ pub fn load_state() -> Result<AppState> {
 
 pub fn save_state(state: &AppState) -> Result<()> {
     let state_path = paths::get_state_path();
-    if let Some(parent) = state_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let content = serde_json::to_string_pretty(state)?;
-    std::fs::write(&state_path, content)?;
-    Ok(())
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct LayoutState {
-    pub layout: LayoutNode,
-    pub tab_group: TabGroup,
-}
-
-impl Default for LayoutState {
-    fn default() -> Self {
-        LayoutState {
-            layout: LayoutNode::default(),
-            tab_group: TabGroup::default(),
-        }
-    }
-}
-
-pub fn load_layout_state() -> Result<LayoutState> {
-    let state_path = paths::get_state_path().parent()
-        .unwrap_or_else(|| std::path::Path::new("."))
-        .join("layout_state.json");
-
-    if state_path.exists() {
-        let content = std::fs::read_to_string(&state_path)?;
-        let state: LayoutState = serde_json::from_str(&content)?;
-        Ok(state)
-    } else {
-        Ok(LayoutState::default())
-    }
-}
-
-pub fn save_layout_state(state: &LayoutState) -> Result<()> {
-    let state_path = paths::get_state_path().parent()
-        .unwrap_or_else(|| std::path::Path::new("."))
-        .join("layout_state.json");
-
     if let Some(parent) = state_path.parent() {
         std::fs::create_dir_all(parent)?;
     }

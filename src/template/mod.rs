@@ -2,14 +2,11 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::ui::layout_tree::LayoutNode;
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkspaceTemplate {
     pub id: String,
     pub name: String,
     pub description: String,
-    pub layout: LayoutNode,
     pub commands: Vec<TemplateCommand>,
     pub tags: Vec<String>,
 }
@@ -18,7 +15,6 @@ pub struct WorkspaceTemplate {
 pub struct TemplateCommand {
     pub name: String,
     pub command: String,
-    pub terminal_id: String,
     pub working_directory: Option<String>,
 }
 
@@ -43,81 +39,42 @@ impl TemplateConfig {
     }
 
     fn add_default_templates(&mut self) {
-        // 前端开发模板
         self.add_template(WorkspaceTemplate {
             id: "frontend-dev".to_string(),
             name: "前端开发".to_string(),
             description: "适合前端开发的工作区模板".to_string(),
-            layout: LayoutNode::new_split(
-                crate::ui::layout_tree::SplitDirection::Vertical,
-                vec![
-                    LayoutNode::new_pane("terminal-1", "代码编辑器"),
-                    LayoutNode::new_split(
-                        crate::ui::layout_tree::SplitDirection::Horizontal,
-                        vec![
-                            LayoutNode::new_pane("terminal-2", "终端"),
-                            LayoutNode::new_pane("terminal-3", "浏览器"),
-                        ],
-                    ),
-                ],
-            ),
             commands: vec![
                 TemplateCommand {
                     name: "启动开发服务器".to_string(),
                     command: "npm run dev".to_string(),
-                    terminal_id: "terminal-2".to_string(),
                     working_directory: None,
                 },
             ],
             tags: vec!["frontend".to_string(), "web".to_string()],
         });
 
-        // 后端开发模板
         self.add_template(WorkspaceTemplate {
             id: "backend-dev".to_string(),
             name: "后端开发".to_string(),
             description: "适合后端开发的工作区模板".to_string(),
-            layout: LayoutNode::new_split(
-                crate::ui::layout_tree::SplitDirection::Horizontal,
-                vec![
-                    LayoutNode::new_pane("terminal-1", "代码编辑器"),
-                    LayoutNode::new_split(
-                        crate::ui::layout_tree::SplitDirection::Horizontal,
-                        vec![
-                            LayoutNode::new_pane("terminal-2", "服务器"),
-                            LayoutNode::new_pane("terminal-3", "数据库"),
-                        ],
-                    ),
-                ],
-            ),
             commands: vec![
                 TemplateCommand {
                     name: "启动服务器".to_string(),
                     command: "cargo run".to_string(),
-                    terminal_id: "terminal-2".to_string(),
                     working_directory: None,
                 },
             ],
             tags: vec!["backend".to_string(), "rust".to_string()],
         });
 
-        // 数据科学模板
         self.add_template(WorkspaceTemplate {
             id: "data-science".to_string(),
             name: "数据科学".to_string(),
             description: "适合数据科学的工作区模板".to_string(),
-            layout: LayoutNode::new_split(
-                crate::ui::layout_tree::SplitDirection::Horizontal,
-                vec![
-                    LayoutNode::new_pane("terminal-1", "Jupyter Notebook"),
-                    LayoutNode::new_pane("terminal-2", "终端"),
-                ],
-            ),
             commands: vec![
                 TemplateCommand {
                     name: "启动 Jupyter".to_string(),
                     command: "jupyter notebook".to_string(),
-                    terminal_id: "terminal-1".to_string(),
                     working_directory: None,
                 },
             ],
