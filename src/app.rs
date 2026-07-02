@@ -6,6 +6,7 @@ pub struct App {
     active_terminal: usize,
     tab_counter: u32,
     pending_command: Option<String>,
+    input_focused: bool,
 }
 
 struct Terminal {
@@ -22,6 +23,7 @@ impl Default for App {
             active_terminal: 0,
             tab_counter: 0,
             pending_command: None,
+            input_focused: false,
         };
         app.new_terminal();
         app
@@ -37,10 +39,9 @@ impl App {
     fn setup_fonts(ctx: &egui::Context) {
         let mut fonts = egui::FontDefinitions::default();
 
-        // 尝试加载系统中文字体
         let font_paths = [
-            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
             "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
             "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
             "/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc",
             "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
@@ -73,7 +74,7 @@ impl App {
         }
 
         if !loaded {
-            log::warn!("No Chinese font found, Chinese characters may not display correctly");
+            log::warn!("No Chinese font found");
         }
 
         ctx.set_fonts(fonts);
@@ -124,6 +125,9 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // 请求重绘以保持焦点
+        ctx.request_repaint();
+
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
                 ui.menu_button("文件", |ui| {
@@ -181,6 +185,7 @@ impl eframe::App for App {
                 ui.heading(&terminal.title);
                 ui.separator();
 
+                // 终端输出区域
                 egui::ScrollArea::vertical()
                     .auto_shrink([false; 2])
                     .stick_to_bottom(true)
@@ -195,30 +200,44 @@ impl eframe::App for App {
 
                 ui.separator();
 
+                // 输入区域
                 ui.horizontal(|ui| {
                     ui.label("$");
-                    let response = ui.add(
-                        egui::TextEdit::singleline(&mut terminal.input_buffer)
-                            .font(egui::TextStyle::Monospace)
-                            .desired_width(ui.available_width())
-                            .hint_text("输入命令..."),
-                    );
+
+                    let text_edit = egui::TextEdit::singleline(&mut terminal.input_buffer)
+                        .font(egui::TextStyle::Monospace)
+                        .desired_width(ui.available_width())
+                        .hint_text("输入命令后按 Enter 执行");
+
+                    let response = ui.add(text_edit);
+
+                    // 如果输入框没有焦点，请求焦点
+                    if !self.input_focused {
+                        response.request_focus();
+                        self.input_focused = true;
+                    }
 
                     // 检测 Enter 键
                     let enter_pressed = ui.input(|i| i.key_pressed(egui::Key::Enter));
-                    if enter_pressed && !terminal.input_buffer.is_empty() {
-                        let command = terminal.input_buffer.clone();
-                        terminal.input_buffer.clear();
-                        self.pending_command = Some(command);
+
+                    if enter_pressed {
+                        let command = terminal.input_buffer.trim().to_string();
+                        if !command.is_empty() {
+                            self.pending_command = Some(command);
+                            terminal.input_buffer.clear();
+                        }
+                        // 重新请求焦点
+                        response.request_focus();
                     }
 
-                    // 确保输入框始终获取焦点
-                    if !response.has_focus() && ui.memory(|m| m.focused().is_none()) {
+                    // 如果输入框失去焦点，重新请求
+                    if response.lost_focus() && !ui.input(|i| i.key_pressed(egui::Key::Tab)) {
                         response.request_focus();
                     }
                 });
             }
 
+            // 执行命令
             if let Some(command) = self.pending_command.take() {
                 self.execute_command(&command);
             }
