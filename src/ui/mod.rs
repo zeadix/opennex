@@ -3,6 +3,7 @@ pub mod tabs;
 pub mod layout_tree;
 pub mod tab_group;
 pub mod drag;
+pub mod presets;
 
 use ratatui::Frame;
 use ratatui::layout::Rect;

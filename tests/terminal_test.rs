@@ -4,6 +4,7 @@ use open_zoo::state::AppState;
 use open_zoo::state::persistence::{LayoutState, CommandHistory, HistoryEntry};
 use open_zoo::ui::layout_tree::{LayoutNode, SplitDirection};
 use open_zoo::ui::tab_group::{TabGroup, Tab};
+use open_zoo::ui::presets::{get_presets, get_preset_by_name};
 
 #[tokio::test]
 async fn test_terminal_manager_create() {
@@ -129,4 +130,21 @@ fn test_command_history_persistence() {
     let restored: CommandHistory = serde_json::from_str(&json).unwrap();
     assert_eq!(restored.histories.len(), 1);
     assert_eq!(restored.histories[0].command, "ls -la");
+}
+
+#[test]
+fn test_layout_presets() {
+    let presets = get_presets();
+    assert!(!presets.is_empty());
+
+    let single = get_preset_by_name("single");
+    assert!(single.is_some());
+    let single = single.unwrap();
+    assert_eq!(single.name, "single");
+
+    let grid = get_preset_by_name("grid-4");
+    assert!(grid.is_some());
+    let grid = grid.unwrap();
+    let pane_ids = grid.layout.get_all_pane_ids();
+    assert_eq!(pane_ids.len(), 4);
 }
