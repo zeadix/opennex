@@ -208,7 +208,7 @@ impl eframe::App for App {
                 DockArea::new(tree)
                     .style(Style::from_egui(ui.style().as_ref()))
                     .show_add_buttons(true)
-                    .show_add_popup(true)
+                    .show_add_popup(false)
                     .show_inside(ui, &mut TerminalTabViewer {
                         terminals: &mut self.terminals,
                         pending_close: &mut self.pending_close,
