@@ -10,15 +10,16 @@
 
 ## Implemented Features
 
-- [ ] 基础终端管理 - 状态: 待实现
-- [ ] 多终端切换 - 状态: 待实现
-- [ ] 基础快捷键 - 状态: 待实现
+- [x] 基础终端管理 - 状态: 已实现
+- [x] 多终端切换 - 状态: 已实现
+- [x] 基础快捷键 - 状态: 已实现
+- [x] 简单布局 - 状态: 已实现
 
 ## In Progress
 
-- [ ] 分屏布局系统 - 进度: 需求已定义
-- [ ] 拖拽调整分屏 - 进度: 需求已定义
-- [ ] 嵌套选项卡系统 - 进度: 需求已定义
+- [ ] 分屏布局系统 - 进度: 0%
+- [ ] 拖拽调整分屏 - 进度: 0%
+- [ ] 嵌套选项卡系统 - 进度: 0%
 
 ## Planned Features
 
@@ -31,8 +32,18 @@
 ## Technical Stack
 
 - Language: Rust
-- [其他技术栈信息]
+- TUI Framework: ratatui
+- Terminal Backend: crossterm
+- Async Runtime: tokio
+- Serialization: serde
 
-## Notes
+## Development Notes
 
-[开发过程中的重要笔记和决策]
+Phase 1 核心功能已完成，包括：
+- 项目基础结构
+- 终端管理模块
+- 快捷键系统
+- UI 渲染基础
+- 配置管理
+- 状态管理
+- 集成测试
