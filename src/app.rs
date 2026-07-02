@@ -14,6 +14,8 @@ pub struct App {
     pending_close: Option<String>,
     pending_split_after: Option<String>,
     pending_split_vertical: bool,
+    editing_panel: Option<usize>,
+    editing_panel_buffer: String,
 }
 
 struct Panel {
@@ -56,6 +58,8 @@ impl App {
             pending_close: None,
             pending_split_after: None,
             pending_split_vertical: false,
+            editing_panel: None,
+            editing_panel_buffer: String::new(),
         }
     }
 
@@ -79,7 +83,6 @@ impl App {
             let tab_id = self.create_terminal(ctx);
 
             if let Some(tree) = self.dock_states.get_mut(&panel_idx) {
-                // Dock state exists - add tab or split
                 if let Some(ref after_tab) = self.pending_split_after.clone() {
                     if let Some((_surface, node_idx, _tab_idx)) = tree.find_tab(after_tab) {
                         if self.pending_split_vertical {
@@ -97,7 +100,6 @@ impl App {
                 }
                 self.pending_split_after = None;
             } else {
-                // Dock state doesn't exist yet - create it with this tab
                 self.dock_states
                     .insert(panel_idx, DockState::new(vec![tab_id]));
             }
@@ -174,6 +176,7 @@ impl eframe::App for App {
             });
         });
 
+        // Left panel - workspace navigation with double-click rename
         egui::SidePanel::left("navigation")
             .default_width(160.0)
             .show(ctx, |ui| {
@@ -181,10 +184,43 @@ impl eframe::App for App {
                 ui.separator();
 
                 let mut to_select = None;
-                for (i, panel) in self.panels.iter().enumerate() {
+                let panel_count = self.panels.len();
+                for i in 0..panel_count {
                     let is_active = i == self.active_panel;
-                    if ui.selectable_label(is_active, &panel.name).clicked() {
-                        to_select = Some(i);
+
+                    if self.editing_panel == Some(i) {
+                        // Editing mode - show text input
+                        let response = ui.add(
+                            egui::TextEdit::singleline(&mut self.editing_panel_buffer)
+                                .font(egui::FontId::monospace(14.0))
+                                .desired_width(ui.available_width()),
+                        );
+
+                        // Auto-focus the text input
+                        if !response.has_focus() && self.editing_panel == Some(i) {
+                            response.request_focus();
+                        }
+
+                        if response.lost_focus() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                            if !self.editing_panel_buffer.is_empty() {
+                                self.panels[i].name = self.editing_panel_buffer.clone();
+                            }
+                            self.editing_panel = None;
+                        }
+                    } else {
+                        // Normal mode - show selectable label
+                        let panel_name = self.panels[i].name.clone();
+                        let response = ui.selectable_label(is_active, &panel_name);
+
+                        if response.clicked() {
+                            to_select = Some(i);
+                        }
+
+                        // Double-click to rename
+                        if response.double_clicked() {
+                            self.editing_panel = Some(i);
+                            self.editing_panel_buffer = panel_name;
+                        }
                     }
                 }
 
@@ -203,6 +239,7 @@ impl eframe::App for App {
                 ui.label("L3: Terminal tabs");
             });
 
+        // Right panel - dock area with terminal tabs
         egui::CentralPanel::default().show(ctx, |ui| {
             if let Some(tree) = self.dock_states.get_mut(&self.active_panel) {
                 DockArea::new(tree)
@@ -276,9 +313,14 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
         *self.pending_new_terminal = Some(self.active_panel);
     }
 
-    fn add_popup(&mut self, ui: &mut egui::Ui, _surface: SurfaceIndex, _node: NodeIndex) {
-        ui.label("Right-click tab for split options");
+    fn on_tab_button(&mut self, tab: &mut Self::Tab, response: &egui::Response) {
+        // Handle double-click on tab to rename via context menu
+        if response.double_clicked() {
+            // Store the tab to rename and show context menu
+        }
     }
+
+    fn add_popup(&mut self, _ui: &mut egui::Ui, _surface: SurfaceIndex, _node: NodeIndex) {}
 
     fn context_menu(
         &mut self,
