@@ -204,11 +204,16 @@ impl eframe::App for App {
                             .hint_text("输入命令..."),
                     );
 
-                    if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))
-                    {
+                    // 检测 Enter 键
+                    let enter_pressed = ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    if enter_pressed && !terminal.input_buffer.is_empty() {
                         let command = terminal.input_buffer.clone();
                         terminal.input_buffer.clear();
                         self.pending_command = Some(command);
+                    }
+
+                    // 确保输入框始终获取焦点
+                    if !response.has_focus() && ui.memory(|m| m.focused().is_none()) {
                         response.request_focus();
                     }
                 });
