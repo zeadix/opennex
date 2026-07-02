@@ -218,7 +218,7 @@ impl eframe::App for App {
                 DockArea::new(tree)
                     .style(Style::from_egui(ui.style().as_ref()))
                     .show_add_buttons(true)
-                    .show_add_popup(true)
+                    .show_add_popup(false)
                     .show_inside(ui, &mut TerminalTabViewer {
                         terminals: &mut self.terminals,
                         pending_close: &mut self.pending_close,
@@ -276,6 +276,34 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
     fn on_close(&mut self, tab: &mut Self::Tab) -> bool {
         *self.pending_close = Some(tab.clone());
         true
+    }
+
+    fn context_menu(
+        &mut self,
+        ui: &mut egui::Ui,
+        tab: &mut Self::Tab,
+        _surface: SurfaceIndex,
+        _node: NodeIndex,
+    ) {
+        ui.label("Tab Operations");
+        ui.separator();
+        if ui.button("+ New Tab").clicked() {
+            *self.pending_new_terminal = Some(self.active_panel);
+            ui.close_menu();
+        }
+        ui.separator();
+        if ui.button("Split Horizontal (Right)").clicked() {
+            *self.pending_split_after = Some(tab.clone());
+            *self.pending_split_vertical = false;
+            *self.pending_new_terminal = Some(self.active_panel);
+            ui.close_menu();
+        }
+        if ui.button("Split Vertical (Down)").clicked() {
+            *self.pending_split_after = Some(tab.clone());
+            *self.pending_split_vertical = true;
+            *self.pending_new_terminal = Some(self.active_panel);
+            ui.close_menu();
+        }
     }
 
     fn on_add(&mut self, _surface: SurfaceIndex, _node: NodeIndex) {
