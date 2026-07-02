@@ -16,6 +16,8 @@ pub struct App {
     pending_split_vertical: bool,
     editing_panel: Option<usize>,
     editing_panel_buffer: String,
+    editing_terminal: Option<String>,
+    editing_terminal_buffer: String,
 }
 
 struct Panel {
@@ -60,6 +62,8 @@ impl App {
             pending_split_vertical: false,
             editing_panel: None,
             editing_panel_buffer: String::new(),
+            editing_terminal: None,
+            editing_terminal_buffer: String::new(),
         }
     }
 
@@ -254,6 +258,8 @@ impl eframe::App for App {
                         pending_split_vertical: &mut self.pending_split_vertical,
                         active_panel: self.active_panel,
                         current_tab: None,
+                        editing_terminal: &mut self.editing_terminal,
+                        editing_terminal_buffer: &mut self.editing_terminal_buffer,
                     });
             } else {
                 ui.centered_and_justified(|ui| {
@@ -272,6 +278,8 @@ struct TerminalTabViewer<'a> {
     pending_split_vertical: &'a mut bool,
     active_panel: usize,
     current_tab: Option<String>,
+    editing_terminal: &'a mut Option<String>,
+    editing_terminal_buffer: &'a mut String,
 }
 
 impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
@@ -286,6 +294,34 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
 
     fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab) {
         self.current_tab = Some(tab.clone());
+
+        // Show rename input if this tab is being edited
+        if self.editing_terminal.as_ref() == Some(tab) {
+            ui.horizontal(|ui| {
+                ui.label("Rename:");
+                let response = ui.add(
+                    egui::TextEdit::singleline(self.editing_terminal_buffer)
+                        .font(egui::FontId::monospace(14.0))
+                        .desired_width(200.0)
+                        .hint_text("Enter name..."),
+                );
+
+                // Auto-focus
+                if !response.has_focus() {
+                    response.request_focus();
+                }
+
+                if response.lost_focus() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    if !self.editing_terminal_buffer.is_empty() {
+                        if let Some(data) = self.terminals.get_mut(tab) {
+                            data.name = self.editing_terminal_buffer.clone();
+                        }
+                    }
+                    *self.editing_terminal = None;
+                }
+            });
+            ui.separator();
+        }
 
         if let Some(terminal_data) = self.terminals.get_mut(tab) {
             if let Ok((_, PtyEvent::Exit)) = terminal_data.receiver.try_recv() {
@@ -314,9 +350,11 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
     }
 
     fn on_tab_button(&mut self, tab: &mut Self::Tab, response: &egui::Response) {
-        // Handle double-click on tab to rename via context menu
         if response.double_clicked() {
-            // Store the tab to rename and show context menu
+            *self.editing_terminal = Some(tab.clone());
+            if let Some(data) = self.terminals.get(tab) {
+                *self.editing_terminal_buffer = data.name.clone();
+            }
         }
     }
 
