@@ -79,6 +79,14 @@ impl App {
     fn process_pending(&mut self, ctx: &egui::Context) {
         if let Some(panel_id) = self.pending_new_terminal.take() {
             let tab_id = self.create_terminal(ctx);
+
+            // If the dock state doesn't exist yet, create it with this tab
+            if !self.dock_states.contains_key(&panel_id) {
+                self.dock_states
+                    .insert(panel_id, DockState::new(vec![tab_id]));
+                return;
+            }
+
             if let Some(tree) = self.dock_states.get_mut(&panel_id) {
                 if let Some(ref after_tab) = self.pending_split_after.clone() {
                     if let Some((_surface, node_idx, _tab_idx)) = tree.find_tab(after_tab) {
@@ -104,16 +112,14 @@ impl App {
         }
     }
 
-    fn add_panel(&mut self, ctx: &egui::Context) {
+    fn add_panel(&mut self) {
         self.panel_counter += 1;
         let id = self.panel_counter as usize;
         self.panels.push(Panel {
             id,
             name: format!("Workspace {}", self.panel_counter),
         });
-        let tab_id = self.create_terminal(ctx);
-        self.dock_states
-            .insert(id, DockState::new(vec![tab_id]));
+        self.pending_new_terminal = Some(id);
         self.active_panel = self.panels.len() - 1;
     }
 }
@@ -146,7 +152,7 @@ impl eframe::App for App {
             egui::menu::bar(ui, |ui| {
                 ui.menu_button("File", |ui| {
                     if ui.button("New Workspace").clicked() {
-                        self.add_panel(ui.ctx());
+                        self.add_panel();
                         ui.close_menu();
                     }
                     if ui.button("Exit").clicked() {
@@ -193,7 +199,7 @@ impl eframe::App for App {
 
                 ui.separator();
                 if ui.button("+ New Workspace").clicked() {
-                    self.add_panel(ui.ctx());
+                    self.add_panel();
                 }
 
                 ui.separator();
