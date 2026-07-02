@@ -7,7 +7,9 @@ use serde::{Deserialize, Serialize};
 pub struct AppState {
     pub terminals: Vec<TerminalState>,
     pub active_terminal: Option<String>,
-    pub layout: LayoutState,
+    pub layout_width: u16,
+    pub layout_height: u16,
+    pub split_ratio: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -18,23 +20,14 @@ pub struct TerminalState {
     pub history: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LayoutState {
-    pub width: u16,
-    pub height: u16,
-    pub split_ratio: f32,
-}
-
 impl Default for AppState {
     fn default() -> Self {
         AppState {
             terminals: Vec::new(),
             active_terminal: None,
-            layout: LayoutState {
-                width: 80,
-                height: 24,
-                split_ratio: 0.5,
-            },
+            layout_width: 80,
+            layout_height: 24,
+            split_ratio: 0.5,
         }
     }
 }

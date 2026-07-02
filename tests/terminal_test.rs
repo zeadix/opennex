@@ -1,6 +1,7 @@
 use open_zoo::terminal::TerminalManager;
 use open_zoo::config::AppConfig;
 use open_zoo::state::AppState;
+use open_zoo::state::persistence::{LayoutState, CommandHistory, HistoryEntry};
 use open_zoo::ui::layout_tree::{LayoutNode, SplitDirection};
 use open_zoo::ui::tab_group::{TabGroup, Tab};
 
@@ -93,4 +94,39 @@ fn test_tab_group_rename() {
     let result = group.rename_tab("tab-1", "New Name");
     assert!(result);
     assert_eq!(group.tabs[0].title, "New Name");
+}
+
+#[test]
+fn test_layout_state_persistence() {
+    let mut state = LayoutState::default();
+    state.layout.split_pane("terminal-1", SplitDirection::Horizontal, "terminal-2", "终端 2");
+
+    // 测试序列化
+    let json = serde_json::to_string(&state).unwrap();
+    assert!(json.contains("terminal-1"));
+    assert!(json.contains("terminal-2"));
+
+    // 测试反序列化
+    let restored: LayoutState = serde_json::from_str(&json).unwrap();
+    let pane_ids = restored.layout.get_all_pane_ids();
+    assert_eq!(pane_ids.len(), 2);
+}
+
+#[test]
+fn test_command_history_persistence() {
+    let mut history = CommandHistory::default();
+    history.histories.push(HistoryEntry {
+        terminal_id: "terminal-1".to_string(),
+        command: "ls -la".to_string(),
+        timestamp: 1234567890,
+    });
+
+    // 测试序列化
+    let json = serde_json::to_string(&history).unwrap();
+    assert!(json.contains("ls -la"));
+
+    // 测试反序列化
+    let restored: CommandHistory = serde_json::from_str(&json).unwrap();
+    assert_eq!(restored.histories.len(), 1);
+    assert_eq!(restored.histories[0].command, "ls -la");
 }
