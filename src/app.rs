@@ -6,10 +6,7 @@ use crossterm::{
 };
 use ratatui::{
     backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout},
-    style::{Color, Modifier, Style},
-    widgets::{Block, Borders, Tabs},
-    Frame, Terminal,
+    Terminal,
 };
 use std::io;
 
@@ -43,34 +40,9 @@ impl App {
     fn draw(&mut self) -> Result<()> {
         let terminal = &mut self.terminal;
         terminal.draw(|f| {
-            Self::ui_static(f);
+            crate::ui::render(f, f.size());
         })?;
         Ok(())
-    }
-
-    fn ui_static(f: &mut Frame) {
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(3),
-                Constraint::Min(1),
-            ])
-            .split(f.size());
-
-        // 顶部选项卡栏
-        let menu_titles = vec!["终端 1", "终端 2", "终端 3"];
-        let tabs = Tabs::new(menu_titles)
-            .block(Block::default().borders(Borders::ALL).title("AI 终端管理器"))
-            .select(0)
-            .style(Style::default().fg(Color::White))
-            .highlight_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
-        f.render_widget(tabs, chunks[0]);
-
-        // 终端内容区域
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title("终端内容");
-        f.render_widget(block, chunks[1]);
     }
 
     async fn handle_events(&mut self) -> Result<()> {

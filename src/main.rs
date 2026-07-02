@@ -1,4 +1,9 @@
 mod app;
+mod terminal;
+mod ui;
+mod keybindings;
+mod state;
+mod config;
 
 use anyhow::Result;
 
