@@ -5,6 +5,8 @@ use open_zoo::state::persistence::{LayoutState, CommandHistory, HistoryEntry};
 use open_zoo::ui::layout_tree::{LayoutNode, SplitDirection};
 use open_zoo::ui::tab_group::{TabGroup, Tab};
 use open_zoo::ui::presets::{get_presets, get_preset_by_name};
+use open_zoo::plugin::{PluginConfig, Plugin};
+use open_zoo::template::TemplateConfig;
 
 #[tokio::test]
 async fn test_terminal_manager_create() {
@@ -147,4 +149,46 @@ fn test_layout_presets() {
     let grid = grid.unwrap();
     let pane_ids = grid.layout.get_all_pane_ids();
     assert_eq!(pane_ids.len(), 4);
+}
+
+#[test]
+fn test_plugin_config() {
+    let mut config = PluginConfig::new();
+    config.add_plugin(Plugin {
+        id: "test-plugin".to_string(),
+        name: "Test Plugin".to_string(),
+        version: "1.0.0".to_string(),
+        description: "A test plugin".to_string(),
+        enabled: true,
+    });
+
+    assert_eq!(config.plugins.len(), 1);
+    assert!(config.get_plugin("test-plugin").is_some());
+
+    let enabled = config.list_enabled_plugins();
+    assert_eq!(enabled.len(), 1);
+
+    config.disable_plugin("test-plugin");
+    let enabled = config.list_enabled_plugins();
+    assert_eq!(enabled.len(), 0);
+}
+
+#[test]
+fn test_template_config() {
+    let config = TemplateConfig::new();
+    assert!(!config.templates.is_empty());
+
+    let frontend = config.get_template("frontend-dev");
+    assert!(frontend.is_some());
+    let frontend = frontend.unwrap();
+    assert_eq!(frontend.name, "前端开发");
+
+    let backend = config.get_template("backend-dev");
+    assert!(backend.is_some());
+
+    let data_science = config.get_template("data-science");
+    assert!(data_science.is_some());
+
+    let web_templates = config.search_by_tag("web");
+    assert_eq!(web_templates.len(), 1);
 }
