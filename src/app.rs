@@ -283,18 +283,18 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
     }
 
     fn add_popup(&mut self, ui: &mut egui::Ui, _surface: SurfaceIndex, _node: NodeIndex) {
-        ui.label("Add Terminal");
-        ui.separator();
-        if ui.button("New Terminal").clicked() {
-            *self.pending_new_terminal = Some(self.active_panel);
-        }
-        if ui.button("Split Horizontal").clicked() {
-            *self.pending_split_vertical = false;
-            *self.pending_new_terminal = Some(self.active_panel);
-        }
-        if ui.button("Split Vertical").clicked() {
-            *self.pending_split_vertical = true;
-            *self.pending_new_terminal = Some(self.active_panel);
-        }
+        ui.horizontal(|ui| {
+            if ui.button("+ Tab").clicked() {
+                *self.pending_new_terminal = Some(self.active_panel);
+            }
+            if ui.button("Split H").clicked() {
+                *self.pending_split_vertical = false;
+                *self.pending_new_terminal = Some(self.active_panel);
+            }
+            if ui.button("Split V").clicked() {
+                *self.pending_split_vertical = true;
+                *self.pending_new_terminal = Some(self.active_panel);
+            }
+        });
     }
 }
