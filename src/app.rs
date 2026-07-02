@@ -200,12 +200,14 @@ impl eframe::App for App {
                                 .desired_width(ui.available_width()),
                         );
 
-                        // Auto-focus the text input
-                        if !response.has_focus() && self.editing_panel == Some(i) {
-                            response.request_focus();
+                        // Request focus on first frame of editing
+                        if response.has_focus() == false && self.editing_panel == Some(i) {
+                            ui.memory_mut(|m| m.request_focus(response.id));
                         }
 
-                        if response.lost_focus() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        // Confirm on Enter or when clicking elsewhere
+                        let enter_pressed = ui.input(|i| i.key_pressed(egui::Key::Enter));
+                        if enter_pressed || response.lost_focus() {
                             if !self.editing_panel_buffer.is_empty() {
                                 self.panels[i].name = self.editing_panel_buffer.clone();
                             }
