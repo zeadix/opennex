@@ -472,21 +472,21 @@ impl eframe::App for App {
                 self.add_panel(ui.ctx());
             }
 
-            // Template button — hover to show available workspace files
+            // Template button — click to show workspace files
             let template_files = list_workspace_files();
-            if !template_files.is_empty() {
-                let resp = ui.button("Templates");
-                resp.on_hover_ui(|ui| {
-                    ui.heading("Load from template");
-                    ui.separator();
+            ui.menu_button("Templates", |ui| {
+                if template_files.is_empty() {
+                    ui.label("(empty)");
+                } else {
                     for (display_name, path) in &template_files {
                         let path = path.clone();
                         if ui.button(display_name.as_str()).clicked() {
                             self.pending_load_from_template = Some(path);
+                            ui.close_menu();
                         }
                     }
-                });
-            }
+                }
+            });
 
             ui.separator();
             ui.label("L1: Workspaces");
