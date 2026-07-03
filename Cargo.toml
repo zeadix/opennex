@@ -8,10 +8,10 @@ description = "AI Terminal Manager"
 egui = "0.31"
 eframe = "0.31"
 egui_term = "0.1"
-egui_dock = "0.16"
+egui_dock = { version = "0.16", features = ["serde"] }
+rfd = "0.15"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 anyhow = "1"
 log = "0.4"
 env_logger = "0.11"
-
-[dev-dependencies]
-tempfile = "3"

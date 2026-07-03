@@ -1,6 +1,8 @@
 use egui_dock::{DockArea, DockState, NodeIndex, Style, SurfaceIndex};
 use egui_term::{PtyEvent, TerminalBackend, TerminalView, TerminalFont, FontSettings};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
 
 const DEFAULT_FONT_SIZE: f32 = 14.0;
@@ -8,10 +10,33 @@ const MIN_FONT_SIZE: f32 = 8.0;
 const MAX_FONT_SIZE: f32 = 32.0;
 const FONT_SIZE_STEP: f32 = 1.0;
 
+// ── Persistence structs ──────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct WorkspaceState {
+    panels: Vec<PanelState>,
+    active_panel: usize,
+    dock_states: HashMap<usize, DockState<String>>,
+    terminals: HashMap<String, TerminalState>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PanelState {
+    name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct TerminalState {
+    name: String,
+    font_size: f32,
+    working_directory: String,
+}
+
+// ── App ──────────────────────────────────────────────────────────
+
 pub struct App {
     panels: Vec<Panel>,
     active_panel: usize,
-    panel_counter: u32,
     dock_states: HashMap<usize, DockState<String>>,
     terminals: HashMap<String, TerminalData>,
     tab_counter: u32,
@@ -28,6 +53,7 @@ pub struct App {
 
 struct Panel {
     name: String,
+    bound_file: Option<PathBuf>,
 }
 
 struct TerminalData {
@@ -35,34 +61,100 @@ struct TerminalData {
     receiver: Receiver<(u64, PtyEvent)>,
     name: String,
     font_size: f32,
+    working_directory: String,
 }
+
+// ── Workspace directory ──────────────────────────────────────────
+
+fn workspace_dir() -> PathBuf {
+    std::env::current_dir().unwrap_or_default().join("workspace")
+}
+
+fn ensure_workspace_dir() {
+    let _ = std::fs::create_dir_all(workspace_dir());
+}
+
+fn workspace_file_for(name: &str) -> PathBuf {
+    workspace_dir().join(format!("{}.json", name))
+}
+
+// ── Save / Load ──────────────────────────────────────────────────
+
+fn build_state(app: &App) -> WorkspaceState {
+    let panels: Vec<PanelState> = app.panels.iter().map(|p| PanelState { name: p.name.clone() }).collect();
+    let mut terminals = HashMap::new();
+    for (id, data) in &app.terminals {
+        terminals.insert(id.clone(), TerminalState {
+            name: data.name.clone(),
+            font_size: data.font_size,
+            working_directory: data.working_directory.clone(),
+        });
+    }
+    WorkspaceState {
+        panels,
+        active_panel: app.active_panel,
+        dock_states: app.dock_states.clone(),
+        terminals,
+    }
+}
+
+fn save_to_file(path: &PathBuf, state: &WorkspaceState) -> Result<(), anyhow::Error> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let json = serde_json::to_string_pretty(state)?;
+    std::fs::write(path, json)?;
+    Ok(())
+}
+
+fn load_from_file(path: &PathBuf) -> Result<WorkspaceState, anyhow::Error> {
+    let json = std::fs::read_to_string(path)?;
+    let state: WorkspaceState = serde_json::from_str(&json)?;
+    Ok(state)
+}
+
+// ── App impl ─────────────────────────────────────────────────────
 
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        let mut terminals = HashMap::new();
-        let tab_id = "terminal-1".to_string();
-        let (backend, receiver) = create_terminal(&cc.egui_ctx, 0);
-        terminals.insert(
-            tab_id.clone(),
-            TerminalData {
-                backend,
-                receiver,
-                name: "Terminal 1".to_string(),
-                font_size: DEFAULT_FONT_SIZE,
-            },
-        );
-        let mut dock_states = HashMap::new();
-        dock_states.insert(0, DockState::new(vec![tab_id]));
+        let ctx = &cc.egui_ctx;
+        ensure_workspace_dir();
+        let ws_dir = workspace_dir();
 
+        // Try to load existing workspaces
+        let entries: Vec<PathBuf> = std::fs::read_dir(&ws_dir)
+            .into_iter()
+            .flat_map(|rd| rd.into_iter())
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().map_or(false, |ext| ext == "json"))
+            .map(|e| e.path())
+            .collect();
+
+        if !entries.is_empty() {
+            let mut app = App::empty();
+            for path in &entries {
+                if let Ok(state) = load_from_file(path) {
+                    app.load_workspace_state(ctx, state, Some(path.clone()));
+                }
+            }
+            if app.panels.is_empty() {
+                app.add_initial_terminal(ctx);
+            }
+            app
+        } else {
+            let mut app = App::empty();
+            app.add_initial_terminal(ctx);
+            app
+        }
+    }
+
+    fn empty() -> Self {
         App {
-            panels: vec![Panel {
-                name: "Workspace 1".to_string(),
-            }],
+            panels: Vec::new(),
             active_panel: 0,
-            panel_counter: 1,
-            dock_states,
-            terminals,
-            tab_counter: 1,
+            dock_states: HashMap::new(),
+            terminals: HashMap::new(),
+            tab_counter: 0,
             pending_new_terminal: None,
             pending_close: None,
             pending_split_after: None,
@@ -75,36 +167,66 @@ impl App {
         }
     }
 
+    fn add_initial_terminal(&mut self, ctx: &egui::Context) {
+        let name = "Workspace 1".to_string();
+        let file = workspace_file_for(&name);
+        let tab_id = self.create_terminal_inner(ctx);
+        self.dock_states.insert(0, DockState::new(vec![tab_id]));
+        self.panels.push(Panel { name, bound_file: Some(file.clone()) });
+        self.active_panel = 0;
+        let state = build_state(self);
+        let _ = save_to_file(&file, &state);
+    }
+
+    fn load_workspace_state(&mut self, ctx: &egui::Context, state: WorkspaceState, file: Option<PathBuf>) {
+        let panel_idx = self.panels.len();
+
+        // Restore terminals
+        for (id, tstate) in &state.terminals {
+            if !self.terminals.contains_key(id) {
+                let id_num: u64 = id.strip_prefix("terminal-")
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(self.tab_counter as u64 + 1);
+                let (backend, receiver) = create_terminal(ctx, id_num);
+                self.terminals.insert(id.clone(), TerminalData {
+                    backend,
+                    receiver,
+                    name: tstate.name.clone(),
+                    font_size: tstate.font_size,
+                    working_directory: tstate.working_directory.clone(),
+                });
+                if id_num >= self.tab_counter as u64 {
+                    self.tab_counter = id_num as u32;
+                }
+            }
+        }
+
+        // Restore panel
+        let panel_name = state.panels.first().map(|p| p.name.clone()).unwrap_or(format!("Workspace {}", panel_idx + 1));
+        self.panels.push(Panel { name: panel_name, bound_file: file });
+        self.dock_states.insert(panel_idx, state.dock_states.into_iter().next().map(|(_, v)| v).unwrap_or_else(|| DockState::new(vec![])));
+    }
+
     fn is_renaming(&self) -> bool {
         self.renaming_panel.is_some() || self.renaming_terminal.is_some()
     }
 
-    fn start_rename_panel(&mut self, idx: usize, name: String) {
-        self.renaming_panel = Some(idx);
-        self.rename_buffer = name;
-        self.rename_frame_count = 0;
-    }
-
-    fn start_rename_terminal(&mut self, tab: String, name: String) {
-        self.renaming_terminal = Some(tab);
-        self.terminal_rename_buffer = name;
-        self.rename_frame_count = 0;
+    fn create_terminal_inner(&mut self, ctx: &egui::Context) -> String {
+        self.tab_counter += 1;
+        let id = format!("terminal-{}", self.tab_counter);
+        let (backend, receiver) = create_terminal(ctx, self.tab_counter as u64);
+        let cwd = std::env::current_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+        self.terminals.insert(id.clone(), TerminalData {
+            backend, receiver,
+            name: format!("Terminal {}", self.tab_counter),
+            font_size: DEFAULT_FONT_SIZE,
+            working_directory: cwd,
+        });
+        id
     }
 
     fn create_terminal(&mut self, ctx: &egui::Context) -> String {
-        self.tab_counter += 1;
-        let id = format!("terminal-{}", self.tab_counter);
-        let (backend, receiver) = create_terminal(ctx, self.terminals.len() as u64);
-        self.terminals.insert(
-            id.clone(),
-            TerminalData {
-                backend,
-                receiver,
-                name: format!("Terminal {}", self.tab_counter),
-                font_size: DEFAULT_FONT_SIZE,
-            },
-        );
-        id
+        self.create_terminal_inner(ctx)
     }
 
     fn process_pending(&mut self, ctx: &egui::Context) {
@@ -112,7 +234,7 @@ impl App {
             let tab_id = self.create_terminal(ctx);
             if let Some(tree) = self.dock_states.get_mut(&panel_idx) {
                 if let Some(ref after_tab) = self.pending_split_after.clone() {
-                    if let Some((_surface, node_idx, _tab_idx)) = tree.find_tab(after_tab) {
+                    if let Some((_surface, node_idx, _)) = tree.find_tab(after_tab) {
                         if self.pending_split_vertical {
                             tree.main_surface_mut().split_below(node_idx, 0.5, vec![tab_id]);
                         } else {
@@ -134,16 +256,85 @@ impl App {
         }
     }
 
-    fn add_panel(&mut self) {
-        self.panel_counter += 1;
-        self.panels.push(Panel {
-            name: format!("Workspace {}", self.panel_counter),
-        });
-        let idx = self.panels.len() - 1;
+    fn add_panel(&mut self, ctx: &egui::Context) {
+        let idx = self.panels.len();
+        let name = format!("Workspace {}", idx + 1);
+        let file = workspace_file_for(&name);
+        let tab_id = self.create_terminal(ctx);
+        self.dock_states.insert(idx, DockState::new(vec![tab_id]));
+        self.panels.push(Panel { name, bound_file: Some(file.clone()) });
         self.active_panel = idx;
-        self.pending_new_terminal = Some(idx);
+        // Save initial state
+        let state = build_state(self);
+        let _ = save_to_file(&file, &state);
+    }
+
+    fn save_workspace(&mut self, panel_idx: usize) {
+        if let Some(panel) = self.panels.get(panel_idx) {
+            let file = panel.bound_file.clone().unwrap_or_else(|| workspace_file_for(&panel.name));
+            let state = build_state(self);
+            if let Err(e) = save_to_file(&file, &state) {
+                log::error!("Failed to save: {}", e);
+            }
+        }
+    }
+
+    fn save_workspace_as(&mut self, panel_idx: usize) {
+        if let Some(panel) = self.panels.get(panel_idx) {
+            if let Some(path) = rfd::FileDialog::new()
+                .set_title("Save Workspace As")
+                .add_filter("JSON", &["json"])
+                .set_file_name(&format!("{}.json", panel.name))
+                .save_file()
+            {
+                let state = build_state(self);
+                if let Err(e) = save_to_file(&path, &state) {
+                    log::error!("Failed to save: {}", e);
+                } else if let Some(p) = self.panels.get_mut(panel_idx) {
+                    p.bound_file = Some(path);
+                }
+            }
+        }
+    }
+
+    fn load_workspace(&mut self, ctx: &egui::Context) {
+        if let Some(path) = rfd::FileDialog::new()
+            .set_title("Load Workspace")
+            .add_filter("JSON", &["json"])
+            .pick_file()
+        {
+            if let Ok(state) = load_from_file(&path) {
+                let idx = self.panels.len();
+                self.load_workspace_state(ctx, state, Some(path));
+                self.active_panel = idx;
+            }
+        }
+    }
+
+    fn close_workspace(&mut self, idx: usize) {
+        if self.panels.len() <= 1 {
+            return;
+        }
+        self.panels.remove(idx);
+        // Reindex dock_states: shift everything after removed index down by 1
+        let old_dock = self.dock_states.clone();
+        self.dock_states.clear();
+        for old_idx in 0..old_dock.len() {
+            if old_idx == idx {
+                continue; // skip removed
+            }
+            let new_idx = if old_idx > idx { old_idx - 1 } else { old_idx };
+            if let Some(state) = old_dock.get(&old_idx) {
+                self.dock_states.insert(new_idx, state.clone());
+            }
+        }
+        if self.active_panel >= self.panels.len() {
+            self.active_panel = self.panels.len().saturating_sub(1);
+        }
     }
 }
+
+// ── Terminal creation ────────────────────────────────────────────
 
 fn create_terminal(ctx: &egui::Context, id: u64) -> (TerminalBackend, Receiver<(u64, PtyEvent)>) {
     #[cfg(unix)]
@@ -152,32 +343,31 @@ fn create_terminal(ctx: &egui::Context, id: u64) -> (TerminalBackend, Receiver<(
     let shell = "cmd.exe".to_string();
 
     let (sender, receiver) = std::sync::mpsc::channel();
-    let backend = TerminalBackend::new(
-        id,
-        ctx.clone(),
-        sender,
-        egui_term::BackendSettings {
-            shell,
-            ..Default::default()
-        },
-    )
-    .unwrap();
+    let backend = TerminalBackend::new(id, ctx.clone(), sender, egui_term::BackendSettings {
+        shell,
+        ..Default::default()
+    }).unwrap();
     (backend, receiver)
 }
+
+// ── eframe::App ──────────────────────────────────────────────────
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.process_pending(ctx);
         let renaming = self.is_renaming();
-        if renaming {
-            self.rename_frame_count += 1;
-        }
+        if renaming { self.rename_frame_count += 1; }
 
+        // Menu bar
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
                 ui.menu_button("File", |ui| {
                     if ui.button("New Workspace").clicked() {
-                        self.add_panel();
+                        self.add_panel(ui.ctx());
+                        ui.close_menu();
+                    }
+                    if ui.button("Load Workspace").clicked() {
+                        self.load_workspace(ui.ctx());
                         ui.close_menu();
                     }
                     if ui.button("Exit").clicked() {
@@ -204,70 +394,100 @@ impl eframe::App for App {
             });
         });
 
-        // Left panel - workspace navigation with inline rename
-        egui::SidePanel::left("navigation")
-            .default_width(160.0)
-            .show(ctx, |ui| {
-                ui.heading("Workspaces");
-                ui.separator();
+        // Left panel
+        egui::SidePanel::left("navigation").default_width(160.0).show(ctx, |ui| {
+            ui.heading("Workspaces");
+            ui.separator();
 
-                let mut to_select = None;
-                let panel_count = self.panels.len();
-                for i in 0..panel_count {
-                    let is_active = i == self.active_panel;
+            let mut to_select = None;
+            let panel_count = self.panels.len();
+            for i in 0..panel_count {
+                let is_active = i == self.active_panel;
 
-                    if self.renaming_panel == Some(i) {
-                        let response = ui.add(
-                            egui::TextEdit::singleline(&mut self.rename_buffer)
-                                .font(egui::FontId::monospace(14.0))
-                                .desired_width(ui.available_width()),
-                        );
-                        if !response.has_focus() {
-                            response.request_focus();
-                        }
+                if self.renaming_panel == Some(i) {
+                    let response = ui.add(
+                        egui::TextEdit::singleline(&mut self.rename_buffer)
+                            .font(egui::FontId::monospace(14.0))
+                            .desired_width(ui.available_width()),
+                    );
+                    if !response.has_focus() { response.request_focus(); }
 
-                        let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
-                        // Skip frames 0-1 to avoid the double-click triggering immediate exit
-                        let can_exit = self.rename_frame_count > 1;
-                        let pointer = ui.input(|i| i.pointer.clone());
-                        let clicked_outside = can_exit
-                            && pointer.any_click()
-                            && !response.rect.contains(pointer.interact_pos().unwrap_or_default());
+                    let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    let can_exit = self.rename_frame_count > 1;
+                    let pointer = ui.input(|i| i.pointer.clone());
+                    let clicked_outside = can_exit && pointer.any_click()
+                        && !response.rect.contains(pointer.interact_pos().unwrap_or_default());
 
-                        if enter || clicked_outside {
-                            if !self.rename_buffer.is_empty() {
-                                self.panels[i].name = self.rename_buffer.clone();
+                    if enter || clicked_outside {
+                        let old_name = self.panels[i].name.clone();
+                        if !self.rename_buffer.is_empty() {
+                            self.panels[i].name = self.rename_buffer.clone();
+                            // Rename bound file
+                            let new_file = workspace_file_for(&self.rename_buffer);
+                            if let Some(ref old_file) = self.panels[i].bound_file {
+                                if old_file.exists() {
+                                    let _ = std::fs::rename(old_file, &new_file);
+                                }
                             }
-                            self.renaming_panel = None;
+                            self.panels[i].bound_file = Some(new_file);
                         }
-                    } else {
-                        let panel_name = self.panels[i].name.clone();
-                        let response = ui.selectable_label(is_active, &panel_name);
-                        if response.clicked() && !renaming {
-                            to_select = Some(i);
-                        }
-                        if response.double_clicked() && !renaming {
-                            self.start_rename_panel(i, panel_name);
-                        }
+                        self.renaming_panel = None;
                     }
+                } else {
+                    let panel_name = self.panels[i].name.clone();
+                    let response = ui.selectable_label(is_active, &panel_name);
+                    if response.clicked() && !renaming { to_select = Some(i); }
+                    if response.double_clicked() && !renaming {
+                        self.renaming_panel = Some(i);
+                        self.rename_buffer = panel_name;
+                        self.rename_frame_count = 0;
+                    }
+
+                    // Right-click context menu
+                    let panel_idx = i;
+                    response.context_menu(|ui| {
+                        if ui.button("Rename").clicked() {
+                            self.renaming_panel = Some(panel_idx);
+                            self.rename_buffer = self.panels[panel_idx].name.clone();
+                            self.rename_frame_count = 0;
+                            ui.close_menu();
+                        }
+                        ui.separator();
+                        if ui.button("Save").clicked() {
+                            self.save_workspace(panel_idx);
+                            ui.close_menu();
+                        }
+                        if ui.button("Save As...").clicked() {
+                            self.save_workspace_as(panel_idx);
+                            ui.close_menu();
+                        }
+                        if ui.button("Load...").clicked() {
+                            // Will be handled after menu closes
+                            ui.close_menu();
+                        }
+                        ui.separator();
+                        if ui.button("Close").clicked() {
+                            self.close_workspace(panel_idx);
+                            ui.close_menu();
+                        }
+                    });
                 }
+            }
 
-                if let Some(i) = to_select {
-                    self.active_panel = i;
-                }
+            if let Some(i) = to_select { self.active_panel = i; }
 
-                ui.separator();
-                if ui.button("+ New Workspace").clicked() {
-                    self.add_panel();
-                }
+            ui.separator();
+            if ui.button("+ New Workspace").clicked() {
+                self.add_panel(ui.ctx());
+            }
 
-                ui.separator();
-                ui.label("L1: Workspaces");
-                ui.label("L2: Dock panels");
-                ui.label("L3: Terminal tabs");
-            });
+            ui.separator();
+            ui.label("L1: Workspaces");
+            ui.label("L2: Dock panels");
+            ui.label("L3: Terminal tabs");
+        });
 
-        // Right panel - dock area
+        // Right panel
         let active_tab = self.dock_states.get_mut(&self.active_panel)
             .and_then(|t| t.find_active_focused().map(|(_, t)| t.clone()));
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -290,13 +510,13 @@ impl eframe::App for App {
                         active_tab,
                     });
             } else {
-                ui.centered_and_justified(|ui| {
-                    ui.label("Click '+ New Workspace' to create one.");
-                });
+                ui.centered_and_justified(|ui| { ui.label("Click '+ New Workspace' to create one."); });
             }
         });
     }
 }
+
+// ── TerminalTabViewer ────────────────────────────────────────────
 
 struct TerminalTabViewer<'a> {
     terminals: &'a mut HashMap<String, TerminalData>,
@@ -316,88 +536,67 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
     type Tab = String;
 
     fn title(&mut self, tab: &mut Self::Tab) -> egui::WidgetText {
-        self.terminals
-            .get(tab)
-            .map(|d| d.name.clone().into())
-            .unwrap_or_else(|| tab.clone().into())
+        self.terminals.get(tab).map(|d| d.name.clone().into()).unwrap_or_else(|| tab.clone().into())
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab) {
-        // Inline rename at top of tab content
-            if self.renaming_terminal.as_ref() == Some(tab) {
-                ui.horizontal(|ui| {
-                    let response = ui.add(
-                        egui::TextEdit::singleline(self.terminal_rename_buffer)
-                            .font(egui::FontId::monospace(14.0))
-                            .desired_width(200.0)
-                            .hint_text("Enter name..."),
-                    );
-                    if !response.has_focus() {
-                        response.request_focus();
-                    }
+        // Inline rename
+        if self.renaming_terminal.as_ref() == Some(tab) {
+            ui.horizontal(|ui| {
+                let response = ui.add(
+                    egui::TextEdit::singleline(self.terminal_rename_buffer)
+                        .font(egui::FontId::monospace(14.0))
+                        .desired_width(200.0)
+                        .hint_text("Enter name..."),
+                );
+                if !response.has_focus() { response.request_focus(); }
 
-                    let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
-                    // Skip frames 0-1 to avoid the double-click triggering immediate exit
-                    let can_exit = self.rename_frame_count > 1;
-                    let pointer = ui.input(|i| i.pointer.clone());
-                    let clicked_outside = can_exit
-                        && pointer.any_click()
-                        && !response.rect.contains(pointer.interact_pos().unwrap_or_default());
+                let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
+                let can_exit = self.rename_frame_count > 1;
+                let pointer = ui.input(|i| i.pointer.clone());
+                let clicked_outside = can_exit && pointer.any_click()
+                    && !response.rect.contains(pointer.interact_pos().unwrap_or_default());
 
-                    if enter || clicked_outside {
-                        if !self.terminal_rename_buffer.is_empty() {
-                            if let Some(data) = self.terminals.get_mut(tab) {
-                                data.name = self.terminal_rename_buffer.clone();
-                            }
+                if enter || clicked_outside {
+                    if !self.terminal_rename_buffer.is_empty() {
+                        if let Some(data) = self.terminals.get_mut(tab) {
+                            data.name = self.terminal_rename_buffer.clone();
                         }
-                        *self.renaming_terminal = None;
                     }
-                });
-                ui.separator();
-            }
+                    *self.renaming_terminal = None;
+                }
+            });
+            ui.separator();
+        }
 
-        // Show terminal
+        // Terminal
         if let Some(terminal_data) = self.terminals.get_mut(tab) {
             if let Ok((_, PtyEvent::Exit)) = terminal_data.receiver.try_recv() {
                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
                 return;
             }
 
-            // Handle Ctrl+scroll zoom — only when mouse is over THIS terminal
+            // Ctrl+scroll zoom (mouse over this terminal only)
             let mouse_over = ui.rect_contains_pointer(ui.clip_rect());
-            let scroll = if mouse_over {
-                ui.input(|i| i.events.iter().filter_map(|e| {
+            if mouse_over {
+                let scroll: f32 = ui.input(|i| i.events.iter().filter_map(|e| {
                     if let egui::Event::MouseWheel { delta, modifiers, .. } = e {
-                        if modifiers.ctrl {
-                            Some(delta.y)
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
-                }).sum::<f32>())
-            } else {
-                0.0
-            };
-
-            if scroll != 0.0 {
+                        if modifiers.ctrl { Some(delta.y) } else { None }
+                    } else { None }
+                }).sum());
                 if scroll > 0.0 {
                     terminal_data.font_size = (terminal_data.font_size + FONT_SIZE_STEP).min(MAX_FONT_SIZE);
-                } else {
+                } else if scroll < 0.0 {
                     terminal_data.font_size = (terminal_data.font_size - FONT_SIZE_STEP).max(MIN_FONT_SIZE);
                 }
             }
 
-            // Handle Ctrl+/- keyboard zoom — only when this tab is active
-            let is_active = self.active_tab.as_ref() == Some(tab);
-            if is_active {
-                let plus = ui.input(|i| i.key_pressed(egui::Key::Equals) && i.modifiers.ctrl);
-                let minus = ui.input(|i| i.key_pressed(egui::Key::Minus) && i.modifiers.ctrl);
-                if plus {
+            // Ctrl+/- keyboard zoom (active tab only)
+            if self.active_tab.as_ref() == Some(tab) {
+                if ui.input(|i| i.key_pressed(egui::Key::Equals) && i.modifiers.ctrl) {
                     terminal_data.font_size = (terminal_data.font_size + FONT_SIZE_STEP).min(MAX_FONT_SIZE);
                 }
-                if minus {
+                if ui.input(|i| i.key_pressed(egui::Key::Minus) && i.modifiers.ctrl) {
                     terminal_data.font_size = (terminal_data.font_size - FONT_SIZE_STEP).max(MIN_FONT_SIZE);
                 }
             }
@@ -437,13 +636,7 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
 
     fn add_popup(&mut self, _ui: &mut egui::Ui, _surface: SurfaceIndex, _node: NodeIndex) {}
 
-    fn context_menu(
-        &mut self,
-        ui: &mut egui::Ui,
-        tab: &mut Self::Tab,
-        _surface: SurfaceIndex,
-        _node: NodeIndex,
-    ) {
+    fn context_menu(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab, _surface: SurfaceIndex, _node: NodeIndex) {
         if ui.button("Rename").clicked() {
             *self.renaming_terminal = Some(tab.clone());
             if let Some(data) = self.terminals.get(tab) {
