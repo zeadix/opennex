@@ -201,7 +201,7 @@ impl eframe::App for App {
                         response.request_focus();
 
                         let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
-                        if enter || (response.lost_focus() && !response.has_focus()) {
+                        if enter || response.lost_focus() {
                             if !self.rename_buffer.is_empty() {
                                 self.panels[i].name = self.rename_buffer.clone();
                             }
@@ -297,7 +297,7 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                 response.request_focus();
 
                 let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
-                if enter || (response.lost_focus() && !response.has_focus()) {
+                if enter || response.lost_focus() {
                     if !self.terminal_rename_buffer.is_empty() {
                         if let Some(data) = self.terminals.get_mut(tab) {
                             data.name = self.terminal_rename_buffer.clone();
