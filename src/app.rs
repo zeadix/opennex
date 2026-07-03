@@ -268,6 +268,8 @@ impl eframe::App for App {
             });
 
         // Right panel - dock area
+        let active_tab = self.dock_states.get_mut(&self.active_panel)
+            .and_then(|t| t.find_active_focused().map(|(_, t)| t.clone()));
         egui::CentralPanel::default().show(ctx, |ui| {
             if let Some(tree) = self.dock_states.get_mut(&self.active_panel) {
                 DockArea::new(tree)
@@ -285,6 +287,7 @@ impl eframe::App for App {
                         terminal_rename_buffer: &mut self.terminal_rename_buffer,
                         renaming,
                         rename_frame_count: self.rename_frame_count,
+                        active_tab,
                     });
             } else {
                 ui.centered_and_justified(|ui| {
@@ -306,6 +309,7 @@ struct TerminalTabViewer<'a> {
     terminal_rename_buffer: &'a mut String,
     renaming: bool,
     rename_frame_count: u32,
+    active_tab: Option<String>,
 }
 
 impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
@@ -359,18 +363,23 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                 return;
             }
 
-            // Handle Ctrl+scroll zoom for this terminal
-            let scroll = ui.input(|i| i.events.iter().filter_map(|e| {
-                if let egui::Event::MouseWheel { delta, modifiers, .. } = e {
-                    if modifiers.ctrl {
-                        Some(delta.y)
+            // Handle Ctrl+scroll zoom — only when mouse is over THIS terminal
+            let mouse_over = ui.rect_contains_pointer(ui.clip_rect());
+            let scroll = if mouse_over {
+                ui.input(|i| i.events.iter().filter_map(|e| {
+                    if let egui::Event::MouseWheel { delta, modifiers, .. } = e {
+                        if modifiers.ctrl {
+                            Some(delta.y)
+                        } else {
+                            None
+                        }
                     } else {
                         None
                     }
-                } else {
-                    None
-                }
-            }).sum::<f32>());
+                }).sum::<f32>())
+            } else {
+                0.0
+            };
 
             if scroll != 0.0 {
                 if scroll > 0.0 {
@@ -380,14 +389,17 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                 }
             }
 
-            // Handle Ctrl+/- keyboard zoom
-            let plus = ui.input(|i| i.key_pressed(egui::Key::Equals) && i.modifiers.ctrl);
-            let minus = ui.input(|i| i.key_pressed(egui::Key::Minus) && i.modifiers.ctrl);
-            if plus {
-                terminal_data.font_size = (terminal_data.font_size + FONT_SIZE_STEP).min(MAX_FONT_SIZE);
-            }
-            if minus {
-                terminal_data.font_size = (terminal_data.font_size - FONT_SIZE_STEP).max(MIN_FONT_SIZE);
+            // Handle Ctrl+/- keyboard zoom — only when this tab is active
+            let is_active = self.active_tab.as_ref() == Some(tab);
+            if is_active {
+                let plus = ui.input(|i| i.key_pressed(egui::Key::Equals) && i.modifiers.ctrl);
+                let minus = ui.input(|i| i.key_pressed(egui::Key::Minus) && i.modifiers.ctrl);
+                if plus {
+                    terminal_data.font_size = (terminal_data.font_size + FONT_SIZE_STEP).min(MAX_FONT_SIZE);
+                }
+                if minus {
+                    terminal_data.font_size = (terminal_data.font_size - FONT_SIZE_STEP).max(MIN_FONT_SIZE);
+                }
             }
 
             let font = TerminalFont::new(FontSettings {
