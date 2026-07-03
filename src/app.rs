@@ -140,18 +140,8 @@ fn workspace_dir() -> PathBuf {
         .join(&settings.workspace.template_dir)
 }
 
-fn workspace_dir_for(settings: &AppSettings) -> PathBuf {
-    std::env::current_dir()
-        .unwrap_or_default()
-        .join(&settings.workspace.template_dir)
-}
-
 fn ensure_workspace_dir() {
     let _ = std::fs::create_dir_all(workspace_dir());
-}
-
-fn workspace_file_for(name: &str) -> PathBuf {
-    workspace_dir().join(format!("{}.json", name))
 }
 
 fn list_workspace_files() -> Vec<(String, PathBuf)> {
@@ -302,7 +292,7 @@ impl App {
     }
 
     fn process_pending(&mut self, ctx: &egui::Context) {
-        if let Some((panel_idx, surface_idx, _node_idx)) = self.pending_new_terminal.take() {
+        if let Some((panel_idx, _surface_idx, node_idx)) = self.pending_new_terminal.take() {
             let tab_id = self.create_terminal(ctx);
             if let Some(tree) = self.dock_states.get_mut(&panel_idx) {
                 if let Some(ref after_tab) = self.pending_split_after.clone() {
@@ -315,12 +305,26 @@ impl App {
                     }
                     self.pending_split_after = None;
                 } else {
-                    // + Tab: add to the SPECIFIC surface where + was clicked
-                    if let Some(surface) = tree.get_surface_mut(surface_idx) {
-                        if let Some(node_tree) = surface.node_tree_mut() {
-                            node_tree.push_to_first_leaf(tab_id);
+                    // + Tab: find the specific leaf node and append tab
+                    let mut found = false;
+                    for surf in tree.iter_surfaces_mut() {
+                        if let Some(node_tree) = surf.node_tree_mut() {
+                            for (i, node) in node_tree.iter_mut().enumerate() {
+                                if i == node_idx.0 {
+                                    if let egui_dock::Node::Leaf { tabs, active, .. } = node {
+                                        *active = egui_dock::TabIndex(tabs.len());
+                                        tabs.push(tab_id.clone());
+                                        found = true;
+                                        break;
+                                    }
+                                }
+                            }
                         }
-                    } else {
+                        if found {
+                            break;
+                        }
+                    }
+                    if !found {
                         tree.main_surface_mut().push_to_first_leaf(tab_id);
                     }
                 }
