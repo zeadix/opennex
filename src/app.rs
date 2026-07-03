@@ -637,13 +637,24 @@ impl App {
 fn parse_cd_from_output(text: &str) -> Option<String> {
     for line in text.lines().rev().take(20) {
         let trimmed = line.trim();
-        // Match "cd /path" anywhere in the line
         if let Some(idx) = trimmed.find("cd ") {
             let after_cd = &trimmed[idx + 3..];
             let path = after_cd.trim();
             if path.starts_with('/') || path.starts_with("~") {
                 return Some(path.to_string());
             }
+        }
+    }
+    None
+}
+
+fn parse_cd_from_current_line(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    if let Some(idx) = trimmed.find("cd ") {
+        let after_cd = &trimmed[idx + 3..];
+        let path = after_cd.trim();
+        if path.starts_with('/') || path.starts_with("~") {
+            return Some(path.to_string());
         }
     }
     None
@@ -1047,25 +1058,34 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
             ui.add(terminal_view);
 
             // Detect cd commands from terminal output to update working_directory
+            // Check all new lines (not just last) for cd commands
             let content = terminal_data.backend.sync();
             let content_len: usize = content.grid.display_iter().count();
             if content_len > terminal_data.last_sync_len && content_len > 0 {
+                let prev_len = terminal_data.last_sync_len;
                 terminal_data.last_sync_len = content_len;
-                // Collect all lines and get the last one
-                let mut lines: Vec<String> = Vec::new();
+
+                // Collect only new lines
                 let mut current_line = String::new();
+                let mut line_idx = 0;
                 for indexed in content.grid.display_iter() {
+                    line_idx += 1;
+                    if line_idx <= prev_len {
+                        if indexed.point.column.0 == 0 {
+                            current_line.clear();
+                        }
+                        continue;
+                    }
                     if indexed.point.column.0 == 0 && !current_line.is_empty() {
-                        lines.push(current_line.clone());
+                        if let Some(dir) = parse_cd_from_current_line(&current_line) {
+                            terminal_data.working_directory = dir;
+                        }
                         current_line.clear();
                     }
                     current_line.push(indexed.c);
                 }
                 if !current_line.is_empty() {
-                    lines.push(current_line);
-                }
-                if let Some(last_line) = lines.last() {
-                    if let Some(dir) = parse_cd_from_output(last_line) {
+                    if let Some(dir) = parse_cd_from_current_line(&current_line) {
                         terminal_data.working_directory = dir;
                     }
                 }
