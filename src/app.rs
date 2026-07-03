@@ -10,6 +10,51 @@ const MIN_FONT_SIZE: f32 = 8.0;
 const MAX_FONT_SIZE: f32 = 32.0;
 const FONT_SIZE_STEP: f32 = 1.0;
 
+// ── Settings ─────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AppSettings {
+    workspace: WorkspaceSettings,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct WorkspaceSettings {
+    template_dir: String,
+}
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        AppSettings {
+            workspace: WorkspaceSettings {
+                template_dir: "workspace".to_string(),
+            },
+        }
+    }
+}
+
+fn settings_path() -> PathBuf {
+    std::env::current_dir().unwrap_or_default().join("settings.json")
+}
+
+fn load_settings() -> AppSettings {
+    let path = settings_path();
+    if path.exists() {
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            if let Ok(settings) = serde_json::from_str(&content) {
+                return settings;
+            }
+        }
+    }
+    AppSettings::default()
+}
+
+fn save_settings(settings: &AppSettings) -> Result<(), anyhow::Error> {
+    let path = settings_path();
+    let content = serde_json::to_string_pretty(settings)?;
+    std::fs::write(path, content)?;
+    Ok(())
+}
+
 // ── Persistence structs (single panel per file) ──────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -45,6 +90,15 @@ pub struct App {
     rename_frame_count: u32,
     pending_load_workspace: bool,
     pending_load_from_template: Option<PathBuf>,
+    settings: AppSettings,
+    show_settings: bool,
+    settings_tab: SettingsTab,
+    settings_edit: AppSettings,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum SettingsTab {
+    Workspace,
 }
 
 struct Panel {
@@ -63,7 +117,16 @@ struct TerminalData {
 // ── Workspace directory ──────────────────────────────────────────
 
 fn workspace_dir() -> PathBuf {
-    std::env::current_dir().unwrap_or_default().join("workspace")
+    let settings = load_settings();
+    std::env::current_dir()
+        .unwrap_or_default()
+        .join(&settings.workspace.template_dir)
+}
+
+fn workspace_dir_for(settings: &AppSettings) -> PathBuf {
+    std::env::current_dir()
+        .unwrap_or_default()
+        .join(&settings.workspace.template_dir)
 }
 
 fn ensure_workspace_dir() {
@@ -130,7 +193,10 @@ impl App {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let ctx = &cc.egui_ctx;
         ensure_workspace_dir();
+        let settings = load_settings();
         let mut app = App::empty();
+        app.settings = settings.clone();
+        app.settings_edit = settings;
         app.add_initial_terminal(ctx);
         app
     }
@@ -153,6 +219,10 @@ impl App {
             rename_frame_count: 0,
             pending_load_workspace: false,
             pending_load_from_template: None,
+            settings: AppSettings::default(),
+            show_settings: false,
+            settings_tab: SettingsTab::Workspace,
+            settings_edit: AppSettings::default(),
         }
     }
 
@@ -392,8 +462,60 @@ impl eframe::App for App {
                         }
                     }
                 });
+                if ui.button("Settings").clicked() {
+                    self.show_settings = true;
+                    self.settings_edit = self.settings.clone();
+                }
             });
         });
+
+        // Settings window
+        if self.show_settings {
+            let mut open = self.show_settings;
+            egui::Window::new("Settings")
+                .open(&mut open)
+                .resizable(true)
+                .default_width(500.0)
+                .default_height(300.0)
+                .show(ctx, |ui| {
+                    ui.columns(2, |cols| {
+                        // Left: tabs
+                        cols[0].vertical(|ui| {
+                            ui.heading("Settings");
+                            ui.separator();
+                            if ui.selectable_label(self.settings_tab == SettingsTab::Workspace, "Workspace").clicked() {
+                                self.settings_tab = SettingsTab::Workspace;
+                            }
+                        });
+
+                        // Right: content
+                        cols[1].vertical(|ui| {
+                            match self.settings_tab {
+                                SettingsTab::Workspace => {
+                                    ui.heading("Workspace Settings");
+                                    ui.separator();
+                                    ui.label("Template Directory:");
+                                    ui.add(egui::TextEdit::singleline(&mut self.settings_edit.workspace.template_dir)
+                                        .desired_width(ui.available_width()));
+                                    ui.label("Default: workspace (relative to app root)");
+                                }
+                            }
+                        });
+                    });
+
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        if ui.button("Save").clicked() {
+                            self.settings = self.settings_edit.clone();
+                            let _ = save_settings(&self.settings);
+                        }
+                        if ui.button("Cancel").clicked() {
+                            self.settings_edit = self.settings.clone();
+                        }
+                    });
+                });
+            self.show_settings = open;
+        }
 
         // Left panel
         egui::SidePanel::left("navigation").default_width(160.0).show(ctx, |ui| {
