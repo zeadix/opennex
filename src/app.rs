@@ -44,6 +44,7 @@ pub struct App {
     terminal_rename_buffer: String,
     rename_frame_count: u32,
     pending_load_workspace: bool,
+    pending_load_from_template: Option<PathBuf>,
 }
 
 struct Panel {
@@ -71,6 +72,21 @@ fn ensure_workspace_dir() {
 
 fn workspace_file_for(name: &str) -> PathBuf {
     workspace_dir().join(format!("{}.json", name))
+}
+
+fn list_workspace_files() -> Vec<(String, PathBuf)> {
+    let ws_dir = workspace_dir();
+    std::fs::read_dir(&ws_dir)
+        .into_iter()
+        .flat_map(|rd| rd.into_iter())
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().map_or(false, |ext| ext == "json"))
+        .map(|e| e.path())
+        .filter_map(|path| {
+            let stem = path.file_stem()?.to_string_lossy().to_string();
+            Some((stem, path))
+        })
+        .collect()
 }
 
 // ── Save / Load ──────────────────────────────────────────────────
@@ -114,32 +130,9 @@ impl App {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let ctx = &cc.egui_ctx;
         ensure_workspace_dir();
-        let ws_dir = workspace_dir();
-
-        let entries: Vec<PathBuf> = std::fs::read_dir(&ws_dir)
-            .into_iter()
-            .flat_map(|rd| rd.into_iter())
-            .filter_map(|e| e.ok())
-            .filter(|e| e.path().extension().map_or(false, |ext| ext == "json"))
-            .map(|e| e.path())
-            .collect();
-
-        if !entries.is_empty() {
-            let mut app = App::empty();
-            for path in &entries {
-                if let Ok(state) = load_from_file(&path) {
-                    app.load_workspace_state(ctx, state, Some(path.clone()));
-                }
-            }
-            if app.panels.is_empty() {
-                app.add_initial_terminal(ctx);
-            }
-            app
-        } else {
-            let mut app = App::empty();
-            app.add_initial_terminal(ctx);
-            app
-        }
+        let mut app = App::empty();
+        app.add_initial_terminal(ctx);
+        app
     }
 
     fn empty() -> Self {
@@ -159,19 +152,16 @@ impl App {
             terminal_rename_buffer: String::new(),
             rename_frame_count: 0,
             pending_load_workspace: false,
+            pending_load_from_template: None,
         }
     }
 
     fn add_initial_terminal(&mut self, ctx: &egui::Context) {
         let name = "Workspace 1".to_string();
-        let file = workspace_file_for(&name);
         let tab_id = self.create_terminal_inner(ctx);
         self.dock_states.insert(0, DockState::new(vec![tab_id]));
-        self.panels.push(Panel { name, bound_file: Some(file.clone()) });
+        self.panels.push(Panel { name, bound_file: None });
         self.active_panel = 0;
-        if let Some(state) = build_panel_state(self, 0) {
-            let _ = save_to_file(&file, &state);
-        }
     }
 
     fn load_workspace_state(&mut self, ctx: &egui::Context, state: WorkspaceState, file: Option<PathBuf>) {
@@ -263,29 +253,46 @@ impl App {
                 }
             }
         }
+
+        // Handle pending load from template (no binding)
+        if let Some(path) = self.pending_load_from_template.take() {
+            if let Ok(state) = load_from_file(&path) {
+                self.load_workspace_state(ctx, state, None);
+                self.active_panel = self.panels.len() - 1;
+            }
+        }
     }
 
     fn add_panel(&mut self, ctx: &egui::Context) {
         let idx = self.panels.len();
         let name = format!("Workspace {}", idx + 1);
-        let file = workspace_file_for(&name);
         let tab_id = self.create_terminal(ctx);
         self.dock_states.insert(idx, DockState::new(vec![tab_id]));
-        self.panels.push(Panel { name, bound_file: Some(file.clone()) });
+        self.panels.push(Panel { name, bound_file: None });
         self.active_panel = idx;
-        if let Some(state) = build_panel_state(self, idx) {
-            let _ = save_to_file(&file, &state);
-        }
     }
 
     fn save_workspace(&mut self, panel_idx: usize) {
         if let Some(state) = build_panel_state(self, panel_idx) {
-            let file = self.panels[panel_idx].bound_file.clone()
-                .unwrap_or_else(|| workspace_file_for(&self.panels[panel_idx].name));
-            if let Err(e) = save_to_file(&file, &state) {
-                log::error!("Failed to save: {}", e);
+            let path = if let Some(ref file) = self.panels[panel_idx].bound_file {
+                file.clone()
             } else {
-                self.panels[panel_idx].bound_file = Some(file);
+                // No bound file — ask user where to save
+                match rfd::FileDialog::new()
+                    .set_title("Save Workspace")
+                    .add_filter("JSON", &["json"])
+                    .set_file_name(&format!("{}.json", self.panels[panel_idx].name))
+                    .save_file()
+                {
+                    Some(p) => {
+                        self.panels[panel_idx].bound_file = Some(p.clone());
+                        p
+                    }
+                    None => return,
+                }
+            };
+            if let Err(e) = save_to_file(&path, &state) {
+                log::error!("Failed to save: {}", e);
             }
         }
     }
@@ -413,16 +420,8 @@ impl eframe::App for App {
                         && !response.rect.contains(pointer.interact_pos().unwrap_or_default());
 
                     if enter || clicked_outside {
-                        let old_name = self.panels[i].name.clone();
                         if !self.rename_buffer.is_empty() {
                             self.panels[i].name = self.rename_buffer.clone();
-                            let new_file = workspace_file_for(&self.rename_buffer);
-                            if let Some(ref old_file) = self.panels[i].bound_file {
-                                if old_file.exists() {
-                                    let _ = std::fs::rename(old_file, &new_file);
-                                }
-                            }
-                            self.panels[i].bound_file = Some(new_file);
                         }
                         self.renaming_panel = None;
                     }
@@ -471,6 +470,31 @@ impl eframe::App for App {
             ui.separator();
             if ui.button("+ New Workspace").clicked() {
                 self.add_panel(ui.ctx());
+            }
+
+            // Template button — hover to show available workspace files
+            let template_files = list_workspace_files();
+            if !template_files.is_empty() {
+                let resp = ui.button("Templates");
+                if resp.hovered() {
+                    egui::popup_below_widget(
+                        ui,
+                        resp.id.with("template_popup"),
+                        &resp,
+                        egui::PopupCloseBehavior::CloseOnClickOutside,
+                        |ui| {
+                            ui.heading("Load from template");
+                            ui.separator();
+                            for (display_name, path) in &template_files {
+                                let path = path.clone();
+                                if ui.button(display_name.as_str()).clicked() {
+                                    self.pending_load_from_template = Some(path);
+                                    ui.memory_mut(|m| m.close_popup());
+                                }
+                            }
+                        },
+                    );
+                }
             }
 
             ui.separator();
