@@ -315,6 +315,7 @@ impl App {
             if let Some(path) = rfd::FileDialog::new()
                 .set_title("Load Workspace")
                 .add_filter("JSON", &["json"])
+                .set_directory(workspace_dir())
                 .pick_file()
             {
                 if let Ok(state) = load_from_file(&path) {
@@ -347,10 +348,10 @@ impl App {
             let path = if let Some(ref file) = self.panels[panel_idx].bound_file {
                 file.clone()
             } else {
-                // No bound file — ask user where to save
                 match rfd::FileDialog::new()
                     .set_title("Save Workspace")
                     .add_filter("JSON", &["json"])
+                    .set_directory(workspace_dir())
                     .set_file_name(&format!("{}.json", self.panels[panel_idx].name))
                     .save_file()
                 {
@@ -372,6 +373,7 @@ impl App {
             if let Some(path) = rfd::FileDialog::new()
                 .set_title("Save Workspace As")
                 .add_filter("JSON", &["json"])
+                .set_directory(workspace_dir())
                 .set_file_name(&format!("{}.json", panel.name))
                 .save_file()
             {
@@ -495,8 +497,18 @@ impl eframe::App for App {
                                     ui.heading("Workspace Settings");
                                     ui.separator();
                                     ui.label("Template Directory:");
-                                    ui.add(egui::TextEdit::singleline(&mut self.settings_edit.workspace.template_dir)
-                                        .desired_width(ui.available_width()));
+                                    ui.horizontal(|ui| {
+                                        ui.add(egui::TextEdit::singleline(&mut self.settings_edit.workspace.template_dir)
+                                            .desired_width(ui.available_width() - 70.0));
+                                        if ui.button("Browse...").clicked() {
+                                            if let Some(dir) = rfd::FileDialog::new()
+                                                .set_title("Select Template Directory")
+                                                .pick_folder()
+                                            {
+                                                self.settings_edit.workspace.template_dir = dir.to_string_lossy().to_string();
+                                            }
+                                        }
+                                    });
                                     ui.label("Default: workspace (relative to app root)");
                                 }
                             }
