@@ -131,6 +131,7 @@ pub struct App {
     dock_states: HashMap<usize, DockState<String>>,
     terminals: HashMap<String, TerminalData>,
     tab_counter: u32,
+    backend_id_counter: u64,
     pending_new_terminal: Option<(usize, SurfaceIndex, NodeIndex)>,
     pending_close: Option<String>,
     pending_split_after: Option<String>,
@@ -237,9 +238,12 @@ impl App {
                 app.settings_edit = settings;
                 for panel in &scene.panels {
                     let idx = app.panels.len();
-                    for (id, tstate) in &panel.terminals {
-                        let (backend, receiver) = create_terminal(ctx, id.strip_prefix("terminal-").and_then(|s| s.parse().ok()).unwrap_or(idx as u64 + 1), &tstate.working_directory);
-                        app.terminals.insert(id.clone(), TerminalData {
+                for (_id, tstate) in &panel.terminals {
+                    let (backend, receiver) = create_terminal(ctx, app.backend_id_counter, &tstate.working_directory);
+                    app.backend_id_counter += 1;
+                    let new_id = format!("terminal-{}", app.tab_counter);
+                    app.tab_counter += 1;
+                        app.terminals.insert(new_id, TerminalData {
                             backend, receiver,
                             name: tstate.name.clone(),
                             font_size: tstate.font_size,
@@ -278,6 +282,7 @@ impl App {
             dock_states: HashMap::new(),
             terminals: HashMap::new(),
             tab_counter: 0,
+            backend_id_counter: 0,
             pending_new_terminal: None,
             pending_close: None,
             pending_split_after: None,
@@ -309,13 +314,10 @@ impl App {
     fn load_workspace_state(&mut self, ctx: &egui::Context, state: WorkspaceState, file: Option<PathBuf>) {
         let panel_idx = self.panels.len();
 
-        // Restore terminals
         for (id, tstate) in &state.terminals {
             if !self.terminals.contains_key(id) {
-                let id_num: u64 = id.strip_prefix("terminal-")
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or(self.tab_counter as u64 + 1);
-                        let (backend, receiver) = create_terminal(ctx, id_num, &tstate.working_directory);
+                let (backend, receiver) = create_terminal(ctx, self.backend_id_counter, &tstate.working_directory);
+                self.backend_id_counter += 1;
                 self.terminals.insert(id.clone(), TerminalData {
                     backend,
                     receiver,
@@ -324,13 +326,9 @@ impl App {
                     working_directory: tstate.working_directory.clone(),
                     initial_cd_sent: false,
                 });
-                if id_num >= self.tab_counter as u64 {
-                    self.tab_counter = id_num as u32;
-                }
             }
         }
 
-        // Restore panel and dock state
         self.panels.push(Panel { name: state.panel_name, bound_file: file });
         self.dock_states.insert(panel_idx, state.dock_state);
     }
@@ -343,7 +341,8 @@ impl App {
         self.tab_counter += 1;
         let id = format!("terminal-{}", self.tab_counter);
         let cwd = std::env::current_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
-        let (backend, receiver) = create_terminal(ctx, self.terminals.len() as u64, &cwd);
+        let (backend, receiver) = create_terminal(ctx, self.backend_id_counter, &cwd);
+        self.backend_id_counter += 1;
         self.terminals.insert(id.clone(), TerminalData {
             backend, receiver,
             name: "New Terminal".to_string(),
@@ -536,28 +535,23 @@ impl App {
         self.dock_states.clear();
         self.terminals.clear();
         self.tab_counter = 0;
+        self.backend_id_counter = 0;
         self.active_panel = 0;
 
         for panel in &scene.panels {
             let idx = self.panels.len();
-            for (id, tstate) in &panel.terminals {
-                let id_num: u64 = id.strip_prefix("terminal-")
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or(idx as u64 + 1);
-                        let (backend, receiver) = create_terminal(ctx, id_num, &tstate.working_directory);
-                if id_num >= self.tab_counter as u64 {
-                    self.tab_counter = id_num as u32;
-                }
-                self.terminals.insert(id.clone(), TerminalData {
+            for (_id, tstate) in &panel.terminals {
+                let (backend, receiver) = create_terminal(ctx, self.backend_id_counter, &tstate.working_directory);
+                self.backend_id_counter += 1;
+                let new_id = format!("terminal-{}", self.tab_counter);
+                self.tab_counter += 1;
+                self.terminals.insert(new_id, TerminalData {
                     backend, receiver,
                     name: tstate.name.clone(),
                     font_size: tstate.font_size,
                     working_directory: tstate.working_directory.clone(),
                     initial_cd_sent: false,
                 });
-                if id_num >= self.tab_counter as u64 {
-                    self.tab_counter = id_num as u32;
-                }
             }
             self.panels.push(Panel { name: panel.name.clone(), bound_file: None });
             self.dock_states.insert(idx, panel.dock_state.clone());
