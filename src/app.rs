@@ -282,7 +282,7 @@ impl App {
                 for panel in &scene.panels {
                     let idx = app.panels.len();
                     for (id, tstate) in &panel.terminals {
-                        let (backend, receiver) = create_terminal(ctx, id.strip_prefix("terminal-").and_then(|s| s.parse().ok()).unwrap_or(idx as u64 + 1));
+                        let (backend, receiver) = create_terminal(ctx, id.strip_prefix("terminal-").and_then(|s| s.parse().ok()).unwrap_or(idx as u64 + 1), &tstate.working_directory);
                         app.terminals.insert(id.clone(), TerminalData {
                             backend, receiver,
                             name: tstate.name.clone(),
@@ -358,7 +358,7 @@ impl App {
                 let id_num: u64 = id.strip_prefix("terminal-")
                     .and_then(|s| s.parse().ok())
                     .unwrap_or(self.tab_counter as u64 + 1);
-                let (backend, receiver) = create_terminal(ctx, id_num);
+                        let (backend, receiver) = create_terminal(ctx, id_num, &tstate.working_directory);
                 self.terminals.insert(id.clone(), TerminalData {
                     backend,
                     receiver,
@@ -384,8 +384,8 @@ impl App {
     fn create_terminal_inner(&mut self, ctx: &egui::Context) -> String {
         self.tab_counter += 1;
         let id = format!("terminal-{}", self.tab_counter);
-        let (backend, receiver) = create_terminal(ctx, self.tab_counter as u64);
         let cwd = std::env::current_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+        let (backend, receiver) = create_terminal(ctx, self.tab_counter as u64, &cwd);
         self.terminals.insert(id.clone(), TerminalData {
             backend, receiver,
             name: format!("Terminal {}", self.tab_counter),
@@ -585,7 +585,7 @@ impl App {
                 let id_num: u64 = id.strip_prefix("terminal-")
                     .and_then(|s| s.parse().ok())
                     .unwrap_or(idx as u64 + 1);
-                let (backend, receiver) = create_terminal(ctx, id_num);
+                        let (backend, receiver) = create_terminal(ctx, id_num, &tstate.working_directory);
                 if id_num >= self.tab_counter as u64 {
                     self.tab_counter = id_num as u32;
                 }
@@ -626,15 +626,20 @@ impl App {
 
 // ── Terminal creation ────────────────────────────────────────────
 
-fn create_terminal(ctx: &egui::Context, id: u64) -> (TerminalBackend, Receiver<(u64, PtyEvent)>) {
+fn create_terminal(ctx: &egui::Context, id: u64, working_dir: &str) -> (TerminalBackend, Receiver<(u64, PtyEvent)>) {
     #[cfg(unix)]
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
     #[cfg(not(unix))]
     let shell = "cmd.exe".to_string();
 
+    let cwd = std::path::PathBuf::from(working_dir);
+    let cwd_str = if cwd.exists() { working_dir.to_string() } else { std::env::current_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default() };
+
     let (sender, receiver) = std::sync::mpsc::channel();
     let backend = TerminalBackend::new(id, ctx.clone(), sender, egui_term::BackendSettings {
-        shell, ..Default::default()
+        shell,
+        working_directory: Some(std::path::PathBuf::from(&cwd_str)),
+        ..Default::default()
     }).unwrap();
     (backend, receiver)
 }
