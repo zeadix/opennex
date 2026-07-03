@@ -367,7 +367,13 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
         _surface: SurfaceIndex,
         _node: NodeIndex,
     ) {
-        ui.label("Tab Operations");
+        if ui.button("Rename").clicked() {
+            *self.renaming_terminal = Some(tab.clone());
+            if let Some(data) = self.terminals.get(tab) {
+                *self.terminal_rename_buffer = data.name.clone();
+            }
+            ui.close_menu();
+        }
         ui.separator();
         if ui.button("+ New Tab").clicked() {
             *self.pending_new_terminal = Some(self.active_panel);
