@@ -302,7 +302,7 @@ impl App {
     }
 
     fn process_pending(&mut self, ctx: &egui::Context) {
-        if let Some((panel_idx, surface_idx, node_idx)) = self.pending_new_terminal.take() {
+        if let Some((panel_idx, surface_idx, _node_idx)) = self.pending_new_terminal.take() {
             let tab_id = self.create_terminal(ctx);
             if let Some(tree) = self.dock_states.get_mut(&panel_idx) {
                 if let Some(ref after_tab) = self.pending_split_after.clone() {
@@ -315,9 +315,14 @@ impl App {
                     }
                     self.pending_split_after = None;
                 } else {
-                    // + Tab: add to the surface where + was clicked
-                    tree.set_focused_node_and_surface((surface_idx, node_idx));
-                    tree.push_to_first_leaf(tab_id);
+                    // + Tab: add to the SPECIFIC surface where + was clicked
+                    if let Some(surface) = tree.get_surface_mut(surface_idx) {
+                        if let Some(node_tree) = surface.node_tree_mut() {
+                            node_tree.push_to_first_leaf(tab_id);
+                        }
+                    } else {
+                        tree.main_surface_mut().push_to_first_leaf(tab_id);
+                    }
                 }
             } else {
                 let mut dock = DockState::new(vec![]);
