@@ -350,7 +350,7 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
     }
 
     fn on_tab_button(&mut self, tab: &mut Self::Tab, response: &egui::Response) {
-        if response.double_clicked() && !self.renaming {
+        if response.double_clicked() {
             *self.renaming_terminal = Some(tab.clone());
             if let Some(data) = self.terminals.get(tab) {
                 *self.terminal_rename_buffer = data.name.clone();
