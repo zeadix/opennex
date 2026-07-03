@@ -198,13 +198,15 @@ impl eframe::App for App {
                                 .font(egui::FontId::monospace(14.0))
                                 .desired_width(ui.available_width()),
                         );
-                        response.request_focus();
+                        // Only request focus if not already focused (first frame)
+                        if !response.has_focus() {
+                            response.request_focus();
+                        }
 
                         let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
                         let any_click = ui.input(|i| i.pointer.any_click());
-                        let has_focus = response.has_focus();
 
-                        if enter || (any_click && !has_focus) {
+                        if enter || (any_click && !response.has_focus()) {
                             if !self.rename_buffer.is_empty() {
                                 self.panels[i].name = self.rename_buffer.clone();
                             }
@@ -289,28 +291,33 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
 
     fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab) {
         // Inline rename at top of tab content
-        if self.renaming_terminal.as_ref() == Some(tab) {
-            ui.horizontal(|ui| {
-                let response = ui.add(
-                    egui::TextEdit::singleline(self.terminal_rename_buffer)
-                        .font(egui::FontId::monospace(14.0))
-                        .desired_width(200.0)
-                        .hint_text("Enter name..."),
-                );
-                response.request_focus();
-
-                let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
-                if enter || response.lost_focus() {
-                    if !self.terminal_rename_buffer.is_empty() {
-                        if let Some(data) = self.terminals.get_mut(tab) {
-                            data.name = self.terminal_rename_buffer.clone();
-                        }
+            if self.renaming_terminal.as_ref() == Some(tab) {
+                ui.horizontal(|ui| {
+                    let response = ui.add(
+                        egui::TextEdit::singleline(self.terminal_rename_buffer)
+                            .font(egui::FontId::monospace(14.0))
+                            .desired_width(200.0)
+                            .hint_text("Enter name..."),
+                    );
+                    // Only request focus if not already focused (first frame)
+                    if !response.has_focus() {
+                        response.request_focus();
                     }
-                    *self.renaming_terminal = None;
-                }
-            });
-            ui.separator();
-        }
+
+                    let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    let any_click = ui.input(|i| i.pointer.any_click());
+
+                    if enter || (any_click && !response.has_focus()) {
+                        if !self.terminal_rename_buffer.is_empty() {
+                            if let Some(data) = self.terminals.get_mut(tab) {
+                                data.name = self.terminal_rename_buffer.clone();
+                            }
+                        }
+                        *self.renaming_terminal = None;
+                    }
+                });
+                ui.separator();
+            }
 
         // Show terminal (always render, but set_focus only when not renaming)
         if let Some(terminal_data) = self.terminals.get_mut(tab) {
