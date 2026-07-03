@@ -18,6 +18,7 @@ pub struct App {
     rename_buffer: String,
     renaming_terminal: Option<String>,
     terminal_rename_buffer: String,
+    rename_frame_count: u32,
 }
 
 struct Panel {
@@ -63,11 +64,24 @@ impl App {
             rename_buffer: String::new(),
             renaming_terminal: None,
             terminal_rename_buffer: String::new(),
+            rename_frame_count: 0,
         }
     }
 
     fn is_renaming(&self) -> bool {
         self.renaming_panel.is_some() || self.renaming_terminal.is_some()
+    }
+
+    fn start_rename_panel(&mut self, idx: usize, name: String) {
+        self.renaming_panel = Some(idx);
+        self.rename_buffer = name;
+        self.rename_frame_count = 0;
+    }
+
+    fn start_rename_terminal(&mut self, tab: String, name: String) {
+        self.renaming_terminal = Some(tab);
+        self.terminal_rename_buffer = name;
+        self.rename_frame_count = 0;
     }
 
     fn create_terminal(&mut self, ctx: &egui::Context) -> String {
@@ -147,6 +161,9 @@ impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.process_pending(ctx);
         let renaming = self.is_renaming();
+        if renaming {
+            self.rename_frame_count += 1;
+        }
 
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
@@ -202,9 +219,10 @@ impl eframe::App for App {
                         }
 
                         let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
+                        // Skip frames 0-1 to avoid the double-click triggering immediate exit
+                        let can_exit = self.rename_frame_count > 1;
                         let pointer = ui.input(|i| i.pointer.clone());
-                        // Skip first frame's click (the double-click that triggered rename)
-                        let clicked_outside = response.has_focus()
+                        let clicked_outside = can_exit
                             && pointer.any_click()
                             && !response.rect.contains(pointer.interact_pos().unwrap_or_default());
 
@@ -221,8 +239,7 @@ impl eframe::App for App {
                             to_select = Some(i);
                         }
                         if response.double_clicked() && !renaming {
-                            self.renaming_panel = Some(i);
-                            self.rename_buffer = panel_name;
+                            self.start_rename_panel(i, panel_name);
                         }
                     }
                 }
@@ -259,6 +276,7 @@ impl eframe::App for App {
                         renaming_terminal: &mut self.renaming_terminal,
                         terminal_rename_buffer: &mut self.terminal_rename_buffer,
                         renaming,
+                        rename_frame_count: self.rename_frame_count,
                     });
             } else {
                 ui.centered_and_justified(|ui| {
@@ -279,6 +297,7 @@ struct TerminalTabViewer<'a> {
     renaming_terminal: &'a mut Option<String>,
     terminal_rename_buffer: &'a mut String,
     renaming: bool,
+    rename_frame_count: u32,
 }
 
 impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
@@ -306,9 +325,10 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                     }
 
                     let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
-                    // Skip first frame's click (the double-click that triggered rename)
+                    // Skip frames 0-1 to avoid the double-click triggering immediate exit
+                    let can_exit = self.rename_frame_count > 1;
                     let pointer = ui.input(|i| i.pointer.clone());
-                    let clicked_outside = response.has_focus()
+                    let clicked_outside = can_exit
                         && pointer.any_click()
                         && !response.rect.contains(pointer.interact_pos().unwrap_or_default());
 
