@@ -375,6 +375,7 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
             if let Some(data) = self.terminals.get(tab) {
                 *self.terminal_rename_buffer = data.name.clone();
             }
+            self.rename_frame_count = 0;
         }
     }
 
@@ -392,6 +393,7 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
             if let Some(data) = self.terminals.get(tab) {
                 *self.terminal_rename_buffer = data.name.clone();
             }
+            self.rename_frame_count = 0;
             ui.close_menu();
         }
         ui.separator();
