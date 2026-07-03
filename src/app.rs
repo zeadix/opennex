@@ -1,7 +1,12 @@
 use egui_dock::{DockArea, DockState, NodeIndex, Style, SurfaceIndex};
-use egui_term::{PtyEvent, TerminalBackend, TerminalView};
+use egui_term::{PtyEvent, TerminalBackend, TerminalView, TerminalFont, FontSettings};
 use std::collections::HashMap;
 use std::sync::mpsc::Receiver;
+
+const DEFAULT_FONT_SIZE: f32 = 14.0;
+const MIN_FONT_SIZE: f32 = 8.0;
+const MAX_FONT_SIZE: f32 = 32.0;
+const FONT_SIZE_STEP: f32 = 1.0;
 
 pub struct App {
     panels: Vec<Panel>,
@@ -29,6 +34,7 @@ struct TerminalData {
     backend: TerminalBackend,
     receiver: Receiver<(u64, PtyEvent)>,
     name: String,
+    font_size: f32,
 }
 
 impl App {
@@ -42,6 +48,7 @@ impl App {
                 backend,
                 receiver,
                 name: "Terminal 1".to_string(),
+                font_size: DEFAULT_FONT_SIZE,
             },
         );
         let mut dock_states = HashMap::new();
@@ -94,6 +101,7 @@ impl App {
                 backend,
                 receiver,
                 name: format!("Terminal {}", self.tab_counter),
+                font_size: DEFAULT_FONT_SIZE,
             },
         );
         id
@@ -344,15 +352,51 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                 ui.separator();
             }
 
-        // Show terminal (always render, but set_focus only when not renaming)
+        // Show terminal
         if let Some(terminal_data) = self.terminals.get_mut(tab) {
             if let Ok((_, PtyEvent::Exit)) = terminal_data.receiver.try_recv() {
                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
                 return;
             }
 
+            // Handle Ctrl+scroll zoom for this terminal
+            let scroll = ui.input(|i| i.events.iter().filter_map(|e| {
+                if let egui::Event::MouseWheel { delta, modifiers, .. } = e {
+                    if modifiers.ctrl {
+                        Some(delta.y)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }).sum::<f32>());
+
+            if scroll != 0.0 {
+                if scroll > 0.0 {
+                    terminal_data.font_size = (terminal_data.font_size + FONT_SIZE_STEP).min(MAX_FONT_SIZE);
+                } else {
+                    terminal_data.font_size = (terminal_data.font_size - FONT_SIZE_STEP).max(MIN_FONT_SIZE);
+                }
+            }
+
+            // Handle Ctrl+/- keyboard zoom
+            let plus = ui.input(|i| i.key_pressed(egui::Key::Equals) && i.modifiers.ctrl);
+            let minus = ui.input(|i| i.key_pressed(egui::Key::Minus) && i.modifiers.ctrl);
+            if plus {
+                terminal_data.font_size = (terminal_data.font_size + FONT_SIZE_STEP).min(MAX_FONT_SIZE);
+            }
+            if minus {
+                terminal_data.font_size = (terminal_data.font_size - FONT_SIZE_STEP).max(MIN_FONT_SIZE);
+            }
+
+            let font = TerminalFont::new(FontSettings {
+                font_type: egui::FontId::monospace(terminal_data.font_size),
+            });
+
             let terminal_view = TerminalView::new(ui, &mut terminal_data.backend)
                 .set_focus(!self.renaming)
+                .set_font(font)
                 .set_size(ui.available_size());
             ui.add(terminal_view);
         } else {
