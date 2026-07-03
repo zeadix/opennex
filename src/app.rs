@@ -635,11 +635,15 @@ impl App {
 // ── Terminal creation ────────────────────────────────────────────
 
 fn parse_cd_from_output(text: &str) -> Option<String> {
-    // Look for "cd /path" or "cd ~/" patterns in the last few lines
-    for line in text.lines().rev().take(10) {
+    for line in text.lines().rev().take(20) {
         let trimmed = line.trim();
-        if let Some(path) = trimmed.strip_prefix("$ cd ") {
-            return Some(path.to_string());
+        // Match "cd /path" anywhere in the line
+        if let Some(idx) = trimmed.find("cd ") {
+            let after_cd = &trimmed[idx + 3..];
+            let path = after_cd.trim();
+            if path.starts_with('/') || path.starts_with("~") {
+                return Some(path.to_string());
+            }
         }
     }
     None
@@ -1036,12 +1040,27 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
             ui.add(terminal_view);
 
             // Detect cd commands from terminal output to update working_directory
-            let content_len = terminal_data.backend.sync().grid.display_iter().count();
-            if content_len != terminal_data.last_sync_len {
+            let content = terminal_data.backend.sync();
+            let content_len: usize = content.grid.display_iter().count();
+            if content_len > terminal_data.last_sync_len && content_len > 0 {
                 terminal_data.last_sync_len = content_len;
-                let text = terminal_data.backend.selectable_content();
-                if let Some(dir) = parse_cd_from_output(&text) {
-                    terminal_data.working_directory = dir;
+                // Collect all lines and get the last one
+                let mut lines: Vec<String> = Vec::new();
+                let mut current_line = String::new();
+                for indexed in content.grid.display_iter() {
+                    if indexed.point.column.0 == 0 && !current_line.is_empty() {
+                        lines.push(current_line.clone());
+                        current_line.clear();
+                    }
+                    current_line.push(indexed.c);
+                }
+                if !current_line.is_empty() {
+                    lines.push(current_line);
+                }
+                if let Some(last_line) = lines.last() {
+                    if let Some(dir) = parse_cd_from_output(last_line) {
+                        terminal_data.working_directory = dir;
+                    }
                 }
             }
         } else {
