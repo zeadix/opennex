@@ -366,28 +366,8 @@ impl App {
                     }
                     self.pending_split_after = None;
                 } else {
-                    // + Tab: find the specific leaf node and append tab
-                    let mut found = false;
-                    for surf in tree.iter_surfaces_mut() {
-                        if let Some(node_tree) = surf.node_tree_mut() {
-                            for (i, node) in node_tree.iter_mut().enumerate() {
-                                if i == node_idx.0 {
-                                    if let egui_dock::Node::Leaf { tabs, active, .. } = node {
-                                        *active = egui_dock::TabIndex(tabs.len());
-                                        tabs.push(tab_id.clone());
-                                        found = true;
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                        if found {
-                            break;
-                        }
-                    }
-                    if !found {
-                        tree.main_surface_mut().push_to_first_leaf(tab_id);
-                    }
+                    // + Tab: add to focused leaf
+                    tree.push_to_focused_leaf(tab_id);
                 }
             } else {
                 let mut dock = DockState::new(vec![]);
