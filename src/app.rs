@@ -199,6 +199,7 @@ struct TerminalData {
     name: String,
     font_size: f32,
     working_directory: String,
+    last_sync_len: usize,
 }
 
 // ── Workspace directory ──────────────────────────────────────────
@@ -288,6 +289,7 @@ impl App {
                             name: tstate.name.clone(),
                             font_size: tstate.font_size,
                             working_directory: tstate.working_directory.clone(),
+                            last_sync_len: 0,
                         });
                     }
                     app.panels.push(Panel { name: panel.name.clone(), bound_file: Some(sp.clone()) });
@@ -365,6 +367,7 @@ impl App {
                     name: tstate.name.clone(),
                     font_size: tstate.font_size,
                     working_directory: tstate.working_directory.clone(),
+                    last_sync_len: 0,
                 });
                 if id_num >= self.tab_counter as u64 {
                     self.tab_counter = id_num as u32;
@@ -391,6 +394,7 @@ impl App {
             name: format!("Terminal {}", self.tab_counter),
             font_size: DEFAULT_FONT_SIZE,
             working_directory: cwd,
+            last_sync_len: 0,
         });
         id
     }
@@ -594,7 +598,11 @@ impl App {
                     name: tstate.name.clone(),
                     font_size: tstate.font_size,
                     working_directory: tstate.working_directory.clone(),
+                    last_sync_len: 0,
                 });
+                if id_num >= self.tab_counter as u64 {
+                    self.tab_counter = id_num as u32;
+                }
             }
             self.panels.push(Panel { name: panel.name.clone(), bound_file: None });
             self.dock_states.insert(idx, panel.dock_state.clone());
@@ -625,6 +633,17 @@ impl App {
 }
 
 // ── Terminal creation ────────────────────────────────────────────
+
+fn parse_cd_from_output(text: &str) -> Option<String> {
+    // Look for "cd /path" or "cd ~/" patterns in the last few lines
+    for line in text.lines().rev().take(10) {
+        let trimmed = line.trim();
+        if let Some(path) = trimmed.strip_prefix("$ cd ") {
+            return Some(path.to_string());
+        }
+    }
+    None
+}
 
 fn create_terminal(ctx: &egui::Context, id: u64, working_dir: &str) -> (TerminalBackend, Receiver<(u64, PtyEvent)>) {
     #[cfg(unix)]
@@ -1015,6 +1034,16 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                 .set_font(font)
                 .set_size(ui.available_size());
             ui.add(terminal_view);
+
+            // Detect cd commands from terminal output to update working_directory
+            let content_len = terminal_data.backend.sync().grid.display_iter().count();
+            if content_len != terminal_data.last_sync_len {
+                terminal_data.last_sync_len = content_len;
+                let text = terminal_data.backend.selectable_content();
+                if let Some(dir) = parse_cd_from_output(&text) {
+                    terminal_data.working_directory = dir;
+                }
+            }
         } else {
             ui.label("Terminal not found");
         }
