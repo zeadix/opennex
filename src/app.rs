@@ -115,48 +115,15 @@ struct ScenePanel {
     terminals: HashMap<String, TerminalState>,
 }
 
-fn scene_path() -> PathBuf {
-    std::env::current_dir().unwrap_or_default().join(&load_settings().workspace.scene)
+struct Panel {
+    name: String,
+    bound_file: Option<PathBuf>,
 }
 
-fn load_scene_file(path: &PathBuf) -> Result<SceneState, anyhow::Error> {
-    let json = std::fs::read_to_string(path)?;
-    let state: SceneState = serde_json::from_str(&json)?;
-    Ok(state)
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum SettingsTab {
+    Workspace,
 }
-
-fn save_scene_file(path: &PathBuf, state: &SceneState) -> Result<(), anyhow::Error> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let json = serde_json::to_string_pretty(state)?;
-    std::fs::write(path, json)?;
-    Ok(())
-}
-
-fn build_scene(app: &App) -> SceneState {
-    let mut panels = Vec::new();
-    for (i, panel) in app.panels.iter().enumerate() {
-        if let Some(dock_state) = app.dock_states.get(&i) {
-            let mut terminals = HashMap::new();
-            for (id, data) in &app.terminals {
-                terminals.insert(id.clone(), TerminalState {
-                    name: data.name.clone(),
-                    font_size: data.font_size,
-                    working_directory: data.working_directory.clone(),
-                });
-            }
-            panels.push(ScenePanel {
-                name: panel.name.clone(),
-                dock_state: dock_state.clone(),
-                terminals,
-            });
-        }
-    }
-    SceneState { panels }
-}
-
-// ── App ──────────────────────────────────────────────────────────
 
 pub struct App {
     panels: Vec<Panel>,
@@ -183,36 +150,24 @@ pub struct App {
     settings_edit: AppSettings,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum SettingsTab {
-    Workspace,
-}
-
-struct Panel {
-    name: String,
-    bound_file: Option<PathBuf>,
-}
-
 struct TerminalData {
     backend: TerminalBackend,
     receiver: Receiver<(u64, PtyEvent)>,
     name: String,
     font_size: f32,
     working_directory: String,
-    last_sync_len: usize,
+    initial_cd_sent: bool,
 }
 
-// ── Workspace directory ──────────────────────────────────────────
+fn ensure_workspace_dir() {
+    let _ = std::fs::create_dir_all(workspace_dir());
+}
 
 fn workspace_dir() -> PathBuf {
     let settings = load_settings();
     std::env::current_dir()
         .unwrap_or_default()
         .join(&settings.workspace.template_dir)
-}
-
-fn ensure_workspace_dir() {
-    let _ = std::fs::create_dir_all(workspace_dir());
 }
 
 fn list_workspace_files() -> Vec<(String, PathBuf)> {
@@ -289,7 +244,7 @@ impl App {
                             name: tstate.name.clone(),
                             font_size: tstate.font_size,
                             working_directory: tstate.working_directory.clone(),
-                            last_sync_len: 0,
+                            initial_cd_sent: false,
                         });
                     }
                     app.panels.push(Panel { name: panel.name.clone(), bound_file: Some(sp.clone()) });
@@ -367,7 +322,7 @@ impl App {
                     name: tstate.name.clone(),
                     font_size: tstate.font_size,
                     working_directory: tstate.working_directory.clone(),
-                    last_sync_len: 0,
+                    initial_cd_sent: false,
                 });
                 if id_num >= self.tab_counter as u64 {
                     self.tab_counter = id_num as u32;
@@ -394,7 +349,7 @@ impl App {
             name: format!("Terminal {}", self.tab_counter),
             font_size: DEFAULT_FONT_SIZE,
             working_directory: cwd,
-            last_sync_len: 0,
+            initial_cd_sent: false,
         });
         id
     }
@@ -598,7 +553,7 @@ impl App {
                     name: tstate.name.clone(),
                     font_size: tstate.font_size,
                     working_directory: tstate.working_directory.clone(),
-                    last_sync_len: 0,
+                    initial_cd_sent: false,
                 });
                 if id_num >= self.tab_counter as u64 {
                     self.tab_counter = id_num as u32;
@@ -634,30 +589,41 @@ impl App {
 
 // ── Terminal creation ────────────────────────────────────────────
 
-fn parse_cd_from_output(text: &str) -> Option<String> {
-    for line in text.lines().rev().take(20) {
-        let trimmed = line.trim();
-        if let Some(idx) = trimmed.find("cd ") {
-            let after_cd = &trimmed[idx + 3..];
-            let path = after_cd.trim();
-            if path.starts_with('/') || path.starts_with("~") {
-                return Some(path.to_string());
-            }
-        }
-    }
-    None
+fn load_scene_file(path: &PathBuf) -> Result<SceneState, anyhow::Error> {
+    let json = std::fs::read_to_string(path)?;
+    let state: SceneState = serde_json::from_str(&json)?;
+    Ok(state)
 }
 
-fn parse_cd_from_current_line(line: &str) -> Option<String> {
-    let trimmed = line.trim();
-    if let Some(idx) = trimmed.find("cd ") {
-        let after_cd = &trimmed[idx + 3..];
-        let path = after_cd.trim();
-        if path.starts_with('/') || path.starts_with("~") {
-            return Some(path.to_string());
+fn save_scene_file(path: &PathBuf, state: &SceneState) -> Result<(), anyhow::Error> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let json = serde_json::to_string_pretty(state)?;
+    std::fs::write(path, json)?;
+    Ok(())
+}
+
+fn build_scene(app: &App) -> SceneState {
+    let mut panels = Vec::new();
+    for (i, panel) in app.panels.iter().enumerate() {
+        if let Some(dock_state) = app.dock_states.get(&i) {
+            let mut terminals = HashMap::new();
+            for (id, data) in &app.terminals {
+                terminals.insert(id.clone(), TerminalState {
+                    name: data.name.clone(),
+                    font_size: data.font_size,
+                    working_directory: data.working_directory.clone(),
+                });
+            }
+            panels.push(ScenePanel {
+                name: panel.name.clone(),
+                dock_state: dock_state.clone(),
+                terminals,
+            });
         }
     }
-    None
+    SceneState { panels }
 }
 
 fn create_terminal(ctx: &egui::Context, id: u64, working_dir: &str) -> (TerminalBackend, Receiver<(u64, PtyEvent)>) {
@@ -675,12 +641,6 @@ fn create_terminal(ctx: &egui::Context, id: u64, working_dir: &str) -> (Terminal
         working_directory: Some(std::path::PathBuf::from(&cwd_str)),
         ..Default::default()
     }).unwrap();
-
-    // Send cd command to ensure we're in the right directory
-    if !cwd_str.is_empty() {
-        let cd_cmd = format!("cd {}\n", cwd_str);
-        backend.process_command(egui_term::BackendCommand::Write(cd_cmd.into_bytes()));
-    }
 
     (backend, receiver)
 }
@@ -1056,40 +1016,6 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                 .set_font(font)
                 .set_size(ui.available_size());
             ui.add(terminal_view);
-
-            // Detect cd commands from terminal output to update working_directory
-            // Check all new lines (not just last) for cd commands
-            let content = terminal_data.backend.sync();
-            let content_len: usize = content.grid.display_iter().count();
-            if content_len > terminal_data.last_sync_len && content_len > 0 {
-                let prev_len = terminal_data.last_sync_len;
-                terminal_data.last_sync_len = content_len;
-
-                // Collect only new lines
-                let mut current_line = String::new();
-                let mut line_idx = 0;
-                for indexed in content.grid.display_iter() {
-                    line_idx += 1;
-                    if line_idx <= prev_len {
-                        if indexed.point.column.0 == 0 {
-                            current_line.clear();
-                        }
-                        continue;
-                    }
-                    if indexed.point.column.0 == 0 && !current_line.is_empty() {
-                        if let Some(dir) = parse_cd_from_current_line(&current_line) {
-                            terminal_data.working_directory = dir;
-                        }
-                        current_line.clear();
-                    }
-                    current_line.push(indexed.c);
-                }
-                if !current_line.is_empty() {
-                    if let Some(dir) = parse_cd_from_current_line(&current_line) {
-                        terminal_data.working_directory = dir;
-                    }
-                }
-            }
         } else {
             ui.label("Terminal not found");
         }
