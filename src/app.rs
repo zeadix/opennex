@@ -96,7 +96,7 @@ pub struct App {
     dock_states: HashMap<usize, DockState<String>>,
     terminals: HashMap<String, TerminalData>,
     tab_counter: u32,
-    pending_new_terminal: Option<usize>,
+    pending_new_terminal: Option<(usize, SurfaceIndex, NodeIndex)>,
     pending_close: Option<String>,
     pending_split_after: Option<String>,
     pending_split_vertical: bool,
@@ -302,25 +302,30 @@ impl App {
     }
 
     fn process_pending(&mut self, ctx: &egui::Context) {
-        if let Some(panel_idx) = self.pending_new_terminal.take() {
+        if let Some((panel_idx, surface_idx, node_idx)) = self.pending_new_terminal.take() {
             let tab_id = self.create_terminal(ctx);
             if let Some(tree) = self.dock_states.get_mut(&panel_idx) {
                 if let Some(ref after_tab) = self.pending_split_after.clone() {
-                    if let Some((_surface, node_idx, _)) = tree.find_tab(after_tab) {
+                    if let Some((_surface, split_node_idx, _)) = tree.find_tab(after_tab) {
                         if self.pending_split_vertical {
-                            tree.main_surface_mut().split_below(node_idx, 0.5, vec![tab_id]);
+                            tree.main_surface_mut().split_below(split_node_idx, 0.5, vec![tab_id]);
                         } else {
-                            tree.main_surface_mut().split_right(node_idx, 0.5, vec![tab_id]);
+                            tree.main_surface_mut().split_right(split_node_idx, 0.5, vec![tab_id]);
                         }
                     } else {
-                        tree.main_surface_mut().push_to_first_leaf(tab_id);
-                    }
-                } else {
-                    tree.main_surface_mut().push_to_first_leaf(tab_id);
+                        // Focus the target surface/node, then push tab
+                    tree.set_focused_node_and_surface((surface_idx, node_idx));
+                    tree.push_to_first_leaf(tab_id);
                 }
                 self.pending_split_after = None;
             } else {
-                self.dock_states.insert(panel_idx, DockState::new(vec![tab_id]));
+                tree.set_focused_node_and_surface((surface_idx, node_idx));
+                tree.push_to_first_leaf(tab_id);
+                }
+            } else {
+                let mut dock = DockState::new(vec![]);
+                dock.main_surface_mut().push_to_first_leaf(tab_id);
+                self.dock_states.insert(panel_idx, dock);
             }
         }
         if let Some(tab_id) = self.pending_close.take() {
@@ -464,23 +469,30 @@ impl eframe::App for App {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                     }
                 });
-                ui.menu_button("View", |ui| {
-                    if let Some(tree) = self.dock_states.get_mut(&self.active_panel) {
-                        let active_tab = tree.find_active_focused().map(|(_, t)| t.clone());
-                        if let Some(ref tab) = active_tab {
-                            if ui.button("Split Right").clicked() {
-                                self.pending_split_after = Some(tab.clone());
-                                self.pending_split_vertical = false;
-                                ui.close_menu();
-                            }
-                            if ui.button("Split Down").clicked() {
-                                self.pending_split_after = Some(tab.clone());
-                                self.pending_split_vertical = true;
-                                ui.close_menu();
-                            }
+        ui.menu_button("View", |ui| {
+            if let Some(tree) = self.dock_states.get_mut(&self.active_panel) {
+                let active_tab = tree.find_active_focused().map(|(_, t)| t.clone());
+                if let Some(ref tab) = active_tab {
+                    if ui.button("Split Right").clicked() {
+                        self.pending_split_after = Some(tab.clone());
+                        self.pending_split_vertical = false;
+                        // Also set pending_new_terminal with current active surface/node
+                        if let Some((surface, node, _)) = tree.find_tab(tab) {
+                            self.pending_new_terminal = Some((self.active_panel, surface, node));
                         }
+                        ui.close_menu();
                     }
-                });
+                    if ui.button("Split Down").clicked() {
+                        self.pending_split_after = Some(tab.clone());
+                        self.pending_split_vertical = true;
+                        if let Some((surface, node, _)) = tree.find_tab(tab) {
+                            self.pending_new_terminal = Some((self.active_panel, surface, node));
+                        }
+                        ui.close_menu();
+                    }
+                }
+            }
+        });
                 if ui.button("Settings").clicked() {
                     self.show_settings = true;
                     self.settings_edit = self.settings.clone();
@@ -692,7 +704,7 @@ impl eframe::App for App {
 struct TerminalTabViewer<'a> {
     terminals: &'a mut HashMap<String, TerminalData>,
     pending_close: &'a mut Option<String>,
-    pending_new_terminal: &'a mut Option<usize>,
+    pending_new_terminal: &'a mut Option<(usize, SurfaceIndex, NodeIndex)>,
     pending_split_after: &'a mut Option<String>,
     pending_split_vertical: &'a mut bool,
     active_panel: usize,
@@ -791,8 +803,8 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
         true
     }
 
-    fn on_add(&mut self, _surface: SurfaceIndex, _node: NodeIndex) {
-        *self.pending_new_terminal = Some(self.active_panel);
+    fn on_add(&mut self, surface: SurfaceIndex, node: NodeIndex) {
+        *self.pending_new_terminal = Some((self.active_panel, surface, node));
     }
 
     fn on_tab_button(&mut self, tab: &mut Self::Tab, response: &egui::Response) {
@@ -818,20 +830,18 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
         }
         ui.separator();
         if ui.button("+ New Tab").clicked() {
-            *self.pending_new_terminal = Some(self.active_panel);
+            *self.pending_new_terminal = Some((self.active_panel, SurfaceIndex::main(), NodeIndex::root()));
             ui.close_menu();
         }
         ui.separator();
         if ui.button("Split Horizontal (Right)").clicked() {
             *self.pending_split_after = Some(tab.clone());
             *self.pending_split_vertical = false;
-            *self.pending_new_terminal = Some(self.active_panel);
             ui.close_menu();
         }
         if ui.button("Split Vertical (Down)").clicked() {
             *self.pending_split_after = Some(tab.clone());
             *self.pending_split_vertical = true;
-            *self.pending_new_terminal = Some(self.active_panel);
             ui.close_menu();
         }
     }
