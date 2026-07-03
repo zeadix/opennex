@@ -312,15 +312,12 @@ impl App {
                         } else {
                             tree.main_surface_mut().split_right(split_node_idx, 0.5, vec![tab_id]);
                         }
-                    } else {
-                        // Focus the target surface/node, then push tab
+                    }
+                    self.pending_split_after = None;
+                } else {
+                    // + Tab: add to the surface where + was clicked
                     tree.set_focused_node_and_surface((surface_idx, node_idx));
                     tree.push_to_first_leaf(tab_id);
-                }
-                self.pending_split_after = None;
-            } else {
-                tree.set_focused_node_and_surface((surface_idx, node_idx));
-                tree.push_to_first_leaf(tab_id);
                 }
             } else {
                 let mut dock = DockState::new(vec![]);
@@ -328,6 +325,7 @@ impl App {
                 self.dock_states.insert(panel_idx, dock);
             }
         }
+
         if let Some(tab_id) = self.pending_close.take() {
             self.terminals.remove(&tab_id);
         }
@@ -807,17 +805,24 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
         *self.pending_new_terminal = Some((self.active_panel, surface, node));
     }
 
-    fn on_tab_button(&mut self, tab: &mut Self::Tab, response: &egui::Response) {
-        if response.double_clicked() {
-            *self.renaming_terminal = Some(tab.clone());
-            if let Some(data) = self.terminals.get(tab) {
-                *self.terminal_rename_buffer = data.name.clone();
+    fn add_popup(&mut self, ui: &mut egui::Ui, surface: SurfaceIndex, node: NodeIndex) {
+        ui.horizontal(|ui| {
+            if ui.button("+ Tab").clicked() {
+                *self.pending_new_terminal = Some((self.active_panel, surface, node));
+                ui.close_menu();
             }
-            self.rename_frame_count = 0;
-        }
+            if ui.button("Split H").clicked() {
+                *self.pending_split_vertical = false;
+                *self.pending_new_terminal = Some((self.active_panel, surface, node));
+                ui.close_menu();
+            }
+            if ui.button("Split V").clicked() {
+                *self.pending_split_vertical = true;
+                *self.pending_new_terminal = Some((self.active_panel, surface, node));
+                ui.close_menu();
+            }
+        });
     }
-
-    fn add_popup(&mut self, _ui: &mut egui::Ui, _surface: SurfaceIndex, _node: NodeIndex) {}
 
     fn context_menu(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab, _surface: SurfaceIndex, _node: NodeIndex) {
         if ui.button("Rename").clicked() {
