@@ -15,6 +15,8 @@ const FONT_SIZE_STEP: f32 = 1.0;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct AppSettings {
     workspace: WorkspaceSettings,
+    #[serde(default)]
+    settings_window: SettingsWindowState,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -22,13 +24,17 @@ struct WorkspaceSettings {
     template_dir: String,
 }
 
-impl Default for AppSettings {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SettingsWindowState {
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+}
+
+impl Default for SettingsWindowState {
     fn default() -> Self {
-        AppSettings {
-            workspace: WorkspaceSettings {
-                template_dir: "workspace".to_string(),
-            },
-        }
+        SettingsWindowState { x: 200.0, y: 150.0, width: 500.0, height: 350.0 }
     }
 }
 
@@ -53,6 +59,17 @@ fn save_settings(settings: &AppSettings) -> Result<(), anyhow::Error> {
     let content = serde_json::to_string_pretty(settings)?;
     std::fs::write(path, content)?;
     Ok(())
+}
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        AppSettings {
+            workspace: WorkspaceSettings {
+                template_dir: "workspace".to_string(),
+            },
+            settings_window: SettingsWindowState::default(),
+        }
+    }
 }
 
 // ── Persistence structs (single panel per file) ──────────────────
@@ -474,14 +491,18 @@ impl eframe::App for App {
         // Settings window
         if self.show_settings {
             let mut open = self.show_settings;
-            egui::Window::new("Settings")
+            let ws_x = self.settings_edit.settings_window.x;
+            let ws_y = self.settings_edit.settings_window.y;
+            let ws_w = self.settings_edit.settings_window.width;
+            let ws_h = self.settings_edit.settings_window.height;
+
+            let resp = egui::Window::new("Settings")
                 .open(&mut open)
                 .resizable(true)
-                .default_width(500.0)
-                .default_height(300.0)
+                .default_pos([ws_x, ws_y])
+                .default_size([ws_w, ws_h])
                 .show(ctx, |ui| {
                     ui.columns(2, |cols| {
-                        // Left: tabs
                         cols[0].vertical(|ui| {
                             ui.heading("Settings");
                             ui.separator();
@@ -490,7 +511,6 @@ impl eframe::App for App {
                             }
                         });
 
-                        // Right: content
                         cols[1].vertical(|ui| {
                             match self.settings_tab {
                                 SettingsTab::Workspace => {
@@ -526,7 +546,21 @@ impl eframe::App for App {
                         }
                     });
                 });
+
+            // Save window position and size
+            if let Some(inner) = resp {
+                let rect = inner.response.rect;
+                self.settings_edit.settings_window.x = rect.min.x;
+                self.settings_edit.settings_window.y = rect.min.y;
+                self.settings_edit.settings_window.width = rect.width();
+                self.settings_edit.settings_window.height = rect.height();
+            }
+
             self.show_settings = open;
+            if !open {
+                self.settings.settings_window = self.settings_edit.settings_window.clone();
+                let _ = save_settings(&self.settings);
+            }
         }
 
         // Left panel
