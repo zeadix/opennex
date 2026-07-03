@@ -203,7 +203,9 @@ impl eframe::App for App {
 
                         let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
                         let pointer = ui.input(|i| i.pointer.clone());
-                        let clicked_outside = pointer.any_click()
+                        // Skip first frame's click (the double-click that triggered rename)
+                        let clicked_outside = response.has_focus()
+                            && pointer.any_click()
                             && !response.rect.contains(pointer.interact_pos().unwrap_or_default());
 
                         if enter || clicked_outside {
@@ -304,8 +306,10 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                     }
 
                     let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    // Skip first frame's click (the double-click that triggered rename)
                     let pointer = ui.input(|i| i.pointer.clone());
-                    let clicked_outside = pointer.any_click()
+                    let clicked_outside = response.has_focus()
+                        && pointer.any_click()
                         && !response.rect.contains(pointer.interact_pos().unwrap_or_default());
 
                     if enter || clicked_outside {
