@@ -22,6 +22,21 @@ struct AppSettings {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct WorkspaceSettings {
     template_dir: String,
+    #[serde(default = "default_scene_path")]
+    scene: String,
+}
+
+fn default_scene_path() -> String {
+    "scene.json".to_string()
+}
+
+impl Default for WorkspaceSettings {
+    fn default() -> Self {
+        WorkspaceSettings {
+            template_dir: "workspace".to_string(),
+            scene: default_scene_path(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -64,9 +79,7 @@ fn save_settings(settings: &AppSettings) -> Result<(), anyhow::Error> {
 impl Default for AppSettings {
     fn default() -> Self {
         AppSettings {
-            workspace: WorkspaceSettings {
-                template_dir: "workspace".to_string(),
-            },
+            workspace: WorkspaceSettings::default(),
             settings_window: SettingsWindowState::default(),
         }
     }
@@ -88,6 +101,61 @@ struct TerminalState {
     working_directory: String,
 }
 
+// ── Scene (global workspace data) ────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SceneState {
+    panels: Vec<ScenePanel>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ScenePanel {
+    name: String,
+    dock_state: DockState<String>,
+    terminals: HashMap<String, TerminalState>,
+}
+
+fn scene_path() -> PathBuf {
+    std::env::current_dir().unwrap_or_default().join(&load_settings().workspace.scene)
+}
+
+fn load_scene_file(path: &PathBuf) -> Result<SceneState, anyhow::Error> {
+    let json = std::fs::read_to_string(path)?;
+    let state: SceneState = serde_json::from_str(&json)?;
+    Ok(state)
+}
+
+fn save_scene_file(path: &PathBuf, state: &SceneState) -> Result<(), anyhow::Error> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let json = serde_json::to_string_pretty(state)?;
+    std::fs::write(path, json)?;
+    Ok(())
+}
+
+fn build_scene(app: &App) -> SceneState {
+    let mut panels = Vec::new();
+    for (i, panel) in app.panels.iter().enumerate() {
+        if let Some(dock_state) = app.dock_states.get(&i) {
+            let mut terminals = HashMap::new();
+            for (id, data) in &app.terminals {
+                terminals.insert(id.clone(), TerminalState {
+                    name: data.name.clone(),
+                    font_size: data.font_size,
+                    working_directory: data.working_directory.clone(),
+                });
+            }
+            panels.push(ScenePanel {
+                name: panel.name.clone(),
+                dock_state: dock_state.clone(),
+                terminals,
+            });
+        }
+    }
+    SceneState { panels }
+}
+
 // ── App ──────────────────────────────────────────────────────────
 
 pub struct App {
@@ -107,6 +175,8 @@ pub struct App {
     rename_frame_count: u32,
     pending_load_workspace: bool,
     pending_load_from_template: Option<PathBuf>,
+    pending_load_scene: bool,
+    pending_save_scene_as: bool,
     settings: AppSettings,
     show_settings: bool,
     settings_tab: SettingsTab,
@@ -201,10 +271,46 @@ impl App {
         let ctx = &cc.egui_ctx;
         ensure_workspace_dir();
         let settings = load_settings();
+
+        // Try to load scene file
+        let sp = std::env::current_dir().unwrap_or_default().join(&settings.workspace.scene);
+        if sp.exists() {
+            if let Ok(scene) = load_scene_file(&sp) {
+                let mut app = App::empty();
+                app.settings = settings.clone();
+                app.settings_edit = settings;
+                for panel in &scene.panels {
+                    let idx = app.panels.len();
+                    for (id, tstate) in &panel.terminals {
+                        let (backend, receiver) = create_terminal(ctx, id.strip_prefix("terminal-").and_then(|s| s.parse().ok()).unwrap_or(idx as u64 + 1));
+                        app.terminals.insert(id.clone(), TerminalData {
+                            backend, receiver,
+                            name: tstate.name.clone(),
+                            font_size: tstate.font_size,
+                            working_directory: tstate.working_directory.clone(),
+                        });
+                    }
+                    app.panels.push(Panel { name: panel.name.clone(), bound_file: Some(sp.clone()) });
+                    app.dock_states.insert(idx, panel.dock_state.clone());
+                }
+                if app.panels.is_empty() {
+                    app.add_initial_terminal(ctx);
+                }
+                app.active_panel = 0;
+                return app;
+            }
+        }
+
+        // No scene file — create default
         let mut app = App::empty();
         app.settings = settings.clone();
         app.settings_edit = settings;
         app.add_initial_terminal(ctx);
+
+        // Save default scene
+        let scene = build_scene(&app);
+        let _ = save_scene_file(&sp, &scene);
+
         app
     }
 
@@ -226,6 +332,8 @@ impl App {
             rename_frame_count: 0,
             pending_load_workspace: false,
             pending_load_from_template: None,
+            pending_load_scene: false,
+            pending_save_scene_as: false,
             settings: AppSettings::default(),
             show_settings: false,
             settings_tab: SettingsTab::Workspace,
@@ -361,6 +469,18 @@ impl App {
                 self.active_panel = self.panels.len() - 1;
             }
         }
+
+        // Handle pending scene load
+        if self.pending_load_scene {
+            self.pending_load_scene = false;
+            self.load_scene(ctx);
+        }
+
+        // Handle pending scene save as
+        if self.pending_save_scene_as {
+            self.pending_save_scene_as = false;
+            self.save_scene_as();
+        }
     }
 
     fn add_panel(&mut self, ctx: &egui::Context) {
@@ -417,6 +537,73 @@ impl App {
         }
     }
 
+    fn save_scene(&mut self) {
+        let sp = std::env::current_dir().unwrap_or_default().join(&self.settings.workspace.scene);
+        let scene = build_scene(self);
+        if let Err(e) = save_scene_file(&sp, &scene) {
+            log::error!("Failed to save scene: {}", e);
+        }
+    }
+
+    fn save_scene_as(&mut self) {
+        if let Some(path) = rfd::FileDialog::new()
+            .set_title("Save Scene As")
+            .add_filter("JSON", &["json"])
+            .set_file_name("scene.json")
+            .save_file()
+        {
+            self.settings.workspace.scene = path.to_string_lossy().to_string();
+            let _ = save_settings(&self.settings);
+            self.save_scene();
+        }
+    }
+
+    fn load_scene(&mut self, ctx: &egui::Context) {
+        if let Some(path) = rfd::FileDialog::new()
+            .set_title("Load Scene")
+            .add_filter("JSON", &["json"])
+            .pick_file()
+        {
+            if let Ok(scene) = load_scene_file(&path) {
+                self.apply_scene(ctx, scene);
+                self.settings.workspace.scene = path.to_string_lossy().to_string();
+                let _ = save_settings(&self.settings);
+            }
+        }
+    }
+
+    fn apply_scene(&mut self, ctx: &egui::Context, scene: SceneState) {
+        self.panels.clear();
+        self.dock_states.clear();
+        self.terminals.clear();
+        self.tab_counter = 0;
+        self.active_panel = 0;
+
+        for panel in &scene.panels {
+            let idx = self.panels.len();
+            for (id, tstate) in &panel.terminals {
+                let id_num: u64 = id.strip_prefix("terminal-")
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(idx as u64 + 1);
+                let (backend, receiver) = create_terminal(ctx, id_num);
+                if id_num >= self.tab_counter as u64 {
+                    self.tab_counter = id_num as u32;
+                }
+                self.terminals.insert(id.clone(), TerminalData {
+                    backend, receiver,
+                    name: tstate.name.clone(),
+                    font_size: tstate.font_size,
+                    working_directory: tstate.working_directory.clone(),
+                });
+            }
+            self.panels.push(Panel { name: panel.name.clone(), bound_file: None });
+            self.dock_states.insert(idx, panel.dock_state.clone());
+        }
+        if self.panels.is_empty() {
+            self.add_initial_terminal(ctx);
+        }
+    }
+
     fn close_workspace(&mut self, idx: usize) {
         if self.panels.len() <= 1 {
             return;
@@ -464,14 +651,19 @@ impl eframe::App for App {
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
                 ui.menu_button("File", |ui| {
-                    if ui.button("New Workspace").clicked() {
-                        self.add_panel(ui.ctx());
+                    if ui.button("Save").clicked() {
+                        self.save_scene();
                         ui.close_menu();
                     }
-                    if ui.button("Load Workspace").clicked() {
-                        self.pending_load_workspace = true;
+                    if ui.button("Load").clicked() {
+                        self.pending_load_scene = true;
                         ui.close_menu();
                     }
+                    if ui.button("Save As...").clicked() {
+                        self.pending_save_scene_as = true;
+                        ui.close_menu();
+                    }
+                    ui.separator();
                     if ui.button("Exit").clicked() {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                     }
@@ -530,24 +722,42 @@ impl eframe::App for App {
 
                     // Right: content
                     match self.settings_tab {
-                        SettingsTab::Workspace => {
-                            ui.heading("Workspace Settings");
-                            ui.separator();
-                            ui.label("Template Directory:");
-                            ui.horizontal(|ui| {
-                                ui.add(egui::TextEdit::singleline(&mut self.settings_edit.workspace.template_dir)
-                                    .desired_width(300.0));
-                                if ui.button("Browse...").clicked() {
-                                    if let Some(dir) = rfd::FileDialog::new()
-                                        .set_title("Select Template Directory")
-                                        .pick_folder()
-                                    {
-                                        self.settings_edit.workspace.template_dir = dir.to_string_lossy().to_string();
-                                    }
+                                SettingsTab::Workspace => {
+                                    ui.heading("Workspace Settings");
+                                    ui.separator();
+
+                                    ui.label("Scene File:");
+                                    ui.horizontal(|ui| {
+                                        ui.add(egui::TextEdit::singleline(&mut self.settings_edit.workspace.scene)
+                                            .desired_width(300.0));
+                                        if ui.button("Browse...").clicked() {
+                                            if let Some(path) = rfd::FileDialog::new()
+                                                .set_title("Select Scene File")
+                                                .add_filter("JSON", &["json"])
+                                                .pick_file()
+                                            {
+                                                self.settings_edit.workspace.scene = path.to_string_lossy().to_string();
+                                            }
+                                        }
+                                    });
+                                    ui.label("Default: scene.json (relative to app root)");
+
+                                    ui.separator();
+                                    ui.label("Template Directory:");
+                                    ui.horizontal(|ui| {
+                                        ui.add(egui::TextEdit::singleline(&mut self.settings_edit.workspace.template_dir)
+                                            .desired_width(300.0));
+                                        if ui.button("Browse...").clicked() {
+                                            if let Some(dir) = rfd::FileDialog::new()
+                                                .set_title("Select Template Directory")
+                                                .pick_folder()
+                                            {
+                                                self.settings_edit.workspace.template_dir = dir.to_string_lossy().to_string();
+                                            }
+                                        }
+                                    });
+                                    ui.label("Default: workspace (relative to app root)");
                                 }
-                            });
-                            ui.label("Default: workspace (relative to app root)");
-                        }
                     }
 
                     ui.separator();
