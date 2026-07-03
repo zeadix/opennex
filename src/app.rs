@@ -343,10 +343,10 @@ impl App {
         self.tab_counter += 1;
         let id = format!("terminal-{}", self.tab_counter);
         let cwd = std::env::current_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
-        let (backend, receiver) = create_terminal(ctx, self.tab_counter as u64, &cwd);
+        let (backend, receiver) = create_terminal(ctx, self.terminals.len() as u64, &cwd);
         self.terminals.insert(id.clone(), TerminalData {
             backend, receiver,
-            name: format!("Terminal {}", self.tab_counter),
+            name: "New Terminal".to_string(),
             font_size: DEFAULT_FONT_SIZE,
             working_directory: cwd,
             initial_cd_sent: false,
@@ -825,40 +825,21 @@ impl eframe::App for App {
                         self.renaming_panel = None;
                     }
                 } else {
-                    let panel_name = self.panels[i].name.clone();
-                    let response = ui.selectable_label(is_active, &panel_name);
-                    if response.clicked() && !renaming { to_select = Some(i); }
-                    if response.double_clicked() && !renaming {
-                        self.renaming_panel = Some(i);
-                        self.rename_buffer = panel_name;
-                        self.rename_frame_count = 0;
-                    }
-
-                    let panel_idx = i;
-                    response.context_menu(|ui| {
-                        if ui.button("Rename").clicked() {
-                            self.renaming_panel = Some(panel_idx);
-                            self.rename_buffer = self.panels[panel_idx].name.clone();
+                    ui.horizontal(|ui| {
+                        let panel_name = self.panels[i].name.clone();
+                        let response = ui.selectable_label(is_active, &panel_name);
+                        if response.clicked() && !renaming { to_select = Some(i); }
+                        if response.double_clicked() && !renaming {
+                            self.renaming_panel = Some(i);
+                            self.rename_buffer = panel_name;
                             self.rename_frame_count = 0;
-                            ui.close_menu();
                         }
-                        ui.separator();
-                        if ui.button("Save").clicked() {
-                            self.save_workspace(panel_idx);
-                            ui.close_menu();
-                        }
-                        if ui.button("Save As...").clicked() {
-                            self.save_workspace_as(panel_idx);
-                            ui.close_menu();
-                        }
-                        if ui.button("Load...").clicked() {
-                            self.pending_load_workspace = true;
-                            ui.close_menu();
-                        }
-                        ui.separator();
-                        if ui.button("Close").clicked() {
-                            self.close_workspace(panel_idx);
-                            ui.close_menu();
+
+                        if self.panels.len() > 1 {
+                            if ui.small_button("x").clicked() {
+                                self.close_workspace(i);
+                                return;
+                            }
                         }
                     });
                 }
