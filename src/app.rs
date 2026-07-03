@@ -501,39 +501,35 @@ impl eframe::App for App {
                 .resizable(true)
                 .default_pos([ws_x, ws_y])
                 .default_size([ws_w, ws_h])
+                .max_width(600.0)
                 .show(ctx, |ui| {
-                    ui.columns(2, |cols| {
-                        cols[0].vertical(|ui| {
-                            ui.heading("Settings");
-                            ui.separator();
-                            if ui.selectable_label(self.settings_tab == SettingsTab::Workspace, "Workspace").clicked() {
-                                self.settings_tab = SettingsTab::Workspace;
-                            }
-                        });
-
-                        cols[1].vertical(|ui| {
-                            match self.settings_tab {
-                                SettingsTab::Workspace => {
-                                    ui.heading("Workspace Settings");
-                                    ui.separator();
-                                    ui.label("Template Directory:");
-                                    ui.horizontal(|ui| {
-                                        ui.add(egui::TextEdit::singleline(&mut self.settings_edit.workspace.template_dir)
-                                            .desired_width(ui.available_width() - 70.0));
-                                        if ui.button("Browse...").clicked() {
-                                            if let Some(dir) = rfd::FileDialog::new()
-                                                .set_title("Select Template Directory")
-                                                .pick_folder()
-                                            {
-                                                self.settings_edit.workspace.template_dir = dir.to_string_lossy().to_string();
-                                            }
-                                        }
-                                    });
-                                    ui.label("Default: workspace (relative to app root)");
-                                }
-                            }
-                        });
+                    // Left: tabs
+                    ui.horizontal(|ui| {
+                        ui.selectable_value(&mut self.settings_tab, SettingsTab::Workspace, "Workspace");
                     });
+                    ui.separator();
+
+                    // Right: content
+                    match self.settings_tab {
+                        SettingsTab::Workspace => {
+                            ui.heading("Workspace Settings");
+                            ui.separator();
+                            ui.label("Template Directory:");
+                            ui.horizontal(|ui| {
+                                ui.add(egui::TextEdit::singleline(&mut self.settings_edit.workspace.template_dir)
+                                    .desired_width(300.0));
+                                if ui.button("Browse...").clicked() {
+                                    if let Some(dir) = rfd::FileDialog::new()
+                                        .set_title("Select Template Directory")
+                                        .pick_folder()
+                                    {
+                                        self.settings_edit.workspace.template_dir = dir.to_string_lossy().to_string();
+                                    }
+                                }
+                            });
+                            ui.label("Default: workspace (relative to app root)");
+                        }
+                    }
 
                     ui.separator();
                     ui.horizontal(|ui| {
