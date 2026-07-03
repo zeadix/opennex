@@ -131,7 +131,6 @@ pub struct App {
     dock_states: HashMap<usize, DockState<String>>,
     terminals: HashMap<String, TerminalData>,
     tab_counter: u32,
-    backend_id_counter: u64,
     pending_new_terminal: Option<(usize, SurfaceIndex, NodeIndex)>,
     pending_close: Option<String>,
     pending_split_after: Option<String>,
@@ -239,8 +238,7 @@ impl App {
                 for panel in &scene.panels {
                     let idx = app.panels.len();
                 for (_id, tstate) in &panel.terminals {
-                    let (backend, receiver) = create_terminal(ctx, app.backend_id_counter, &tstate.working_directory);
-                    app.backend_id_counter += 1;
+                    let (backend, receiver) = create_terminal(ctx, &tstate.working_directory);
                     let new_id = format!("terminal-{}", app.tab_counter);
                     app.tab_counter += 1;
                         app.terminals.insert(new_id, TerminalData {
@@ -282,7 +280,6 @@ impl App {
             dock_states: HashMap::new(),
             terminals: HashMap::new(),
             tab_counter: 0,
-            backend_id_counter: 0,
             pending_new_terminal: None,
             pending_close: None,
             pending_split_after: None,
@@ -316,8 +313,7 @@ impl App {
 
         for (id, tstate) in &state.terminals {
             if !self.terminals.contains_key(id) {
-                let (backend, receiver) = create_terminal(ctx, self.backend_id_counter, &tstate.working_directory);
-                self.backend_id_counter += 1;
+                let (backend, receiver) = create_terminal(ctx, &tstate.working_directory);
                 self.terminals.insert(id.clone(), TerminalData {
                     backend,
                     receiver,
@@ -341,8 +337,7 @@ impl App {
         self.tab_counter += 1;
         let id = format!("terminal-{}", self.tab_counter);
         let cwd = std::env::current_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
-        let (backend, receiver) = create_terminal(ctx, self.backend_id_counter, &cwd);
-        self.backend_id_counter += 1;
+        let (backend, receiver) = create_terminal(ctx, &cwd);
         self.terminals.insert(id.clone(), TerminalData {
             backend, receiver,
             name: "New Terminal".to_string(),
@@ -535,14 +530,11 @@ impl App {
         self.dock_states.clear();
         self.terminals.clear();
         self.tab_counter = 0;
-        self.backend_id_counter = 0;
         self.active_panel = 0;
-
         for panel in &scene.panels {
             let idx = self.panels.len();
             for (_id, tstate) in &panel.terminals {
-                let (backend, receiver) = create_terminal(ctx, self.backend_id_counter, &tstate.working_directory);
-                self.backend_id_counter += 1;
+                let (backend, receiver) = create_terminal(ctx, &tstate.working_directory);
                 let new_id = format!("terminal-{}", self.tab_counter);
                 self.tab_counter += 1;
                 self.terminals.insert(new_id, TerminalData {
@@ -620,7 +612,7 @@ fn build_scene(app: &App) -> SceneState {
     SceneState { panels }
 }
 
-fn create_terminal(ctx: &egui::Context, id: u64, working_dir: &str) -> (TerminalBackend, Receiver<(u64, PtyEvent)>) {
+fn create_terminal(ctx: &egui::Context, working_dir: &str) -> (TerminalBackend, Receiver<(u64, PtyEvent)>) {
     #[cfg(unix)]
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
     #[cfg(not(unix))]
@@ -629,8 +621,12 @@ fn create_terminal(ctx: &egui::Context, id: u64, working_dir: &str) -> (Terminal
     let cwd = std::path::PathBuf::from(working_dir);
     let cwd_str = if cwd.exists() { working_dir.to_string() } else { std::env::current_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default() };
 
+    // Use random u64 for unique widget ID
+    let uuid_bytes = uuid::Uuid::new_v4();
+    let backend_id = u64::from_be_bytes(uuid_bytes.as_bytes()[0..8].try_into().unwrap());
+
     let (sender, receiver) = std::sync::mpsc::channel();
-    let mut backend = TerminalBackend::new(id, ctx.clone(), sender, egui_term::BackendSettings {
+    let backend = TerminalBackend::new(backend_id, ctx.clone(), sender, egui_term::BackendSettings {
         shell,
         working_directory: Some(std::path::PathBuf::from(&cwd_str)),
         ..Default::default()
