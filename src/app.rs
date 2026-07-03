@@ -659,11 +659,18 @@ fn create_terminal(ctx: &egui::Context, id: u64, working_dir: &str) -> (Terminal
     let cwd_str = if cwd.exists() { working_dir.to_string() } else { std::env::current_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default() };
 
     let (sender, receiver) = std::sync::mpsc::channel();
-    let backend = TerminalBackend::new(id, ctx.clone(), sender, egui_term::BackendSettings {
+    let mut backend = TerminalBackend::new(id, ctx.clone(), sender, egui_term::BackendSettings {
         shell,
         working_directory: Some(std::path::PathBuf::from(&cwd_str)),
         ..Default::default()
     }).unwrap();
+
+    // Send cd command to ensure we're in the right directory
+    if !cwd_str.is_empty() {
+        let cd_cmd = format!("cd {}\n", cwd_str);
+        backend.process_command(egui_term::BackendCommand::Write(cd_cmd.into_bytes()));
+    }
+
     (backend, receiver)
 }
 
