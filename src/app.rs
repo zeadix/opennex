@@ -10,19 +10,13 @@ const MIN_FONT_SIZE: f32 = 8.0;
 const MAX_FONT_SIZE: f32 = 32.0;
 const FONT_SIZE_STEP: f32 = 1.0;
 
-// ── Persistence structs ──────────────────────────────────────────
+// ── Persistence structs (single panel per file) ──────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct WorkspaceState {
-    panels: Vec<PanelState>,
-    active_panel: usize,
-    dock_states: HashMap<usize, DockState<String>>,
+    panel_name: String,
+    dock_state: DockState<String>,
     terminals: HashMap<String, TerminalState>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct PanelState {
-    name: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,6 +43,7 @@ pub struct App {
     renaming_terminal: Option<String>,
     terminal_rename_buffer: String,
     rename_frame_count: u32,
+    pending_load_workspace: bool,
 }
 
 struct Panel {
@@ -80,8 +75,9 @@ fn workspace_file_for(name: &str) -> PathBuf {
 
 // ── Save / Load ──────────────────────────────────────────────────
 
-fn build_state(app: &App) -> WorkspaceState {
-    let panels: Vec<PanelState> = app.panels.iter().map(|p| PanelState { name: p.name.clone() }).collect();
+fn build_panel_state(app: &App, panel_idx: usize) -> Option<WorkspaceState> {
+    let panel = app.panels.get(panel_idx)?;
+    let dock_state = app.dock_states.get(&panel_idx)?.clone();
     let mut terminals = HashMap::new();
     for (id, data) in &app.terminals {
         terminals.insert(id.clone(), TerminalState {
@@ -90,12 +86,11 @@ fn build_state(app: &App) -> WorkspaceState {
             working_directory: data.working_directory.clone(),
         });
     }
-    WorkspaceState {
-        panels,
-        active_panel: app.active_panel,
-        dock_states: app.dock_states.clone(),
+    Some(WorkspaceState {
+        panel_name: panel.name.clone(),
+        dock_state,
         terminals,
-    }
+    })
 }
 
 fn save_to_file(path: &PathBuf, state: &WorkspaceState) -> Result<(), anyhow::Error> {
@@ -121,7 +116,6 @@ impl App {
         ensure_workspace_dir();
         let ws_dir = workspace_dir();
 
-        // Try to load existing workspaces
         let entries: Vec<PathBuf> = std::fs::read_dir(&ws_dir)
             .into_iter()
             .flat_map(|rd| rd.into_iter())
@@ -133,7 +127,7 @@ impl App {
         if !entries.is_empty() {
             let mut app = App::empty();
             for path in &entries {
-                if let Ok(state) = load_from_file(path) {
+                if let Ok(state) = load_from_file(&path) {
                     app.load_workspace_state(ctx, state, Some(path.clone()));
                 }
             }
@@ -164,6 +158,7 @@ impl App {
             renaming_terminal: None,
             terminal_rename_buffer: String::new(),
             rename_frame_count: 0,
+            pending_load_workspace: false,
         }
     }
 
@@ -174,8 +169,9 @@ impl App {
         self.dock_states.insert(0, DockState::new(vec![tab_id]));
         self.panels.push(Panel { name, bound_file: Some(file.clone()) });
         self.active_panel = 0;
-        let state = build_state(self);
-        let _ = save_to_file(&file, &state);
+        if let Some(state) = build_panel_state(self, 0) {
+            let _ = save_to_file(&file, &state);
+        }
     }
 
     fn load_workspace_state(&mut self, ctx: &egui::Context, state: WorkspaceState, file: Option<PathBuf>) {
@@ -201,10 +197,9 @@ impl App {
             }
         }
 
-        // Restore panel
-        let panel_name = state.panels.first().map(|p| p.name.clone()).unwrap_or(format!("Workspace {}", panel_idx + 1));
-        self.panels.push(Panel { name: panel_name, bound_file: file });
-        self.dock_states.insert(panel_idx, state.dock_states.into_iter().next().map(|(_, v)| v).unwrap_or_else(|| DockState::new(vec![])));
+        // Restore panel and dock state
+        self.panels.push(Panel { name: state.panel_name, bound_file: file });
+        self.dock_states.insert(panel_idx, state.dock_state);
     }
 
     fn is_renaming(&self) -> bool {
@@ -254,6 +249,20 @@ impl App {
         if let Some(tab_id) = self.pending_close.take() {
             self.terminals.remove(&tab_id);
         }
+        // Handle pending load (deferred to avoid blocking UI)
+        if self.pending_load_workspace {
+            self.pending_load_workspace = false;
+            if let Some(path) = rfd::FileDialog::new()
+                .set_title("Load Workspace")
+                .add_filter("JSON", &["json"])
+                .pick_file()
+            {
+                if let Ok(state) = load_from_file(&path) {
+                    self.load_workspace_state(ctx, state, Some(path));
+                    self.active_panel = self.panels.len() - 1;
+                }
+            }
+        }
     }
 
     fn add_panel(&mut self, ctx: &egui::Context) {
@@ -264,17 +273,19 @@ impl App {
         self.dock_states.insert(idx, DockState::new(vec![tab_id]));
         self.panels.push(Panel { name, bound_file: Some(file.clone()) });
         self.active_panel = idx;
-        // Save initial state
-        let state = build_state(self);
-        let _ = save_to_file(&file, &state);
+        if let Some(state) = build_panel_state(self, idx) {
+            let _ = save_to_file(&file, &state);
+        }
     }
 
     fn save_workspace(&mut self, panel_idx: usize) {
-        if let Some(panel) = self.panels.get(panel_idx) {
-            let file = panel.bound_file.clone().unwrap_or_else(|| workspace_file_for(&panel.name));
-            let state = build_state(self);
+        if let Some(state) = build_panel_state(self, panel_idx) {
+            let file = self.panels[panel_idx].bound_file.clone()
+                .unwrap_or_else(|| workspace_file_for(&self.panels[panel_idx].name));
             if let Err(e) = save_to_file(&file, &state) {
                 log::error!("Failed to save: {}", e);
+            } else {
+                self.panels[panel_idx].bound_file = Some(file);
             }
         }
     }
@@ -287,26 +298,13 @@ impl App {
                 .set_file_name(&format!("{}.json", panel.name))
                 .save_file()
             {
-                let state = build_state(self);
-                if let Err(e) = save_to_file(&path, &state) {
-                    log::error!("Failed to save: {}", e);
-                } else if let Some(p) = self.panels.get_mut(panel_idx) {
-                    p.bound_file = Some(path);
+                if let Some(state) = build_panel_state(self, panel_idx) {
+                    if let Err(e) = save_to_file(&path, &state) {
+                        log::error!("Failed to save: {}", e);
+                    } else if let Some(p) = self.panels.get_mut(panel_idx) {
+                        p.bound_file = Some(path);
+                    }
                 }
-            }
-        }
-    }
-
-    fn load_workspace(&mut self, ctx: &egui::Context) {
-        if let Some(path) = rfd::FileDialog::new()
-            .set_title("Load Workspace")
-            .add_filter("JSON", &["json"])
-            .pick_file()
-        {
-            if let Ok(state) = load_from_file(&path) {
-                let idx = self.panels.len();
-                self.load_workspace_state(ctx, state, Some(path));
-                self.active_panel = idx;
             }
         }
     }
@@ -316,13 +314,10 @@ impl App {
             return;
         }
         self.panels.remove(idx);
-        // Reindex dock_states: shift everything after removed index down by 1
         let old_dock = self.dock_states.clone();
         self.dock_states.clear();
         for old_idx in 0..old_dock.len() {
-            if old_idx == idx {
-                continue; // skip removed
-            }
+            if old_idx == idx { continue; }
             let new_idx = if old_idx > idx { old_idx - 1 } else { old_idx };
             if let Some(state) = old_dock.get(&old_idx) {
                 self.dock_states.insert(new_idx, state.clone());
@@ -344,8 +339,7 @@ fn create_terminal(ctx: &egui::Context, id: u64) -> (TerminalBackend, Receiver<(
 
     let (sender, receiver) = std::sync::mpsc::channel();
     let backend = TerminalBackend::new(id, ctx.clone(), sender, egui_term::BackendSettings {
-        shell,
-        ..Default::default()
+        shell, ..Default::default()
     }).unwrap();
     (backend, receiver)
 }
@@ -367,7 +361,7 @@ impl eframe::App for App {
                         ui.close_menu();
                     }
                     if ui.button("Load Workspace").clicked() {
-                        self.load_workspace(ui.ctx());
+                        self.pending_load_workspace = true;
                         ui.close_menu();
                     }
                     if ui.button("Exit").clicked() {
@@ -422,7 +416,6 @@ impl eframe::App for App {
                         let old_name = self.panels[i].name.clone();
                         if !self.rename_buffer.is_empty() {
                             self.panels[i].name = self.rename_buffer.clone();
-                            // Rename bound file
                             let new_file = workspace_file_for(&self.rename_buffer);
                             if let Some(ref old_file) = self.panels[i].bound_file {
                                 if old_file.exists() {
@@ -443,7 +436,6 @@ impl eframe::App for App {
                         self.rename_frame_count = 0;
                     }
 
-                    // Right-click context menu
                     let panel_idx = i;
                     response.context_menu(|ui| {
                         if ui.button("Rename").clicked() {
@@ -462,7 +454,7 @@ impl eframe::App for App {
                             ui.close_menu();
                         }
                         if ui.button("Load...").clicked() {
-                            // Will be handled after menu closes
+                            self.pending_load_workspace = true;
                             ui.close_menu();
                         }
                         ui.separator();
