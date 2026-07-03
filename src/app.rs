@@ -192,7 +192,7 @@ impl eframe::App for App {
                     let is_active = i == self.active_panel;
 
                     if self.renaming_panel == Some(i) {
-                        // Inline rename: show TextEdit in place of label
+                        // Inline rename
                         let response = ui.add(
                             egui::TextEdit::singleline(&mut self.rename_buffer)
                                 .font(egui::FontId::monospace(14.0))
@@ -201,7 +201,10 @@ impl eframe::App for App {
                         response.request_focus();
 
                         let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
-                        if enter || response.lost_focus() {
+                        let any_click = ui.input(|i| i.pointer.any_click());
+                        let has_focus = response.has_focus();
+
+                        if enter || (any_click && !has_focus) {
                             if !self.rename_buffer.is_empty() {
                                 self.panels[i].name = self.rename_buffer.clone();
                             }
