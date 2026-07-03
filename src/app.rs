@@ -338,9 +338,13 @@ impl App {
         let id = format!("terminal-{}", self.tab_counter);
         let cwd = std::env::current_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
         let (backend, receiver) = create_terminal(ctx, &cwd);
+        let random_suffix: String = uuid::Uuid::new_v4().as_bytes()[0..3]
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect();
         self.terminals.insert(id.clone(), TerminalData {
             backend, receiver,
-            name: "New Terminal".to_string(),
+            name: format!("Terminal {}", random_suffix),
             font_size: DEFAULT_FONT_SIZE,
             working_directory: cwd,
             initial_cd_sent: false,
