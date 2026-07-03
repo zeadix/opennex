@@ -476,25 +476,16 @@ impl eframe::App for App {
             let template_files = list_workspace_files();
             if !template_files.is_empty() {
                 let resp = ui.button("Templates");
-                if resp.hovered() {
-                    egui::popup_below_widget(
-                        ui,
-                        resp.id.with("template_popup"),
-                        &resp,
-                        egui::PopupCloseBehavior::CloseOnClickOutside,
-                        |ui| {
-                            ui.heading("Load from template");
-                            ui.separator();
-                            for (display_name, path) in &template_files {
-                                let path = path.clone();
-                                if ui.button(display_name.as_str()).clicked() {
-                                    self.pending_load_from_template = Some(path);
-                                    ui.memory_mut(|m| m.close_popup());
-                                }
-                            }
-                        },
-                    );
-                }
+                resp.on_hover_ui(|ui| {
+                    ui.heading("Load from template");
+                    ui.separator();
+                    for (display_name, path) in &template_files {
+                        let path = path.clone();
+                        if ui.button(display_name.as_str()).clicked() {
+                            self.pending_load_from_template = Some(path);
+                        }
+                    }
+                });
             }
 
             ui.separator();
