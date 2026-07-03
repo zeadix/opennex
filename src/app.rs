@@ -114,6 +114,10 @@ impl App {
         }
     }
 
+    fn is_renaming(&self) -> bool {
+        self.renaming_panel.is_some() || self.renaming_terminal.is_some()
+    }
+
     fn add_panel(&mut self) {
         self.panel_counter += 1;
         self.panels.push(Panel {
@@ -125,89 +129,77 @@ impl App {
     }
 
     fn render_rename_popup(&mut self, ctx: &egui::Context) {
-        if self.renaming_panel.is_some() || self.renaming_terminal.is_some() {
-            // Darken background
-            egui::Area::new(egui::Id::new("rename_overlay"))
-                .order(egui::Order::Foreground)
-                .show(ctx, |ui| {
-                    // Fill entire screen with semi-transparent overlay
-                    let screen = ui.ctx().screen_rect();
-                    ui.painter().rect_filled(
-                        screen,
-                        egui::Rounding::ZERO,
-                        egui::Color32::from_black_alpha(128),
-                    );
+        if self.renaming_panel.is_none() && self.renaming_terminal.is_none() {
+            return;
+        }
 
-                    // Center the popup
-                    let popup_size = egui::vec2(320.0, 120.0);
-                    let popup_rect = egui::Rect::from_center_size(
-                        screen.center(),
-                        popup_size,
-                    );
+        let screen = ctx.screen_rect();
+        let popup_size = egui::vec2(320.0, 130.0);
+        let popup_rect = egui::Rect::from_center_size(screen.center(), popup_size);
 
-                    egui::Frame::popup(ui.style()).show(ui, |ui| {
-                        ui.allocate_ui_at_rect(popup_rect, |ui| {
-                            ui.set_min_width(popup_size.x - 20.0);
+        // Dark overlay to block interaction with background
+        egui::Area::new(egui::Id::new("rename_overlay"))
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                ui.painter().rect_filled(screen, egui::Rounding::ZERO, egui::Color32::from_black_alpha(128));
+            });
 
-                            if let Some(panel_idx) = self.renaming_panel {
-                                ui.heading("Rename Workspace");
-                                ui.separator();
-                                let response = ui.add(
-                                    egui::TextEdit::singleline(&mut self.rename_buffer)
-                                        .font(egui::FontId::monospace(14.0))
-                                        .desired_width(ui.available_width()),
-                                );
+        // Popup content
+        egui::Area::new(egui::Id::new("rename_popup"))
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    ui.allocate_ui_at_rect(popup_rect, |ui| {
+                        ui.set_min_width(popup_size.x - 20.0);
 
-                                // Focus the text field every frame
-                                ui.memory_mut(|m| m.request_focus(response.id));
-
-                                ui.separator();
-                                ui.horizontal(|ui| {
-                                    if ui.button("OK").clicked()
-                                        || ui.input(|i| i.key_pressed(egui::Key::Enter))
-                                    {
-                                        if !self.rename_buffer.is_empty() {
-                                            self.panels[panel_idx].name = self.rename_buffer.clone();
+                        if let Some(panel_idx) = self.renaming_panel {
+                            ui.heading("Rename Workspace");
+                            ui.separator();
+                            let response = ui.add(
+                                egui::TextEdit::singleline(&mut self.rename_buffer)
+                                    .font(egui::FontId::monospace(14.0))
+                                    .desired_width(ui.available_width()),
+                            );
+                            response.request_focus();
+                            ui.separator();
+                            ui.horizontal(|ui| {
+                                if ui.button("OK").clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                                    if !self.rename_buffer.is_empty() {
+                                        self.panels[panel_idx].name = self.rename_buffer.clone();
+                                    }
+                                    self.renaming_panel = None;
+                                }
+                                if ui.button("Cancel").clicked() {
+                                    self.renaming_panel = None;
+                                }
+                            });
+                        } else if let Some(ref tab_id) = self.renaming_terminal.clone() {
+                            ui.heading("Rename Terminal");
+                            ui.separator();
+                            let response = ui.add(
+                                egui::TextEdit::singleline(&mut self.terminal_rename_buffer)
+                                    .font(egui::FontId::monospace(14.0))
+                                    .desired_width(ui.available_width()),
+                            );
+                            response.request_focus();
+                            ui.separator();
+                            ui.horizontal(|ui| {
+                                if ui.button("OK").clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                                    if !self.terminal_rename_buffer.is_empty() {
+                                        if let Some(data) = self.terminals.get_mut(tab_id) {
+                                            data.name = self.terminal_rename_buffer.clone();
                                         }
-                                        self.renaming_panel = None;
                                     }
-                                    if ui.button("Cancel").clicked() {
-                                        self.renaming_panel = None;
-                                    }
-                                });
-                            } else if let Some(ref tab_id) = self.renaming_terminal.clone() {
-                                        ui.heading("Rename Terminal");
-                                        ui.separator();
-                                        let response = ui.add(
-                                            egui::TextEdit::singleline(&mut self.terminal_rename_buffer)
-                                                .font(egui::FontId::monospace(14.0))
-                                                .desired_width(ui.available_width()),
-                                        );
-
-                                        // Focus the text field every frame
-                                        ui.memory_mut(|m| m.request_focus(response.id));
-
-                                        ui.separator();
-                                        ui.horizontal(|ui| {
-                                            if ui.button("OK").clicked()
-                                                || ui.input(|i| i.key_pressed(egui::Key::Enter))
-                                            {
-                                                if !self.terminal_rename_buffer.is_empty() {
-                                                    if let Some(data) = self.terminals.get_mut(tab_id) {
-                                                        data.name = self.terminal_rename_buffer.clone();
-                                                    }
-                                                }
-                                                self.renaming_terminal = None;
-                                            }
-                                            if ui.button("Cancel").clicked() {
-                                                self.renaming_terminal = None;
-                                            }
-                                        });
-                            }
-                        });
+                                    self.renaming_terminal = None;
+                                }
+                                if ui.button("Cancel").clicked() {
+                                    self.renaming_terminal = None;
+                                }
+                            });
+                        }
                     });
                 });
-        }
+            });
     }
 }
 
@@ -234,6 +226,7 @@ fn create_terminal(ctx: &egui::Context, id: u64) -> (TerminalBackend, Receiver<(
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.process_pending(ctx);
+        let renaming = self.is_renaming();
 
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
@@ -280,12 +273,11 @@ impl eframe::App for App {
                     let panel_name = self.panels[i].name.clone();
                     let response = ui.selectable_label(is_active, &panel_name);
 
-                    if response.clicked() {
+                    if response.clicked() && !renaming {
                         to_select = Some(i);
                     }
 
-                    // Double-click to rename
-                    if response.double_clicked() {
+                    if response.double_clicked() && !renaming {
                         self.renaming_panel = Some(i);
                         self.rename_buffer = panel_name;
                     }
@@ -323,6 +315,7 @@ impl eframe::App for App {
                         current_tab: None,
                         renaming_terminal: &mut self.renaming_terminal,
                         terminal_rename_buffer: &mut self.terminal_rename_buffer,
+                        renaming,
                     });
             } else {
                 ui.centered_and_justified(|ui| {
@@ -346,6 +339,7 @@ struct TerminalTabViewer<'a> {
     current_tab: Option<String>,
     renaming_terminal: &'a mut Option<String>,
     terminal_rename_buffer: &'a mut String,
+    renaming: bool,
 }
 
 impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
@@ -368,8 +362,10 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                 return;
             }
 
+            // KEY FIX: TerminalView.request_focus() steals focus every frame.
+            // Only steal focus when NOT renaming, so TextEdit can receive input.
             let terminal_view = TerminalView::new(ui, &mut terminal_data.backend)
-                .set_focus(true)
+                .set_focus(!self.renaming)
                 .set_size(ui.available_size());
 
             ui.add(terminal_view);
