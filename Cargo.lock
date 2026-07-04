@@ -2675,6 +2675,7 @@ dependencies = [
 name = "open-zoo"
 version = "0.1.0"
 dependencies = [
+ "alacritty_terminal",
  "anyhow",
  "eframe",
  "egui 0.31.1",

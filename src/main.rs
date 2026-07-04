@@ -2,6 +2,7 @@ use anyhow::Result;
 use eframe::egui;
 
 mod app;
+mod snapshot;
 
 fn main() -> Result<()> {
     env_logger::init();
