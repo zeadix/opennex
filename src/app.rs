@@ -14,29 +14,8 @@ const FONT_SIZE_STEP: f32 = 1.0;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct AppSettings {
-    workspace: WorkspaceSettings,
     #[serde(default)]
     settings_window: SettingsWindowState,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct WorkspaceSettings {
-    template_dir: String,
-    #[serde(default = "default_scene_path")]
-    scene: String,
-}
-
-fn default_scene_path() -> String {
-    "scene.json".to_string()
-}
-
-impl Default for WorkspaceSettings {
-    fn default() -> Self {
-        WorkspaceSettings {
-            template_dir: "workspace".to_string(),
-            scene: default_scene_path(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -79,10 +58,13 @@ fn save_settings(settings: &AppSettings) -> Result<(), anyhow::Error> {
 impl Default for AppSettings {
     fn default() -> Self {
         AppSettings {
-            workspace: WorkspaceSettings::default(),
             settings_window: SettingsWindowState::default(),
         }
     }
+}
+
+fn scene_path() -> PathBuf {
+    std::env::current_dir().unwrap_or_default().join("scene.json")
 }
 
 // ── Persistence structs (single panel per file) ──────────────────
@@ -124,11 +106,6 @@ struct Panel {
     bound_file: Option<PathBuf>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum SettingsTab {
-    Workspace,
-}
-
 pub struct App {
     panels: Vec<Panel>,
     active_panel: usize,
@@ -151,7 +128,6 @@ pub struct App {
     pending_save_scene_as: bool,
     settings: AppSettings,
     show_settings: bool,
-    settings_tab: SettingsTab,
     settings_edit: AppSettings,
     cached_template_files: Vec<(String, PathBuf)>,
     completion: crate::completion::CompletionEngine,
@@ -168,20 +144,7 @@ struct TerminalData {
     restored_snapshot: Option<crate::snapshot::state::TerminalSnapshot>,
 }
 
-fn ensure_workspace_dir(settings: &AppSettings) {
-    let dir = std::env::current_dir()
-        .unwrap_or_default()
-        .join(&settings.workspace.template_dir);
-    let _ = std::fs::create_dir_all(dir);
-}
-
 impl App {
-    fn workspace_dir(&self) -> PathBuf {
-        std::env::current_dir()
-            .unwrap_or_default()
-            .join(&self.settings.workspace.template_dir)
-    }
-
     fn templates_dir(&self) -> PathBuf {
         std::env::current_dir()
             .unwrap_or_default()
@@ -272,10 +235,9 @@ impl App {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let ctx = &cc.egui_ctx;
         let settings = load_settings();
-        ensure_workspace_dir(&settings);
 
-        // Try to load scene file
-        let sp = std::env::current_dir().unwrap_or_default().join(&settings.workspace.scene);
+        // Try to load scene file from root
+        let sp = scene_path();
         if sp.exists() {
             if let Ok(scene) = load_scene_file(&sp) {
                 let mut app = App::empty();
@@ -285,7 +247,6 @@ impl App {
                     let idx = app.panels.len();
                  for (_id, tstate) in &panel.terminals {
                     let Some((backend, receiver)) = create_terminal(ctx, &tstate.working_directory) else { continue };
-                    // Use original ID from scene to keep dock_state tab references aligned
                     let cwd_file = std::path::PathBuf::from(format!("/tmp/openzoo_cwd_{}", _id));
                     app.terminals.insert(_id.clone(), TerminalData {
                             backend, receiver,
@@ -296,12 +257,11 @@ impl App {
                             cwd_file,
                             restored_snapshot: tstate.snapshot.clone(),
                         });
-                    // Update tab_counter to avoid future ID collisions
                     if let Some(n) = _id.strip_prefix("terminal-").and_then(|s| s.parse::<u32>().ok()) {
                         app.tab_counter = app.tab_counter.max(n + 1);
                     }
                     }
-                    app.panels.push(Panel { name: panel.name.clone(), bound_file: Some(sp.clone()) });
+                    app.panels.push(Panel { name: panel.name.clone(), bound_file: None });
                     app.dock_states.insert(idx, panel.dock_state.clone());
                 }
                 if app.panels.is_empty() {
@@ -348,7 +308,6 @@ impl App {
             pending_save_scene_as: false,
             settings: AppSettings::default(),
             show_settings: false,
-            settings_tab: SettingsTab::Workspace,
             settings_edit: AppSettings::default(),
             cached_template_files: Vec::new(),
             completion: crate::completion::CompletionEngine::new(),
@@ -448,7 +407,6 @@ impl App {
             if let Some(path) = rfd::FileDialog::new()
                 .set_title("Load Workspace")
                 .add_filter("JSON", &["json"])
-                .set_directory(self.workspace_dir())
                 .pick_file()
             {
                 if let Ok(state) = load_from_file(&path) {
@@ -528,7 +486,6 @@ impl App {
                 match rfd::FileDialog::new()
                     .set_title("Save Workspace")
                     .add_filter("JSON", &["json"])
-                .set_directory(self.workspace_dir())
                     .set_file_name(&format!("{}.json", self.panels[panel_idx].name))
                     .save_file()
                 {
@@ -550,7 +507,6 @@ impl App {
             if let Some(path) = rfd::FileDialog::new()
                 .set_title("Save Workspace As")
                 .add_filter("JSON", &["json"])
-                .set_directory(self.workspace_dir())
                 .set_file_name(&format!("{}.json", panel.name))
                 .save_file()
             {
@@ -566,7 +522,7 @@ impl App {
     }
 
     fn save_scene(&mut self) {
-        let sp = std::env::current_dir().unwrap_or_default().join(&self.settings.workspace.scene);
+        let sp = scene_path();
         let scene = build_scene(self);
         if let Err(e) = save_scene_file(&sp, &scene) {
             log::error!("Failed to save scene: {}", e);
@@ -580,9 +536,8 @@ impl App {
             .set_file_name("scene.json")
             .save_file()
         {
-            self.settings.workspace.scene = path.to_string_lossy().to_string();
-            let _ = save_settings(&self.settings);
-            self.save_scene();
+            let scene = build_scene(self);
+            let _ = save_scene_file(&path, &scene);
         }
     }
 
@@ -594,8 +549,6 @@ impl App {
         {
             if let Ok(scene) = load_scene_file(&path) {
                 self.apply_scene(ctx, scene);
-                self.settings.workspace.scene = path.to_string_lossy().to_string();
-                let _ = save_settings(&self.settings);
             }
         }
     }
@@ -806,51 +759,11 @@ impl eframe::App for App {
                 .default_size([ws_w, ws_h])
                 .max_width(600.0)
                 .show(ctx, |ui| {
-                    // Left: tabs
-                    ui.horizontal(|ui| {
-                        ui.selectable_value(&mut self.settings_tab, SettingsTab::Workspace, "Workspace");
-                    });
+                    ui.heading("Settings");
                     ui.separator();
-
-                    // Right: content
-                    match self.settings_tab {
-                                SettingsTab::Workspace => {
-                                    ui.heading("Workspace Settings");
-                                    ui.separator();
-
-                                    ui.label("Scene File:");
-                                    ui.horizontal(|ui| {
-                                        ui.add(egui::TextEdit::singleline(&mut self.settings_edit.workspace.scene)
-                                            .desired_width(300.0));
-                                        if ui.button("Browse...").clicked() {
-                                            if let Some(path) = rfd::FileDialog::new()
-                                                .set_title("Select Scene File")
-                                                .add_filter("JSON", &["json"])
-                                                .pick_file()
-                                            {
-                                                self.settings_edit.workspace.scene = path.to_string_lossy().to_string();
-                                            }
-                                        }
-                                    });
-                                    ui.label("Default: scene.json (relative to app root)");
-
-                                    ui.separator();
-                                    ui.label("Template Directory:");
-                                    ui.horizontal(|ui| {
-                                        ui.add(egui::TextEdit::singleline(&mut self.settings_edit.workspace.template_dir)
-                                            .desired_width(300.0));
-                                        if ui.button("Browse...").clicked() {
-                                            if let Some(dir) = rfd::FileDialog::new()
-                                                .set_title("Select Template Directory")
-                                                .pick_folder()
-                                            {
-                                                self.settings_edit.workspace.template_dir = dir.to_string_lossy().to_string();
-                                            }
-                                        }
-                                    });
-                                    ui.label("Default: workspace (relative to app root)");
-                                }
-                    }
+                    ui.label("Scene and templates use fixed paths:");
+                    ui.label("  Scene: ./scene.json");
+                    ui.label("  Templates: ./templates/");
 
                     ui.separator();
                     ui.horizontal(|ui| {
@@ -1216,25 +1129,27 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                         }
                     }
                     let prompt_end = input_line.rfind("$ ").or_else(|| input_line.rfind("# ")).map(|p| p + 2).unwrap_or(0);
-                    let input = input_line[prompt_end..cursor_col].trim();
-                    if !input.is_empty() {
-                        if let Some(best) = self.completion.suggest(input).first() {
-                            if best.len() > input.len() {
-                                let remaining = &best[input.len()..];
-                                let term_rect = terminal_response.rect;
-                                let cell_w = content.terminal_size.cell_width as f32;
-                                let cell_h = content.terminal_size.cell_height as f32;
-                                let cursor_pos = egui::pos2(
-                                    term_rect.min.x + cursor_col as f32 * cell_w,
-                                    term_rect.min.y + cursor_line as f32 * cell_h,
-                                );
-                                ui.painter().text(
-                                    cursor_pos,
-                                    egui::Align2::LEFT_CENTER,
-                                    remaining,
-                                    egui::FontId::monospace(terminal_data.font_size),
-                                    egui::Color32::from_rgba_premultiplied(120, 120, 120, 100),
-                                );
+                    if cursor_col > prompt_end {
+                        let input = input_line[prompt_end..cursor_col].trim();
+                        if !input.is_empty() {
+                            if let Some(best) = self.completion.suggest(input).first() {
+                                if best.len() > input.len() {
+                                    let remaining = &best[input.len()..];
+                                    let term_rect = terminal_response.rect;
+                                    let cell_w = content.terminal_size.cell_width as f32;
+                                    let cell_h = content.terminal_size.cell_height as f32;
+                                    let cursor_pos = egui::pos2(
+                                        term_rect.min.x + cursor_col as f32 * cell_w,
+                                        term_rect.min.y + cursor_line as f32 * cell_h,
+                                    );
+                                    ui.painter().text(
+                                        cursor_pos,
+                                        egui::Align2::LEFT_CENTER,
+                                        remaining,
+                                        egui::FontId::monospace(terminal_data.font_size),
+                                        egui::Color32::from_rgba_premultiplied(120, 120, 120, 100),
+                                    );
+                                }
                             }
                         }
                     }
@@ -1265,13 +1180,19 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                             }
                         }
                         let prompt_end = input_line.rfind("$ ").or_else(|| input_line.rfind("# ")).map(|p| p + 2).unwrap_or(0);
-                        let input = input_line[prompt_end..cursor_col].trim();
-                        if !input.is_empty() {
-                            if let Some(best) = self.completion.suggest(input).first() {
-                                if best.len() > input.len() {
-                                    let remaining = &best[input.len()..];
+                        if cursor_col > prompt_end {
+                            let input = input_line[prompt_end..cursor_col].trim();
+                            if !input.is_empty() {
+                                if let Some(best) = self.completion.suggest(input).first() {
+                                    if best.len() > input.len() {
+                                        let remaining = &best[input.len()..];
+                                        terminal_data.backend.process_command(
+                                            egui_term::BackendCommand::Write(remaining.as_bytes().to_vec())
+                                        );
+                                    }
+                                } else {
                                     terminal_data.backend.process_command(
-                                        egui_term::BackendCommand::Write(remaining.as_bytes().to_vec())
+                                        egui_term::BackendCommand::Write([0x09].to_vec())
                                     );
                                 }
                             } else {
@@ -1279,10 +1200,6 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                                     egui_term::BackendCommand::Write([0x09].to_vec())
                                 );
                             }
-                        } else {
-                            terminal_data.backend.process_command(
-                                egui_term::BackendCommand::Write([0x09].to_vec())
-                            );
                         }
                     }
                 }
@@ -1299,14 +1216,16 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                         }
                     }
                     let prompt_end = input_line.rfind("$ ").or_else(|| input_line.rfind("# ")).map(|p| p + 2).unwrap_or(0);
-                    let input = input_line[prompt_end..cursor_col].trim();
-                    if !input.is_empty() {
-                        if let Some(best) = self.completion.suggest(input).first() {
-                            if best.len() > input.len() {
-                                let remaining = &best[input.len()..];
-                                terminal_data.backend.process_command(
-                                    egui_term::BackendCommand::Write(remaining.as_bytes().to_vec())
-                                );
+                    if cursor_col > prompt_end {
+                        let input = input_line[prompt_end..cursor_col].trim();
+                        if !input.is_empty() {
+                            if let Some(best) = self.completion.suggest(input).first() {
+                                if best.len() > input.len() {
+                                    let remaining = &best[input.len()..];
+                                    terminal_data.backend.process_command(
+                                        egui_term::BackendCommand::Write(remaining.as_bytes().to_vec())
+                                    );
+                                }
                             }
                         }
                     }
