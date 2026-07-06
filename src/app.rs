@@ -146,6 +146,7 @@ pub struct App {
     rename_frame_count: u32,
     pending_load_workspace: bool,
     pending_load_from_template: Option<PathBuf>,
+    pending_delete_template: Option<PathBuf>,
     pending_load_scene: bool,
     pending_save_scene_as: bool,
     settings: AppSettings,
@@ -181,9 +182,16 @@ impl App {
             .join(&self.settings.workspace.template_dir)
     }
 
+    fn templates_dir(&self) -> PathBuf {
+        std::env::current_dir()
+            .unwrap_or_default()
+            .join("templates")
+    }
+
     fn refresh_template_files(&mut self) {
-        let ws_dir = self.workspace_dir();
-        self.cached_template_files = std::fs::read_dir(&ws_dir)
+        let dir = self.templates_dir();
+        let _ = std::fs::create_dir_all(&dir);
+        self.cached_template_files = std::fs::read_dir(&dir)
             .into_iter()
             .flat_map(|rd| rd.into_iter())
             .filter_map(|e| e.ok())
@@ -194,6 +202,18 @@ impl App {
                 Some((stem, path))
             })
             .collect();
+    }
+
+    fn save_as_template(&mut self, panel_idx: usize) {
+        let Some(state) = build_panel_state(self, panel_idx) else { return };
+        let dir = self.templates_dir();
+        let _ = std::fs::create_dir_all(&dir);
+        let name = state.panel_name.replace(['/', '\\', ':'], "_");
+        let path = dir.join(format!("{}.json", name));
+        if let Err(e) = save_to_file(&path, &state) {
+            log::error!("Failed to save template: {}", e);
+        }
+        self.refresh_template_files();
     }
 }
 
@@ -232,6 +252,18 @@ fn load_from_file(path: &PathBuf) -> Result<WorkspaceState, anyhow::Error> {
     let json = std::fs::read_to_string(path)?;
     let state: WorkspaceState = serde_json::from_str(&json)?;
     Ok(state)
+}
+
+fn update_tab_id_in_dock(dock: &mut DockState<String>, old_id: &str, new_id: &str) {
+    for (_surface, node) in dock.iter_all_nodes_mut() {
+        if let egui_dock::Node::Leaf { tabs, .. } = node {
+            for tab in tabs.iter_mut() {
+                if tab == old_id {
+                    *tab = new_id.to_string();
+                }
+            }
+        }
+    }
 }
 
 // ── App impl ─────────────────────────────────────────────────────
@@ -311,6 +343,7 @@ impl App {
             rename_frame_count: 0,
             pending_load_workspace: false,
             pending_load_from_template: None,
+            pending_delete_template: None,
             pending_load_scene: false,
             pending_save_scene_as: false,
             settings: AppSettings::default(),
@@ -427,9 +460,41 @@ impl App {
 
         // Handle pending load from template (no binding)
         if let Some(path) = self.pending_load_from_template.take() {
-            if let Ok(state) = load_from_file(&path) {
+            if let Ok(mut state) = load_from_file(&path) {
+                // Add 6-digit random hex suffix to workspace name
+                let random_suffix: String = uuid::Uuid::new_v4().as_bytes()[0..3]
+                    .iter()
+                    .map(|b| format!("{:02x}", b))
+                    .collect();
+                state.panel_name = format!("{} {}", state.panel_name, random_suffix);
+                // Remap terminal IDs with new counter
+                let mut new_terminals = HashMap::new();
+                let mut new_dock_state = state.dock_state.clone();
+                for (old_id, tstate) in &state.terminals {
+                    self.tab_counter += 1;
+                    let new_id = format!("terminal-{}", self.tab_counter);
+                    // Update dock state references
+                    update_tab_id_in_dock(&mut new_dock_state, old_id, &new_id);
+                    new_terminals.insert(new_id, tstate.clone());
+                }
+                state.dock_state = new_dock_state;
+                state.terminals = new_terminals;
                 self.load_workspace_state(ctx, state, None);
                 self.active_panel = self.panels.len() - 1;
+            }
+        }
+
+        // Handle pending delete template
+        if let Some(path) = self.pending_delete_template.take() {
+            let confirmed = rfd::MessageDialog::new()
+                .set_title("确认删除")
+                .set_description("确定要删除这个模版吗？")
+                .set_buttons(rfd::MessageButtons::OkCancel)
+                .show()
+                == rfd::MessageDialogResult::Ok;
+            if confirmed {
+                let _ = std::fs::remove_file(&path);
+                self.refresh_template_files();
             }
         }
 
@@ -856,6 +921,18 @@ impl eframe::App for App {
                             self.rename_frame_count = 0;
                         }
 
+                        response.context_menu(|ui| {
+                            if ui.button("保存为模版").clicked() {
+                                self.save_as_template(i);
+                                ui.close_menu();
+                            }
+                            ui.separator();
+                            if ui.button("关闭").clicked() {
+                                self.close_workspace(i);
+                                ui.close_menu();
+                            }
+                        });
+
                         if self.panels.len() > 1 {
                             if ui.small_button("x").clicked() {
                                 self.close_workspace(i);
@@ -877,17 +954,24 @@ impl eframe::App for App {
             if self.cached_template_files.is_empty() {
                 self.refresh_template_files();
             }
-            let template_files = &self.cached_template_files;
+            let template_files = self.cached_template_files.clone();
             ui.menu_button("Templates", |ui| {
                 if template_files.is_empty() {
                     ui.label("(empty)");
                 } else {
-                    for (display_name, path) in template_files {
+                    for (display_name, path) in &template_files {
                         let path = path.clone();
-                        if ui.button(display_name.as_str()).clicked() {
-                            self.pending_load_from_template = Some(path);
-                            ui.close_menu();
-                        }
+                        let display_name = display_name.clone();
+                        ui.horizontal(|ui| {
+                            if ui.button(display_name.as_str()).clicked() {
+                                self.pending_load_from_template = Some(path.clone());
+                                ui.close_menu();
+                            }
+                            if ui.small_button("×").clicked() {
+                                self.pending_delete_template = Some(path);
+                                ui.close_menu();
+                            }
+                        });
                     }
                 }
             });
