@@ -2,6 +2,7 @@ use anyhow::Result;
 use eframe::egui;
 
 mod app;
+mod completion;
 mod snapshot;
 
 fn main() -> Result<()> {

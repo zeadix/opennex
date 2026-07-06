@@ -1,5 +1,5 @@
 use egui_dock::{DockArea, DockState, NodeIndex, Style, SurfaceIndex};
-use egui_term::{PtyEvent, TerminalBackend, TerminalView, TerminalFont, FontSettings};
+use egui_term::{PtyEvent, TerminalBackend, TerminalView, TerminalFont, FontSettings, Binding, BindingAction, InputKind};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -153,6 +153,7 @@ pub struct App {
     settings_tab: SettingsTab,
     settings_edit: AppSettings,
     cached_template_files: Vec<(String, PathBuf)>,
+    completion: crate::completion::CompletionEngine,
 }
 
 struct TerminalData {
@@ -317,6 +318,7 @@ impl App {
             settings_tab: SettingsTab::Workspace,
             settings_edit: AppSettings::default(),
             cached_template_files: Vec::new(),
+            completion: crate::completion::CompletionEngine::new(),
         }
     }
 
@@ -381,21 +383,21 @@ impl App {
     }
 
     fn process_pending(&mut self, ctx: &egui::Context) {
-        if let Some((panel_idx, _surface_idx, _node_idx)) = self.pending_new_terminal.take() {
+        if let Some((panel_idx, surface_idx, node_idx)) = self.pending_new_terminal.take() {
             let Some(tab_id) = self.create_terminal(ctx) else { return };
-            if let Some(tree) = self.dock_states.get_mut(&panel_idx) {
+            if let Some(dock) = self.dock_states.get_mut(&panel_idx) {
                 if let Some(ref after_tab) = self.pending_split_after.clone() {
-                    if let Some((_surface, split_node_idx, _)) = tree.find_tab(after_tab) {
+                    if let Some((_surface, split_node_idx, _)) = dock.find_tab(after_tab) {
                         if self.pending_split_vertical {
-                            tree.main_surface_mut().split_below(split_node_idx, 0.5, vec![tab_id]);
+                            dock.main_surface_mut().split_below(split_node_idx, 0.5, vec![tab_id]);
                         } else {
-                            tree.main_surface_mut().split_right(split_node_idx, 0.5, vec![tab_id]);
+                            dock.main_surface_mut().split_right(split_node_idx, 0.5, vec![tab_id]);
                         }
                     }
                     self.pending_split_after = None;
                 } else {
-                    // + Tab: add to focused leaf
-                    tree.push_to_focused_leaf(tab_id);
+                    // 精确定位到用户点击的 surface/node
+                    dock[surface_idx][node_idx].append_tab(tab_id);
                 }
             } else {
                 let mut dock = DockState::new(vec![]);
@@ -907,6 +909,7 @@ impl eframe::App for App {
                     .show_add_popup(false)
                     .show_inside(ui, &mut TerminalTabViewer {
                         terminals: &mut self.terminals,
+                        completion: &self.completion,
                         pending_close: &mut self.pending_close,
                         pending_new_terminal: &mut self.pending_new_terminal,
                         pending_split_after: &mut self.pending_split_after,
@@ -917,6 +920,7 @@ impl eframe::App for App {
                         renaming,
                         rename_frame_count: self.rename_frame_count,
                         active_tab,
+                        last_tab_time: None,
                     });
             } else {
                 ui.centered_and_justified(|ui| { ui.label("Click '+ New Workspace' to create one."); });
@@ -929,6 +933,7 @@ impl eframe::App for App {
 
 struct TerminalTabViewer<'a> {
     terminals: &'a mut HashMap<String, TerminalData>,
+    completion: &'a crate::completion::CompletionEngine,
     pending_close: &'a mut Option<String>,
     pending_new_terminal: &'a mut Option<(usize, SurfaceIndex, NodeIndex)>,
     pending_split_after: &'a mut Option<String>,
@@ -939,6 +944,7 @@ struct TerminalTabViewer<'a> {
     renaming: bool,
     rename_frame_count: u32,
     active_tab: Option<String>,
+    last_tab_time: Option<std::time::Instant>,
 }
 
 impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
@@ -1096,11 +1102,131 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                     font_type: egui::FontId::monospace(terminal_data.font_size),
                 });
 
+                // Override Tab to Ignore so we can intercept it
+                let tab_override = vec![(
+                    Binding {
+                        target: InputKind::KeyCode(egui::Key::Tab),
+                        modifiers: egui::Modifiers::NONE,
+                        terminal_mode_include: alacritty_terminal::term::TermMode::empty(),
+                        terminal_mode_exclude: alacritty_terminal::term::TermMode::empty(),
+                    },
+                    BindingAction::Ignore,
+                )];
+
                 let terminal_view = TerminalView::new(ui, &mut terminal_data.backend)
                     .set_focus(!self.renaming)
-                    .set_font(font)
-                    .set_size(ui.available_size());
-                ui.add(terminal_view);
+                    .set_font(font.clone())
+                    .set_size(ui.available_size())
+                    .add_bindings(tab_override);
+                let terminal_response = ui.add(terminal_view);
+
+                // Ghost text: render gray suggestion after cursor (single line, no wrap)
+                {
+                    let content = terminal_data.backend.sync();
+                    let cursor_line = content.grid.cursor.point.line.0 as usize;
+                    let cursor_col = content.grid.cursor.point.column.0 as usize;
+                    let mut input_line = String::new();
+                    for indexed in content.grid.display_iter() {
+                        if indexed.point.line.0 as usize == cursor_line {
+                            input_line.push(indexed.c);
+                        }
+                    }
+                    let prompt_end = input_line.rfind("$ ").or_else(|| input_line.rfind("# ")).map(|p| p + 2).unwrap_or(0);
+                    let input = input_line[prompt_end..cursor_col].trim();
+                    if !input.is_empty() {
+                        if let Some(best) = self.completion.suggest(input).first() {
+                            if best.len() > input.len() {
+                                let remaining = &best[input.len()..];
+                                let term_rect = terminal_response.rect;
+                                let cell_w = content.terminal_size.cell_width as f32;
+                                let cell_h = content.terminal_size.cell_height as f32;
+                                let cursor_pos = egui::pos2(
+                                    term_rect.min.x + cursor_col as f32 * cell_w,
+                                    term_rect.min.y + cursor_line as f32 * cell_h,
+                                );
+                                ui.painter().text(
+                                    cursor_pos,
+                                    egui::Align2::LEFT_CENTER,
+                                    remaining,
+                                    egui::FontId::monospace(terminal_data.font_size),
+                                    egui::Color32::from_rgba_premultiplied(120, 120, 120, 100),
+                                );
+                            }
+                        }
+                    }
+                }
+
+                // Handle Tab key: single tab fills suggestion, double tab sends native shell tab
+                if ui.input(|i| i.key_pressed(egui::Key::Tab)) {
+                    let now = std::time::Instant::now();
+                    let is_double_tab = self.last_tab_time
+                        .map(|t| now.duration_since(t).as_millis() < 500)
+                        .unwrap_or(false);
+                    self.last_tab_time = Some(now);
+
+                    if is_double_tab {
+                        // Double tab: send native shell tab completion
+                        terminal_data.backend.process_command(
+                            egui_term::BackendCommand::Write([0x09].to_vec())
+                        );
+                    } else {
+                        // Single tab: fill our completion suggestion
+                        let content = terminal_data.backend.last_content();
+                        let cursor_line = content.grid.cursor.point.line.0 as usize;
+                        let cursor_col = content.grid.cursor.point.column.0 as usize;
+                        let mut input_line = String::new();
+                        for indexed in content.grid.display_iter() {
+                            if indexed.point.line.0 as usize == cursor_line {
+                                input_line.push(indexed.c);
+                            }
+                        }
+                        let prompt_end = input_line.rfind("$ ").or_else(|| input_line.rfind("# ")).map(|p| p + 2).unwrap_or(0);
+                        let input = input_line[prompt_end..cursor_col].trim();
+                        if !input.is_empty() {
+                            if let Some(best) = self.completion.suggest(input).first() {
+                                if best.len() > input.len() {
+                                    let remaining = &best[input.len()..];
+                                    terminal_data.backend.process_command(
+                                        egui_term::BackendCommand::Write(remaining.as_bytes().to_vec())
+                                    );
+                                }
+                            } else {
+                                terminal_data.backend.process_command(
+                                    egui_term::BackendCommand::Write([0x09].to_vec())
+                                );
+                            }
+                        } else {
+                            terminal_data.backend.process_command(
+                                egui_term::BackendCommand::Write([0x09].to_vec())
+                            );
+                        }
+                    }
+                }
+
+                // Handle Right Arrow key: fill completion suggestion
+                if ui.input(|i| i.key_pressed(egui::Key::ArrowRight)) {
+                    let content = terminal_data.backend.last_content();
+                    let cursor_line = content.grid.cursor.point.line.0 as usize;
+                    let cursor_col = content.grid.cursor.point.column.0 as usize;
+                    let mut input_line = String::new();
+                    for indexed in content.grid.display_iter() {
+                        if indexed.point.line.0 as usize == cursor_line {
+                            input_line.push(indexed.c);
+                        }
+                    }
+                    let prompt_end = input_line.rfind("$ ").or_else(|| input_line.rfind("# ")).map(|p| p + 2).unwrap_or(0);
+                    let input = input_line[prompt_end..cursor_col].trim();
+                    if !input.is_empty() {
+                        if let Some(best) = self.completion.suggest(input).first() {
+                            if best.len() > input.len() {
+                                let remaining = &best[input.len()..];
+                                terminal_data.backend.process_command(
+                                    egui_term::BackendCommand::Write(remaining.as_bytes().to_vec())
+                                );
+                            }
+                        }
+                    }
+                }
             }
         } else {
             ui.label("Terminal not found");
@@ -1135,7 +1261,7 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
         });
     }
 
-    fn context_menu(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab, _surface: SurfaceIndex, _node: NodeIndex) {
+    fn context_menu(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab, surface: SurfaceIndex, node: NodeIndex) {
         if ui.button("Rename").clicked() {
             *self.renaming_terminal = Some(tab.clone());
             if let Some(data) = self.terminals.get(tab) {
@@ -1146,18 +1272,20 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
         }
         ui.separator();
         if ui.button("+ New Tab").clicked() {
-            *self.pending_new_terminal = Some((self.active_panel, SurfaceIndex::main(), NodeIndex::root()));
+            *self.pending_new_terminal = Some((self.active_panel, surface, node));
             ui.close_menu();
         }
         ui.separator();
         if ui.button("Split Horizontal (Right)").clicked() {
             *self.pending_split_after = Some(tab.clone());
             *self.pending_split_vertical = false;
+            *self.pending_new_terminal = Some((self.active_panel, surface, node));
             ui.close_menu();
         }
         if ui.button("Split Vertical (Down)").clicked() {
             *self.pending_split_after = Some(tab.clone());
             *self.pending_split_vertical = true;
+            *self.pending_new_terminal = Some((self.active_panel, surface, node));
             ui.close_menu();
         }
     }

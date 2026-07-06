@@ -6,9 +6,12 @@ use state::{SnapshotCell, TerminalSnapshot};
 /// Take a snapshot of the current terminal state
 pub fn take_snapshot(backend: &mut TerminalBackend, working_dir: &str) -> TerminalSnapshot {
     let content = backend.sync();
-    let size = content.terminal_size;
-    let cols = size.cell_width as usize;
-    let rows = size.cell_height as usize;
+    let mut cols = 0usize;
+    let mut rows = 0usize;
+    for indexed in content.grid.display_iter() {
+        cols = cols.max(indexed.point.column.0 as usize + 1);
+        rows = rows.max(indexed.point.line.0 as usize + 1);
+    }
 
     let mut grid: Vec<Vec<SnapshotCell>> = Vec::with_capacity(rows);
     for _row in 0..rows {
