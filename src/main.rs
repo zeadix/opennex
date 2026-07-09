@@ -3,6 +3,7 @@ use eframe::egui;
 
 mod app;
 mod completion;
+mod history_db;
 mod snapshot;
 
 fn main() -> Result<()> {

@@ -19,3 +19,4 @@ uuid = { version = "1", features = ["v4"] }
 egui-elegance = "0.13"
 alacritty_terminal = "0.25"
 dirs = "6.0.0"
+rusqlite = { version = "0.31", features = ["bundled"] }

@@ -14,8 +14,14 @@ const FONT_SIZE_STEP: f32 = 1.0;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct AppSettings {
+    #[serde(default = "default_max_history")]
+    max_history: usize,
     #[serde(default)]
     settings_window: SettingsWindowState,
+}
+
+fn default_max_history() -> usize {
+    300
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -58,6 +64,7 @@ fn save_settings(settings: &AppSettings) -> Result<(), anyhow::Error> {
 impl Default for AppSettings {
     fn default() -> Self {
         AppSettings {
+            max_history: default_max_history(),
             settings_window: SettingsWindowState::default(),
         }
     }
@@ -106,6 +113,11 @@ struct Panel {
     bound_file: Option<PathBuf>,
 }
 
+struct HistoryNav {
+    entries: Vec<String>,
+    selected: usize,
+}
+
 pub struct App {
     panels: Vec<Panel>,
     active_panel: usize,
@@ -126,11 +138,14 @@ pub struct App {
     pending_delete_template: Option<PathBuf>,
     pending_load_scene: bool,
     pending_save_scene_as: bool,
+    pending_clear_history: bool,
     settings: AppSettings,
     show_settings: bool,
     settings_edit: AppSettings,
     cached_template_files: Vec<(String, PathBuf)>,
     completion: crate::completion::CompletionEngine,
+    history_db: crate::history_db::HistoryDb,
+    history_nav: Option<HistoryNav>,
 }
 
 struct TerminalData {
@@ -139,7 +154,6 @@ struct TerminalData {
     name: String,
     font_size: f32,
     working_directory: String,
-    initial_cd_sent: bool,
     cwd_file: std::path::PathBuf,
     restored_snapshot: Option<crate::snapshot::state::TerminalSnapshot>,
 }
@@ -253,7 +267,7 @@ impl App {
                             name: tstate.name.clone(),
                             font_size: tstate.font_size,
                             working_directory: tstate.working_directory.clone(),
-                            initial_cd_sent: false,
+
                             cwd_file,
                             restored_snapshot: tstate.snapshot.clone(),
                         });
@@ -286,6 +300,7 @@ impl App {
     }
 
     fn empty() -> Self {
+        let db_path = std::env::current_dir().unwrap_or_default().join("history.db");
         App {
             panels: Vec::new(),
             active_panel: 0,
@@ -306,11 +321,14 @@ impl App {
             pending_delete_template: None,
             pending_load_scene: false,
             pending_save_scene_as: false,
+            pending_clear_history: false,
             settings: AppSettings::default(),
             show_settings: false,
             settings_edit: AppSettings::default(),
             cached_template_files: Vec::new(),
             completion: crate::completion::CompletionEngine::new(),
+            history_db: crate::history_db::HistoryDb::new(&db_path, default_max_history()),
+            history_nav: None,
         }
     }
 
@@ -334,7 +352,6 @@ impl App {
                     name: tstate.name.clone(),
                     font_size: tstate.font_size,
                     working_directory: tstate.working_directory.clone(),
-                    initial_cd_sent: false,
                     cwd_file: std::path::PathBuf::from(format!("/tmp/openzoo_cwd_{}", id)),
                     restored_snapshot: tstate.snapshot.clone(),
                 });
@@ -363,7 +380,6 @@ impl App {
             name: format!("Terminal {}", random_suffix),
             font_size: DEFAULT_FONT_SIZE,
             working_directory: cwd.clone(),
-            initial_cd_sent: false,
             cwd_file: std::path::PathBuf::from(format!("/tmp/openzoo_cwd_{}", id)),
             restored_snapshot: None,
         });
@@ -453,6 +469,20 @@ impl App {
             if confirmed {
                 let _ = std::fs::remove_file(&path);
                 self.refresh_template_files();
+            }
+        }
+
+        // Handle pending clear history
+        if self.pending_clear_history {
+            self.pending_clear_history = false;
+            let confirmed = rfd::MessageDialog::new()
+                .set_title("确认清空")
+                .set_description("确定要清空所有命令历史吗？")
+                .set_buttons(rfd::MessageButtons::OkCancel)
+                .show()
+                == rfd::MessageDialogResult::Ok;
+            if confirmed {
+                self.history_db.clear_all();
             }
         }
 
@@ -569,7 +599,6 @@ impl App {
                     name: tstate.name.clone(),
                     font_size: tstate.font_size,
                     working_directory: tstate.working_directory.clone(),
-                    initial_cd_sent: false,
                     cwd_file,
                     restored_snapshot: tstate.snapshot.clone(),
                 });
@@ -766,9 +795,21 @@ impl eframe::App for App {
                     ui.label("  Templates: ./templates/");
 
                     ui.separator();
+                    ui.label("History:");
+                    ui.horizontal(|ui| {
+                        ui.label("Max entries:");
+                        ui.add(egui::DragValue::new(&mut self.settings_edit.max_history)
+                            .range(10..=10000));
+                    });
+                    if ui.button("Clear All History").clicked() {
+                        self.pending_clear_history = true;
+                    }
+
+                    ui.separator();
                     ui.horizontal(|ui| {
                         if ui.button("Save").clicked() {
                             self.settings = self.settings_edit.clone();
+                            self.history_db.set_max_entries(self.settings.max_history);
                             let _ = save_settings(&self.settings);
                         }
                         if ui.button("Cancel").clicked() {
@@ -907,6 +948,9 @@ impl eframe::App for App {
                     .show_inside(ui, &mut TerminalTabViewer {
                         terminals: &mut self.terminals,
                         completion: &self.completion,
+                        history_db: &self.history_db,
+                        history_nav: &mut self.history_nav,
+                        max_history: self.settings.max_history,
                         pending_close: &mut self.pending_close,
                         pending_new_terminal: &mut self.pending_new_terminal,
                         pending_split_after: &mut self.pending_split_after,
@@ -931,6 +975,9 @@ impl eframe::App for App {
 struct TerminalTabViewer<'a> {
     terminals: &'a mut HashMap<String, TerminalData>,
     completion: &'a crate::completion::CompletionEngine,
+    history_db: &'a crate::history_db::HistoryDb,
+    history_nav: &'a mut Option<HistoryNav>,
+    max_history: usize,
     pending_close: &'a mut Option<String>,
     pending_new_terminal: &'a mut Option<(usize, SurfaceIndex, NodeIndex)>,
     pending_split_after: &'a mut Option<String>,
@@ -988,16 +1035,7 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                 return;
             }
 
-            // Send initial cd command to ensure correct working directory
-            if !terminal_data.initial_cd_sent && !terminal_data.working_directory.is_empty() {
-                terminal_data.initial_cd_sent = true;
-                let setup_cmd = format!(
-                    "cd {} && PROMPT_COMMAND='pwd > {} 2>/dev/null'\n",
-                    terminal_data.working_directory,
-                    terminal_data.cwd_file.display()
-                );
-                terminal_data.backend.process_command(egui_term::BackendCommand::Write(setup_cmd.as_bytes().to_vec()));
-            }
+
 
             // Check if there's a restored snapshot to display
             let has_snapshot = terminal_data.restored_snapshot.is_some();
@@ -1113,7 +1151,7 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                 let terminal_view = TerminalView::new(ui, &mut terminal_data.backend)
                     .set_focus(!self.renaming)
                     .set_font(font.clone())
-                    .set_size(ui.available_size())
+                    .set_size(ui.available_rect_before_wrap().size())
                     .add_bindings(tab_override);
                 let terminal_response = ui.add(terminal_view);
 
@@ -1129,7 +1167,7 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                         }
                     }
                     let prompt_end = input_line.rfind("$ ").or_else(|| input_line.rfind("# ")).map(|p| p + 2).unwrap_or(0);
-                    if cursor_col > prompt_end {
+                    if cursor_col > prompt_end && cursor_col <= input_line.len() {
                         let input = input_line[prompt_end..cursor_col].trim();
                         if !input.is_empty() {
                             if let Some(best) = self.completion.suggest(input).first() {
@@ -1179,13 +1217,13 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                                 input_line.push(indexed.c);
                             }
                         }
-                        let prompt_end = input_line.rfind("$ ").or_else(|| input_line.rfind("# ")).map(|p| p + 2).unwrap_or(0);
-                        if cursor_col > prompt_end {
-                            let input = input_line[prompt_end..cursor_col].trim();
-                            if !input.is_empty() {
-                                if let Some(best) = self.completion.suggest(input).first() {
-                                    if best.len() > input.len() {
-                                        let remaining = &best[input.len()..];
+                    let prompt_end = input_line.rfind("$ ").or_else(|| input_line.rfind("# ")).map(|p| p + 2).unwrap_or(0);
+                    if cursor_col > prompt_end && cursor_col <= input_line.len() {
+                        let input = input_line[prompt_end..cursor_col].trim();
+                        if !input.is_empty() {
+                            if let Some(best) = self.completion.suggest(input).first() {
+                                if best.len() > input.len() {
+                                    let remaining = &best[input.len()..];
                                         terminal_data.backend.process_command(
                                             egui_term::BackendCommand::Write(remaining.as_bytes().to_vec())
                                         );
@@ -1216,7 +1254,7 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                         }
                     }
                     let prompt_end = input_line.rfind("$ ").or_else(|| input_line.rfind("# ")).map(|p| p + 2).unwrap_or(0);
-                    if cursor_col > prompt_end {
+                    if cursor_col > prompt_end && cursor_col <= input_line.len() {
                         let input = input_line[prompt_end..cursor_col].trim();
                         if !input.is_empty() {
                             if let Some(best) = self.completion.suggest(input).first() {
@@ -1227,6 +1265,115 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                                     );
                                 }
                             }
+                        }
+                    }
+                }
+
+                // Handle Enter key: record command to history
+                if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    let content = terminal_data.backend.last_content();
+                    let cursor_line = content.grid.cursor.point.line.0 as usize;
+                    let cursor_col = content.grid.cursor.point.column.0 as usize;
+                    let mut input_line = String::new();
+                    for indexed in content.grid.display_iter() {
+                        if indexed.point.line.0 as usize == cursor_line {
+                            input_line.push(indexed.c);
+                        }
+                    }
+                    let prompt_end = input_line.rfind("$ ").or_else(|| input_line.rfind("# ")).map(|p| p + 2).unwrap_or(0);
+                    if cursor_col > prompt_end && cursor_col <= input_line.len() {
+                        let cmd = input_line[prompt_end..cursor_col].trim().to_string();
+                        if !cmd.is_empty() {
+                            self.history_db.add(tab, &cmd);
+                        }
+                    }
+                }
+
+                // Handle Up Arrow key: show history navigation
+                if ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
+                    if self.history_nav.is_none() {
+                        let entries = self.history_db.get(tab, self.max_history);
+                        if !entries.is_empty() {
+                            *self.history_nav = Some(HistoryNav {
+                                entries,
+                                selected: 0,
+                            });
+                        }
+                    }
+                }
+
+                // Handle Down Arrow key: navigate history
+                if ui.input(|i| i.key_pressed(egui::Key::ArrowDown)) {
+                    if let Some(ref mut nav) = *self.history_nav {
+                        if nav.selected + 1 < nav.entries.len() {
+                            nav.selected += 1;
+                        }
+                    }
+                }
+
+                // Handle Escape: close history nav
+                if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    *self.history_nav = None;
+                }
+
+                // Render history navigation list
+                if let Some(ref nav) = *self.history_nav {
+                    let content = terminal_data.backend.sync();
+                    let term_rect = terminal_response.rect;
+                    let cell_h = content.terminal_size.cell_height as f32;
+                    let cursor_line = content.grid.cursor.point.line.0 as usize;
+                    let list_top = term_rect.min.y + (cursor_line as f32 + 1.0) * cell_h;
+                    let list_width = 400.0;
+                    let max_visible = 10;
+                    let visible_count = nav.entries.len().min(max_visible);
+                    let list_height = visible_count as f32 * cell_h;
+
+                    let list_rect = egui::Rect::from_min_size(
+                        egui::pos2(term_rect.min.x, list_top),
+                        egui::vec2(list_width, list_height),
+                    );
+
+                    ui.painter().rect_filled(
+                        list_rect,
+                        0.0,
+                        egui::Color32::from_rgba_unmultiplied(30, 30, 30, 240),
+                    );
+
+                    let start_idx = if nav.selected >= max_visible {
+                        nav.selected - max_visible + 1
+                    } else {
+                        0
+                    };
+
+                    for (i, entry) in nav.entries[start_idx..].iter().enumerate().take(max_visible) {
+                        let y = list_top + i as f32 * cell_h;
+                        let is_selected = start_idx + i == nav.selected;
+                        let bg = if is_selected {
+                            egui::Color32::from_rgba_unmultiplied(60, 60, 80, 255)
+                        } else {
+                            egui::Color32::from_rgba_unmultiplied(30, 30, 30, 240)
+                        };
+                        ui.painter().rect_filled(
+                            egui::Rect::from_min_size(egui::pos2(term_rect.min.x, y), egui::vec2(list_width, cell_h)),
+                            0.0,
+                            bg,
+                        );
+                        ui.painter().text(
+                            egui::pos2(term_rect.min.x + 4.0, y + cell_h * 0.5),
+                            egui::Align2::LEFT_CENTER,
+                            entry,
+                            egui::FontId::monospace(terminal_data.font_size),
+                            egui::Color32::WHITE,
+                        );
+                    }
+
+                    // Handle Enter to confirm selection
+                    if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        if let Some(selected) = self.history_nav.as_ref().map(|n| n.entries[n.selected].clone()) {
+                            terminal_data.backend.process_command(
+                                egui_term::BackendCommand::Write(selected.as_bytes().to_vec())
+                            );
+                            *self.history_nav = None;
                         }
                     }
                 }
@@ -1291,5 +1438,9 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
             *self.pending_new_terminal = Some((self.active_panel, surface, node));
             ui.close_menu();
         }
+    }
+
+    fn scroll_bars(&self, _tab: &Self::Tab) -> [bool; 2] {
+        [false, false]
     }
 }
