@@ -146,6 +146,7 @@ pub struct App {
     completion: crate::completion::CompletionEngine,
     history_db: crate::history_db::HistoryDb,
     history_nav: Option<HistoryNav>,
+    focused_terminal: Option<String>,
 }
 
 struct TerminalData {
@@ -329,6 +330,7 @@ impl App {
             completion: crate::completion::CompletionEngine::new(),
             history_db: crate::history_db::HistoryDb::new(&db_path, default_max_history()),
             history_nav: None,
+            focused_terminal: None,
         }
     }
 
@@ -383,6 +385,9 @@ impl App {
             cwd_file: std::path::PathBuf::from(format!("/tmp/openzoo_cwd_{}", id)),
             restored_snapshot: None,
         });
+        if self.focused_terminal.is_none() {
+            self.focused_terminal = Some(id.clone());
+        }
         Some(id)
     }
 
@@ -962,6 +967,7 @@ impl eframe::App for App {
                         rename_frame_count: self.rename_frame_count,
                         active_tab,
                         last_tab_time: None,
+                        focused_terminal: &mut self.focused_terminal,
                     });
             } else {
                 ui.centered_and_justified(|ui| { ui.label("Click '+ New Workspace' to create one."); });
@@ -989,6 +995,7 @@ struct TerminalTabViewer<'a> {
     rename_frame_count: u32,
     active_tab: Option<String>,
     last_tab_time: Option<std::time::Instant>,
+    focused_terminal: &'a mut Option<String>,
 }
 
 impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
@@ -1148,12 +1155,18 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                     BindingAction::Ignore,
                 )];
 
+                let is_focused = self.focused_terminal.as_ref() == Some(tab);
                 let terminal_view = TerminalView::new(ui, &mut terminal_data.backend)
-                    .set_focus(!self.renaming)
+                    .set_focus(is_focused && !self.renaming)
                     .set_font(font.clone())
                     .set_size(ui.available_rect_before_wrap().size())
                     .add_bindings(tab_override);
                 let terminal_response = ui.add(terminal_view);
+
+                // Click to focus
+                if terminal_response.clicked() {
+                    *self.focused_terminal = Some(tab.clone());
+                }
 
                 // Ghost text: render gray suggestion after cursor (single line, no wrap)
                 {
