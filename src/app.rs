@@ -1,4 +1,5 @@
 use egui_dock::{DockArea, DockState, NodeIndex, Style, SurfaceIndex};
+use egui::EventFilter;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -525,6 +526,15 @@ impl eframe::App for App {
         let renaming = self.is_renaming();
         if renaming { self.rename_frame_count += 1; }
 
+        // Consume Tab key to prevent egui focus navigation, send to focused terminal
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab)) {
+            if let Some(tab) = &self.focused_terminal.clone() {
+                if let Some(td) = self.terminals.get_mut(tab) {
+                    td.instance.write(&[0x09]);
+                }
+            }
+        }
+
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
                 ui.menu_button("File", |ui| {
@@ -803,6 +813,18 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
 
                 let terminal_response = render_terminal(ui, &td.instance, cell_w, cell_h);
 
+                if is_focused {
+                    terminal_response.request_focus();
+                    ui.ctx().memory_mut(|mem| {
+                        mem.set_focus_lock_filter(terminal_response.id, EventFilter {
+                            tab: true,
+                            horizontal_arrows: true,
+                            vertical_arrows: true,
+                            escape: true,
+                        });
+                    });
+                }
+
                 if terminal_response.clicked() {
                     *self.focused_terminal = Some(tab.clone());
                 }
@@ -834,34 +856,6 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                                                 self.history_db.add(tab, &cmd);
                                             }
                                             td.instance.write(b"\r");
-                                        }
-                                    }
-                                    egui::Key::Tab => {
-                                        let now = std::time::Instant::now();
-                                        let is_double = td.instance.last_tab_time
-                                            .map(|t| now.duration_since(t).as_millis() < 500)
-                                            .unwrap_or(false);
-                                        td.instance.last_tab_time = Some(now);
-                                        if is_double {
-                                            td.instance.write(&[0x09]);
-                                        } else {
-                                            let line = td.instance.get_current_line();
-                                            let prompt_end = line.rfind("$ ").or_else(|| line.rfind("# ")).map(|p| p + 2).unwrap_or(0);
-                                            let input_text = line[prompt_end..].trim().to_string();
-                                            if !input_text.is_empty() {
-                                                if let Some(best) = self.completion.suggest(&input_text).first() {
-                                                    if best.len() > input_text.len() {
-                                                        let remaining = &best[input_text.len()..];
-                                                        td.instance.write(remaining.as_bytes());
-                                                    } else {
-                                                        td.instance.write(&[0x09]);
-                                                    }
-                                                } else {
-                                                    td.instance.write(&[0x09]);
-                                                }
-                                            } else {
-                                                td.instance.write(&[0x09]);
-                                            }
                                         }
                                     }
                                     egui::Key::ArrowUp => {
