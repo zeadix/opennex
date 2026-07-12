@@ -40,6 +40,7 @@ pub struct TerminalInstance {
     pub history_nav: Option<crate::app::HistoryNav>,
     pub screen_rows: usize,
     pub screen_cols: usize,
+    grid_initialized: bool,
 }
 
 fn srgb_to_egui(srgb: wezterm_term::color::SrgbaTuple) -> egui::Color32 {
@@ -117,6 +118,7 @@ writer: user_writer,
             history_nav: None,
             screen_rows: rows as usize,
             screen_cols: cols as usize,
+            grid_initialized: false,
         })
     }
 
@@ -126,6 +128,22 @@ writer: user_writer,
             pixel_width: cols * 8,
             pixel_height: rows * 18,
         });
+
+        if !self.grid_initialized {
+            self.grid_initialized = true;
+            if let Ok(mut term) = self.terminal.lock() {
+                let size = TerminalSize {
+                    rows: rows as usize,
+                    cols: cols as usize,
+                    pixel_width: cols as usize * 8,
+                    pixel_height: rows as usize * 18,
+                    dpi: 96,
+                };
+                term.resize(size);
+                self.screen_cols = cols as usize;
+                self.screen_rows = rows as usize;
+            }
+        }
     }
 
     pub fn write(&mut self, data: &[u8]) {

@@ -418,10 +418,11 @@ impl App {
     }
 
     fn process_pending(&mut self, ctx: &egui::Context) {
-        if let Some((panel_idx, _surface_idx, _node_idx)) = self.pending_new_terminal.take() {
+        if let Some((panel_idx, surface_idx, node_idx)) = self.pending_new_terminal.take() {
             let _split_after = self.pending_split_after.take();
             let Some(tab_id) = self.create_terminal_inner(ctx) else { return };
             if let Some(tree) = self.dock_states.get_mut(&panel_idx) {
+                tree.set_focused_node_and_surface((surface_idx, node_idx));
                 tree.push_to_focused_leaf(tab_id);
             }
         }
