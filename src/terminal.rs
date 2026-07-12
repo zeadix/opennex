@@ -182,11 +182,13 @@ pub fn render_terminal(
     instance: &TerminalInstance,
     cell_w: f32,
     cell_h: f32,
+    bg_color: egui::Color32,
+    fg_color: egui::Color32,
 ) -> egui::Response {
     let (response, painter) = ui.allocate_painter(ui.available_size(), egui::Sense::click());
     let rect = response.rect;
 
-    painter.rect_filled(rect, egui::CornerRadius::ZERO, egui::Color32::BLACK);
+    painter.rect_filled(rect, egui::CornerRadius::ZERO, bg_color);
 
     if let Ok(mut term) = instance.terminal.lock() {
         let palette = term.palette();
@@ -195,20 +197,25 @@ pub fn render_terminal(
         let rows = show_rows.min(instance.screen_rows);
         let cols = show_cols.min(instance.screen_cols);
         let s = term.screen_mut();
+        let mut skip_col = false;
 
         for row in 0..rows {
             let y = rect.min.y + row as f32 * cell_h;
+            skip_col = false;
             for col in 0..cols {
+                if skip_col { skip_col = false; continue; }
                 if let Some(cell) = s.get_cell(col, row as i64) {
                     let text = cell.str();
+                    if text.is_empty() || text == " " { continue; }
                     let attrs = cell.attrs();
                     let fg = srgb_to_egui(palette.resolve_fg(attrs.foreground()));
                     let bg = srgb_to_egui(palette.resolve_bg(attrs.background()));
                     let x = rect.min.x + col as f32 * cell_w;
+                    let cw = cell.width().max(1) as f32 * cell_w;
 
-                    if bg != egui::Color32::BLACK {
+                    if bg != bg_color {
                         painter.rect_filled(
-                            egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(cell_w, cell_h)),
+                            egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(cw, cell_h)),
                             egui::CornerRadius::ZERO, bg,
                         );
                     }
@@ -219,6 +226,7 @@ pub fn render_terminal(
                         egui::FontId::monospace(instance.font_size),
                         fg,
                     );
+                    if cell.width() > 1 { skip_col = true; }
                 }
             }
         }

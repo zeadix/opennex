@@ -15,11 +15,31 @@ const FONT_SIZE_STEP: f32 = 1.0;
 struct AppSettings {
     #[serde(default = "default_max_history")]
     max_history: usize,
+    #[serde(default = "default_scrollback")]
+    scrollback: usize,
+    #[serde(default)]
+    font_size: f32,
+    #[serde(default = "default_bg")]
+    bg_color: [u8; 3],
+    #[serde(default = "default_fg")]
+    fg_color: [u8; 3],
+    #[serde(default = "default_menu_bg")]
+    menu_bg_color: [u8; 3],
+    #[serde(default = "default_menu_fg")]
+    menu_fg_color: [u8; 3],
+    #[serde(default = "default_menu_font_size")]
+    menu_font_size: f32,
     #[serde(default)]
     settings_window: SettingsWindowState,
 }
 
 fn default_max_history() -> usize { 300 }
+fn default_scrollback() -> usize { 10000 }
+fn default_bg() -> [u8; 3] { [0, 0, 0] }
+fn default_fg() -> [u8; 3] { [255, 255, 255] }
+fn default_menu_bg() -> [u8; 3] { [30, 30, 30] }
+fn default_menu_fg() -> [u8; 3] { [255, 255, 255] }
+fn default_menu_font_size() -> f32 { 14.0 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct SettingsWindowState {
@@ -54,7 +74,17 @@ fn save_settings(settings: &AppSettings) -> Result<(), anyhow::Error> {
 
 impl Default for AppSettings {
     fn default() -> Self {
-        AppSettings { max_history: default_max_history(), settings_window: SettingsWindowState::default() }
+        AppSettings {
+            max_history: default_max_history(),
+            scrollback: default_scrollback(),
+            font_size: 14.0,
+            bg_color: default_bg(),
+            fg_color: default_fg(),
+            menu_bg_color: default_menu_bg(),
+            menu_fg_color: default_menu_fg(),
+            menu_font_size: default_menu_font_size(),
+            settings_window: SettingsWindowState::default(),
+        }
     }
 }
 
@@ -126,6 +156,7 @@ pub struct App {
     settings: AppSettings,
     show_settings: bool,
     settings_edit: AppSettings,
+    settings_tab: usize,
     cached_template_files: Vec<(String, PathBuf)>,
     completion: crate::completion::CompletionEngine,
     history_db: crate::history_db::HistoryDb,
@@ -246,6 +277,15 @@ impl App {
     pub fn new(cc: &eframe::CreationContext) -> Self {
         let settings = load_settings();
         let ctx = &cc.egui_ctx.clone();
+
+        // Try to add CJK font for Chinese/Japanese character support
+        if let Ok(cjk_data) = std::fs::read("/usr/share/fonts/opentype/noto/NotoSansCJK-Medium.ttc") {
+            let mut fonts = egui::FontDefinitions::default();
+            fonts.font_data.insert("noto-cjk".into(), std::sync::Arc::new(egui::FontData::from_owned(cjk_data).tweak(egui::FontTweak { scale: 0.9, ..Default::default() })));
+            fonts.families.get_mut(&egui::FontFamily::Proportional).unwrap().insert(0, "noto-cjk".into());
+            fonts.families.get_mut(&egui::FontFamily::Monospace).unwrap().insert(0, "noto-cjk".into());
+            ctx.set_fonts(fonts);
+        }
         let db_path = std::env::current_dir().unwrap_or_default().join("history.db");
 
         let mut app = App {
@@ -272,6 +312,7 @@ impl App {
             settings,
             show_settings: false,
             settings_edit: AppSettings::default(),
+            settings_tab: 0,
             cached_template_files: Vec::new(),
             completion: crate::completion::CompletionEngine::new(),
             history_db: crate::history_db::HistoryDb::new(&db_path, default_max_history()),
@@ -535,6 +576,18 @@ impl eframe::App for App {
             }
         }
 
+        // Ctrl+Up/Down: switch workspace
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::ArrowUp)) {
+            if self.active_panel > 0 {
+                self.active_panel -= 1;
+            }
+        }
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::ArrowDown)) {
+            if self.active_panel + 1 < self.panels.len() {
+                self.active_panel += 1;
+            }
+        }
+
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
                 ui.menu_button("File", |ui| {
@@ -575,27 +628,88 @@ impl eframe::App for App {
             let mut open = self.show_settings;
             let ws = &self.settings_edit.settings_window;
             egui::Window::new("Settings").open(&mut open).resizable(true)
-                .default_pos([ws.x, ws.y]).default_size([ws.width, ws.height]).max_width(600.0)
+                .default_pos([ws.x, ws.y]).default_size([ws.width, ws.height])
                 .show(ctx, |ui| {
-                    ui.heading("Settings"); ui.separator();
-                    ui.label("Scene and templates use fixed paths:");
-                    ui.label("  Scene: ./scene.json");
-                    ui.label("  Templates: ./templates/");
-                    ui.separator();
-                    ui.label("History:");
                     ui.horizontal(|ui| {
-                        ui.label("Max entries:");
-                        ui.add(egui::DragValue::new(&mut self.settings_edit.max_history).range(10..=10000));
+                        let tabs = ["通用", "外观", "快捷键"];
+                        for (i, label) in tabs.iter().enumerate() {
+                            let selected = self.settings_tab == i;
+                            if ui.selectable_label(selected, *label).clicked() {
+                                self.settings_tab = i;
+                            }
+                        }
                     });
-                    if ui.button("Clear All History").clicked() { self.pending_clear_history = true; }
+                    ui.separator();
+
+                    match self.settings_tab {
+                        0 => {
+                            ui.label("Scene and templates use fixed paths:");
+                            ui.label("  Scene: ./scene.json");
+                            ui.label("  Templates: ./templates/");
+                            ui.separator();
+                            ui.label("历史记录:");
+                            ui.horizontal(|ui| {
+                                ui.label("最大条数:");
+                                ui.add(egui::DragValue::new(&mut self.settings_edit.max_history).range(10..=10000));
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label("滚动回溯:");
+                                ui.add(egui::DragValue::new(&mut self.settings_edit.scrollback).range(100..=50000));
+                            });
+                            if ui.button("清空所有历史").clicked() { self.pending_clear_history = true; }
+                        }
+                        1 => {
+                            ui.label("终端外观:");
+                            ui.horizontal(|ui| {
+                                ui.label("字号:");
+                                ui.add(egui::DragValue::new(&mut self.settings_edit.font_size).range(8.0..=32.0));
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label("背景色:");
+                                egui::widgets::color_picker::color_edit_button_srgb(ui, &mut self.settings_edit.bg_color);
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label("前景色:");
+                                egui::widgets::color_picker::color_edit_button_srgb(ui, &mut self.settings_edit.fg_color);
+                            });
+                            ui.separator();
+                            ui.label("指令菜单:");
+                            ui.horizontal(|ui| {
+                                ui.label("背景色:");
+                                egui::widgets::color_picker::color_edit_button_srgb(ui, &mut self.settings_edit.menu_bg_color);
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label("文字色:");
+                                egui::widgets::color_picker::color_edit_button_srgb(ui, &mut self.settings_edit.menu_fg_color);
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label("字号:");
+                                ui.add(egui::DragValue::new(&mut self.settings_edit.menu_font_size).range(8.0..=32.0));
+                            });
+                        }
+                        2 => {
+                            ui.label("快捷键 (开发中)");
+                            ui.separator();
+                            ui.label("Ctrl+C: 复制");
+                            ui.label("Ctrl+V: 粘贴");
+                            ui.label("Ctrl+Shift+N: 新建终端");
+                            ui.label("Ctrl+W: 关闭终端");
+                            ui.label("Ctrl+Tab: 切换终端");
+                            ui.label("Ctrl+Shift+T: 新建标签页");
+                        }
+                        _ => {}
+                    }
+
                     ui.separator();
                     ui.horizontal(|ui| {
-                        if ui.button("Save").clicked() {
+                        if ui.button("保存").clicked() {
                             self.settings = self.settings_edit.clone();
                             self.history_db.set_max_entries(self.settings.max_history);
                             let _ = save_settings(&self.settings);
                         }
-                        if ui.button("Cancel").clicked() { self.settings_edit = self.settings.clone(); }
+                        if ui.button("取消").clicked() {
+                            self.settings_edit = self.settings.clone();
+                        }
                     });
                 });
             self.show_settings = open;
@@ -691,6 +805,11 @@ impl eframe::App for App {
                         completion: &self.completion,
                         history_db: &self.history_db,
                         max_history: self.settings.max_history,
+                        bg_color: self.settings.bg_color,
+                        fg_color: self.settings.fg_color,
+                        menu_bg_color: self.settings.menu_bg_color,
+                        menu_fg_color: self.settings.menu_fg_color,
+                        menu_font_size: self.settings.menu_font_size,
                         pending_close: &mut self.pending_close,
                         pending_new_terminal: &mut self.pending_new_terminal,
                         pending_split_after: &mut self.pending_split_after,
@@ -715,6 +834,11 @@ struct TerminalTabViewer<'a> {
     completion: &'a crate::completion::CompletionEngine,
     history_db: &'a crate::history_db::HistoryDb,
     max_history: usize,
+    bg_color: [u8; 3],
+    fg_color: [u8; 3],
+    menu_bg_color: [u8; 3],
+    menu_fg_color: [u8; 3],
+    menu_font_size: f32,
     pending_close: &'a mut Option<String>,
     pending_new_terminal: &'a mut Option<(usize, SurfaceIndex, NodeIndex)>,
     pending_split_after: &'a mut Option<String>,
@@ -811,7 +935,9 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                     td.instance.history_nav = None;
                 }
 
-                let terminal_response = render_terminal(ui, &td.instance, cell_w, cell_h);
+                let terminal_response = render_terminal(ui, &td.instance, cell_w, cell_h,
+                    egui::Color32::from_rgb(self.bg_color[0], self.bg_color[1], self.bg_color[2]),
+                    egui::Color32::from_rgb(self.fg_color[0], self.fg_color[1], self.fg_color[2]));
 
                 if is_focused {
                     terminal_response.request_focus();
@@ -949,27 +1075,29 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                             egui::pos2(terminal_response.rect.min.x, list_top),
                             egui::vec2(list_width, list_height),
                         );
-                        ui.painter().rect_filled(list_rect, 0.0, egui::Color32::from_rgba_unmultiplied(30, 30, 30, 240));
+                        let menu_bg = egui::Color32::from_rgb(self.menu_bg_color[0], self.menu_bg_color[1], self.menu_bg_color[2]);
+                        let menu_fg = egui::Color32::from_rgb(self.menu_fg_color[0], self.menu_fg_color[1], self.menu_fg_color[2]);
+                        ui.painter().rect_filled(list_rect, 0.0, menu_bg);
 
                         let start_idx = if nav.selected >= max_visible { nav.selected - max_visible + 1 } else { 0 };
                         for (i, entry) in nav.entries[start_idx..].iter().enumerate().take(max_visible) {
                             let y = list_top + i as f32 * cell_h;
                             let is_selected = start_idx + i == nav.selected;
-                            let bg = if is_selected {
+                            let item_bg = if is_selected {
                                 egui::Color32::from_rgba_unmultiplied(60, 60, 80, 255)
                             } else {
-                                egui::Color32::from_rgba_unmultiplied(30, 30, 30, 240)
+                                menu_bg
                             };
                             ui.painter().rect_filled(
                                 egui::Rect::from_min_size(egui::pos2(terminal_response.rect.min.x, y), egui::vec2(list_width, cell_h)),
-                                0.0, bg,
+                                0.0, item_bg,
                             );
                             ui.painter().text(
                                 egui::pos2(terminal_response.rect.min.x + 4.0, y),
                                 egui::Align2::LEFT_TOP,
                                 &entry,
-                                egui::FontId::monospace(td.font_size),
-                                egui::Color32::WHITE,
+                                egui::FontId::monospace(self.menu_font_size),
+                                menu_fg,
                             );
                         }
 
@@ -1012,6 +1140,11 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                 *self.terminal_rename_buffer = data.name.clone();
             }
             self.rename_frame_count = 0;
+            ui.close_menu();
+        }
+        ui.separator();
+        if ui.button("清空指令历史").clicked() {
+            self.history_db.clear(tab);
             ui.close_menu();
         }
         ui.separator();
