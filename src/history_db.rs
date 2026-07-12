@@ -26,6 +26,16 @@ impl HistoryDb {
         if trimmed.is_empty() || trimmed.len() <= 1 {
             return;
         }
+        let last: Result<String, _> = self.conn.query_row(
+            "SELECT command FROM command_history WHERE terminal_id = ?1 ORDER BY id DESC LIMIT 1",
+            params![terminal_id],
+            |row| row.get(0),
+        );
+        if let Ok(last_cmd) = last {
+            if last_cmd.trim() == trimmed {
+                return;
+            }
+        }
         self.conn.execute(
             "INSERT INTO command_history (terminal_id, command) VALUES (?1, ?2)",
             params![terminal_id, trimmed],

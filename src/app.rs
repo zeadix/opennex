@@ -128,7 +128,6 @@ pub struct App {
     cached_template_files: Vec<(String, PathBuf)>,
     completion: crate::completion::CompletionEngine,
     history_db: crate::history_db::HistoryDb,
-    history_nav: Option<HistoryNav>,
     focused_terminal: Option<String>,
 }
 
@@ -275,7 +274,6 @@ impl App {
             cached_template_files: Vec::new(),
             completion: crate::completion::CompletionEngine::new(),
             history_db: crate::history_db::HistoryDb::new(&db_path, default_max_history()),
-            history_nav: None,
             focused_terminal: None,
         };
 
@@ -682,7 +680,6 @@ impl eframe::App for App {
                         terminals: &mut self.terminals,
                         completion: &self.completion,
                         history_db: &self.history_db,
-                        history_nav: &mut self.history_nav,
                         max_history: self.settings.max_history,
                         pending_close: &mut self.pending_close,
                         pending_new_terminal: &mut self.pending_new_terminal,
@@ -707,7 +704,6 @@ struct TerminalTabViewer<'a> {
     terminals: &'a mut HashMap<String, TerminalData>,
     completion: &'a crate::completion::CompletionEngine,
     history_db: &'a crate::history_db::HistoryDb,
-    history_nav: &'a mut Option<HistoryNav>,
     max_history: usize,
     pending_close: &'a mut Option<String>,
     pending_new_terminal: &'a mut Option<(usize, SurfaceIndex, NodeIndex)>,
@@ -794,6 +790,17 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                 }
 
                 let is_focused = self.focused_terminal.as_ref() == Some(tab);
+
+                // Auto-focus when this tab becomes active
+                if self.active_tab.as_ref() == Some(tab) {
+                    *self.focused_terminal = Some(tab.clone());
+                }
+
+                // Close menu when terminal loses focus
+                if !is_focused {
+                    td.instance.history_nav = None;
+                }
+
                 let terminal_response = render_terminal(ui, &td.instance, cell_w, cell_h);
 
                 if terminal_response.clicked() {
@@ -817,13 +824,17 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                             egui::Event::Key { key, pressed, modifiers, .. } if *pressed => {
                                 match key {
                                     egui::Key::Enter => {
-                                        let line = td.instance.get_current_line();
-                                        let prompt_end = line.rfind("$ ").or_else(|| line.rfind("# ")).map(|p| p + 2).unwrap_or(0);
-                                        let cmd = line[prompt_end..].trim().to_string();
-                                        if !cmd.is_empty() {
-                                            self.history_db.add(tab, &cmd);
+                                        if td.instance.history_nav.is_some() {
+                                            // Menu is open: Enter is handled by the rendering section
+                                        } else {
+                                            let line = td.instance.get_current_line();
+                                            let prompt_end = line.rfind("$ ").or_else(|| line.rfind("# ")).map(|p| p + 2).unwrap_or(0);
+                                            let cmd = line[prompt_end..].trim().to_string();
+                                            if !cmd.is_empty() {
+                                                self.history_db.add(tab, &cmd);
+                                            }
+                                            td.instance.write(b"\r");
                                         }
-                                        td.instance.write(b"\r");
                                     }
                                     egui::Key::Tab => {
                                         let now = std::time::Instant::now();
@@ -854,21 +865,23 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                                         }
                                     }
                                     egui::Key::ArrowUp => {
-                                        if self.history_nav.is_none() {
+                                        if td.instance.history_nav.is_some() {
+                                            if let Some(ref mut nav) = td.instance.history_nav {
+                                                if nav.selected > 0 {
+                                                    nav.selected -= 1;
+                                                }
+                                            }
+                                        } else {
                                             let entries = self.history_db.get(tab, self.max_history);
                                             if !entries.is_empty() {
-                                                *self.history_nav = Some(HistoryNav { entries, selected: 0 });
+                                                td.instance.history_nav = Some(HistoryNav { entries, selected: 0 });
+                                            } else {
+                                                td.instance.write(b"\x1b[A");
                                             }
-                                        }
-                                        let line = td.instance.get_current_line();
-                                        let cursor_col = td.instance.cursor_position().0;
-                                        let prompt_end = line.rfind("$ ").or_else(|| line.rfind("# ")).map(|p| p + 2).unwrap_or(0);
-                                        if cursor_col <= prompt_end && self.history_nav.is_none() {
-                                            td.instance.write(b"\x1b[A");
                                         }
                                     }
                                     egui::Key::ArrowDown => {
-                                        if let Some(ref mut nav) = *self.history_nav {
+                                        if let Some(ref mut nav) = td.instance.history_nav {
                                             if nav.selected + 1 < nav.entries.len() {
                                                 nav.selected += 1;
                                             }
@@ -877,7 +890,7 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                                         }
                                     }
                                     egui::Key::ArrowRight => {
-                                        if self.history_nav.is_none() {
+                                        if td.instance.history_nav.is_none() {
                                             let line = td.instance.get_current_line();
                                             let prompt_end = line.rfind("$ ").or_else(|| line.rfind("# ")).map(|p| p + 2).unwrap_or(0);
                                             let input_text = line[prompt_end..].trim().to_string();
@@ -900,8 +913,11 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                                         }
                                     }
                                     egui::Key::Escape => {
-                                        *self.history_nav = None;
-                                        td.instance.write(b"\x1b");
+                                        if td.instance.history_nav.is_some() {
+                                            td.instance.history_nav = None;
+                                        } else {
+                                            td.instance.write(b"\x1b");
+                                        }
                                     }
                                     egui::Key::Backspace => td.instance.write(b"\x7f"),
                                     egui::Key::Delete => td.instance.write(b"\x1b[3~"),
@@ -921,13 +937,20 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                         }
                     }
 
-                    if let Some(ref nav) = *self.history_nav {
+                    if let Some(ref nav) = td.instance.history_nav {
                         let (_, cursor_row) = td.instance.cursor_position();
-                        let list_top = terminal_response.rect.min.y + (cursor_row as f32 + 1.0) * cell_h;
                         let list_width = 400.0;
                         let max_visible = 10;
                         let visible_count = nav.entries.len().min(max_visible);
                         let list_height = visible_count as f32 * cell_h;
+                        let below_top = terminal_response.rect.min.y + (cursor_row as f32 + 1.0) * cell_h;
+                        let below_space = terminal_response.rect.max.y - below_top;
+                        let list_top = if below_space >= list_height {
+                            below_top
+                        } else {
+                            (terminal_response.rect.min.y + cursor_row as f32 * cell_h - list_height)
+                                .max(terminal_response.rect.min.y)
+                        };
                         let list_rect = egui::Rect::from_min_size(
                             egui::pos2(terminal_response.rect.min.x, list_top),
                             egui::vec2(list_width, list_height),
@@ -957,9 +980,9 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                         }
 
                         if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                            if let Some(selected) = self.history_nav.as_ref().map(|n| n.entries[n.selected].clone()) {
+                            if let Some(selected) = td.instance.history_nav.as_ref().map(|n| n.entries[n.selected].clone()) {
                                 td.instance.write(selected.as_bytes());
-                                *self.history_nav = None;
+                                td.instance.history_nav = None;
                             }
                         }
                     }
