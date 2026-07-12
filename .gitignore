@@ -1,3 +1,6 @@
 /target
 Cargo.lock
 workspace/
+debug.log
+history.db
+*.json
