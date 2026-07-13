@@ -1041,7 +1041,7 @@ impl eframe::App for App {
                 } else {
                     ui.horizontal(|ui| {
                         let panel_name = self.panels[i].name.clone();
-                        let response = ui.selectable_label(is_active, &panel_name);
+                        let mut response = ui.selectable_label(is_active, &panel_name);
                         if response.double_clicked() && !renaming {
                             self.renaming_panel = Some(i);
                             self.rename_buffer = panel_name;
@@ -1051,15 +1051,13 @@ impl eframe::App for App {
                             to_select = Some(i);
                         }
 
-                        // Drag to reorder
-                        let drag_id = egui::Id::new(("panel_drag", i));
-                        let drag_resp = ui.interact(response.rect, drag_id, egui::Sense::drag());
-                        if drag_resp.drag_started() {
+                        // Drag to reorder —叠加到同一 response 上，避免竞争交互
+                        response = response.interact(egui::Sense::drag());
+                        if response.drag_started() {
                             self.drag_src_panel = Some(i);
                         }
-                        if drag_resp.dragged() && self.drag_src_panel.is_some() {
+                        if response.dragged() && self.drag_src_panel.is_some() {
                             if let Some(pointer) = ui.input(|i| i.pointer.interact_pos()) {
-                                // Check if pointer is over a different panel
                                 for j in 0..panel_count {
                                     if j == i { continue; }
                                     let other_rect = ui.memory(|m| m.area_rect(egui::Id::new(("panel_drag", j))));
@@ -1075,7 +1073,7 @@ impl eframe::App for App {
                                 }
                             }
                         }
-                        if drag_resp.drag_stopped() {
+                        if response.drag_stopped() {
                             self.drag_src_panel = None;
                             self.drag_dst_panel = None;
                         }
