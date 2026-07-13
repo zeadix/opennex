@@ -31,6 +31,8 @@ struct AppSettings {
     menu_font_size: f32,
     #[serde(default)]
     settings_window: SettingsWindowState,
+    #[serde(default = "default_key_binds")]
+    key_binds: HashMap<String, ShortcutBinding>,
 }
 
 fn default_max_history() -> usize { 300 }
@@ -40,6 +42,72 @@ fn default_fg() -> [u8; 3] { [255, 255, 255] }
 fn default_menu_bg() -> [u8; 3] { [30, 30, 30] }
 fn default_menu_fg() -> [u8; 3] { [255, 255, 255] }
 fn default_menu_font_size() -> f32 { 14.0 }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ShortcutBinding {
+    key: String,
+    ctrl: bool,
+    shift: bool,
+    alt: bool,
+}
+
+fn default_key_binds() -> HashMap<String, ShortcutBinding> {
+    let mut m = HashMap::new();
+    m.insert("new_terminal".into(), ShortcutBinding { key: "N".into(), ctrl: true, shift: true, alt: false });
+    m.insert("close_terminal".into(), ShortcutBinding { key: "W".into(), ctrl: true, shift: false, alt: false });
+    m.insert("workspace_up".into(), ShortcutBinding { key: "ArrowUp".into(), ctrl: true, shift: false, alt: false });
+    m.insert("workspace_down".into(), ShortcutBinding { key: "ArrowDown".into(), ctrl: true, shift: false, alt: false });
+    m.insert("panel_left".into(), ShortcutBinding { key: "ArrowLeft".into(), ctrl: true, shift: false, alt: false });
+    m.insert("panel_right".into(), ShortcutBinding { key: "ArrowRight".into(), ctrl: true, shift: false, alt: false });
+    m
+}
+
+fn binding_to_modifiers(b: &ShortcutBinding) -> egui::Modifiers {
+    let mut m = egui::Modifiers::NONE;
+    if b.ctrl { m |= egui::Modifiers::CTRL; }
+    if b.shift { m |= egui::Modifiers::SHIFT; }
+    if b.alt { m |= egui::Modifiers::ALT; }
+    m
+}
+
+fn binding_to_key(b: &ShortcutBinding) -> Option<egui::Key> {
+    match b.key.as_str() {
+        "N" => Some(egui::Key::N), "W" => Some(egui::Key::W),
+        "ArrowUp" => Some(egui::Key::ArrowUp), "ArrowDown" => Some(egui::Key::ArrowDown),
+        "ArrowLeft" => Some(egui::Key::ArrowLeft), "ArrowRight" => Some(egui::Key::ArrowRight),
+        "Tab" => Some(egui::Key::Tab), "Escape" => Some(egui::Key::Escape),
+        "Enter" => Some(egui::Key::Enter), "Space" => Some(egui::Key::Space),
+        _ => None,
+    }
+}
+
+fn key_display_name(k: &str) -> &str {
+    match k {
+        "ArrowUp" => "↑", "ArrowDown" => "↓",
+        "ArrowLeft" => "←", "ArrowRight" => "→",
+        "N" => "N", "W" => "W", "Tab" => "Tab",
+        "Escape" => "Esc", "Enter" => "Enter", "Space" => "Space",
+        _ => k,
+    }
+}
+
+fn shortcut_display(b: &ShortcutBinding) -> String {
+    let mut s = String::new();
+    if b.ctrl { s.push_str("Ctrl+"); }
+    if b.shift { s.push_str("Shift+"); }
+    if b.alt { s.push_str("Alt+"); }
+    s.push_str(key_display_name(&b.key));
+    s
+}
+
+fn check_shortcut(ctx: &egui::Context, binds: &HashMap<String, ShortcutBinding>, name: &str) -> bool {
+    if let Some(b) = binds.get(name) {
+        let mods = binding_to_modifiers(b);
+        if let Some(key) = binding_to_key(b) {
+            return ctx.input_mut(|i| i.consume_key(mods, key));
+        }
+    }
+    false
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct SettingsWindowState {
@@ -84,6 +152,7 @@ impl Default for AppSettings {
             menu_fg_color: default_menu_fg(),
             menu_font_size: default_menu_font_size(),
             settings_window: SettingsWindowState::default(),
+            key_binds: default_key_binds(),
         }
     }
 }
@@ -157,6 +226,7 @@ pub struct App {
     show_settings: bool,
     settings_edit: AppSettings,
     settings_tab: usize,
+    binding_recording: Option<String>,
     cached_template_files: Vec<(String, PathBuf)>,
     completion: crate::completion::CompletionEngine,
     history_db: crate::history_db::HistoryDb,
@@ -313,6 +383,7 @@ impl App {
             show_settings: false,
             settings_edit: AppSettings::default(),
             settings_tab: 0,
+            binding_recording: None,
             cached_template_files: Vec::new(),
             completion: crate::completion::CompletionEngine::new(),
             history_db: crate::history_db::HistoryDb::new(&db_path, default_max_history()),
@@ -604,23 +675,51 @@ impl eframe::App for App {
             }
         }
 
-        // Ctrl+Up/Down: switch workspace
-        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::ArrowUp)) {
-            if self.active_panel > 0 {
-                self.active_panel -= 1;
-            }
-        }
-        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::ArrowDown)) {
-            if self.active_panel + 1 < self.panels.len() {
-                self.active_panel += 1;
+        // Handle key binding recording in settings
+        if let Some(recording) = self.binding_recording.clone() {
+            let input = ctx.input(|i| i.clone());
+            for event in &input.events {
+                if let egui::Event::Key { key, pressed: true, modifiers, .. } = event {
+                    if *key != egui::Key::Escape {
+                        let key_name = format!("{:?}", key);
+                        self.settings_edit.key_binds.insert(recording.clone(), ShortcutBinding {
+                            key: key_name,
+                            ctrl: modifiers.ctrl,
+                            shift: modifiers.shift,
+                            alt: modifiers.alt,
+                        });
+                    }
+                    self.binding_recording = None;
+                    break;
+                }
             }
         }
 
-        // Ctrl+Left/Right: switch panel focus within workspace
-        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::ArrowLeft)) {
+        // Configurable shortcuts
+        let binds = self.settings.key_binds.clone();
+
+        if check_shortcut(ctx, &binds, "new_terminal") {
+            if let Some(tree) = self.dock_states.get_mut(&self.active_panel) {
+                if let Some((surface, node)) = tree.focused_leaf() {
+                    self.pending_new_terminal = Some((self.active_panel, surface, node));
+                }
+            }
+        }
+        if check_shortcut(ctx, &binds, "close_terminal") {
+            if let Some(tab) = &self.focused_terminal.clone() {
+                self.pending_close = Some(tab.clone());
+            }
+        }
+        if check_shortcut(ctx, &binds, "workspace_up") {
+            if self.active_panel > 0 { self.active_panel -= 1; }
+        }
+        if check_shortcut(ctx, &binds, "workspace_down") {
+            if self.active_panel + 1 < self.panels.len() { self.active_panel += 1; }
+        }
+        if check_shortcut(ctx, &binds, "panel_left") {
             self.focus_adjacent_panel(-1);
         }
-        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::ArrowRight)) {
+        if check_shortcut(ctx, &binds, "panel_right") {
             self.focus_adjacent_panel(1);
         }
 
@@ -724,14 +823,33 @@ impl eframe::App for App {
                             });
                         }
                         2 => {
-                            ui.label("快捷键 (开发中)");
+                            ui.label("点击快捷键名称后按下新按键即可修改");
                             ui.separator();
-                            ui.label("Ctrl+C: 复制");
-                            ui.label("Ctrl+V: 粘贴");
-                            ui.label("Ctrl+Shift+N: 新建终端");
-                            ui.label("Ctrl+W: 关闭终端");
-                            ui.label("Ctrl+Tab: 切换终端");
-                            ui.label("Ctrl+Shift+T: 新建标签页");
+                            let labels = [
+                                ("new_terminal", "新建终端"),
+                                ("close_terminal", "关闭终端"),
+                                ("workspace_up", "上一个 Workspace"),
+                                ("workspace_down", "下一个 Workspace"),
+                                ("panel_left", "左侧 Panel"),
+                                ("panel_right", "右侧 Panel"),
+                            ];
+                            for (id, label) in &labels {
+                                ui.horizontal(|ui| {
+                                    ui.label(*label);
+                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                        let text = if self.binding_recording.as_deref() == Some(id) {
+                                            "按下按键...".to_string()
+                                        } else if let Some(b) = self.settings_edit.key_binds.get(*id) {
+                                            shortcut_display(b)
+                                        } else {
+                                            "(未设置)".to_string()
+                                        };
+                                        if ui.button(text).clicked() {
+                                            self.binding_recording = Some(id.to_string());
+                                        }
+                                    });
+                                });
+                            }
                         }
                         _ => {}
                     }
