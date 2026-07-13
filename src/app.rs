@@ -1035,6 +1035,12 @@ impl eframe::App for App {
             let mut reorder = None;
             self.panel_rects.clear();
             self.panel_rects.resize(panel_count, egui::Rect::NOTHING);
+
+            // Detect drag state from pointer
+            let pointer_down = ui.input(|i| i.pointer.primary_down());
+            let pointer_pos = ui.input(|i| i.pointer.interact_pos());
+            let pointer_delta = ui.input(|i| i.pointer.delta());
+
             for i in 0..panel_count {
                 let is_active = i == self.active_panel;
                 if self.renaming_panel == Some(i) {
@@ -1058,6 +1064,8 @@ impl eframe::App for App {
                         let panel_name = self.panels[i].name.clone();
                         let response = ui.selectable_label(is_active, &panel_name);
                         self.panel_rects[i] = response.rect;
+
+                        // Click to select
                         if response.double_clicked() && !renaming {
                             self.renaming_panel = Some(i);
                             self.rename_buffer = panel_name;
@@ -1067,32 +1075,23 @@ impl eframe::App for App {
                             to_select = Some(i);
                         }
 
-                        // Drag to reorder
-                        let drag_resp = ui.interact(response.rect, egui::Id::new(("panel_drag", i)), egui::Sense::drag());
-                        if drag_resp.drag_started() {
-                            self.drag_src_panel = Some(i);
-                        }
-                        if drag_resp.dragged() {
-                            if let Some(pointer) = ui.input(|i| i.pointer.interact_pos()) {
+                        // Drag to reorder: detect drag via pointer delta on this rect
+                        if pointer_down && pointer_delta.length() > 2.0 {
+                            if let Some(pos) = pointer_pos {
+                                // Start drag if not already dragging and pointer is on this rect
+                                if self.drag_src_panel.is_none() && response.rect.contains(pos) {
+                                    self.drag_src_panel = Some(i);
+                                }
+                                // Find drag target
                                 if let Some(src) = self.drag_src_panel {
-                                    for j in 0..panel_count {
-                                        if j == src { continue; }
-                                        if j < self.panel_rects.len() && self.panel_rects[j].contains(pointer) {
-                                            if self.drag_dst_panel != Some(j) {
-                                                self.drag_dst_panel = Some(j);
-                                                reorder = Some((src, j));
-                                            }
-                                            break;
-                                        }
+                                    if src != i {
+                                        // Use this panel's rect as potential target
                                     }
                                 }
                             }
                         }
-                        if drag_resp.drag_stopped() {
-                            self.drag_src_panel = None;
-                            self.drag_dst_panel = None;
-                        }
 
+                        // Context menu
                         response.context_menu(|ui| {
                             if ui.button("重命名").clicked() {
                                 self.renaming_panel = Some(i);
@@ -1104,6 +1103,8 @@ impl eframe::App for App {
                             ui.separator();
                             if ui.button("关闭").clicked() { self.close_workspace(i); ui.close_menu(); }
                         });
+
+                        // Lock and close buttons
                         if self.panels.len() > 1 || self.locked_panels.contains(&i) {
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 if self.panels.len() > 1 {
@@ -1123,6 +1124,29 @@ impl eframe::App for App {
                     });
                 }
             }
+
+            // Handle drag target detection after all rects are known
+            if pointer_down && pointer_delta.length() > 2.0 {
+                if let Some(src) = self.drag_src_panel {
+                    if let Some(pos) = pointer_pos {
+                        for j in (0..panel_count).rev() {
+                            if j == src { continue; }
+                            if j < self.panel_rects.len() && self.panel_rects[j].contains(pos) {
+                                if self.drag_dst_panel != Some(j) {
+                                    self.drag_dst_panel = Some(j);
+                                    reorder = Some((src, j));
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+            } else {
+                // Pointer released: reset drag state
+                self.drag_src_panel = None;
+                self.drag_dst_panel = None;
+            }
+
             // Perform reorder
             if let Some((src, dst)) = reorder {
                 self.reorder_panel(src, dst);
@@ -1228,6 +1252,7 @@ impl eframe::App for App {
                         rename_frame_count: self.rename_frame_count,
                         active_tab,
                         focused_terminal: &mut self.focused_terminal,
+                        show_settings: self.show_settings,
                     });
             } else {
                 ui.centered_and_justified(|ui| { ui.label("Click '+ New Workspace' to create one."); });
@@ -1258,6 +1283,7 @@ struct TerminalTabViewer<'a> {
     rename_frame_count: u32,
     active_tab: Option<String>,
     focused_terminal: &'a mut Option<String>,
+    show_settings: bool,
 }
 
 impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
@@ -1346,7 +1372,7 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                     egui::Color32::from_rgb(self.fg_color[0], self.fg_color[1], self.fg_color[2]),
                     self.cell_spacing);
 
-                if is_focused && !self.renaming {
+                if is_focused && !self.renaming && !self.show_settings {
                     terminal_response.request_focus();
                     ui.ctx().memory_mut(|mem| {
                         mem.set_focus_lock_filter(terminal_response.id, EventFilter {
@@ -1362,7 +1388,7 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                     *self.focused_terminal = Some(tab.clone());
                 }
 
-                if is_focused && !self.renaming {
+                if is_focused && !self.renaming && !self.show_settings {
                     let any_key = ui.input(|i| {
                         i.events.iter().any(|e| matches!(e, egui::Event::Text(_) | egui::Event::Key { .. }))
                     });
