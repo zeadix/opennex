@@ -900,7 +900,8 @@ impl eframe::App for App {
                 let is_active = i == self.active_panel;
                 if self.renaming_panel == Some(i) {
                     let response = ui.add(egui::TextEdit::singleline(&mut self.rename_buffer)
-                        .font(egui::FontId::monospace(14.0)).desired_width(ui.available_width()));
+                        .font(egui::FontId::monospace(14.0)).desired_width(ui.available_width())
+                        .id_source("workspace_rename"));
                     response.request_focus();
                     let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
                     let can_exit = self.rename_frame_count > 1;
@@ -1048,7 +1049,8 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
             ui.horizontal(|ui| {
                 let response = ui.add(
                     egui::TextEdit::singleline(self.terminal_rename_buffer)
-                        .font(egui::FontId::monospace(14.0)).desired_width(200.0).hint_text("Enter name..."),
+                        .font(egui::FontId::monospace(14.0)).desired_width(200.0).hint_text("Enter name...")
+                        .id_source("tab_rename"),
                 );
                 response.request_focus();
                 let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
