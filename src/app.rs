@@ -1125,6 +1125,7 @@ impl eframe::App for App {
                     }
                     ui.add_space(10.0);
                     let enter_pressed = ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    let esc_pressed = ui.input(|i| i.key_pressed(egui::Key::Escape));
                     ui.horizontal(|ui| {
                         if ui.button("确认").clicked() || enter_pressed {
                             if self.settings.lock_password.is_empty()
@@ -1139,7 +1140,7 @@ impl eframe::App for App {
                                 self.lock_password_input.clear();
                             }
                         }
-                        if ui.button("取消").clicked() {
+                        if ui.button("取消").clicked() || esc_pressed {
                             self.lock_password_input.clear();
                             self.pw_message.clear();
                             self.unlock_popup = None;
