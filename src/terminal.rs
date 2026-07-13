@@ -184,7 +184,6 @@ pub fn render_terminal(
     cell_h: f32,
     bg_color: egui::Color32,
     fg_color: egui::Color32,
-    font_family: &str,
     cell_spacing: f32,
 ) -> egui::Response {
     let (response, painter) = ui.allocate_painter(ui.available_size(), egui::Sense::click());
@@ -227,15 +226,10 @@ pub fn render_terminal(
                         }
                     }
 
-                    let font_id = if font_family == "monospace" {
-                        egui::FontId::monospace(instance.font_size)
-                    } else {
-                        egui::FontId::new(instance.font_size, egui::FontFamily::Name(font_family.into()))
-                    };
                     painter.text(
                         egui::pos2(x, y), egui::Align2::LEFT_TOP,
                         text,
-                        font_id,
+                        egui::FontId::monospace(instance.font_size),
                         fg,
                     );
                     if cell.width() > 1 { skip_col = true; }

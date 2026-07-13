@@ -814,15 +814,7 @@ impl eframe::App for App {
                             });
                             ui.horizontal(|ui| {
                                 ui.label("字体:");
-                                let families = ["monospace", "Noto Sans Mono", "Ubuntu Mono", "Fira Code", "JetBrains Mono", "Cascadia Code"];
-                                let idx = families.iter().position(|f| *f == self.settings_edit.font_family).unwrap_or(0);
-                                egui::ComboBox::from_id_salt("font_family")
-                                    .selected_text(&self.settings_edit.font_family)
-                                    .show_ui(ui, |ui| {
-                                        for f in &families {
-                                            ui.selectable_value(&mut self.settings_edit.font_family, f.to_string(), *f);
-                                        }
-                                    });
+                                ui.label("monospace (系统)");
                             });
                             ui.horizontal(|ui| {
                                 ui.label("背景色:");
@@ -881,20 +873,19 @@ impl eframe::App for App {
 
                     ui.separator();
                     ui.horizontal(|ui| {
-                        if ui.button("保存").clicked() {
+                        if ui.button("应用").clicked() {
                             self.settings = self.settings_edit.clone();
                             self.history_db.set_max_entries(self.settings.max_history);
                             let _ = save_settings(&self.settings);
-                            self.show_settings = false;
                         }
-                        if ui.button("取消").clicked() {
+                        if ui.button("关闭").clicked() {
                             self.settings_edit = self.settings.clone();
                             self.show_settings = false;
                         }
                     });
                 });
-            self.show_settings = open;
             if !open {
+                self.show_settings = false;
                 self.settings.settings_window = self.settings_edit.settings_window.clone();
                 let _ = save_settings(&self.settings);
             }
@@ -986,7 +977,6 @@ impl eframe::App for App {
                         completion: &self.completion,
                         history_db: &self.history_db,
                         max_history: self.settings.max_history,
-                        font_family: self.settings.font_family.clone(),
                         cell_spacing: self.settings.cell_spacing,
                         bg_color: self.settings.bg_color,
                         fg_color: self.settings.fg_color,
@@ -1017,7 +1007,6 @@ struct TerminalTabViewer<'a> {
     completion: &'a crate::completion::CompletionEngine,
     history_db: &'a crate::history_db::HistoryDb,
     max_history: usize,
-    font_family: String,
     cell_spacing: f32,
     bg_color: [u8; 3],
     fg_color: [u8; 3],
@@ -1123,7 +1112,7 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                 let terminal_response = render_terminal(ui, &td.instance, cell_w, cell_h,
                     egui::Color32::from_rgb(self.bg_color[0], self.bg_color[1], self.bg_color[2]),
                     egui::Color32::from_rgb(self.fg_color[0], self.fg_color[1], self.fg_color[2]),
-                    &self.font_family, self.cell_spacing);
+                    self.cell_spacing);
 
                 if is_focused {
                     terminal_response.request_focus();
