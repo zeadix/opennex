@@ -675,6 +675,10 @@ impl eframe::App for App {
         let renaming = self.is_renaming();
         if renaming { self.rename_frame_count += 1; }
 
+        log::info!("FRAME: renaming={} rename_panel={:?} rename_count={} focused={:?}",
+            renaming, self.renaming_panel, self.rename_frame_count,
+            ctx.memory(|mem| mem.focused()));
+
         // Consume Tab key to prevent egui focus navigation, send to focused terminal
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab)) {
             if let Some(tab) = &self.focused_terminal.clone() {
@@ -907,11 +911,7 @@ impl eframe::App for App {
                     );
                     ui.memory_mut(|mem| mem.request_focus(response.id));
                     let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
-                    let can_exit = self.rename_frame_count > 1;
-                    let clicked_outside = can_exit && ui.input(|i| {
-                        i.pointer.any_click() && !response.rect.contains(i.pointer.interact_pos().unwrap_or_default())
-                    });
-                    if enter || clicked_outside {
+                    if enter {
                         if !self.rename_buffer.is_empty() {
                             self.panels[i].name = self.rename_buffer.clone();
                         }
@@ -1057,11 +1057,7 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                 );
                 ui.memory_mut(|mem| mem.request_focus(response.id));
                 let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
-                let can_exit = self.rename_frame_count > 1;
-                let pointer = ui.input(|i| i.pointer.clone());
-                let clicked_outside = can_exit && pointer.any_click()
-                    && !response.rect.contains(pointer.interact_pos().unwrap_or_default());
-                if enter || clicked_outside {
+                if enter {
                     if !self.terminal_rename_buffer.is_empty() {
                         if let Some(data) = self.terminals.get_mut(tab) {
                             data.name = self.terminal_rename_buffer.clone();
@@ -1129,7 +1125,7 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                     egui::Color32::from_rgb(self.fg_color[0], self.fg_color[1], self.fg_color[2]),
                     self.cell_spacing);
 
-                if is_focused {
+                if is_focused && !self.renaming {
                     terminal_response.request_focus();
                     ui.ctx().memory_mut(|mem| {
                         mem.set_focus_lock_filter(terminal_response.id, EventFilter {
