@@ -34,6 +34,10 @@ struct AppSettings {
     #[serde(default = "default_menu_font_size")]
     menu_font_size: f32,
     #[serde(default)]
+    lock_password: String,
+    #[serde(default = "default_lock_color")]
+    lock_color: [u8; 3],
+    #[serde(default)]
     settings_window: SettingsWindowState,
     #[serde(default = "default_key_binds")]
     key_binds: HashMap<String, ShortcutBinding>,
@@ -49,6 +53,7 @@ fn default_fg() -> [u8; 3] { [255, 255, 255] }
 fn default_menu_bg() -> [u8; 3] { [30, 30, 30] }
 fn default_menu_fg() -> [u8; 3] { [255, 255, 255] }
 fn default_menu_font_size() -> f32 { 14.0 }
+fn default_lock_color() -> [u8; 3] { [30, 30, 60] }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ShortcutBinding {
     key: String,
@@ -160,6 +165,8 @@ impl Default for AppSettings {
             menu_bg_color: default_menu_bg(),
             menu_fg_color: default_menu_fg(),
             menu_font_size: default_menu_font_size(),
+            lock_password: String::new(),
+            lock_color: default_lock_color(),
             settings_window: SettingsWindowState::default(),
             key_binds: default_key_binds(),
         }
@@ -242,6 +249,8 @@ pub struct App {
     focused_terminal: Option<String>,
     drag_src_panel: Option<usize>,
     drag_dst_panel: Option<usize>,
+    locked_panels: std::collections::HashSet<usize>,
+    lock_password_input: String,
 }
 
 struct TerminalData {
@@ -391,6 +400,8 @@ impl App {
             focused_terminal: None,
             drag_src_panel: None,
             drag_dst_panel: None,
+            locked_panels: std::collections::HashSet::new(),
+            lock_password_input: String::new(),
         };
 
         let scene_path = scene_path();
@@ -815,7 +826,7 @@ impl eframe::App for App {
                 .default_pos([ws.x, ws.y]).default_size([ws.width, ws.height])
                 .show(ctx, |ui| {
                     ui.horizontal(|ui| {
-                        let tabs = ["通用", "外观", "快捷键"];
+                        let tabs = ["通用", "外观", "快捷键", "锁定"];
                         for (i, label) in tabs.iter().enumerate() {
                             let selected = self.settings_tab == i;
                             if ui.selectable_label(selected, *label).clicked() {
@@ -878,6 +889,12 @@ impl eframe::App for App {
                                 ui.label("字号:");
                                 ui.add(egui::DragValue::new(&mut self.settings_edit.menu_font_size).range(8.0..=32.0));
                             });
+                            ui.separator();
+                            ui.label("锁定:");
+                            ui.horizontal(|ui| {
+                                ui.label("遮罩色:");
+                                egui::widgets::color_picker::color_edit_button_srgb(ui, &mut self.settings_edit.lock_color);
+                            });
                         }
                         2 => {
                             ui.label("点击快捷键名称后按下新按键即可修改");
@@ -906,6 +923,71 @@ impl eframe::App for App {
                                         }
                                     });
                                 });
+                            }
+                        }
+                        3 => {
+                            ui.label("密码配置:");
+                            ui.separator();
+                            if self.settings.lock_password.is_empty() {
+                                ui.label("当前未设置密码。设置密码后可锁定工作区。");
+                                ui.add_space(10.0);
+                                let mut pw1 = String::new();
+                                let mut pw2 = String::new();
+                                ui.horizontal(|ui| {
+                                    ui.label("输入密码:");
+                                    ui.add(egui::TextEdit::singleline(&mut pw1).password(true).desired_width(150.0));
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label("确认密码:");
+                                    ui.add(egui::TextEdit::singleline(&mut pw2).password(true).desired_width(150.0));
+                                });
+                                if ui.button("设置密码").clicked() {
+                                    if !pw1.is_empty() && pw1 == pw2 {
+                                        self.settings_edit.lock_password = pw1.clone();
+                                        self.settings.lock_password = pw1.clone();
+                                        let _ = save_settings(&self.settings);
+                                    }
+                                }
+                            } else {
+                                ui.label("已设置密码。");
+                                ui.add_space(10.0);
+                                ui.label("修改密码：");
+                                let mut old_pw = String::new();
+                                let mut new_pw1 = String::new();
+                                let mut new_pw2 = String::new();
+                                ui.horizontal(|ui| {
+                                    ui.label("原密码:");
+                                    ui.add(egui::TextEdit::singleline(&mut old_pw).password(true).desired_width(150.0));
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label("新密码:");
+                                    ui.add(egui::TextEdit::singleline(&mut new_pw1).password(true).desired_width(150.0));
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label("确认新密码:");
+                                    ui.add(egui::TextEdit::singleline(&mut new_pw2).password(true).desired_width(150.0));
+                                });
+                                if ui.button("修改密码").clicked() {
+                                    if old_pw == self.settings.lock_password && !new_pw1.is_empty() && new_pw1 == new_pw2 {
+                                        self.settings_edit.lock_password = new_pw1.clone();
+                                        self.settings.lock_password = new_pw1.clone();
+                                        let _ = save_settings(&self.settings);
+                                    }
+                                }
+                                ui.add_space(10.0);
+                                let mut clear_pw = String::new();
+                                ui.horizontal(|ui| {
+                                    ui.label("清除密码:");
+                                    ui.add(egui::TextEdit::singleline(&mut clear_pw).password(true).desired_width(150.0));
+                                });
+                                if ui.button("清除密码").clicked() {
+                                    if clear_pw == self.settings.lock_password {
+                                        self.settings_edit.lock_password.clear();
+                                        self.settings.lock_password.clear();
+                                        self.locked_panels.clear();
+                                        let _ = save_settings(&self.settings);
+                                    }
+                                }
                             }
                         }
                         _ => {}
@@ -1009,9 +1091,20 @@ impl eframe::App for App {
                             ui.separator();
                             if ui.button("关闭").clicked() { self.close_workspace(i); ui.close_menu(); }
                         });
-                        if self.panels.len() > 1 {
+                        if self.panels.len() > 1 || self.locked_panels.contains(&i) {
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                if ui.small_button("x").clicked() { self.close_workspace(i); return; }
+                                if self.panels.len() > 1 {
+                                    if ui.small_button("x").clicked() { self.close_workspace(i); return; }
+                                }
+                                let is_locked = self.locked_panels.contains(&i);
+                                let lock_label = if is_locked { "🔓" } else { "🔒" };
+                                if ui.small_button(lock_label).clicked() {
+                                    if is_locked {
+                                        self.locked_panels.remove(&i);
+                                    } else {
+                                        self.locked_panels.insert(i);
+                                    }
+                                }
                             });
                         }
                     });
@@ -1054,7 +1147,48 @@ impl eframe::App for App {
         let active_tab = self.dock_states.get_mut(&self.active_panel)
             .and_then(|t| t.find_active_focused().map(|(_, t)| t.clone()));
         egui::CentralPanel::default().show(ctx, |ui| {
-            if let Some(tree) = self.dock_states.get_mut(&self.active_panel) {
+            let is_locked = self.locked_panels.contains(&self.active_panel);
+            if is_locked {
+                let lock_color = egui::Color32::from_rgb(
+                    self.settings.lock_color[0],
+                    self.settings.lock_color[1],
+                    self.settings.lock_color[2],
+                );
+                let avail = ui.available_size();
+                let (rect, _) = ui.allocate_exact_size(avail, egui::Sense::click());
+                let painter = ui.painter_at(rect);
+                painter.rect_filled(rect, 0.0, lock_color);
+
+                ui.allocate_ui_at_rect(rect, |ui| {
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(rect.height() / 3.0);
+                        ui.heading(egui::RichText::new("🔒 此工作区已锁定").size(24.0).color(egui::Color32::WHITE));
+                        ui.add_space(20.0);
+                        let resp = ui.add(
+                            egui::TextEdit::singleline(&mut self.lock_password_input)
+                                .password(true)
+                                .hint_text("输入密码解锁")
+                                .desired_width(200.0)
+                        );
+                        resp.request_focus();
+                        ui.add_space(10.0);
+                        let enter_pressed = ui.input(|i| i.key_pressed(egui::Key::Enter));
+                        if ui.button("解锁").clicked() || enter_pressed {
+                            if !self.settings.lock_password.is_empty()
+                                && self.lock_password_input == self.settings.lock_password
+                            {
+                                self.locked_panels.remove(&self.active_panel);
+                                self.lock_password_input.clear();
+                            } else if self.settings.lock_password.is_empty() {
+                                self.locked_panels.remove(&self.active_panel);
+                                self.lock_password_input.clear();
+                            } else {
+                                self.lock_password_input.clear();
+                            }
+                        }
+                    });
+                });
+            } else if let Some(tree) = self.dock_states.get_mut(&self.active_panel) {
                 DockArea::new(tree)
                     .style(Style::from_egui(ui.style().as_ref()))
                     .show_add_buttons(true)
