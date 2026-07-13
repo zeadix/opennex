@@ -258,6 +258,7 @@ pub struct App {
     pw_set2: String,
     pw_clear: String,
     panel_rects: Vec<egui::Rect>,
+    pw_message: String,
 }
 
 struct TerminalData {
@@ -416,6 +417,7 @@ impl App {
             pw_set2: String::new(),
             pw_clear: String::new(),
             panel_rects: Vec::new(),
+            pw_message: String::new(),
         };
 
         let scene_path = scene_path();
@@ -952,15 +954,29 @@ impl eframe::App for App {
                                 ui.horizontal(|ui| {
                                     ui.label("确认密码:");
                                     ui.add(egui::TextEdit::singleline(&mut self.pw_set2).password(true).desired_width(150.0).id_source("pw_set2"));
+                                    if !self.pw_set2.is_empty() && self.pw_set1 != self.pw_set2 {
+                                        ui.label(egui::RichText::new("密码不一致").color(egui::Color32::RED));
+                                    } else if !self.pw_set2.is_empty() && self.pw_set1 == self.pw_set2 {
+                                        ui.label(egui::RichText::new("密码一致").color(egui::Color32::GREEN));
+                                    }
                                 });
                                 if ui.button("设置密码").clicked() {
-                                    if !self.pw_set1.is_empty() && self.pw_set1 == self.pw_set2 {
+                                    if self.pw_set1.is_empty() {
+                                        self.pw_message = "密码不能为空".into();
+                                    } else if self.pw_set1 != self.pw_set2 {
+                                        self.pw_message = "两次输入的密码不一致".into();
+                                    } else {
                                         self.settings_edit.lock_password = self.pw_set1.clone();
                                         self.settings.lock_password = self.pw_set1.clone();
                                         let _ = save_settings(&self.settings);
                                         self.pw_set1.clear();
                                         self.pw_set2.clear();
+                                        self.pw_message = "密码设置成功".into();
                                     }
+                                }
+                                if !self.pw_message.is_empty() {
+                                    let color = if self.pw_message.contains("成功") { egui::Color32::GREEN } else { egui::Color32::RED };
+                                    ui.label(egui::RichText::new(&self.pw_message).color(color));
                                 }
                             } else {
                                 ui.label("已设置密码。");
@@ -977,15 +993,27 @@ impl eframe::App for App {
                                 ui.horizontal(|ui| {
                                     ui.label("确认新密码:");
                                     ui.add(egui::TextEdit::singleline(&mut self.pw_new2).password(true).desired_width(150.0).id_source("pw_new2"));
+                                    if !self.pw_new2.is_empty() && self.pw_new1 != self.pw_new2 {
+                                        ui.label(egui::RichText::new("密码不一致").color(egui::Color32::RED));
+                                    } else if !self.pw_new2.is_empty() && self.pw_new1 == self.pw_new2 {
+                                        ui.label(egui::RichText::new("密码一致").color(egui::Color32::GREEN));
+                                    }
                                 });
                                 if ui.button("修改密码").clicked() {
-                                    if self.pw_old == self.settings.lock_password && !self.pw_new1.is_empty() && self.pw_new1 == self.pw_new2 {
+                                    if self.pw_old != self.settings.lock_password {
+                                        self.pw_message = "原密码错误".into();
+                                    } else if self.pw_new1.is_empty() {
+                                        self.pw_message = "新密码不能为空".into();
+                                    } else if self.pw_new1 != self.pw_new2 {
+                                        self.pw_message = "两次输入的新密码不一致".into();
+                                    } else {
                                         self.settings_edit.lock_password = self.pw_new1.clone();
                                         self.settings.lock_password = self.pw_new1.clone();
                                         let _ = save_settings(&self.settings);
                                         self.pw_old.clear();
                                         self.pw_new1.clear();
                                         self.pw_new2.clear();
+                                        self.pw_message = "密码修改成功".into();
                                     }
                                 }
                                 ui.add_space(10.0);
@@ -1000,7 +1028,14 @@ impl eframe::App for App {
                                         self.locked_panels.clear();
                                         let _ = save_settings(&self.settings);
                                         self.pw_clear.clear();
+                                        self.pw_message = "密码已清除".into();
+                                    } else {
+                                        self.pw_message = "原密码错误".into();
                                     }
+                                }
+                                if !self.pw_message.is_empty() {
+                                    let color = if self.pw_message.contains("成功") || self.pw_message.contains("已清除") { egui::Color32::GREEN } else { egui::Color32::RED };
+                                    ui.label(egui::RichText::new(&self.pw_message).color(color));
                                 }
                             }
                         }
