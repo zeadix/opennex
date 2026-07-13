@@ -173,6 +173,49 @@ impl Default for AppSettings {
     }
 }
 
+fn scan_system_fonts() -> Vec<(String, String)> {
+    let mut result = Vec::new();
+    let font_dirs = [
+        "/usr/share/fonts",
+        "/usr/local/share/fonts",
+        "/home/kunpengwang/.local/share/fonts",
+        "/home/kunpengwang/.fonts",
+    ];
+    let mut seen = std::collections::HashSet::new();
+    for dir in &font_dirs {
+        let path = std::path::Path::new(dir);
+        if !path.exists() { continue; }
+        for entry in walk_font_dir(path) {
+            if !seen.contains(&entry.0) {
+                seen.insert(entry.0.clone());
+                result.push(entry);
+            }
+        }
+    }
+    result
+}
+
+fn walk_font_dir(dir: &std::path::Path) -> Vec<(String, String)> {
+    let mut result = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                result.extend(walk_font_dir(&path));
+            } else if let Some(ext) = path.extension() {
+                let ext = ext.to_string_lossy().to_lowercase();
+                if ext == "ttf" || ext == "otf" || ext == "ttc" {
+                    let name = path.file_stem()
+                        .map(|s| s.to_string_lossy().to_string())
+                        .unwrap_or_else(|| "unknown".into());
+                    result.push((name, path.to_string_lossy().to_string()));
+                }
+            }
+        }
+    }
+    result
+}
+
 fn scene_path() -> PathBuf {
     std::env::current_dir().unwrap_or_default().join("scene.json")
 }
@@ -260,6 +303,8 @@ pub struct App {
     panel_rects: Vec<egui::Rect>,
     pw_message: String,
     pw_popup: Option<&'static str>,
+    close_confirm_panel: Option<usize>,
+    system_fonts: Vec<String>,
 }
 
 struct TerminalData {
@@ -367,14 +412,32 @@ impl App {
         let settings = load_settings();
         let ctx = &cc.egui_ctx.clone();
 
-        // Try to add CJK font for Chinese/Japanese character support
+        // Scan system monospace fonts
+        let system_fonts = scan_system_fonts();
+        // Register all found fonts in egui
+        let mut fonts = egui::FontDefinitions::default();
+        let mut registered_names: Vec<String> = Vec::new();
+        for (name, path) in &system_fonts {
+            if let Ok(data) = std::fs::read(path) {
+                fonts.font_data.insert(name.clone(), std::sync::Arc::new(egui::FontData::from_owned(data)));
+                registered_names.push(name.clone());
+            }
+        }
+        // Also try CJK font
         if let Ok(cjk_data) = std::fs::read("/usr/share/fonts/opentype/noto/NotoSansCJK-Medium.ttc") {
-            let mut fonts = egui::FontDefinitions::default();
             fonts.font_data.insert("noto-cjk".into(), std::sync::Arc::new(egui::FontData::from_owned(cjk_data).tweak(egui::FontTweak { scale: 0.9, ..Default::default() })));
             fonts.families.get_mut(&egui::FontFamily::Proportional).unwrap().insert(0, "noto-cjk".into());
-            fonts.families.get_mut(&egui::FontFamily::Monospace).unwrap().insert(0, "noto-cjk".into());
-            ctx.set_fonts(fonts);
+            fonts.families.get_mut(&egui::FontFamily::Monospace).unwrap().push("noto-cjk".into());
         }
+        // Register found fonts into Monospace family
+        if let Some(mono_family) = fonts.families.get_mut(&egui::FontFamily::Monospace) {
+            for name in &registered_names {
+                mono_family.push(name.clone());
+            }
+        }
+        ctx.set_fonts(fonts);
+
+        let font_names: Vec<String> = registered_names;
         let db_path = std::env::current_dir().unwrap_or_default().join("history.db");
 
         let mut app = App {
@@ -420,6 +483,8 @@ impl App {
             panel_rects: Vec::new(),
             pw_message: String::new(),
             pw_popup: None,
+            close_confirm_panel: None,
+            system_fonts: font_names,
         };
 
         let scene_path = scene_path();
@@ -883,7 +948,15 @@ impl eframe::App for App {
                             });
                             ui.horizontal(|ui| {
                                 ui.label("字体:");
-                                ui.label("monospace (系统)");
+                                let current = &self.settings_edit.font_family;
+                                egui::ComboBox::from_id_salt("font_family_select")
+                                    .selected_text(if current.is_empty() { "monospace" } else { current })
+                                    .show_ui(ui, |ui| {
+                                        ui.selectable_value(&mut self.settings_edit.font_family, String::new(), "monospace (默认)");
+                                        for name in &self.system_fonts {
+                                            ui.selectable_value(&mut self.settings_edit.font_family, name.clone(), name);
+                                        }
+                                    });
                             });
                             ui.horizontal(|ui| {
                                 ui.label("背景色:");
@@ -989,6 +1062,32 @@ impl eframe::App for App {
                 self.show_settings = false;
                 self.settings.settings_window = self.settings_edit.settings_window.clone();
                 let _ = save_settings(&self.settings);
+            }
+        }
+
+        // Close workspace confirmation
+        if let Some(panel_idx) = self.close_confirm_panel {
+            let mut open = true;
+            let panel_name = self.panels.get(panel_idx).map(|p| p.name.clone()).unwrap_or_default();
+            egui::Window::new("确认关闭")
+                .open(&mut open)
+                .resizable(false)
+                .collapsible(false)
+                .show(ctx, |ui| {
+                    ui.label(format!("确定要关闭工作区「{}」吗？", panel_name));
+                    ui.add_space(10.0);
+                    ui.horizontal(|ui| {
+                        if ui.button("确认").clicked() {
+                            self.close_workspace(panel_idx);
+                            self.close_confirm_panel = None;
+                        }
+                        if ui.button("取消").clicked() {
+                            self.close_confirm_panel = None;
+                        }
+                    });
+                });
+            if !open {
+                self.close_confirm_panel = None;
             }
         }
 
@@ -1215,14 +1314,14 @@ impl eframe::App for App {
                             }
                             if ui.button("保存为模版").clicked() { self.save_as_template(i); ui.close_menu(); }
                             ui.separator();
-                            if ui.button("关闭").clicked() { self.close_workspace(i); ui.close_menu(); }
+                            if ui.button("关闭").clicked() { self.close_confirm_panel = Some(i); ui.close_menu(); }
                         });
 
                         // Lock and close buttons
                         if self.panels.len() > 1 || self.locked_panels.contains(&i) {
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 if self.panels.len() > 1 {
-                                    if ui.small_button("x").clicked() { self.close_workspace(i); return; }
+                                    if ui.small_button("x").clicked() { self.close_confirm_panel = Some(i); return; }
                                 }
                                 let is_locked = self.locked_panels.contains(&i);
                                 let lock_label = if is_locked { "🔓" } else { "🔒" };
@@ -1355,6 +1454,7 @@ impl eframe::App for App {
                         menu_bg_color: self.settings.menu_bg_color,
                         menu_fg_color: self.settings.menu_fg_color,
                         menu_font_size: self.settings.menu_font_size,
+                        font_family: self.settings.font_family.clone(),
                         pending_close: &mut self.pending_close,
                         pending_new_terminal: &mut self.pending_new_terminal,
                         pending_split_after: &mut self.pending_split_after,
@@ -1386,6 +1486,7 @@ struct TerminalTabViewer<'a> {
     menu_bg_color: [u8; 3],
     menu_fg_color: [u8; 3],
     menu_font_size: f32,
+    font_family: String,
     pending_close: &'a mut Option<String>,
     pending_new_terminal: &'a mut Option<(usize, SurfaceIndex, NodeIndex)>,
     pending_split_after: &'a mut Option<String>,
@@ -1484,7 +1585,8 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                 let terminal_response = render_terminal(ui, &td.instance, cell_w, cell_h,
                     egui::Color32::from_rgb(self.bg_color[0], self.bg_color[1], self.bg_color[2]),
                     egui::Color32::from_rgb(self.fg_color[0], self.fg_color[1], self.fg_color[2]),
-                    self.cell_spacing);
+                    self.cell_spacing,
+                    &self.font_family);
 
                 if is_focused && !self.renaming && !self.show_settings {
                     terminal_response.request_focus();

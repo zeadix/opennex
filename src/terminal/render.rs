@@ -9,11 +9,20 @@ pub fn render_terminal(
     bg_color: egui::Color32,
     _fg_color: egui::Color32,
     cell_spacing: f32,
+    font_family: &str,
 ) -> egui::Response {
     let (response, painter) = ui.allocate_painter(ui.available_size(), egui::Sense::click());
     let rect = response.rect;
 
     let effective_cell_w = cell_w * cell_spacing;
+
+    let make_font = || {
+        if font_family.is_empty() {
+            egui::FontId::monospace(instance.font_size)
+        } else {
+            egui::FontId::new(instance.font_size, egui::FontFamily::Name(font_family.into()))
+        }
+    };
     painter.rect_filled(rect, egui::CornerRadius::ZERO, bg_color);
 
     if let Ok(g) = instance.grid.lock() {
@@ -51,7 +60,7 @@ pub fn render_terminal(
 
                 let mut text = egui::RichText::new(cell.ch.to_string())
                     .color(fg)
-                    .font(egui::FontId::monospace(instance.font_size));
+                    .font(make_font());
                 if cell.flags.bold { text = text.strong(); }
                 if cell.flags.italic { text = text.italics(); }
                 if cell.flags.underline { text = text.underline(); }
@@ -59,7 +68,7 @@ pub fn render_terminal(
                 painter.text(
                     egui::pos2(x, y), egui::Align2::LEFT_TOP,
                     text.text(),
-                    egui::FontId::monospace(instance.font_size),
+                    make_font(),
                     fg,
                 );
             }
@@ -80,7 +89,7 @@ pub fn render_terminal(
                     painter.text(
                         egui::pos2(cx, cy), egui::Align2::LEFT_TOP,
                         cell.ch.to_string(),
-                        egui::FontId::monospace(instance.font_size),
+                        make_font(),
                         egui::Color32::BLACK,
                     );
                 }
