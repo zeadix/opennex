@@ -276,15 +276,10 @@ fn build_panel_state(app: &App, panel_idx: usize) -> Option<WorkspaceState> {
     let mut terminals = HashMap::new();
     for (id, data) in &app.terminals {
         let snapshot = {
-            let t = &data.instance.terminal;
-            let mut term = t.lock().unwrap();
-            if data.instance.screen_rows > 0 {
-                Some(crate::snapshot::take_snapshot(
-                    &mut *term,
-                    &data.working_directory,
-                    data.instance.screen_cols,
-                    data.instance.screen_rows,
-                ))
+            let g = &data.instance.grid;
+            let grid = g.lock().unwrap();
+            if grid.rows > 0 {
+                Some(crate::snapshot::take_snapshot(&*grid, &data.working_directory))
             } else {
                 None
             }
@@ -317,17 +312,12 @@ fn build_scene_state(app: &App) -> SceneState {
     for (panel_idx, panel) in app.panels.iter().enumerate() {
         let dock_state = app.dock_states.get(&panel_idx).cloned().unwrap_or_else(|| DockState::new(vec![]));
         let mut terminals = HashMap::new();
-for (id, data) in &app.terminals {
+        for (id, data) in &app.terminals {
             let snapshot = {
-                let t = &data.instance.terminal;
-                let mut term = t.lock().unwrap();
-                if data.instance.screen_rows > 0 {
-                    Some(crate::snapshot::take_snapshot(
-                        &mut *term,
-                        &data.working_directory,
-                        data.instance.screen_cols,
-                        data.instance.screen_rows,
-                    ))
+                let g = &data.instance.grid;
+                let grid = g.lock().unwrap();
+                if grid.rows > 0 {
+                    Some(crate::snapshot::take_snapshot(&*grid, &data.working_directory))
                 } else {
                     None
                 }
@@ -1106,7 +1096,7 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                 let pty_cols = (avail.x / effective_cell_w).floor() as u16;
                 let pty_rows = (avail.y / cell_h).floor() as u16;
                 if pty_cols > 0 && pty_rows > 0 {
-                    td.instance.resize_pty(pty_cols, pty_rows);
+                    td.instance.resize(pty_cols, pty_rows);
                 }
 
                 let is_focused = self.focused_terminal.as_ref() == Some(tab);
