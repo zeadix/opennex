@@ -1102,7 +1102,8 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                 let cell_w = ui.fonts(|f| f.glyph_width(&font_id, 'm'));
                 let cell_h = ui.fonts(|f| f.row_height(&font_id));
                 let avail = ui.available_size();
-                let pty_cols = (avail.x / cell_w).floor() as u16;
+                let effective_cell_w = cell_w * self.cell_spacing;
+                let pty_cols = (avail.x / effective_cell_w).floor() as u16;
                 let pty_rows = (avail.y / cell_h).floor() as u16;
                 if pty_cols > 0 && pty_rows > 0 {
                     td.instance.resize_pty(pty_cols, pty_rows);

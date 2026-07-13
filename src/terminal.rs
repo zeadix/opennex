@@ -125,16 +125,14 @@ impl TerminalInstance {
     }
 
     pub fn resize_pty(&mut self, cols: u16, rows: u16) {
-        // PTY always resized immediately - shell wraps at correct width
-        let _ = self.master.resize(PtySize {
-            rows, cols,
-            pixel_width: cols * 8,
-            pixel_height: rows * 18,
-        });
-
-        // First frame: initialize grid to visible size (empty grid, safe)
+        // First frame: initialize grid + PTY to visible size (empty grid, safe)
         if !self.grid_initialized {
             self.grid_initialized = true;
+            let _ = self.master.resize(PtySize {
+                rows, cols,
+                pixel_width: cols * 8,
+                pixel_height: rows * 18,
+            });
             if let Ok(mut term) = self.terminal.lock() {
                 let size = TerminalSize {
                     rows: rows as usize, cols: cols as usize,
@@ -148,7 +146,7 @@ impl TerminalInstance {
             return;
         }
 
-        // Debounce grid resize: only when size stable for 5 frames
+        // Debounce: wait for stable size before resizing PTY + grid
         if cols == self.resize_target.0 && rows == self.resize_target.1 {
             self.stable_frames = self.stable_frames.saturating_add(1);
         } else {
@@ -159,6 +157,12 @@ impl TerminalInstance {
         if self.stable_frames >= 5 {
             let need_resize = cols as usize != self.screen_cols || rows as usize != self.screen_rows;
             if need_resize {
+                // PTY + grid resize together (SIGWINCH + reflow)
+                let _ = self.master.resize(PtySize {
+                    rows, cols,
+                    pixel_width: cols * 8,
+                    pixel_height: rows * 18,
+                });
                 if let Ok(mut term) = self.terminal.lock() {
                     let size = TerminalSize {
                         rows: rows as usize, cols: cols as usize,
