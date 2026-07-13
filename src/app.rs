@@ -901,7 +901,7 @@ impl eframe::App for App {
                 if self.renaming_panel == Some(i) {
                     let response = ui.add(egui::TextEdit::singleline(&mut self.rename_buffer)
                         .font(egui::FontId::monospace(14.0)).desired_width(ui.available_width()));
-                    if !response.has_focus() { response.request_focus(); }
+                    response.request_focus();
                     let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
                     let can_exit = self.rename_frame_count > 1;
                     let pointer = ui.input(|i| i.pointer.clone());
@@ -917,19 +917,29 @@ impl eframe::App for App {
                     ui.horizontal(|ui| {
                         let panel_name = self.panels[i].name.clone();
                         let response = ui.selectable_label(is_active, &panel_name);
-                        if response.clicked() && !renaming { to_select = Some(i); }
                         if response.double_clicked() && !renaming {
                             self.renaming_panel = Some(i);
                             self.rename_buffer = panel_name;
                             self.rename_frame_count = 0;
+                            to_select = None;
+                        } else if response.clicked() && !renaming {
+                            to_select = Some(i);
                         }
                         response.context_menu(|ui| {
+                            if ui.button("重命名").clicked() {
+                                self.renaming_panel = Some(i);
+                                self.rename_buffer = self.panels[i].name.clone();
+                                self.rename_frame_count = 0;
+                                ui.close_menu();
+                            }
                             if ui.button("保存为模版").clicked() { self.save_as_template(i); ui.close_menu(); }
                             ui.separator();
                             if ui.button("关闭").clicked() { self.close_workspace(i); ui.close_menu(); }
                         });
                         if self.panels.len() > 1 {
-                            if ui.small_button("x").clicked() { self.close_workspace(i); return; }
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if ui.small_button("x").clicked() { self.close_workspace(i); return; }
+                            });
                         }
                     });
                 }
@@ -1040,7 +1050,7 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                     egui::TextEdit::singleline(self.terminal_rename_buffer)
                         .font(egui::FontId::monospace(14.0)).desired_width(200.0).hint_text("Enter name..."),
                 );
-                if !response.has_focus() { response.request_focus(); }
+                response.request_focus();
                 let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
                 let can_exit = self.rename_frame_count > 1;
                 let pointer = ui.input(|i| i.pointer.clone());
