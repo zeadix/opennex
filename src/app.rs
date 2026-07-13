@@ -240,6 +240,8 @@ pub struct App {
     completion: crate::completion::CompletionEngine,
     history_db: crate::history_db::HistoryDb,
     focused_terminal: Option<String>,
+    drag_src_panel: Option<usize>,
+    drag_dst_panel: Option<usize>,
 }
 
 struct TerminalData {
@@ -387,6 +389,8 @@ impl App {
             completion: crate::completion::CompletionEngine::new(),
             history_db: crate::history_db::HistoryDb::new(&db_path, default_max_history()),
             focused_terminal: None,
+            drag_src_panel: None,
+            drag_dst_panel: None,
         };
 
         let scene_path = scene_path();
@@ -622,6 +626,48 @@ impl App {
         self.dock_states.remove(&i);
         if self.active_panel >= self.panels.len() {
             self.active_panel = self.panels.len().saturating_sub(1);
+        }
+    }
+
+    fn reorder_panel(&mut self, src: usize, dst: usize) {
+        if src == dst || src >= self.panels.len() || dst >= self.panels.len() { return; }
+        // Reorder panels
+        let panel = self.panels.remove(src);
+        self.panels.insert(dst, panel);
+        // Reorder dock_states: rebuild with new indices
+        let mut old_states: Vec<(usize, DockState<String>)> = self.dock_states.drain().collect();
+        old_states.sort_by_key(|(k, _)| *k);
+        let mut new_states = HashMap::new();
+        // Build a mapping: old index -> new index
+        let mut old_to_new = vec![0usize; self.panels.len() + 1];
+        let mut new_idx = 0;
+        // The panel that was at src is now at dst
+        // All other panels shift
+        for old_idx in 0..self.panels.len() {
+            if old_idx == dst {
+                old_to_new[src] = new_idx;
+            } else {
+                let actual_old = if old_idx < dst && old_idx < src { old_idx }
+                    else if old_idx >= dst && old_idx < src { old_idx + 1 }
+                    else if old_idx >= dst && old_idx >= src { old_idx }
+                    else { old_idx };
+                old_to_new[actual_old] = new_idx;
+            }
+            new_idx += 1;
+        }
+        for (old_k, state) in old_states {
+            if old_k < old_to_new.len() {
+                new_states.insert(old_to_new[old_k], state);
+            }
+        }
+        self.dock_states = new_states;
+        // Update active_panel
+        if self.active_panel == src {
+            self.active_panel = dst;
+        } else if src < self.active_panel && dst >= self.active_panel {
+            self.active_panel -= 1;
+        } else if src > self.active_panel && dst <= self.active_panel {
+            self.active_panel += 1;
         }
     }
 
@@ -890,8 +936,11 @@ impl eframe::App for App {
             ui.separator();
             let mut to_select = None;
             let panel_count = self.panels.len();
+            let mut reorder = None;
             for i in 0..panel_count {
                 let is_active = i == self.active_panel;
+                let is_drag_src = self.drag_src_panel == Some(i);
+                let is_drag_dst = self.drag_dst_panel == Some(i);
                 if self.renaming_panel == Some(i) {
                     let response = ui.add(
                         egui::TextEdit::singleline(&mut self.rename_buffer)
@@ -919,6 +968,36 @@ impl eframe::App for App {
                         } else if response.clicked() && !renaming {
                             to_select = Some(i);
                         }
+
+                        // Drag to reorder
+                        let drag_id = egui::Id::new(("panel_drag", i));
+                        let drag_resp = ui.interact(response.rect, drag_id, egui::Sense::drag());
+                        if drag_resp.drag_started() {
+                            self.drag_src_panel = Some(i);
+                        }
+                        if drag_resp.dragged() && self.drag_src_panel.is_some() {
+                            if let Some(pointer) = ui.input(|i| i.pointer.interact_pos()) {
+                                // Check if pointer is over a different panel
+                                for j in 0..panel_count {
+                                    if j == i { continue; }
+                                    let other_rect = ui.memory(|m| m.area_rect(egui::Id::new(("panel_drag", j))));
+                                    if let Some(r) = other_rect {
+                                        if r.contains(pointer) {
+                                            if self.drag_dst_panel != Some(j) {
+                                                self.drag_dst_panel = Some(j);
+                                                reorder = Some((i, j));
+                                            }
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if drag_resp.drag_stopped() {
+                            self.drag_src_panel = None;
+                            self.drag_dst_panel = None;
+                        }
+
                         response.context_menu(|ui| {
                             if ui.button("重命名").clicked() {
                                 self.renaming_panel = Some(i);
@@ -937,6 +1016,10 @@ impl eframe::App for App {
                         }
                     });
                 }
+            }
+            // Perform reorder
+            if let Some((src, dst)) = reorder {
+                self.reorder_panel(src, dst);
             }
             if let Some(i) = to_select { self.active_panel = i; }
             ui.separator();
