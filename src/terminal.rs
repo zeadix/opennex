@@ -40,6 +40,8 @@ pub struct TerminalInstance {
     pub screen_rows: usize,
     pub screen_cols: usize,
     grid_initialized: bool,
+    stable_frames: u8,
+    resize_target: (u16, u16),
 }
 
 fn srgb_to_egui(srgb: wezterm_term::color::SrgbaTuple) -> egui::Color32 {
@@ -105,7 +107,7 @@ impl TerminalInstance {
         let cwd_str = cwd.to_string();
         Some(TerminalInstance {
             terminal,
-writer: user_writer,
+            writer: user_writer,
             master,
             _child: child,
             name: String::new(),
@@ -117,30 +119,58 @@ writer: user_writer,
             screen_rows: rows as usize,
             screen_cols: cols as usize,
             grid_initialized: false,
+            stable_frames: 0,
+            resize_target: (cols, rows),
         })
     }
 
     pub fn resize_pty(&mut self, cols: u16, rows: u16) {
+        // PTY always resized immediately - shell wraps at correct width
         let _ = self.master.resize(PtySize {
             rows, cols,
             pixel_width: cols * 8,
             pixel_height: rows * 18,
         });
 
+        // First frame: initialize grid to visible size (empty grid, safe)
         if !self.grid_initialized {
             self.grid_initialized = true;
             if let Ok(mut term) = self.terminal.lock() {
                 let size = TerminalSize {
-                    rows: rows as usize,
-                    cols: cols as usize,
-                    pixel_width: cols as usize * 8,
-                    pixel_height: rows as usize * 18,
+                    rows: rows as usize, cols: cols as usize,
+                    pixel_width: cols as usize * 8, pixel_height: rows as usize * 18,
                     dpi: 96,
                 };
                 term.resize(size);
                 self.screen_cols = cols as usize;
                 self.screen_rows = rows as usize;
             }
+            return;
+        }
+
+        // Debounce grid resize: only when size stable for 5 frames
+        if cols == self.resize_target.0 && rows == self.resize_target.1 {
+            self.stable_frames = self.stable_frames.saturating_add(1);
+        } else {
+            self.stable_frames = 0;
+            self.resize_target = (cols, rows);
+        }
+
+        if self.stable_frames >= 5 {
+            let need_resize = cols as usize != self.screen_cols || rows as usize != self.screen_rows;
+            if need_resize {
+                if let Ok(mut term) = self.terminal.lock() {
+                    let size = TerminalSize {
+                        rows: rows as usize, cols: cols as usize,
+                        pixel_width: cols as usize * 8, pixel_height: rows as usize * 18,
+                        dpi: 96,
+                    };
+                    term.resize(size);
+                    self.screen_cols = cols as usize;
+                    self.screen_rows = rows as usize;
+                }
+            }
+            self.stable_frames = 0;
         }
     }
 
