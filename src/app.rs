@@ -70,6 +70,7 @@ fn default_key_binds() -> HashMap<String, ShortcutBinding> {
     m.insert("workspace_down".into(), ShortcutBinding { key: "ArrowDown".into(), ctrl: true, shift: false, alt: false });
     m.insert("panel_left".into(), ShortcutBinding { key: "ArrowLeft".into(), ctrl: true, shift: false, alt: false });
     m.insert("panel_right".into(), ShortcutBinding { key: "ArrowRight".into(), ctrl: true, shift: false, alt: false });
+    m.insert("lock_workspace".into(), ShortcutBinding { key: "L".into(), ctrl: true, shift: false, alt: false });
     m
 }
 
@@ -83,7 +84,7 @@ fn binding_to_modifiers(b: &ShortcutBinding) -> egui::Modifiers {
 
 fn binding_to_key(b: &ShortcutBinding) -> Option<egui::Key> {
     match b.key.as_str() {
-        "N" => Some(egui::Key::N), "W" => Some(egui::Key::W),
+        "N" => Some(egui::Key::N), "W" => Some(egui::Key::W), "L" => Some(egui::Key::L),
         "ArrowUp" => Some(egui::Key::ArrowUp), "ArrowDown" => Some(egui::Key::ArrowDown),
         "ArrowLeft" => Some(egui::Key::ArrowLeft), "ArrowRight" => Some(egui::Key::ArrowRight),
         "Tab" => Some(egui::Key::Tab), "Escape" => Some(egui::Key::Escape),
@@ -867,6 +868,14 @@ impl eframe::App for App {
         if check_shortcut(ctx, &binds, "panel_right") {
             self.focus_adjacent_panel(1);
         }
+        if check_shortcut(ctx, &binds, "lock_workspace") {
+            if self.locked_panels.contains(&self.active_panel) {
+                self.unlock_popup = Some(self.active_panel);
+                self.lock_password_input.clear();
+            } else {
+                self.locked_panels.insert(self.active_panel);
+            }
+        }
 
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
@@ -999,6 +1008,7 @@ impl eframe::App for App {
                                 ("workspace_down", "下一个 Workspace"),
                                 ("panel_left", "左侧 Panel"),
                                 ("panel_right", "右侧 Panel"),
+                                ("lock_workspace", "锁定/解锁 Workspace"),
                             ];
                             for (id, label) in &labels {
                                 ui.horizontal(|ui| {
