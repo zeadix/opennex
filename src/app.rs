@@ -251,6 +251,13 @@ pub struct App {
     drag_dst_panel: Option<usize>,
     locked_panels: std::collections::HashSet<usize>,
     lock_password_input: String,
+    pw_old: String,
+    pw_new1: String,
+    pw_new2: String,
+    pw_set1: String,
+    pw_set2: String,
+    pw_clear: String,
+    panel_rects: Vec<egui::Rect>,
 }
 
 struct TerminalData {
@@ -402,6 +409,13 @@ impl App {
             drag_dst_panel: None,
             locked_panels: std::collections::HashSet::new(),
             lock_password_input: String::new(),
+            pw_old: String::new(),
+            pw_new1: String::new(),
+            pw_new2: String::new(),
+            pw_set1: String::new(),
+            pw_set2: String::new(),
+            pw_clear: String::new(),
+            panel_rects: Vec::new(),
         };
 
         let scene_path = scene_path();
@@ -931,61 +945,61 @@ impl eframe::App for App {
                             if self.settings.lock_password.is_empty() {
                                 ui.label("当前未设置密码。设置密码后可锁定工作区。");
                                 ui.add_space(10.0);
-                                let mut pw1 = String::new();
-                                let mut pw2 = String::new();
                                 ui.horizontal(|ui| {
                                     ui.label("输入密码:");
-                                    ui.add(egui::TextEdit::singleline(&mut pw1).password(true).desired_width(150.0));
+                                    ui.add(egui::TextEdit::singleline(&mut self.pw_set1).password(true).desired_width(150.0).id_source("pw_set1"));
                                 });
                                 ui.horizontal(|ui| {
                                     ui.label("确认密码:");
-                                    ui.add(egui::TextEdit::singleline(&mut pw2).password(true).desired_width(150.0));
+                                    ui.add(egui::TextEdit::singleline(&mut self.pw_set2).password(true).desired_width(150.0).id_source("pw_set2"));
                                 });
                                 if ui.button("设置密码").clicked() {
-                                    if !pw1.is_empty() && pw1 == pw2 {
-                                        self.settings_edit.lock_password = pw1.clone();
-                                        self.settings.lock_password = pw1.clone();
+                                    if !self.pw_set1.is_empty() && self.pw_set1 == self.pw_set2 {
+                                        self.settings_edit.lock_password = self.pw_set1.clone();
+                                        self.settings.lock_password = self.pw_set1.clone();
                                         let _ = save_settings(&self.settings);
+                                        self.pw_set1.clear();
+                                        self.pw_set2.clear();
                                     }
                                 }
                             } else {
                                 ui.label("已设置密码。");
                                 ui.add_space(10.0);
-                                ui.label("修改密码：");
-                                let mut old_pw = String::new();
-                                let mut new_pw1 = String::new();
-                                let mut new_pw2 = String::new();
+                                ui.label("修改密码:");
                                 ui.horizontal(|ui| {
                                     ui.label("原密码:");
-                                    ui.add(egui::TextEdit::singleline(&mut old_pw).password(true).desired_width(150.0));
+                                    ui.add(egui::TextEdit::singleline(&mut self.pw_old).password(true).desired_width(150.0).id_source("pw_old"));
                                 });
                                 ui.horizontal(|ui| {
                                     ui.label("新密码:");
-                                    ui.add(egui::TextEdit::singleline(&mut new_pw1).password(true).desired_width(150.0));
+                                    ui.add(egui::TextEdit::singleline(&mut self.pw_new1).password(true).desired_width(150.0).id_source("pw_new1"));
                                 });
                                 ui.horizontal(|ui| {
                                     ui.label("确认新密码:");
-                                    ui.add(egui::TextEdit::singleline(&mut new_pw2).password(true).desired_width(150.0));
+                                    ui.add(egui::TextEdit::singleline(&mut self.pw_new2).password(true).desired_width(150.0).id_source("pw_new2"));
                                 });
                                 if ui.button("修改密码").clicked() {
-                                    if old_pw == self.settings.lock_password && !new_pw1.is_empty() && new_pw1 == new_pw2 {
-                                        self.settings_edit.lock_password = new_pw1.clone();
-                                        self.settings.lock_password = new_pw1.clone();
+                                    if self.pw_old == self.settings.lock_password && !self.pw_new1.is_empty() && self.pw_new1 == self.pw_new2 {
+                                        self.settings_edit.lock_password = self.pw_new1.clone();
+                                        self.settings.lock_password = self.pw_new1.clone();
                                         let _ = save_settings(&self.settings);
+                                        self.pw_old.clear();
+                                        self.pw_new1.clear();
+                                        self.pw_new2.clear();
                                     }
                                 }
                                 ui.add_space(10.0);
-                                let mut clear_pw = String::new();
                                 ui.horizontal(|ui| {
                                     ui.label("清除密码:");
-                                    ui.add(egui::TextEdit::singleline(&mut clear_pw).password(true).desired_width(150.0));
+                                    ui.add(egui::TextEdit::singleline(&mut self.pw_clear).password(true).desired_width(150.0).id_source("pw_clear"));
                                 });
                                 if ui.button("清除密码").clicked() {
-                                    if clear_pw == self.settings.lock_password {
+                                    if self.pw_clear == self.settings.lock_password {
                                         self.settings_edit.lock_password.clear();
                                         self.settings.lock_password.clear();
                                         self.locked_panels.clear();
                                         let _ = save_settings(&self.settings);
+                                        self.pw_clear.clear();
                                     }
                                 }
                             }
@@ -1019,10 +1033,10 @@ impl eframe::App for App {
             let mut to_select = None;
             let panel_count = self.panels.len();
             let mut reorder = None;
+            self.panel_rects.clear();
+            self.panel_rects.resize(panel_count, egui::Rect::NOTHING);
             for i in 0..panel_count {
                 let is_active = i == self.active_panel;
-                let is_drag_src = self.drag_src_panel == Some(i);
-                let is_drag_dst = self.drag_dst_panel == Some(i);
                 if self.renaming_panel == Some(i) {
                     let response = ui.add(
                         egui::TextEdit::singleline(&mut self.rename_buffer)
@@ -1031,6 +1045,7 @@ impl eframe::App for App {
                             .id_source("workspace_rename"),
                     );
                     ui.memory_mut(|mem| mem.request_focus(response.id));
+                    self.panel_rects[i] = response.rect;
                     let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
                     if enter {
                         if !self.rename_buffer.is_empty() {
@@ -1041,7 +1056,8 @@ impl eframe::App for App {
                 } else {
                     ui.horizontal(|ui| {
                         let panel_name = self.panels[i].name.clone();
-                        let mut response = ui.selectable_label(is_active, &panel_name);
+                        let response = ui.selectable_label(is_active, &panel_name);
+                        self.panel_rects[i] = response.rect;
                         if response.double_clicked() && !renaming {
                             self.renaming_panel = Some(i);
                             self.rename_buffer = panel_name;
@@ -1051,21 +1067,20 @@ impl eframe::App for App {
                             to_select = Some(i);
                         }
 
-                        // Drag to reorder —叠加到同一 response 上，避免竞争交互
-                        response = response.interact(egui::Sense::drag());
-                        if response.drag_started() {
+                        // Drag to reorder
+                        let drag_resp = ui.interact(response.rect, egui::Id::new(("panel_drag", i)), egui::Sense::drag());
+                        if drag_resp.drag_started() {
                             self.drag_src_panel = Some(i);
                         }
-                        if response.dragged() && self.drag_src_panel.is_some() {
+                        if drag_resp.dragged() {
                             if let Some(pointer) = ui.input(|i| i.pointer.interact_pos()) {
-                                for j in 0..panel_count {
-                                    if j == i { continue; }
-                                    let other_rect = ui.memory(|m| m.area_rect(egui::Id::new(("panel_drag", j))));
-                                    if let Some(r) = other_rect {
-                                        if r.contains(pointer) {
+                                if let Some(src) = self.drag_src_panel {
+                                    for j in 0..panel_count {
+                                        if j == src { continue; }
+                                        if j < self.panel_rects.len() && self.panel_rects[j].contains(pointer) {
                                             if self.drag_dst_panel != Some(j) {
                                                 self.drag_dst_panel = Some(j);
-                                                reorder = Some((i, j));
+                                                reorder = Some((src, j));
                                             }
                                             break;
                                         }
@@ -1073,7 +1088,7 @@ impl eframe::App for App {
                                 }
                             }
                         }
-                        if response.drag_stopped() {
+                        if drag_resp.drag_stopped() {
                             self.drag_src_panel = None;
                             self.drag_dst_panel = None;
                         }
