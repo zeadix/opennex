@@ -305,6 +305,7 @@ pub struct App {
     pw_popup: Option<&'static str>,
     close_confirm_panel: Option<usize>,
     system_fonts: Vec<String>,
+    unlock_popup: Option<usize>,
 }
 
 struct TerminalData {
@@ -485,6 +486,7 @@ impl App {
             pw_popup: None,
             close_confirm_panel: None,
             system_fonts: font_names,
+            unlock_popup: None,
         };
 
         let scene_path = scene_path();
@@ -1091,6 +1093,54 @@ impl eframe::App for App {
             }
         }
 
+        // Unlock workspace popup
+        if let Some(panel_idx) = self.unlock_popup {
+            let mut open = true;
+            let panel_name = self.panels.get(panel_idx).map(|p| p.name.clone()).unwrap_or_default();
+            egui::Window::new("解锁工作区")
+                .open(&mut open)
+                .resizable(false)
+                .collapsible(false)
+                .show(ctx, |ui| {
+                    ui.label(format!("工作区「{}」已锁定", panel_name));
+                    ui.add_space(10.0);
+                    ui.horizontal(|ui| {
+                        ui.label("密码:");
+                        ui.add(egui::TextEdit::singleline(&mut self.lock_password_input)
+                            .password(true).desired_width(150.0).id_source("unlock_pw"));
+                    });
+                    if !self.pw_message.is_empty() {
+                        ui.label(egui::RichText::new(&self.pw_message).color(egui::Color32::RED));
+                    }
+                    ui.add_space(10.0);
+                    ui.horizontal(|ui| {
+                        if ui.button("确认").clicked() {
+                            if self.settings.lock_password.is_empty()
+                                || self.lock_password_input == self.settings.lock_password
+                            {
+                                self.locked_panels.remove(&panel_idx);
+                                self.lock_password_input.clear();
+                                self.pw_message.clear();
+                                self.unlock_popup = None;
+                            } else {
+                                self.pw_message = "密码错误".into();
+                                self.lock_password_input.clear();
+                            }
+                        }
+                        if ui.button("取消").clicked() {
+                            self.lock_password_input.clear();
+                            self.pw_message.clear();
+                            self.unlock_popup = None;
+                        }
+                    });
+                });
+            if !open {
+                self.unlock_popup = None;
+                self.lock_password_input.clear();
+                self.pw_message.clear();
+            }
+        }
+
         // Password popup windows
         if let Some(popup) = self.pw_popup {
             let mut open = true;
@@ -1327,7 +1377,8 @@ impl eframe::App for App {
                                 let lock_label = if is_locked { "🔓" } else { "🔒" };
                                 if ui.small_button(lock_label).clicked() {
                                     if is_locked {
-                                        self.locked_panels.remove(&i);
+                                        self.unlock_popup = Some(i);
+                                        self.lock_password_input.clear();
                                     } else {
                                         self.locked_panels.insert(i);
                                     }
@@ -1413,29 +1464,8 @@ impl eframe::App for App {
                     ui.vertical_centered(|ui| {
                         ui.add_space(rect.height() / 3.0);
                         ui.heading(egui::RichText::new("🔒 此工作区已锁定").size(24.0).color(egui::Color32::WHITE));
-                        ui.add_space(20.0);
-                        let resp = ui.add(
-                            egui::TextEdit::singleline(&mut self.lock_password_input)
-                                .password(true)
-                                .hint_text("输入密码解锁")
-                                .desired_width(200.0)
-                        );
-                        resp.request_focus();
                         ui.add_space(10.0);
-                        let enter_pressed = ui.input(|i| i.key_pressed(egui::Key::Enter));
-                        if ui.button("解锁").clicked() || enter_pressed {
-                            if !self.settings.lock_password.is_empty()
-                                && self.lock_password_input == self.settings.lock_password
-                            {
-                                self.locked_panels.remove(&self.active_panel);
-                                self.lock_password_input.clear();
-                            } else if self.settings.lock_password.is_empty() {
-                                self.locked_panels.remove(&self.active_panel);
-                                self.lock_password_input.clear();
-                            } else {
-                                self.lock_password_input.clear();
-                            }
-                        }
+                        ui.label(egui::RichText::new("点击列表中的 🔒 按钮解锁").color(egui::Color32::from_gray(180)));
                     });
                 });
             } else if let Some(tree) = self.dock_states.get_mut(&self.active_panel) {
@@ -1454,7 +1484,6 @@ impl eframe::App for App {
                         menu_bg_color: self.settings.menu_bg_color,
                         menu_fg_color: self.settings.menu_fg_color,
                         menu_font_size: self.settings.menu_font_size,
-                        font_family: self.settings.font_family.clone(),
                         pending_close: &mut self.pending_close,
                         pending_new_terminal: &mut self.pending_new_terminal,
                         pending_split_after: &mut self.pending_split_after,
@@ -1486,7 +1515,6 @@ struct TerminalTabViewer<'a> {
     menu_bg_color: [u8; 3],
     menu_fg_color: [u8; 3],
     menu_font_size: f32,
-    font_family: String,
     pending_close: &'a mut Option<String>,
     pending_new_terminal: &'a mut Option<(usize, SurfaceIndex, NodeIndex)>,
     pending_split_after: &'a mut Option<String>,
@@ -1585,8 +1613,7 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                 let terminal_response = render_terminal(ui, &td.instance, cell_w, cell_h,
                     egui::Color32::from_rgb(self.bg_color[0], self.bg_color[1], self.bg_color[2]),
                     egui::Color32::from_rgb(self.fg_color[0], self.fg_color[1], self.fg_color[2]),
-                    self.cell_spacing,
-                    &self.font_family);
+                    self.cell_spacing);
 
                 if is_focused && !self.renaming && !self.show_settings {
                     terminal_response.request_focus();
