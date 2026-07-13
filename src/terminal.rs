@@ -39,6 +39,8 @@ pub struct TerminalInstance {
     pub history_nav: Option<crate::app::HistoryNav>,
     pub screen_rows: usize,
     pub screen_cols: usize,
+    grid_cols: usize,
+    grid_rows: usize,
     grid_initialized: bool,
     stable_frames: u8,
     resize_target: (u16, u16),
@@ -118,6 +120,8 @@ impl TerminalInstance {
             history_nav: None,
             screen_rows: rows as usize,
             screen_cols: cols as usize,
+            grid_cols: cols as usize,
+            grid_rows: rows as usize,
             grid_initialized: false,
             stable_frames: 0,
             resize_target: (cols, rows),
@@ -140,13 +144,16 @@ impl TerminalInstance {
                     dpi: 96,
                 };
                 term.resize(size);
-                self.screen_cols = cols as usize;
-                self.screen_rows = rows as usize;
             }
+            self.grid_cols = cols as usize;
+            self.grid_rows = rows as usize;
+            self.screen_cols = cols as usize;
+            self.screen_rows = rows as usize;
             return;
         }
 
-        // Debounce: wait for stable size before resizing PTY + grid
+        // Debounce PTY resize: only when size stable for 5 frames
+        // Grid is NEVER resized after init (avoids wezterm reflow bug)
         if cols == self.resize_target.0 && rows == self.resize_target.1 {
             self.stable_frames = self.stable_frames.saturating_add(1);
         } else {
@@ -157,22 +164,14 @@ impl TerminalInstance {
         if self.stable_frames >= 5 {
             let need_resize = cols as usize != self.screen_cols || rows as usize != self.screen_rows;
             if need_resize {
-                // PTY + grid resize together (SIGWINCH + reflow)
+                // Only resize PTY (SIGWINCH), NOT the grid
                 let _ = self.master.resize(PtySize {
                     rows, cols,
                     pixel_width: cols * 8,
                     pixel_height: rows * 18,
                 });
-                if let Ok(mut term) = self.terminal.lock() {
-                    let size = TerminalSize {
-                        rows: rows as usize, cols: cols as usize,
-                        pixel_width: cols as usize * 8, pixel_height: rows as usize * 18,
-                        dpi: 96,
-                    };
-                    term.resize(size);
-                    self.screen_cols = cols as usize;
-                    self.screen_rows = rows as usize;
-                }
+                self.screen_cols = cols as usize;
+                self.screen_rows = rows as usize;
             }
             self.stable_frames = 0;
         }
@@ -193,7 +192,7 @@ impl TerminalInstance {
     }
 
     pub fn size(&self) -> (usize, usize) {
-        (self.screen_cols, self.screen_rows)
+        (self.grid_cols, self.grid_rows)
     }
 
     pub fn get_current_line(&self) -> String {
@@ -202,7 +201,7 @@ impl TerminalInstance {
         let row = pos.y as usize;
         let mut line = String::new();
         let s = term.screen_mut();
-        for col in 0..self.screen_cols {
+        for col in 0..self.grid_cols {
             if let Some(cell) = s.get_cell(col, row as i64) {
                 line.push_str(cell.str());
             }
@@ -231,8 +230,8 @@ pub fn render_terminal(
         let palette = term.palette();
         let show_rows = (rect.height() / cell_h).floor() as usize;
         let show_cols = (rect.width() / effective_cell_w).floor() as usize;
-        let rows = show_rows.min(instance.screen_rows);
-        let cols = show_cols.min(instance.screen_cols);
+        let rows = show_rows.min(instance.grid_rows);
+        let cols = show_cols.min(instance.grid_cols);
         let s = term.screen_mut();
         let mut skip_col = false;
 
