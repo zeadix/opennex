@@ -89,6 +89,9 @@ impl TerminalInstance {
     }
 
     pub fn resize(&mut self, cols: u16, rows: u16) {
+        if cols as usize == self.screen_cols && rows as usize == self.screen_rows {
+            return;
+        }
         let _ = self.master.resize(PtySize {
             rows, cols, pixel_width: cols * 8, pixel_height: rows * 18,
         });
