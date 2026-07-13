@@ -1063,6 +1063,43 @@ impl eframe::App for App {
                             self.settings = self.settings_edit.clone();
                             self.history_db.set_max_entries(self.settings.max_history);
                             let _ = save_settings(&self.settings);
+                            // Apply font size to all terminals
+                            let new_size = self.settings.font_size;
+                            for td in self.terminals.values_mut() {
+                                td.font_size = new_size;
+                                td.instance.font_size = new_size;
+                            }
+                            // Apply font family: rebuild FontDefinitions with selected font first
+                            let ctx2 = ctx.clone();
+                            let ff = self.settings.font_family.clone();
+                            let sys_fonts = self.system_fonts.clone();
+                            std::thread::spawn(move || {
+                                let mut fonts = egui::FontDefinitions::default();
+                                // Register all system fonts
+                                for name in &sys_fonts {
+                                    let paths = scan_system_fonts();
+                                    if let Some((_, path)) = paths.iter().find(|(n, _)| n == name) {
+                                        if let Ok(data) = std::fs::read(path) {
+                                            fonts.font_data.insert(name.clone(), std::sync::Arc::new(egui::FontData::from_owned(data)));
+                                        }
+                                    }
+                                }
+                                // CJK font
+                                if let Ok(cjk_data) = std::fs::read("/usr/share/fonts/opentype/noto/NotoSansCJK-Medium.ttc") {
+                                    fonts.font_data.insert("noto-cjk".into(), std::sync::Arc::new(egui::FontData::from_owned(cjk_data).tweak(egui::FontTweak { scale: 0.9, ..Default::default() })));
+                                }
+                                // Put selected font first in Monospace
+                                if let Some(mono) = fonts.families.get_mut(&egui::FontFamily::Monospace) {
+                                    if !ff.is_empty() && fonts.font_data.contains_key(&ff) {
+                                        mono.insert(0, ff.clone());
+                                    }
+                                    mono.push("noto-cjk".into());
+                                }
+                                if let Some(prop) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
+                                    prop.insert(0, "noto-cjk".into());
+                                }
+                                ctx2.set_fonts(fonts);
+                            });
                         }
                         if ui.button("关闭").clicked() {
                             self.settings_edit = self.settings.clone();
