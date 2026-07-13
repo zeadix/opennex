@@ -899,15 +899,18 @@ impl eframe::App for App {
             for i in 0..panel_count {
                 let is_active = i == self.active_panel;
                 if self.renaming_panel == Some(i) {
-                    let response = ui.add(egui::TextEdit::singleline(&mut self.rename_buffer)
-                        .font(egui::FontId::monospace(14.0)).desired_width(ui.available_width())
-                        .id_source("workspace_rename"));
-                    response.request_focus();
+                    let response = ui.add(
+                        egui::TextEdit::singleline(&mut self.rename_buffer)
+                            .font(egui::FontId::monospace(14.0))
+                            .desired_width(ui.available_width())
+                            .id_source("workspace_rename"),
+                    );
+                    ui.memory_mut(|mem| mem.request_focus(response.id));
                     let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
                     let can_exit = self.rename_frame_count > 1;
-                    let pointer = ui.input(|i| i.pointer.clone());
-                    let clicked_outside = can_exit && pointer.any_click()
-                        && !response.rect.contains(pointer.interact_pos().unwrap_or_default());
+                    let clicked_outside = can_exit && ui.input(|i| {
+                        i.pointer.any_click() && !response.rect.contains(i.pointer.interact_pos().unwrap_or_default())
+                    });
                     if enter || clicked_outside {
                         if !self.rename_buffer.is_empty() {
                             self.panels[i].name = self.rename_buffer.clone();
@@ -1052,7 +1055,7 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                         .font(egui::FontId::monospace(14.0)).desired_width(200.0).hint_text("Enter name...")
                         .id_source("tab_rename"),
                 );
-                response.request_focus();
+                ui.memory_mut(|mem| mem.request_focus(response.id));
                 let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
                 let can_exit = self.rename_frame_count > 1;
                 let pointer = ui.input(|i| i.pointer.clone());
