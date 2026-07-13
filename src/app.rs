@@ -1116,15 +1116,17 @@ impl eframe::App for App {
                     ui.add_space(10.0);
                     ui.horizontal(|ui| {
                         ui.label("密码:");
-                        ui.add(egui::TextEdit::singleline(&mut self.lock_password_input)
+                        let resp = ui.add(egui::TextEdit::singleline(&mut self.lock_password_input)
                             .password(true).desired_width(150.0).id_source("unlock_pw"));
+                        resp.request_focus();
                     });
                     if !self.pw_message.is_empty() {
                         ui.label(egui::RichText::new(&self.pw_message).color(egui::Color32::RED));
                     }
                     ui.add_space(10.0);
+                    let enter_pressed = ui.input(|i| i.key_pressed(egui::Key::Enter));
                     ui.horizontal(|ui| {
-                        if ui.button("确认").clicked() {
+                        if ui.button("确认").clicked() || enter_pressed {
                             if self.settings.lock_password.is_empty()
                                 || self.lock_password_input == self.settings.lock_password
                             {
