@@ -40,7 +40,9 @@ pub fn render_terminal(
                     fg = fg.linear_multiply(0.7);
                 }
 
-                if bg != bg_color {
+                // Only draw cell background if it's not the default black background
+                let is_default_bg = cell.bg == [0, 0, 0];
+                if !is_default_bg && bg != bg_color {
                     painter.rect_filled(
                         egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(effective_cell_w, cell_h)),
                         0.0, bg,
