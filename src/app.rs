@@ -555,6 +555,34 @@ impl App {
         }
     }
 
+    fn focus_adjacent_panel(&mut self, direction: i32) {
+        use egui_dock::{Node, Surface};
+        let Some(tree) = self.dock_states.get_mut(&self.active_panel) else { return };
+        let current = tree.focused_leaf();
+        let main = SurfaceIndex(0);
+        let mut leaves = Vec::new();
+        if let Some(surface) = tree.get_surface(main) {
+            let t = match surface {
+                Surface::Main(t) => Some(t),
+                Surface::Window(t, _) => Some(t),
+                Surface::Empty => None,
+            };
+            if let Some(t) = t {
+                for (i, node) in t.iter().enumerate() {
+                    if let Node::Leaf { tabs, .. } = node {
+                        if !tabs.is_empty() {
+                            leaves.push((main, NodeIndex(i)));
+                        }
+                    }
+                }
+            }
+        }
+        if leaves.len() <= 1 { return; }
+        let pos = current.and_then(|c| leaves.iter().position(|l| *l == c)).unwrap_or(0);
+        let next = ((pos as i32 + direction).rem_euclid(leaves.len() as i32)) as usize;
+        tree.set_focused_node_and_surface(leaves[next]);
+    }
+
     fn save_scene(&self) {
         let path = scene_path();
         save_scene(&path, self);
@@ -586,6 +614,14 @@ impl eframe::App for App {
             if self.active_panel + 1 < self.panels.len() {
                 self.active_panel += 1;
             }
+        }
+
+        // Ctrl+Left/Right: switch panel focus within workspace
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::ArrowLeft)) {
+            self.focus_adjacent_panel(-1);
+        }
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::ArrowRight)) {
+            self.focus_adjacent_panel(1);
         }
 
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {

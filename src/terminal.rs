@@ -209,15 +209,18 @@ pub fn render_terminal(
                     if text.is_empty() || text == " " { continue; }
                     let attrs = cell.attrs();
                     let fg = srgb_to_egui(palette.resolve_fg(attrs.foreground()));
-                    let bg = srgb_to_egui(palette.resolve_bg(attrs.background()));
                     let x = rect.min.x + col as f32 * cell_w;
                     let cw = cell.width().max(1) as f32 * cell_w;
 
-                    if bg != bg_color {
-                        painter.rect_filled(
-                            egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(cw, cell_h)),
-                            egui::CornerRadius::ZERO, bg,
-                        );
+                    // Only draw cell background if it's not the default terminal background
+                    if attrs.background() != wezterm_term::color::ColorAttribute::Default {
+                        let bg = srgb_to_egui(palette.resolve_bg(attrs.background()));
+                        if bg != bg_color {
+                            painter.rect_filled(
+                                egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(cw, cell_h)),
+                                egui::CornerRadius::ZERO, bg,
+                            );
+                        }
                     }
 
                     painter.text(
