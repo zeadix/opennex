@@ -19,6 +19,10 @@ struct AppSettings {
     scrollback: usize,
     #[serde(default)]
     font_size: f32,
+    #[serde(default = "default_font_family")]
+    font_family: String,
+    #[serde(default = "default_cell_spacing")]
+    cell_spacing: f32,
     #[serde(default = "default_bg")]
     bg_color: [u8; 3],
     #[serde(default = "default_fg")]
@@ -34,6 +38,9 @@ struct AppSettings {
     #[serde(default = "default_key_binds")]
     key_binds: HashMap<String, ShortcutBinding>,
 }
+
+fn default_font_family() -> String { "monospace".into() }
+fn default_cell_spacing() -> f32 { 1.0 }
 
 fn default_max_history() -> usize { 300 }
 fn default_scrollback() -> usize { 10000 }
@@ -146,6 +153,8 @@ impl Default for AppSettings {
             max_history: default_max_history(),
             scrollback: default_scrollback(),
             font_size: 14.0,
+            font_family: default_font_family(),
+            cell_spacing: default_cell_spacing(),
             bg_color: default_bg(),
             fg_color: default_fg(),
             menu_bg_color: default_menu_bg(),
@@ -800,6 +809,22 @@ impl eframe::App for App {
                                 ui.add(egui::DragValue::new(&mut self.settings_edit.font_size).range(8.0..=32.0));
                             });
                             ui.horizontal(|ui| {
+                                ui.label("字间距:");
+                                ui.add(egui::Slider::new(&mut self.settings_edit.cell_spacing, 0.5..=2.0).text("x"));
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label("字体:");
+                                let families = ["monospace", "Noto Sans Mono", "Ubuntu Mono", "Fira Code", "JetBrains Mono", "Cascadia Code"];
+                                let idx = families.iter().position(|f| *f == self.settings_edit.font_family).unwrap_or(0);
+                                egui::ComboBox::from_id_salt("font_family")
+                                    .selected_text(&self.settings_edit.font_family)
+                                    .show_ui(ui, |ui| {
+                                        for f in &families {
+                                            ui.selectable_value(&mut self.settings_edit.font_family, f.to_string(), *f);
+                                        }
+                                    });
+                            });
+                            ui.horizontal(|ui| {
                                 ui.label("背景色:");
                                 egui::widgets::color_picker::color_edit_button_srgb(ui, &mut self.settings_edit.bg_color);
                             });
@@ -860,9 +885,11 @@ impl eframe::App for App {
                             self.settings = self.settings_edit.clone();
                             self.history_db.set_max_entries(self.settings.max_history);
                             let _ = save_settings(&self.settings);
+                            self.show_settings = false;
                         }
                         if ui.button("取消").clicked() {
                             self.settings_edit = self.settings.clone();
+                            self.show_settings = false;
                         }
                     });
                 });
@@ -959,6 +986,8 @@ impl eframe::App for App {
                         completion: &self.completion,
                         history_db: &self.history_db,
                         max_history: self.settings.max_history,
+                        font_family: self.settings.font_family.clone(),
+                        cell_spacing: self.settings.cell_spacing,
                         bg_color: self.settings.bg_color,
                         fg_color: self.settings.fg_color,
                         menu_bg_color: self.settings.menu_bg_color,
@@ -988,6 +1017,8 @@ struct TerminalTabViewer<'a> {
     completion: &'a crate::completion::CompletionEngine,
     history_db: &'a crate::history_db::HistoryDb,
     max_history: usize,
+    font_family: String,
+    cell_spacing: f32,
     bg_color: [u8; 3],
     fg_color: [u8; 3],
     menu_bg_color: [u8; 3],
@@ -1091,7 +1122,8 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
 
                 let terminal_response = render_terminal(ui, &td.instance, cell_w, cell_h,
                     egui::Color32::from_rgb(self.bg_color[0], self.bg_color[1], self.bg_color[2]),
-                    egui::Color32::from_rgb(self.fg_color[0], self.fg_color[1], self.fg_color[2]));
+                    egui::Color32::from_rgb(self.fg_color[0], self.fg_color[1], self.fg_color[2]),
+                    &self.font_family, self.cell_spacing);
 
                 if is_focused {
                     terminal_response.request_focus();

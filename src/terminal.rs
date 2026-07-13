@@ -184,16 +184,20 @@ pub fn render_terminal(
     cell_h: f32,
     bg_color: egui::Color32,
     fg_color: egui::Color32,
+    font_family: &str,
+    cell_spacing: f32,
 ) -> egui::Response {
     let (response, painter) = ui.allocate_painter(ui.available_size(), egui::Sense::click());
     let rect = response.rect;
+
+    let effective_cell_w = cell_w * cell_spacing;
 
     painter.rect_filled(rect, egui::CornerRadius::ZERO, bg_color);
 
     if let Ok(mut term) = instance.terminal.lock() {
         let palette = term.palette();
         let show_rows = (rect.height() / cell_h).floor() as usize;
-        let show_cols = (rect.width() / cell_w).floor() as usize;
+        let show_cols = (rect.width() / effective_cell_w).floor() as usize;
         let rows = show_rows.min(instance.screen_rows);
         let cols = show_cols.min(instance.screen_cols);
         let s = term.screen_mut();
@@ -209,8 +213,8 @@ pub fn render_terminal(
                     if text.is_empty() || text == " " { continue; }
                     let attrs = cell.attrs();
                     let fg = srgb_to_egui(palette.resolve_fg(attrs.foreground()));
-                    let x = rect.min.x + col as f32 * cell_w;
-                    let cw = cell.width().max(1) as f32 * cell_w;
+                    let x = rect.min.x + col as f32 * effective_cell_w;
+                    let cw = cell.width().max(1) as f32 * effective_cell_w;
 
                     // Only draw cell background if it's not the default terminal background
                     if attrs.background() != wezterm_term::color::ColorAttribute::Default {
@@ -223,10 +227,15 @@ pub fn render_terminal(
                         }
                     }
 
+                    let font_id = if font_family == "monospace" {
+                        egui::FontId::monospace(instance.font_size)
+                    } else {
+                        egui::FontId::new(instance.font_size, egui::FontFamily::Name(font_family.into()))
+                    };
                     painter.text(
                         egui::pos2(x, y), egui::Align2::LEFT_TOP,
                         text,
-                        egui::FontId::monospace(instance.font_size),
+                        font_id,
                         fg,
                     );
                     if cell.width() > 1 { skip_col = true; }
@@ -237,10 +246,10 @@ pub fn render_terminal(
         let pos = term.cursor_pos();
         let (pcol, prow) = (pos.x as usize, pos.y as usize);
         if pcol < cols && prow < rows {
-            let cx = rect.min.x + pcol as f32 * cell_w;
+            let cx = rect.min.x + pcol as f32 * effective_cell_w;
             let cy = rect.min.y + prow as f32 * cell_h;
             painter.rect_filled(
-                egui::Rect::from_min_size(egui::pos2(cx, cy), egui::vec2(cell_w, cell_h)),
+                egui::Rect::from_min_size(egui::pos2(cx, cy), egui::vec2(effective_cell_w, cell_h)),
                 egui::CornerRadius::ZERO, egui::Color32::WHITE,
             );
         }
