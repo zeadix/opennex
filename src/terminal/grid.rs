@@ -37,7 +37,7 @@ pub struct Grid {
     pub alt_screen: bool,
     alt_grid: Vec<Vec<Cell>>,
     alt_cursor: (usize, usize),
-    wrapped: Vec<bool>,  // wrapped[row] = true: row is continuation from previous
+    pub wrapped: Vec<bool>,  // wrapped[row] = true: row is continuation from previous
 }
 
 impl Grid {

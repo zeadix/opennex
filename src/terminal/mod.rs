@@ -95,6 +95,19 @@ impl TerminalInstance {
         // Grid reflow + PTY resize synchronously
         if let Ok(mut g) = self.grid.lock() {
             g.resize(cols as usize, rows as usize);
+            // Clear rows below cursor: these are reflow leftovers that shell won't redraw
+            let r = g.cursor_row + 1;
+            let max = g.cells.len().min(g.rows);
+            for row in r..max {
+                for col in 0..g.cols {
+                    if row < g.cells.len() && col < g.cells[row].len() {
+                        g.cells[row][col] = crate::terminal::grid::Cell::empty();
+                    }
+                }
+                if row < g.wrapped.len() {
+                    g.wrapped[row] = false;
+                }
+            }
         }
         let _ = self.master.resize(PtySize {
             rows, cols, pixel_width: cols * 8, pixel_height: rows * 18,
