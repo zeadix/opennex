@@ -97,9 +97,6 @@ impl TerminalInstance {
         });
         if let Ok(mut g) = self.grid.lock() {
             g.resize(cols as usize, rows as usize);
-            g.clear_screen(2);
-            g.cursor_col = 0;
-            g.cursor_row = 0;
         }
         self.screen_cols = cols as usize;
         self.screen_rows = rows as usize;
