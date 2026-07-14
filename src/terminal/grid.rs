@@ -65,54 +65,61 @@ impl Grid {
         if cols != old_cols {
             let mut new_cells: Vec<Vec<Cell>> = Vec::new();
             let mut new_wrapped: Vec<bool> = Vec::new();
-            let mut carry: Vec<Cell> = Vec::new(); // overflow from previous row
+            let mut had_accumulator = false;
 
-            // Process all existing rows (including scrollback area)
-            let total_old = self.cells.len();
-            for r in 0..total_old {
-                // Build full logical line: carry + current row
-                let mut full: Vec<Cell> = carry.drain(..).collect();
-                full.extend(self.cells[r].drain(..));
+            // Find the last row that contains any non-empty cell.
+            // Empty rows (pure spaces/nulls) are just padding and must not
+            // be reflowed — they would corrupt the content stream with
+            // interleaved spaces.
+            let last_content_row = self.cells
+                .iter()
+                .enumerate()
+                .rev()
+                .find(|(_, row)| row.iter().any(|c| !c.is_empty()))
+                .map(|(i, _)| i + 1)      // 1 past the last content row
+                .unwrap_or(0);             // 0 means no content at all
 
-                if full.is_empty() {
-                    // Empty row: just keep it
-                    new_cells.push(vec![Cell::empty(); cols]);
-                    new_wrapped.push(false);
-                    continue;
-                }
+            let mut accumulator: Vec<Cell> = Vec::new();
 
-                // Split into cols-wide chunks
-                let mut pos = 0;
-                while pos < full.len() {
-                    let end = (pos + cols).min(full.len());
-                    let chunk: Vec<Cell> = full[pos..end].to_vec();
+            for r in 0..last_content_row {
+                // Drain only up to the last non-empty column in this row.
+                // Trailing empty cells (spaces/nulls) are padding and must not
+                // be reflowed — they would inflate the content stream.
+                let last_col = self.cells[r]
+                    .iter()
+                    .enumerate()
+                    .rev()
+                    .find(|(_, c)| !c.is_empty())
+                    .map(|(i, _)| i + 1)
+                    .unwrap_or(0);
 
-                    // Fill remaining columns with empty cells
-                    let mut row_data = chunk;
-                    if row_data.len() < cols {
-                        row_data.resize(cols, Cell::empty());
-                    }
+                // Accumulate content from this row (only non-empty part)
+                accumulator.extend(self.cells[r].drain(..last_col));
 
-                    new_cells.push(row_data);
-                    if pos == 0 && r < self.wrapped.len() {
-                        new_wrapped.push(self.wrapped[r]);
-                    } else if pos > 0 {
-                        new_wrapped.push(true);
-                    } else {
-                        new_wrapped.push(false);
-                    }
-                    pos = end;
+                // Flush complete rows
+                while accumulator.len() >= cols {
+                    let chunk: Vec<Cell> = accumulator.drain(..cols).collect();
+                    new_cells.push(chunk);
+                    // wrapped = true means this row is a continuation of the
+                    // logical line from the previous row.  The accumulator
+                    // is non-empty only if content extends beyond this chunk.
+                    new_wrapped.push(had_accumulator);
+                    had_accumulator = accumulator.len() > 0;
                 }
             }
 
-            // Handle any remaining carry
-            if !carry.is_empty() {
-                let mut row_data = carry;
-                if row_data.len() < cols {
-                    row_data.resize(cols, Cell::empty());
-                }
-                new_cells.push(row_data);
-                new_wrapped.push(true);
+            // Handle remaining incomplete row
+            if !accumulator.is_empty() {
+                let mut row = accumulator;
+                row.resize(cols, Cell::empty());
+                new_cells.push(row);
+                new_wrapped.push(had_accumulator);
+            }
+
+            // Fallback: ensure at least one row exists so wrapped flags match.
+            if new_cells.is_empty() {
+                new_cells.push(vec![Cell::empty(); cols]);
+                new_wrapped.push(false);
             }
 
             self.cells = new_cells;
@@ -211,10 +218,18 @@ impl Grid {
     pub fn backspace(&mut self) {
         if self.cursor_col > 0 {
             self.cursor_col -= 1;
+            // Clear the cell at the new cursor position
+            if let Some(cell) = self.current_cell_mut() {
+                *cell = Cell::empty();
+            }
         } else if self.cursor_row > 0 {
             // Move to end of previous row
             self.cursor_row -= 1;
             self.cursor_col = self.cols.saturating_sub(1);
+            // Clear the cell at the new cursor position
+            if let Some(cell) = self.current_cell_mut() {
+                *cell = Cell::empty();
+            }
         }
     }
 
