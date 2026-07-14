@@ -2,11 +2,8 @@ use std::ops::{Index, IndexMut};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct CellFlags {
-    pub bold: bool,
-    pub italic: bool,
-    pub underline: bool,
-    pub inverse: bool,
-    pub dim: bool,
+    pub bold: bool, pub italic: bool, pub underline: bool,
+    pub inverse: bool, pub dim: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -22,6 +19,7 @@ impl Cell {
     pub fn empty() -> Self {
         Cell { ch: ' ', fg: [255, 255, 255], bg: [0, 0, 0], flags: CellFlags::default(), wide: false }
     }
+    pub fn is_empty(&self) -> bool { self.ch == ' ' || self.ch == '\0' }
 }
 
 pub struct Grid {
@@ -39,55 +37,123 @@ pub struct Grid {
     pub alt_screen: bool,
     alt_grid: Vec<Vec<Cell>>,
     alt_cursor: (usize, usize),
+    wrapped: Vec<bool>,  // wrapped[row] = true: row is continuation from previous
 }
 
 impl Grid {
     pub fn new(cols: usize, rows: usize) -> Self {
-        let cells = vec![vec![Cell::empty(); cols]; rows];
         Grid {
-            cells, cols, rows,
+            cells: vec![vec![Cell::empty(); cols]; rows],
+            cols, rows,
             cursor_col: 0, cursor_row: 0,
             scroll_top: 0, scroll_bottom: rows.saturating_sub(1),
             current_fg: [255, 255, 255], current_bg: [0, 0, 0],
             current_flags: CellFlags::default(),
             cursor_visible: true,
             alt_screen: false,
-            alt_grid: Vec::new(),
+            alt_grid: vec![vec![Cell::empty(); cols]; rows],
             alt_cursor: (0, 0),
+            wrapped: vec![false; rows],
         }
     }
 
-    /// Resize without reflow: truncate or extend rows/cols.
     pub fn resize(&mut self, cols: usize, rows: usize) {
         if cols == self.cols && rows == self.rows { return; }
+        let old_cols = self.cols;
 
-        // Resize each row
+        // --- COLUMN REFLOW ---
+        if cols != old_cols {
+            let mut new_cells: Vec<Vec<Cell>> = Vec::new();
+            let mut new_wrapped: Vec<bool> = Vec::new();
+            let mut carry: Vec<Cell> = Vec::new(); // overflow from previous row
+
+            // Process all existing rows (including scrollback area)
+            let total_old = self.cells.len();
+            for r in 0..total_old {
+                // Build full logical line: carry + current row
+                let mut full: Vec<Cell> = carry.drain(..).collect();
+                full.extend(self.cells[r].drain(..));
+
+                if full.is_empty() {
+                    // Empty row: just keep it
+                    new_cells.push(vec![Cell::empty(); cols]);
+                    new_wrapped.push(false);
+                    continue;
+                }
+
+                // Split into cols-wide chunks
+                let mut pos = 0;
+                while pos < full.len() {
+                    let end = (pos + cols).min(full.len());
+                    let chunk: Vec<Cell> = full[pos..end].to_vec();
+
+                    // Fill remaining columns with empty cells
+                    let mut row_data = chunk;
+                    if row_data.len() < cols {
+                        row_data.resize(cols, Cell::empty());
+                    }
+
+                    new_cells.push(row_data);
+                    if pos == 0 && r < self.wrapped.len() {
+                        new_wrapped.push(self.wrapped[r]);
+                    } else if pos > 0 {
+                        new_wrapped.push(true);
+                    } else {
+                        new_wrapped.push(false);
+                    }
+                    pos = end;
+                }
+            }
+
+            // Handle any remaining carry
+            if !carry.is_empty() {
+                let mut row_data = carry;
+                if row_data.len() < cols {
+                    row_data.resize(cols, Cell::empty());
+                }
+                new_cells.push(row_data);
+                new_wrapped.push(true);
+            }
+
+            self.cells = new_cells;
+            self.wrapped = new_wrapped;
+        }
+
+        // --- ROW COUNT ---
+        if self.cells.len() != rows {
+            if self.cells.len() > rows {
+                self.cells.truncate(rows);
+                self.wrapped.truncate(rows);
+            } else {
+                while self.cells.len() < rows {
+                    self.cells.push(vec![Cell::empty(); cols]);
+                    self.wrapped.push(false);
+                }
+            }
+            // Also handle alt grid
+            if self.alt_grid.len() != rows {
+                if self.alt_grid.len() > rows {
+                    self.alt_grid.truncate(rows);
+                } else {
+                    while self.alt_grid.len() < rows {
+                        self.alt_grid.push(vec![Cell::empty(); cols]);
+                    }
+                }
+            }
+        }
+
+        // Ensure all rows have correct width (may have been resized above)
         for row in &mut self.cells {
-            if cols > row.len() {
-                row.resize(cols, Cell::empty());
-            } else {
-                row.truncate(cols);
+            if row.len() != cols {
+                if row.len() > cols { row.truncate(cols); }
+                else { row.resize(cols, Cell::empty()); }
             }
         }
-        // Resize alt grid too
         for row in &mut self.alt_grid {
-            if cols > row.len() {
-                row.resize(cols, Cell::empty());
-            } else {
-                row.truncate(cols);
+            if row.len() != cols {
+                if row.len() > cols { row.truncate(cols); }
+                else { row.resize(cols, Cell::empty()); }
             }
-        }
-
-        // Add or remove rows
-        if rows > self.cells.len() {
-            self.cells.resize(rows, vec![Cell::empty(); cols]);
-        } else {
-            self.cells.truncate(rows);
-        }
-        if rows > self.alt_grid.len() {
-            self.alt_grid.resize(rows, vec![Cell::empty(); cols]);
-        } else {
-            self.alt_grid.truncate(rows);
         }
 
         self.cols = cols;
@@ -103,10 +169,12 @@ impl Grid {
     }
 
     pub fn put_char(&mut self, ch: char) {
-        // Auto-wrap: if cursor at last col with pending wrap
         if self.cursor_col >= self.cols {
             self.cursor_col = 0;
             self.line_feed();
+            if self.cursor_row < self.wrapped.len() {
+                self.wrapped[self.cursor_row] = true;
+            }
         }
         let fg = self.current_fg;
         let bg = self.current_bg;
@@ -121,22 +189,21 @@ impl Grid {
         self.cursor_col += 1;
     }
 
-    pub fn carriage_return(&mut self) {
-        self.cursor_col = 0;
-    }
+    pub fn carriage_return(&mut self) { self.cursor_col = 0; }
 
     pub fn line_feed(&mut self) {
         if self.cursor_row == self.scroll_bottom {
             self.scroll_up(1);
-        } else if self.cursor_row < self.rows - 1 {
+        } else if self.cursor_row < self.rows.saturating_sub(1) {
             self.cursor_row += 1;
+        }
+        if self.cursor_row < self.wrapped.len() {
+            self.wrapped[self.cursor_row] = false;
         }
     }
 
     pub fn backspace(&mut self) {
-        if self.cursor_col > 0 {
-            self.cursor_col -= 1;
-        }
+        if self.cursor_col > 0 { self.cursor_col -= 1; }
     }
 
     pub fn tab(&mut self) {
@@ -150,7 +217,9 @@ impl Grid {
         if bottom < self.rows {
             for _ in 0..n {
                 self.cells.remove(top);
+                self.wrapped.remove(top);
                 self.cells.insert(bottom, vec![Cell::empty(); self.cols]);
+                self.wrapped.insert(bottom, false);
             }
         }
     }
@@ -161,30 +230,30 @@ impl Grid {
         if bottom < self.rows {
             for _ in 0..n {
                 self.cells.remove(bottom);
+                self.wrapped.remove(bottom);
                 self.cells.insert(top, vec![Cell::empty(); self.cols]);
+                self.wrapped.insert(top, false);
             }
         }
     }
 
     pub fn clear_screen(&mut self, mode: u16) {
         match mode {
-            0 => { // Clear from cursor to end
+            0 => {
                 for col in self.cursor_col..self.cols {
                     if let Some(c) = self.cells.get_mut(self.cursor_row).and_then(|r| r.get_mut(col)) {
                         *c = Cell::empty();
                     }
                 }
                 for row in (self.cursor_row + 1)..self.rows {
-                    for col in 0..self.cols {
-                        self.cells[row][col] = Cell::empty();
-                    }
+                    for col in 0..self.cols { self.cells[row][col] = Cell::empty(); }
+                    if row < self.wrapped.len() { self.wrapped[row] = false; }
                 }
             }
-            1 => { // Clear from start to cursor
+            1 => {
                 for row in 0..self.cursor_row {
-                    for col in 0..self.cols {
-                        self.cells[row][col] = Cell::empty();
-                    }
+                    for col in 0..self.cols { self.cells[row][col] = Cell::empty(); }
+                    if row < self.wrapped.len() { self.wrapped[row] = false; }
                 }
                 for col in 0..=self.cursor_col {
                     if let Some(c) = self.cells.get_mut(self.cursor_row).and_then(|r| r.get_mut(col)) {
@@ -192,14 +261,12 @@ impl Grid {
                     }
                 }
             }
-            2 | 3 => { // Clear entire screen
+            2 | 3 => {
                 for row in 0..self.rows {
-                    for col in 0..self.cols {
-                        self.cells[row][col] = Cell::empty();
-                    }
+                    for col in 0..self.cols { self.cells[row][col] = Cell::empty(); }
                 }
-                self.cursor_col = 0;
-                self.cursor_row = 0;
+                for w in &mut self.wrapped { *w = false; }
+                self.cursor_col = 0; self.cursor_row = 0;
             }
             _ => {}
         }
@@ -207,21 +274,17 @@ impl Grid {
 
     pub fn clear_line(&mut self, mode: u16) {
         match mode {
-            0 => { // Cursor to end
+            0 => {
                 for col in self.cursor_col..self.cols {
-                    if let Some(r) = self.cells.get_mut(self.cursor_row) {
-                        r[col] = Cell::empty();
-                    }
+                    if let Some(r) = self.cells.get_mut(self.cursor_row) { r[col] = Cell::empty(); }
                 }
             }
-            1 => { // Start to cursor
+            1 => {
                 for col in 0..=self.cursor_col.min(self.cols.saturating_sub(1)) {
-                    if let Some(r) = self.cells.get_mut(self.cursor_row) {
-                        r[col] = Cell::empty();
-                    }
+                    if let Some(r) = self.cells.get_mut(self.cursor_row) { r[col] = Cell::empty(); }
                 }
             }
-            2 => { // Entire line
+            2 => {
                 if let Some(r) = self.cells.get_mut(self.cursor_row) {
                     for cell in r.iter_mut() { *cell = Cell::empty(); }
                 }
@@ -235,31 +298,17 @@ impl Grid {
         self.cursor_col = col.min(self.cols.saturating_sub(1));
     }
 
-    pub fn cursor_up(&mut self, n: usize) {
-        self.cursor_row = self.cursor_row.saturating_sub(n);
-    }
-
-    pub fn cursor_down(&mut self, n: usize) {
-        self.cursor_row = (self.cursor_row + n).min(self.rows.saturating_sub(1));
-    }
-
-    pub fn cursor_forward(&mut self, n: usize) {
-        self.cursor_col = (self.cursor_col + n).min(self.cols.saturating_sub(1));
-    }
-
-    pub fn cursor_back(&mut self, n: usize) {
-        self.cursor_col = self.cursor_col.saturating_sub(n);
-    }
+    pub fn cursor_up(&mut self, n: usize) { self.cursor_row = self.cursor_row.saturating_sub(n); }
+    pub fn cursor_down(&mut self, n: usize) { self.cursor_row = (self.cursor_row + n).min(self.rows.saturating_sub(1)); }
+    pub fn cursor_forward(&mut self, n: usize) { self.cursor_col = (self.cursor_col + n).min(self.cols.saturating_sub(1)); }
+    pub fn cursor_back(&mut self, n: usize) { self.cursor_col = self.cursor_col.saturating_sub(n); }
 
     pub fn set_scroll_region(&mut self, top: usize, bottom: usize) {
         self.scroll_top = top.min(self.rows.saturating_sub(1));
         self.scroll_bottom = bottom.min(self.rows.saturating_sub(1)).max(self.scroll_top);
     }
 
-    pub fn save_cursor(&mut self) {
-        self.alt_cursor = (self.cursor_row, self.cursor_col);
-    }
-
+    pub fn save_cursor(&mut self) { self.alt_cursor = (self.cursor_row, self.cursor_col); }
     pub fn restore_cursor(&mut self) {
         self.cursor_row = self.alt_cursor.0.min(self.rows.saturating_sub(1));
         self.cursor_col = self.alt_cursor.1.min(self.cols.saturating_sub(1));
@@ -269,25 +318,25 @@ impl Grid {
         if alt != self.alt_screen {
             std::mem::swap(&mut self.cells, &mut self.alt_grid);
             std::mem::swap(&mut self.alt_cursor, &mut (self.cursor_row, self.cursor_col));
+            if alt {
+                // Switching to alt screen: wrapped flags reset
+                self.wrapped = vec![false; self.rows];
+            }
             self.alt_screen = alt;
         }
     }
 
     pub fn row_text(&self, row: usize) -> String {
-        if row >= self.rows { return String::new(); }
+        if row >= self.cells.len() { return String::new(); }
         self.cells[row].iter().map(|c| c.ch).collect()
     }
 }
 
 impl Index<usize> for Grid {
     type Output = [Cell];
-    fn index(&self, row: usize) -> &[Cell] {
-        &self.cells[row]
-    }
+    fn index(&self, row: usize) -> &[Cell] { &self.cells[row] }
 }
 
 impl IndexMut<usize> for Grid {
-    fn index_mut(&mut self, row: usize) -> &mut [Cell] {
-        &mut self.cells[row]
-    }
+    fn index_mut(&mut self, row: usize) -> &mut [Cell] { &mut self.cells[row] }
 }

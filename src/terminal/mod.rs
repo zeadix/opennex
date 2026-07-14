@@ -92,19 +92,9 @@ impl TerminalInstance {
         if cols as usize == self.screen_cols && rows as usize == self.screen_rows {
             return;
         }
-        let old_cols = self.screen_cols;
-        let narrowing = (cols as usize) < old_cols;
-        let first_resize = old_cols == 0;
-
-        // Grid + PTY resize synchronously (no debounce)
+        // Grid + PTY resize synchronously (no debounce, no reflow bug)
         if let Ok(mut g) = self.grid.lock() {
             g.resize(cols as usize, rows as usize);
-            // Clear screen when narrowing (non-first) to prevent stale content
-            if narrowing && !first_resize {
-                g.clear_screen(2);
-                g.cursor_col = 0;
-                g.cursor_row = 0;
-            }
         }
         let _ = self.master.resize(PtySize {
             rows, cols, pixel_width: cols * 8, pixel_height: rows * 18,
