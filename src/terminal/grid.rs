@@ -189,7 +189,13 @@ impl Grid {
         self.cursor_col += 1;
     }
 
-    pub fn carriage_return(&mut self) { self.cursor_col = 0; }
+    pub fn carriage_return(&mut self) {
+        self.cursor_col = 0;
+        // Move to the first non-wrapped row (start of the logical line)
+        while self.cursor_row > 0 && self.wrapped.get(self.cursor_row).copied().unwrap_or(false) {
+            self.cursor_row -= 1;
+        }
+    }
 
     pub fn line_feed(&mut self) {
         if self.cursor_row == self.scroll_bottom {

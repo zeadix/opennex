@@ -92,7 +92,7 @@ impl TerminalInstance {
         if cols as usize == self.screen_cols && rows as usize == self.screen_rows {
             return;
         }
-        // Grid + PTY resize synchronously (no debounce, no reflow bug)
+        // Grid reflow + PTY resize synchronously
         if let Ok(mut g) = self.grid.lock() {
             g.resize(cols as usize, rows as usize);
         }
