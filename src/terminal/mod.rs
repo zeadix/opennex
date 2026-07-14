@@ -24,6 +24,10 @@ pub struct TerminalInstance {
     pub history_nav: Option<crate::app::HistoryNav>,
     pub screen_cols: usize,
     pub screen_rows: usize,
+    pty_cols: u16,
+    pty_rows: u16,
+    pty_stable: u8,
+    pty_initialized: bool,
 }
 
 #[derive(Clone)]
@@ -85,21 +89,47 @@ impl TerminalInstance {
             history_nav: None,
             screen_cols: cols as usize,
             screen_rows: rows as usize,
+            pty_cols: cols,
+            pty_rows: rows,
+            pty_stable: 0,
+            pty_initialized: false,
         })
     }
 
     pub fn resize(&mut self, cols: u16, rows: u16) {
-        if cols as usize == self.screen_cols && rows as usize == self.screen_rows {
-            return;
+        // Grid resize immediately (no reflow, no side effects)
+        if cols as usize != self.screen_cols || rows as usize != self.screen_rows {
+            if let Ok(mut g) = self.grid.lock() {
+                g.resize(cols as usize, rows as usize);
+            }
+            self.screen_cols = cols as usize;
+            self.screen_rows = rows as usize;
         }
-        let _ = self.master.resize(PtySize {
-            rows, cols, pixel_width: cols * 8, pixel_height: rows * 18,
-        });
-        if let Ok(mut g) = self.grid.lock() {
-            g.resize(cols as usize, rows as usize);
+
+        // PTY resize: debounce to avoid SIGWINCH spam during window drag
+        if cols == self.pty_cols && rows == self.pty_rows {
+            self.pty_stable = self.pty_stable.saturating_add(1);
+        } else {
+            self.pty_stable = 0;
+            self.pty_cols = cols;
+            self.pty_rows = rows;
         }
-        self.screen_cols = cols as usize;
-        self.screen_rows = rows as usize;
+
+        if self.pty_stable == 5 {
+            let _ = self.master.resize(PtySize {
+                rows: self.pty_rows, cols: self.pty_cols,
+                pixel_width: self.pty_cols * 8, pixel_height: self.pty_rows * 18,
+            });
+            if self.pty_initialized {
+                // Subsequent resize: clear screen to prevent content duplication
+                if let Ok(mut g) = self.grid.lock() {
+                    g.clear_screen(2);
+                    g.cursor_col = 0;
+                    g.cursor_row = 0;
+                }
+            }
+            self.pty_initialized = true;
+        }
     }
 
     pub fn write(&mut self, data: &[u8]) {
