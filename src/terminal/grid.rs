@@ -203,7 +203,13 @@ impl Grid {
     }
 
     pub fn backspace(&mut self) {
-        if self.cursor_col > 0 { self.cursor_col -= 1; }
+        if self.cursor_col > 0 {
+            self.cursor_col -= 1;
+        } else if self.cursor_row > 0 {
+            // Move to end of previous row
+            self.cursor_row -= 1;
+            self.cursor_col = self.cols.saturating_sub(1);
+        }
     }
 
     pub fn tab(&mut self) {

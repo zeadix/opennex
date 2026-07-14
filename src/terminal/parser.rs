@@ -165,7 +165,7 @@ impl Perform for TerminalHandler {
             match byte {
                 b'\r' => g.carriage_return(),
                 b'\n' => g.line_feed(),
-                b'\x08' => g.backspace(),
+                b'\x08' | b'\x7f' => g.backspace(),
                 b'\x07' => {} // Bell
                 b'\t' => g.tab(),
                 _ => {}
