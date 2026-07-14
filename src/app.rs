@@ -638,16 +638,30 @@ impl App {
             }
         }
         if let Some(tab) = self.pending_close.take() {
-            self.terminals.remove(&tab);
-            if self.focused_terminal.as_ref() == Some(&tab) {
-                self.focused_terminal = None;
-            }
-            for tree in self.dock_states.values_mut() {
-                if let Some(loc) = tree.find_tab(&tab) {
-                    tree.remove_tab(loc);
+            // Count terminals in the active workspace's dock tree
+            let terminal_count = if let Some(tree) = self.dock_states.get(&self.active_panel) {
+                let mut count = 0;
+                for t in self.terminals.keys() {
+                    if tree.find_tab(t).is_some() {
+                        count += 1;
+                    }
                 }
+                count
+            } else { 0 };
+            if terminal_count <= 1 {
+                // Don't close the last terminal
+            } else {
+                self.terminals.remove(&tab);
+                if self.focused_terminal.as_ref() == Some(&tab) {
+                    self.focused_terminal = None;
+                }
+                for tree in self.dock_states.values_mut() {
+                    if let Some(loc) = tree.find_tab(&tab) {
+                        tree.remove_tab(loc);
+                    }
+                }
+                self.panels.retain(|p| p.name != tab);
             }
-            self.panels.retain(|p| p.name != tab);
         }
         if self.pending_load_scene {
             self.pending_load_scene = false;
