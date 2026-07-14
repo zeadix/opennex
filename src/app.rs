@@ -330,11 +330,8 @@ fn create_terminal(ctx: &egui::Context, working_dir: &str) -> Option<TerminalIns
         std::env::current_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default()
     };
 
-    let screen = ctx.screen_rect();
-    let cols = (((screen.width() - 190.0) / 8.0).round().max(20.0) as u16).min(300);
-    let rows = (((screen.height() - 70.0) / 18.0).round().max(5.0) as u16).min(100);
-
-    TerminalInstance::create(&shell, &cwd_str, cols, rows)
+    // Use standard 80x24, first frame resize will correct to actual size
+    TerminalInstance::create(&shell, &cwd_str, 80, 24)
 }
 
 fn build_panel_state(app: &App, panel_idx: usize) -> Option<WorkspaceState> {
