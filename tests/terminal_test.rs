@@ -252,11 +252,10 @@ fn test_carriage_return_to_wrapped() {
     // Cursor is on row 1 (wrapped). Send CR.
     g.carriage_return();
 
-    // CR should go to column 0 of the first non-wrapped row
+    // CR should go to column 0 of the current row (standard behavior)
     assert_eq!(g.cursor_col, 0, "CR should set cursor_col to 0");
-    // The cursor should be on row 0 (the first non-wrapped row)
-    // Because row 1 is wrapped, CR should move up to row 0
-    assert_eq!(g.cursor_row, 0, "CR should move cursor to row 0 (first non-wrapped)");
+    // The cursor stays on the current row (row 1)
+    assert_eq!(g.cursor_row, 1, "CR should NOT change cursor_row");
 }
 
 #[test]
@@ -291,21 +290,21 @@ fn test_reflow_multiline_output() {
     type_text(&mut g, &"line3_".repeat(5)); // 30 chars
     press_enter(&mut g);
 
-    // Total content (NO prompt in this test):
-    //   row 0: 60 (line1)
-    //   row 1: 80 (first 80 of line2)
-    //   row 2: 40 (30 line3 + 10 remaining line2 chars)
-    //   = 180
+    // Total content:
+    //   line1: 60 chars
+    //   line2: 120 chars (wraps at 80: 80 + 40)
+    //   line3: 30 chars
+    //   = 210
     let total: usize = (0..g.rows).map(|r| row_text(&g, r).len()).sum();
-    assert_eq!(total, 180, "Total should be 180, got {}", total);
+    assert_eq!(total, 210, "Total should be 210 (60+120+30), got {}", total);
 
     // Narrow to 50 cols
     g.resize(50, 24);
     let total: usize = (0..g.rows).map(|r| row_text(&g, r).len()).sum();
-    assert_eq!(total, 180, "After narrow, total should be 180, got {}", total);
+    assert_eq!(total, 210, "After narrow, total should be 210, got {}", total);
 
     // Widen to 80 cols
     g.resize(80, 24);
     let total: usize = (0..g.rows).map(|r| row_text(&g, r).len()).sum();
-    assert_eq!(total, 180, "After widen, total should be 180, got {}", total);
+    assert_eq!(total, 210, "After widen, total should be 210, got {}", total);
 }

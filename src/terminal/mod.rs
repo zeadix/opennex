@@ -8,6 +8,7 @@ pub use render::{render_terminal, render_snapshot};
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use std::io::{Read, Write};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use vte::Parser as VteParser;
 
@@ -24,6 +25,8 @@ pub struct TerminalInstance {
     pub history_nav: Option<crate::app::HistoryNav>,
     pub screen_cols: usize,
     pub screen_rows: usize,
+    resize_pending: Arc<AtomicBool>,
+    resize_size: Arc<Mutex<(u16, u16)>>,
 }
 
 #[derive(Clone)]
@@ -53,14 +56,22 @@ impl TerminalInstance {
         let user_writer = SharedWriter(shared.clone());
         let terminal_writer: Box<dyn Write + Send> = Box::new(SharedWriter(shared));
 
+        // Resize coordination between main thread and reader thread
+        let resize_pending = Arc::new(AtomicBool::new(false));
+        let resize_size = Arc::new(Mutex::new((cols, rows)));
+
         // Reader thread: PTY -> vte parser -> grid
         let g = grid.clone();
         let w = terminal_writer;
+        let rp = resize_pending.clone();
+        let rs = resize_size.clone();
+        let initial_cols = cols as usize;
+        let initial_rows = rows as usize;
         std::thread::spawn(move || {
             let mut buf = [0u8; 65536];
             let mut reader = reader;
             let mut vte_parser = VteParser::new();
-            let mut handler = parser::TerminalHandler::new(g, w);
+            let mut handler = parser::TerminalHandler::new(g.clone(), w);
             loop {
                 let n = match reader.read(&mut buf) {
                     Ok(0) => break,
@@ -68,6 +79,22 @@ impl TerminalInstance {
                     Err(_) => break,
                 };
                 vte_parser.advance(&mut handler, &buf[..n]);
+
+                // Process pending resize after each batch of PTY data
+                if rp.load(Ordering::Relaxed) {
+                    rp.store(false, Ordering::Relaxed);
+                    if let Ok(size) = rs.lock() {
+                        let (new_cols, new_rows) = *size;
+                        if let Ok(mut g) = g.lock() {
+                            if new_cols as usize != g.cols || new_rows as usize != g.rows {
+                                g.resize(new_cols as usize, new_rows as usize);
+                                g.clear_screen(2);
+                                g.cursor_col = 0;
+                                g.cursor_row = 0;
+                            }
+                        }
+                    }
+                }
             }
         });
 
@@ -85,6 +112,8 @@ impl TerminalInstance {
             history_nav: None,
             screen_cols: cols as usize,
             screen_rows: rows as usize,
+            resize_pending,
+            resize_size,
         })
     }
 
@@ -92,26 +121,15 @@ impl TerminalInstance {
         if cols as usize == self.screen_cols && rows as usize == self.screen_rows {
             return;
         }
-        // Grid reflow + PTY resize synchronously
-        if let Ok(mut g) = self.grid.lock() {
-            g.resize(cols as usize, rows as usize);
-            // Clear rows below cursor: these are reflow leftovers that shell won't redraw
-            let r = g.cursor_row + 1;
-            let max = g.cells.len().min(g.rows);
-            for row in r..max {
-                for col in 0..g.cols {
-                    if row < g.cells.len() && col < g.cells[row].len() {
-                        g.cells[row][col] = crate::terminal::grid::Cell::empty();
-                    }
-                }
-                if row < g.wrapped.len() {
-                    g.wrapped[row] = false;
-                }
-            }
-        }
+        // PTY resize immediately (SIGWINCH to shell)
         let _ = self.master.resize(PtySize {
             rows, cols, pixel_width: cols * 8, pixel_height: rows * 18,
         });
+        // Signal reader thread to reflow grid (avoids race with PTY output)
+        if let Ok(mut size) = self.resize_size.lock() {
+            *size = (cols, rows);
+        }
+        self.resize_pending.store(true, Ordering::Relaxed);
         self.screen_cols = cols as usize;
         self.screen_rows = rows as usize;
     }

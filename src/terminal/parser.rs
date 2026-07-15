@@ -174,6 +174,16 @@ impl Perform for TerminalHandler {
     }
 
     fn csi_dispatch(&mut self, params: &Params, _intermediates: &[u8], _ignore: bool, action: char) {
+        // Handle DSR (Device Status Report) before the grid lock
+        if action == 'n' && Self::param(params, 0, 0) == 6 {
+            let (row, col) = if let Ok(g) = self.grid.lock() {
+                (g.cursor_row + 1, g.cursor_col + 1)
+            } else { (1, 1) };
+            let _ = self.writer.write_all(format!("\x1b[{};{}R", row, col).as_bytes());
+            let _ = self.writer.flush();
+            return;
+        }
+
         if let Ok(mut g) = self.grid.lock() {
             match action {
                 'A' => g.cursor_up(Self::param(params, 0, 1) as usize),
