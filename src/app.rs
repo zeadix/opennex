@@ -1,10 +1,9 @@
 use egui_dock::{DockArea, DockState, NodeIndex, Style, SurfaceIndex};
-use egui::EventFilter;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use crate::terminal::{render_snapshot, render_terminal, TerminalInstance};
+use crate::terminal::TerminalInstance;
 
 const DEFAULT_FONT_SIZE: f32 = 14.0;
 const MIN_FONT_SIZE: f32 = 8.0;
@@ -43,17 +42,37 @@ struct AppSettings {
     key_binds: HashMap<String, ShortcutBinding>,
 }
 
-fn default_font_family() -> String { "monospace".into() }
-fn default_cell_spacing() -> f32 { 1.0 }
+fn default_font_family() -> String {
+    "monospace".into()
+}
+fn default_cell_spacing() -> f32 {
+    1.0
+}
 
-fn default_max_history() -> usize { 300 }
-fn default_scrollback() -> usize { 10000 }
-fn default_bg() -> [u8; 3] { [0, 0, 0] }
-fn default_fg() -> [u8; 3] { [255, 255, 255] }
-fn default_menu_bg() -> [u8; 3] { [30, 30, 30] }
-fn default_menu_fg() -> [u8; 3] { [255, 255, 255] }
-fn default_menu_font_size() -> f32 { 14.0 }
-fn default_lock_color() -> [u8; 3] { [30, 30, 60] }
+fn default_max_history() -> usize {
+    300
+}
+fn default_scrollback() -> usize {
+    10000
+}
+fn default_bg() -> [u8; 3] {
+    [0, 0, 0]
+}
+fn default_fg() -> [u8; 3] {
+    [255, 255, 255]
+}
+fn default_menu_bg() -> [u8; 3] {
+    [30, 30, 30]
+}
+fn default_menu_fg() -> [u8; 3] {
+    [255, 255, 255]
+}
+fn default_menu_font_size() -> f32 {
+    14.0
+}
+fn default_lock_color() -> [u8; 3] {
+    [30, 30, 60]
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ShortcutBinding {
     key: String,
@@ -64,55 +83,161 @@ struct ShortcutBinding {
 
 fn default_key_binds() -> HashMap<String, ShortcutBinding> {
     let mut m = HashMap::new();
-    m.insert("new_terminal".into(), ShortcutBinding { key: "N".into(), ctrl: true, shift: true, alt: false });
-    m.insert("close_terminal".into(), ShortcutBinding { key: "W".into(), ctrl: true, shift: false, alt: false });
-    m.insert("workspace_up".into(), ShortcutBinding { key: "ArrowUp".into(), ctrl: true, shift: false, alt: false });
-    m.insert("workspace_down".into(), ShortcutBinding { key: "ArrowDown".into(), ctrl: true, shift: false, alt: false });
-    m.insert("panel_left".into(), ShortcutBinding { key: "ArrowLeft".into(), ctrl: true, shift: false, alt: false });
-    m.insert("panel_right".into(), ShortcutBinding { key: "ArrowRight".into(), ctrl: true, shift: false, alt: false });
-    m.insert("lock_workspace".into(), ShortcutBinding { key: "L".into(), ctrl: true, shift: false, alt: false });
+    m.insert(
+        "new_terminal".into(),
+        ShortcutBinding {
+            key: "N".into(),
+            ctrl: true,
+            shift: true,
+            alt: false,
+        },
+    );
+    m.insert(
+        "close_terminal".into(),
+        ShortcutBinding {
+            key: "W".into(),
+            ctrl: true,
+            shift: false,
+            alt: false,
+        },
+    );
+    m.insert(
+        "workspace_up".into(),
+        ShortcutBinding {
+            key: "ArrowUp".into(),
+            ctrl: true,
+            shift: false,
+            alt: false,
+        },
+    );
+    m.insert(
+        "workspace_down".into(),
+        ShortcutBinding {
+            key: "ArrowDown".into(),
+            ctrl: true,
+            shift: false,
+            alt: false,
+        },
+    );
+    m.insert(
+        "panel_left".into(),
+        ShortcutBinding {
+            key: "ArrowLeft".into(),
+            ctrl: true,
+            shift: false,
+            alt: false,
+        },
+    );
+    m.insert(
+        "panel_right".into(),
+        ShortcutBinding {
+            key: "ArrowRight".into(),
+            ctrl: true,
+            shift: false,
+            alt: false,
+        },
+    );
+    m.insert(
+        "lock_workspace".into(),
+        ShortcutBinding {
+            key: "L".into(),
+            ctrl: true,
+            shift: false,
+            alt: false,
+        },
+    );
+    m.insert(
+        "history_up".into(),
+        ShortcutBinding {
+            key: "PageUp".into(),
+            ctrl: false,
+            shift: false,
+            alt: false,
+        },
+    );
+    m.insert(
+        "history_down".into(),
+        ShortcutBinding {
+            key: "PageDown".into(),
+            ctrl: false,
+            shift: false,
+            alt: false,
+        },
+    );
     m
 }
 
 fn binding_to_modifiers(b: &ShortcutBinding) -> egui::Modifiers {
     let mut m = egui::Modifiers::NONE;
-    if b.ctrl { m |= egui::Modifiers::CTRL; }
-    if b.shift { m |= egui::Modifiers::SHIFT; }
-    if b.alt { m |= egui::Modifiers::ALT; }
+    if b.ctrl {
+        m |= egui::Modifiers::CTRL;
+    }
+    if b.shift {
+        m |= egui::Modifiers::SHIFT;
+    }
+    if b.alt {
+        m |= egui::Modifiers::ALT;
+    }
     m
 }
 
 fn binding_to_key(b: &ShortcutBinding) -> Option<egui::Key> {
     match b.key.as_str() {
-        "N" => Some(egui::Key::N), "W" => Some(egui::Key::W), "L" => Some(egui::Key::L),
-        "ArrowUp" => Some(egui::Key::ArrowUp), "ArrowDown" => Some(egui::Key::ArrowDown),
-        "ArrowLeft" => Some(egui::Key::ArrowLeft), "ArrowRight" => Some(egui::Key::ArrowRight),
-        "Tab" => Some(egui::Key::Tab), "Escape" => Some(egui::Key::Escape),
-        "Enter" => Some(egui::Key::Enter), "Space" => Some(egui::Key::Space),
+        "N" => Some(egui::Key::N),
+        "W" => Some(egui::Key::W),
+        "L" => Some(egui::Key::L),
+        "ArrowUp" => Some(egui::Key::ArrowUp),
+        "ArrowDown" => Some(egui::Key::ArrowDown),
+        "ArrowLeft" => Some(egui::Key::ArrowLeft),
+        "ArrowRight" => Some(egui::Key::ArrowRight),
+        "PageUp" => Some(egui::Key::PageUp),
+        "PageDown" => Some(egui::Key::PageDown),
+        "Tab" => Some(egui::Key::Tab),
+        "Escape" => Some(egui::Key::Escape),
+        "Enter" => Some(egui::Key::Enter),
+        "Space" => Some(egui::Key::Space),
         _ => None,
     }
 }
 
 fn key_display_name(k: &str) -> &str {
     match k {
-        "ArrowUp" => "↑", "ArrowDown" => "↓",
-        "ArrowLeft" => "←", "ArrowRight" => "→",
-        "N" => "N", "W" => "W", "Tab" => "Tab",
-        "Escape" => "Esc", "Enter" => "Enter", "Space" => "Space",
+        "ArrowUp" => "↑",
+        "ArrowDown" => "↓",
+        "ArrowLeft" => "←",
+        "ArrowRight" => "→",
+        "PageUp" => "PageUp",
+        "PageDown" => "PageDown",
+        "N" => "N",
+        "W" => "W",
+        "Tab" => "Tab",
+        "Escape" => "Esc",
+        "Enter" => "Enter",
+        "Space" => "Space",
         _ => k,
     }
 }
 
 fn shortcut_display(b: &ShortcutBinding) -> String {
     let mut s = String::new();
-    if b.ctrl { s.push_str("Ctrl+"); }
-    if b.shift { s.push_str("Shift+"); }
-    if b.alt { s.push_str("Alt+"); }
+    if b.ctrl {
+        s.push_str("Ctrl+");
+    }
+    if b.shift {
+        s.push_str("Shift+");
+    }
+    if b.alt {
+        s.push_str("Alt+");
+    }
     s.push_str(key_display_name(&b.key));
     s
 }
 
-fn check_shortcut(ctx: &egui::Context, binds: &HashMap<String, ShortcutBinding>, name: &str) -> bool {
+fn check_shortcut(
+    ctx: &egui::Context,
+    binds: &HashMap<String, ShortcutBinding>,
+    name: &str,
+) -> bool {
     if let Some(b) = binds.get(name) {
         let mods = binding_to_modifiers(b);
         if let Some(key) = binding_to_key(b) {
@@ -124,24 +249,36 @@ fn check_shortcut(ctx: &egui::Context, binds: &HashMap<String, ShortcutBinding>,
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct SettingsWindowState {
-    x: f32, y: f32, width: f32, height: f32,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
 }
 
 impl Default for SettingsWindowState {
     fn default() -> Self {
-        SettingsWindowState { x: 200.0, y: 150.0, width: 500.0, height: 350.0 }
+        SettingsWindowState {
+            x: 200.0,
+            y: 150.0,
+            width: 500.0,
+            height: 350.0,
+        }
     }
 }
 
 fn settings_path() -> PathBuf {
-    std::env::current_dir().unwrap_or_default().join("settings.json")
+    std::env::current_dir()
+        .unwrap_or_default()
+        .join("settings.json")
 }
 
 fn load_settings() -> AppSettings {
     let path = settings_path();
     if path.exists() {
         if let Ok(content) = std::fs::read_to_string(&path) {
-            if let Ok(settings) = serde_json::from_str(&content) { return settings; }
+            if let Ok(settings) = serde_json::from_str(&content) {
+                return settings;
+            }
         }
     }
     AppSettings::default()
@@ -185,7 +322,9 @@ fn scan_system_fonts() -> Vec<(String, String)> {
     let mut seen = std::collections::HashSet::new();
     for dir in &font_dirs {
         let path = std::path::Path::new(dir);
-        if !path.exists() { continue; }
+        if !path.exists() {
+            continue;
+        }
         for entry in walk_font_dir(path) {
             if !seen.contains(&entry.0) {
                 seen.insert(entry.0.clone());
@@ -206,7 +345,8 @@ fn walk_font_dir(dir: &std::path::Path) -> Vec<(String, String)> {
             } else if let Some(ext) = path.extension() {
                 let ext = ext.to_string_lossy().to_lowercase();
                 if ext == "ttf" || ext == "otf" || ext == "ttc" {
-                    let name = path.file_stem()
+                    let name = path
+                        .file_stem()
                         .map(|s| s.to_string_lossy().to_string())
                         .unwrap_or_else(|| "unknown".into());
                     result.push((name, path.to_string_lossy().to_string()));
@@ -218,7 +358,9 @@ fn walk_font_dir(dir: &std::path::Path) -> Vec<(String, String)> {
 }
 
 fn scene_path() -> PathBuf {
-    std::env::current_dir().unwrap_or_default().join("scene.json")
+    std::env::current_dir()
+        .unwrap_or_default()
+        .join("scene.json")
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -233,10 +375,6 @@ struct TerminalStatePersist {
     name: String,
     font_size: f32,
     working_directory: String,
-    #[serde(default)]
-    snapshot: Option<crate::snapshot::state::TerminalSnapshot>,
-    #[serde(default)]
-    process_info: Option<crate::snapshot::state::ProcessInfo>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -267,6 +405,7 @@ pub struct App {
     dock_states: HashMap<usize, DockState<String>>,
     terminals: HashMap<String, TerminalData>,
     tab_counter: u32,
+    terminal_id_counter: u64,
     pending_new_terminal: Option<(usize, SurfaceIndex, NodeIndex)>,
     pending_close: Option<String>,
     pending_split_after: Option<String>,
@@ -307,18 +446,20 @@ pub struct App {
     close_confirm_panel: Option<usize>,
     system_fonts: Vec<String>,
     unlock_popup: Option<usize>,
+    cwd_poll_frame: u8,
 }
 
 struct TerminalData {
     instance: TerminalInstance,
     name: String,
     font_size: f32,
-    working_directory: String,
-    cwd_file: PathBuf,
-    restored_snapshot: Option<crate::snapshot::state::TerminalSnapshot>,
 }
 
-fn create_terminal(ctx: &egui::Context, working_dir: &str) -> Option<TerminalInstance> {
+fn create_terminal(
+    ctx: &egui::Context,
+    working_dir: &str,
+    id_counter: &mut u64,
+) -> Option<TerminalInstance> {
     #[cfg(unix)]
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
     #[cfg(not(unix))]
@@ -327,40 +468,43 @@ fn create_terminal(ctx: &egui::Context, working_dir: &str) -> Option<TerminalIns
     let cwd_str = if std::path::PathBuf::from(working_dir).exists() {
         working_dir.to_string()
     } else {
-        std::env::current_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default()
+        std::env::current_dir()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default()
     };
 
-    // Use standard 80x24, first frame resize will correct to actual size
-    TerminalInstance::create(&shell, &cwd_str, 80, 24)
+    *id_counter += 1;
+    let id = *id_counter;
+
+    TerminalInstance::create(ctx, id, &shell, &cwd_str, 80, 24)
 }
 
-fn build_panel_state(app: &App, panel_idx: usize) -> Option<WorkspaceState> {
+fn build_panel_state(app: &mut App, panel_idx: usize) -> Option<WorkspaceState> {
     let panel = app.panels.get(panel_idx)?;
     let dock_state = app.dock_states.get(&panel_idx)?.clone();
     let mut terminals = HashMap::new();
-    for (id, data) in &app.terminals {
-        let snapshot = {
-            let g = &data.instance.grid;
-            let grid = g.lock().unwrap();
-            if grid.rows > 0 {
-                Some(crate::snapshot::take_snapshot(&*grid, &data.working_directory))
-            } else {
-                None
-            }
-        };
-        terminals.insert(id.clone(), TerminalStatePersist {
-            name: data.name.clone(),
-            font_size: data.font_size,
-            working_directory: data.working_directory.clone(),
-            snapshot,
-            process_info: None,
-        });
+    for (id, data) in &mut app.terminals {
+        data.instance.poll_cwd();
+        terminals.insert(
+            id.clone(),
+            TerminalStatePersist {
+                name: data.name.clone(),
+                font_size: data.font_size,
+                working_directory: data.instance.cwd.clone(),
+            },
+        );
     }
-    Some(WorkspaceState { panel_name: panel.name.clone(), dock_state, terminals })
+    Some(WorkspaceState {
+        panel_name: panel.name.clone(),
+        dock_state,
+        terminals,
+    })
 }
 
 fn save_to_file<T: Serialize>(path: &PathBuf, data: &T) -> Result<(), anyhow::Error> {
-    if let Some(parent) = path.parent() { std::fs::create_dir_all(parent)?; }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
     let json = serde_json::to_string_pretty(data)?;
     std::fs::write(path, json)?;
     Ok(())
@@ -371,35 +515,36 @@ fn load_scene_file(path: &PathBuf) -> Option<SceneState> {
     serde_json::from_str(&content).ok()
 }
 
-fn build_scene_state(app: &App) -> SceneState {
+fn build_scene_state(app: &mut App) -> SceneState {
     let mut panels = Vec::new();
     for (panel_idx, panel) in app.panels.iter().enumerate() {
-        let dock_state = app.dock_states.get(&panel_idx).cloned().unwrap_or_else(|| DockState::new(vec![]));
+        let dock_state = app
+            .dock_states
+            .get(&panel_idx)
+            .cloned()
+            .unwrap_or_else(|| DockState::new(vec![]));
         let mut terminals = HashMap::new();
-        for (id, data) in &app.terminals {
-            let snapshot = {
-                let g = &data.instance.grid;
-                let grid = g.lock().unwrap();
-                if grid.rows > 0 {
-                    Some(crate::snapshot::take_snapshot(&*grid, &data.working_directory))
-                } else {
-                    None
-                }
-            };
-            terminals.insert(id.clone(), TerminalStatePersist {
-                name: data.name.clone(),
-                font_size: data.font_size,
-                working_directory: data.working_directory.clone(),
-                snapshot,
-                process_info: None,
-            });
+        for (id, data) in &mut app.terminals {
+            data.instance.poll_cwd();
+            terminals.insert(
+                id.clone(),
+                TerminalStatePersist {
+                    name: data.name.clone(),
+                    font_size: data.font_size,
+                    working_directory: data.instance.cwd.clone(),
+                },
+            );
         }
-        panels.push(ScenePanel { name: panel.name.clone(), dock_state, terminals });
+        panels.push(ScenePanel {
+            name: panel.name.clone(),
+            dock_state,
+            terminals,
+        });
     }
     SceneState { panels }
 }
 
-fn save_scene(path: &PathBuf, app: &App) {
+fn save_scene(path: &PathBuf, app: &mut App) {
     let state = build_scene_state(app);
     if let Err(e) = save_to_file(path, &state) {
         log::error!("Failed to save scene: {}", e);
@@ -418,15 +563,33 @@ impl App {
         let mut registered_names: Vec<String> = Vec::new();
         for (name, path) in &system_fonts {
             if let Ok(data) = std::fs::read(path) {
-                fonts.font_data.insert(name.clone(), std::sync::Arc::new(egui::FontData::from_owned(data)));
+                fonts.font_data.insert(
+                    name.clone(),
+                    std::sync::Arc::new(egui::FontData::from_owned(data)),
+                );
                 registered_names.push(name.clone());
             }
         }
         // Also try CJK font
-        if let Ok(cjk_data) = std::fs::read("/usr/share/fonts/opentype/noto/NotoSansCJK-Medium.ttc") {
-            fonts.font_data.insert("noto-cjk".into(), std::sync::Arc::new(egui::FontData::from_owned(cjk_data).tweak(egui::FontTweak { scale: 0.9, ..Default::default() })));
-            fonts.families.get_mut(&egui::FontFamily::Proportional).unwrap().insert(0, "noto-cjk".into());
-            fonts.families.get_mut(&egui::FontFamily::Monospace).unwrap().push("noto-cjk".into());
+        if let Ok(cjk_data) = std::fs::read("/usr/share/fonts/opentype/noto/NotoSansCJK-Medium.ttc")
+        {
+            fonts.font_data.insert(
+                "noto-cjk".into(),
+                std::sync::Arc::new(egui::FontData::from_owned(cjk_data).tweak(egui::FontTweak {
+                    scale: 0.9,
+                    ..Default::default()
+                })),
+            );
+            fonts
+                .families
+                .get_mut(&egui::FontFamily::Proportional)
+                .unwrap()
+                .insert(0, "noto-cjk".into());
+            fonts
+                .families
+                .get_mut(&egui::FontFamily::Monospace)
+                .unwrap()
+                .push("noto-cjk".into());
         }
         // Register found fonts into Monospace family
         if let Some(mono_family) = fonts.families.get_mut(&egui::FontFamily::Monospace) {
@@ -437,14 +600,16 @@ impl App {
         ctx.set_fonts(fonts);
 
         let font_names: Vec<String> = registered_names;
-        let db_path = std::env::current_dir().unwrap_or_default().join("history.db");
-
+        let db_path = std::env::current_dir()
+            .unwrap_or_default()
+            .join("history.db");
         let mut app = App {
             panels: Vec::new(),
             active_panel: 0,
             dock_states: HashMap::new(),
             terminals: HashMap::new(),
             tab_counter: 0,
+            terminal_id_counter: 0,
             pending_new_terminal: None,
             pending_close: None,
             pending_split_after: None,
@@ -485,6 +650,7 @@ impl App {
             close_confirm_panel: None,
             system_fonts: font_names,
             unlock_popup: None,
+            cwd_poll_frame: 0,
         };
 
         let scene_path = scene_path();
@@ -494,21 +660,34 @@ impl App {
                 for panel in &scene.panels {
                     let idx = app.panels.len();
                     for (_id, tstate) in &panel.terminals {
-                        let Some(instance) = create_terminal(ctx, &tstate.working_directory) else { continue };
-                        let cwd_file = PathBuf::from(format!("/tmp/openzoo_cwd_{}", _id));
-                        app.terminals.insert(_id.clone(), TerminalData {
-                            instance,
-                            name: tstate.name.clone(),
-                            font_size: tstate.font_size,
-                            working_directory: tstate.working_directory.clone(),
-                            cwd_file,
-                            restored_snapshot: tstate.snapshot.clone(),
-                        });
-                        if let Some(n) = _id.strip_prefix("terminal-").and_then(|s| s.parse::<u32>().ok()) {
-                            if n > app.tab_counter { app.tab_counter = n; }
+                        let Some(instance) = create_terminal(
+                            ctx,
+                            &tstate.working_directory,
+                            &mut app.terminal_id_counter,
+                        ) else {
+                            continue;
+                        };
+                        app.terminals.insert(
+                            _id.clone(),
+                            TerminalData {
+                                instance,
+                                name: tstate.name.clone(),
+                                font_size: tstate.font_size,
+                            },
+                        );
+                        if let Some(n) = _id
+                            .strip_prefix("terminal-")
+                            .and_then(|s| s.parse::<u32>().ok())
+                        {
+                            if n > app.tab_counter {
+                                app.tab_counter = n;
+                            }
                         }
                     }
-                    app.panels.push(Panel { name: panel.name.clone(), bound_file: None });
+                    app.panels.push(Panel {
+                        name: panel.name.clone(),
+                        bound_file: None,
+                    });
                     app.dock_states.insert(idx, panel.dock_state.clone());
                 }
                 app.active_panel = 0;
@@ -523,13 +702,16 @@ impl App {
     }
 
     fn templates_dir(&self) -> PathBuf {
-        std::env::current_dir().unwrap_or_default().join("templates")
+        std::env::current_dir()
+            .unwrap_or_default()
+            .join("templates")
     }
 
     fn refresh_template_files(&mut self) {
         let dir = self.templates_dir();
         let _ = std::fs::create_dir_all(&dir);
-        self.cached_template_files = std::fs::read_dir(&dir).into_iter()
+        self.cached_template_files = std::fs::read_dir(&dir)
+            .into_iter()
             .flat_map(|rd| rd.into_iter())
             .filter_map(|e| e.ok())
             .filter(|e| e.path().extension().map_or(false, |ext| ext == "json"))
@@ -542,7 +724,9 @@ impl App {
     }
 
     fn save_as_template(&mut self, panel_idx: usize) {
-        let Some(state) = build_panel_state(self, panel_idx) else { return };
+        let Some(state) = build_panel_state(self, panel_idx) else {
+            return;
+        };
         let dir = self.templates_dir();
         let _ = std::fs::create_dir_all(&dir);
         let name = state.panel_name.replace(['/', '\\', ':'], "_");
@@ -554,8 +738,12 @@ impl App {
     }
 
     fn save_workspace(&mut self, path: PathBuf) {
-        if self.panels.is_empty() { return; }
-        let Some(state) = build_panel_state(self, self.active_panel) else { return };
+        if self.panels.is_empty() {
+            return;
+        }
+        let Some(state) = build_panel_state(self, self.active_panel) else {
+            return;
+        };
         if let Err(e) = save_to_file(&path, &state) {
             log::error!("Failed to save workspace: {}", e);
         }
@@ -564,39 +752,64 @@ impl App {
     fn load_workspace_file(&mut self, ctx: &egui::Context, path: PathBuf) {
         let content = match std::fs::read_to_string(&path) {
             Ok(c) => c,
-            Err(e) => { log::error!("Failed to read workspace: {}", e); return; }
+            Err(e) => {
+                log::error!("Failed to read workspace: {}", e);
+                return;
+            }
         };
         let state: WorkspaceState = match serde_json::from_str(&content) {
             Ok(s) => s,
-            Err(e) => { log::error!("Failed to parse workspace: {}", e); return; }
+            Err(e) => {
+                log::error!("Failed to parse workspace: {}", e);
+                return;
+            }
         };
         self.load_workspace_state(ctx, state, Some(path));
     }
 
     fn add_initial_terminal(&mut self, ctx: &egui::Context) {
         let name = "Workspace 1".to_string();
-        let Some(tab_id) = self.create_terminal_inner(ctx) else { return };
+        let Some(tab_id) = self.create_terminal_inner(ctx) else {
+            return;
+        };
         self.dock_states.insert(0, DockState::new(vec![tab_id]));
-        self.panels.push(Panel { name, bound_file: None });
+        self.panels.push(Panel {
+            name,
+            bound_file: None,
+        });
         self.active_panel = 0;
     }
 
-    fn load_workspace_state(&mut self, ctx: &egui::Context, state: WorkspaceState, file: Option<PathBuf>) {
+    fn load_workspace_state(
+        &mut self,
+        ctx: &egui::Context,
+        state: WorkspaceState,
+        file: Option<PathBuf>,
+    ) {
         let panel_idx = self.panels.len();
         for (id, tstate) in &state.terminals {
             if !self.terminals.contains_key(id) {
-                let Some(instance) = create_terminal(ctx, &tstate.working_directory) else { continue };
-                self.terminals.insert(id.clone(), TerminalData {
-                    instance,
-                    name: tstate.name.clone(),
-                    font_size: tstate.font_size,
-                    working_directory: tstate.working_directory.clone(),
-                    cwd_file: PathBuf::from(format!("/tmp/openzoo_cwd_{}", id)),
-                    restored_snapshot: tstate.snapshot.clone(),
-                });
+                let Some(instance) = create_terminal(
+                    ctx,
+                    &tstate.working_directory,
+                    &mut self.terminal_id_counter,
+                ) else {
+                    continue;
+                };
+                self.terminals.insert(
+                    id.clone(),
+                    TerminalData {
+                        instance,
+                        name: tstate.name.clone(),
+                        font_size: tstate.font_size,
+                    },
+                );
             }
         }
-        self.panels.push(Panel { name: state.panel_name, bound_file: file });
+        self.panels.push(Panel {
+            name: state.panel_name,
+            bound_file: file,
+        });
         self.dock_states.insert(panel_idx, state.dock_state);
     }
 
@@ -607,18 +820,22 @@ impl App {
     fn create_terminal_inner(&mut self, ctx: &egui::Context) -> Option<String> {
         self.tab_counter += 1;
         let id = format!("terminal-{}", self.tab_counter);
-        let cwd = std::env::current_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
-        let instance = create_terminal(ctx, &cwd)?;
+        let cwd = std::env::current_dir()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let instance = create_terminal(ctx, &cwd, &mut self.terminal_id_counter)?;
         let random_suffix: String = uuid::Uuid::new_v4().as_bytes()[0..3]
-            .iter().map(|b| format!("{:02x}", b)).collect();
-        self.terminals.insert(id.clone(), TerminalData {
-            instance,
-            name: format!("Terminal {}", random_suffix),
-            font_size: DEFAULT_FONT_SIZE,
-            working_directory: cwd.clone(),
-            cwd_file: PathBuf::from(format!("/tmp/openzoo_cwd_{}", id)),
-            restored_snapshot: None,
-        });
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect();
+        self.terminals.insert(
+            id.clone(),
+            TerminalData {
+                instance,
+                name: format!("Terminal {}", random_suffix),
+                font_size: DEFAULT_FONT_SIZE,
+            },
+        );
         if self.focused_terminal.is_none() {
             self.focused_terminal = Some(id.clone());
         }
@@ -628,7 +845,9 @@ impl App {
     fn process_pending(&mut self, ctx: &egui::Context) {
         if let Some((panel_idx, surface_idx, node_idx)) = self.pending_new_terminal.take() {
             let _split_after = self.pending_split_after.take();
-            let Some(tab_id) = self.create_terminal_inner(ctx) else { return };
+            let Some(tab_id) = self.create_terminal_inner(ctx) else {
+                return;
+            };
             if let Some(tree) = self.dock_states.get_mut(&panel_idx) {
                 tree.set_focused_node_and_surface((surface_idx, node_idx));
                 tree.push_to_focused_leaf(tab_id);
@@ -644,7 +863,9 @@ impl App {
                     }
                 }
                 count
-            } else { 0 };
+            } else {
+                0
+            };
             if terminal_count <= 1 {
                 // Don't close the last terminal
             } else {
@@ -675,18 +896,25 @@ impl App {
                     for panel in &scene.panels {
                         let idx = self.panels.len();
                         for (_id, tstate) in &panel.terminals {
-                            if let Some(instance) = create_terminal(ctx, &tstate.working_directory) {
-                                self.terminals.insert(_id.clone(), TerminalData {
-                                    instance,
-                                    name: tstate.name.clone(),
-                                    font_size: tstate.font_size,
-                                    working_directory: tstate.working_directory.clone(),
-                                    cwd_file: PathBuf::from(format!("/tmp/openzoo_cwd_{}", _id)),
-                                    restored_snapshot: tstate.snapshot.clone(),
-                                });
+                            if let Some(instance) = create_terminal(
+                                ctx,
+                                &tstate.working_directory,
+                                &mut self.terminal_id_counter,
+                            ) {
+                                self.terminals.insert(
+                                    _id.clone(),
+                                    TerminalData {
+                                        instance,
+                                        name: tstate.name.clone(),
+                                        font_size: tstate.font_size,
+                                    },
+                                );
                             }
                         }
-                        self.panels.push(Panel { name: panel.name.clone(), bound_file: None });
+                        self.panels.push(Panel {
+                            name: panel.name.clone(),
+                            bound_file: None,
+                        });
                         self.dock_states.insert(idx, panel.dock_state.clone());
                     }
                     self.active_panel = 0;
@@ -722,13 +950,21 @@ impl App {
     fn add_panel(&mut self, ctx: &egui::Context) {
         let n = self.panels.len() + 1;
         let name = format!("Workspace {}", n);
-        let Some(tab_id) = self.create_terminal_inner(ctx) else { return };
-        self.dock_states.insert(self.panels.len(), DockState::new(vec![tab_id]));
-        self.panels.push(Panel { name, bound_file: None });
+        let Some(tab_id) = self.create_terminal_inner(ctx) else {
+            return;
+        };
+        self.dock_states
+            .insert(self.panels.len(), DockState::new(vec![tab_id]));
+        self.panels.push(Panel {
+            name,
+            bound_file: None,
+        });
     }
 
     fn close_workspace(&mut self, i: usize) {
-        if self.panels.len() <= 1 { return; }
+        if self.panels.len() <= 1 {
+            return;
+        }
         let panel = self.panels.swap_remove(i);
         let _ = panel;
         self.dock_states.remove(&i);
@@ -738,7 +974,9 @@ impl App {
     }
 
     fn reorder_panel(&mut self, src: usize, dst: usize) {
-        if src == dst || src >= self.panels.len() || dst >= self.panels.len() { return; }
+        if src == dst || src >= self.panels.len() || dst >= self.panels.len() {
+            return;
+        }
         // Reorder panels
         let panel = self.panels.remove(src);
         self.panels.insert(dst, panel);
@@ -755,10 +993,15 @@ impl App {
             if old_idx == dst {
                 old_to_new[src] = new_idx;
             } else {
-                let actual_old = if old_idx < dst && old_idx < src { old_idx }
-                    else if old_idx >= dst && old_idx < src { old_idx + 1 }
-                    else if old_idx >= dst && old_idx >= src { old_idx }
-                    else { old_idx };
+                let actual_old = if old_idx < dst && old_idx < src {
+                    old_idx
+                } else if old_idx >= dst && old_idx < src {
+                    old_idx + 1
+                } else if old_idx >= dst && old_idx >= src {
+                    old_idx
+                } else {
+                    old_idx
+                };
                 old_to_new[actual_old] = new_idx;
             }
             new_idx += 1;
@@ -781,7 +1024,9 @@ impl App {
 
     fn focus_adjacent_panel(&mut self, direction: i32) {
         use egui_dock::{Node, Surface};
-        let Some(tree) = self.dock_states.get_mut(&self.active_panel) else { return };
+        let Some(tree) = self.dock_states.get_mut(&self.active_panel) else {
+            return;
+        };
         let current = tree.focused_leaf();
         let main = SurfaceIndex(0);
         let mut leaves = Vec::new();
@@ -801,13 +1046,17 @@ impl App {
                 }
             }
         }
-        if leaves.len() <= 1 { return; }
-        let pos = current.and_then(|c| leaves.iter().position(|l| *l == c)).unwrap_or(0);
+        if leaves.len() <= 1 {
+            return;
+        }
+        let pos = current
+            .and_then(|c| leaves.iter().position(|l| *l == c))
+            .unwrap_or(0);
         let next = ((pos as i32 + direction).rem_euclid(leaves.len() as i32)) as usize;
         tree.set_focused_node_and_surface(leaves[next]);
     }
 
-    fn save_scene(&self) {
+    fn save_scene(&mut self) {
         let path = scene_path();
         save_scene(&path, self);
     }
@@ -816,12 +1065,24 @@ impl App {
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.process_pending(ctx);
+        self.cwd_poll_frame = self.cwd_poll_frame.wrapping_add(1);
+        if self.cwd_poll_frame >= 15 {
+            self.cwd_poll_frame = 0;
+            for data in self.terminals.values_mut() {
+                data.instance.poll_cwd();
+            }
+        }
         let renaming = self.is_renaming();
-        if renaming { self.rename_frame_count += 1; }
+        if renaming {
+            self.rename_frame_count += 1;
+        }
 
-        log::info!("FRAME: renaming={} rename_panel={:?} rename_count={} focused={:?}",
-            renaming, self.renaming_panel, self.rename_frame_count,
-            ctx.memory(|mem| mem.focused()));
+        // Keep focused_terminal in sync with dock active tab before handling shortcuts
+        if let Some(tree) = self.dock_states.get_mut(&self.active_panel) {
+            if let Some((_, tab)) = tree.find_active_focused() {
+                self.focused_terminal = Some(tab.clone());
+            }
+        }
 
         // Consume Tab key to prevent egui focus navigation, send to focused terminal
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab)) {
@@ -832,19 +1093,108 @@ impl eframe::App for App {
             }
         }
 
+        // Enter: select history entry, or record command + send CR to terminal
+        if !self.locked_panels.contains(&self.active_panel)
+            && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter))
+        {
+            if let Some(tab) = &self.focused_terminal.clone() {
+                if let Some(td) = self.terminals.get_mut(tab) {
+                    if let Some(ref nav) = td.instance.history_nav {
+                        let selected = nav.entries.get(nav.selected).cloned();
+                        if let Some(cmd) = selected {
+                            td.instance.write(cmd.as_bytes());
+                        }
+                        td.instance.history_nav = None;
+                    } else {
+                        let line = td.instance.get_current_line();
+                        let prompt_end = line
+                            .rfind("$ ")
+                            .or_else(|| line.rfind("# "))
+                            .map(|p| p + 2)
+                            .unwrap_or(0);
+                        let cmd = line[prompt_end..].trim().to_string();
+                        if !cmd.is_empty() {
+                            self.history_db.add(tab, &cmd);
+                        }
+                        td.instance.write(b"\r");
+                    }
+                }
+            }
+        }
+
+        // Escape: close history menu
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+            if let Some(tab) = &self.focused_terminal.clone() {
+                if let Some(td) = self.terminals.get_mut(tab) {
+                    if td.instance.history_nav.is_some() {
+                        td.instance.history_nav = None;
+                    } else {
+                        td.instance.write(b"\x1b");
+                    }
+                }
+            }
+        }
+
+        // PageUp / history_up: open history (newest on top) or move highlight up
+        let history_up = check_shortcut(ctx, &self.settings.key_binds, "history_up")
+            || ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::PageUp));
+        if history_up {
+            if let Some(tab) = &self.focused_terminal.clone() {
+                if let Some(td) = self.terminals.get_mut(tab) {
+                    if let Some(ref mut nav) = td.instance.history_nav {
+                        if nav.selected > 0 {
+                            nav.selected -= 1;
+                        }
+                    } else {
+                        let entries = self.history_db.get(tab, self.settings.max_history);
+                        if !entries.is_empty() {
+                            // entries: [newest, ..., oldest] — select top (newest)
+                            td.instance.history_nav = Some(HistoryNav {
+                                entries,
+                                selected: 0,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        // PageDown / history_down: move highlight down (toward older commands)
+        let history_down = check_shortcut(ctx, &self.settings.key_binds, "history_down")
+            || ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::PageDown));
+        if history_down {
+            if let Some(tab) = &self.focused_terminal.clone() {
+                if let Some(td) = self.terminals.get_mut(tab) {
+                    if let Some(ref mut nav) = td.instance.history_nav {
+                        if nav.selected + 1 < nav.entries.len() {
+                            nav.selected += 1;
+                        }
+                    }
+                }
+            }
+        }
+
         // Handle key binding recording in settings
         if let Some(recording) = self.binding_recording.clone() {
             let input = ctx.input(|i| i.clone());
             for event in &input.events {
-                if let egui::Event::Key { key, pressed: true, modifiers, .. } = event {
+                if let egui::Event::Key {
+                    key,
+                    pressed: true,
+                    modifiers,
+                    ..
+                } = event
+                {
                     if *key != egui::Key::Escape {
                         let key_name = format!("{:?}", key);
-                        self.settings_edit.key_binds.insert(recording.clone(), ShortcutBinding {
-                            key: key_name,
-                            ctrl: modifiers.ctrl,
-                            shift: modifiers.shift,
-                            alt: modifiers.alt,
-                        });
+                        self.settings_edit.key_binds.insert(
+                            recording.clone(),
+                            ShortcutBinding {
+                                key: key_name,
+                                ctrl: modifiers.ctrl,
+                                shift: modifiers.shift,
+                                alt: modifiers.alt,
+                            },
+                        );
                     }
                     self.binding_recording = None;
                     break;
@@ -868,10 +1218,14 @@ impl eframe::App for App {
             }
         }
         if check_shortcut(ctx, &binds, "workspace_up") {
-            if self.active_panel > 0 { self.active_panel -= 1; }
+            if self.active_panel > 0 {
+                self.active_panel -= 1;
+            }
         }
         if check_shortcut(ctx, &binds, "workspace_down") {
-            if self.active_panel + 1 < self.panels.len() { self.active_panel += 1; }
+            if self.active_panel + 1 < self.panels.len() {
+                self.active_panel += 1;
+            }
         }
         if check_shortcut(ctx, &binds, "panel_left") {
             self.focus_adjacent_panel(-1);
@@ -881,21 +1235,35 @@ impl eframe::App for App {
         }
         if check_shortcut(ctx, &binds, "lock_workspace") {
             if self.locked_panels.contains(&self.active_panel) {
-                self.unlock_popup = Some(self.active_panel);
+                // Already locked: overlay already shows password input.
                 self.lock_password_input.clear();
+                self.pw_message.clear();
             } else {
                 self.locked_panels.insert(self.active_panel);
+                self.lock_password_input.clear();
+                self.pw_message.clear();
             }
         }
 
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
                 ui.menu_button("File", |ui| {
-                    if ui.button("Save").clicked() { self.save_scene(); ui.close_menu(); }
-                    if ui.button("Load").clicked() { self.pending_load_scene = true; ui.close_menu(); }
-                    if ui.button("Save As...").clicked() { self.pending_save_scene_as = true; ui.close_menu(); }
+                    if ui.button("Save").clicked() {
+                        self.save_scene();
+                        ui.close_menu();
+                    }
+                    if ui.button("Load").clicked() {
+                        self.pending_load_scene = true;
+                        ui.close_menu();
+                    }
+                    if ui.button("Save As...").clicked() {
+                        self.pending_save_scene_as = true;
+                        ui.close_menu();
+                    }
                     ui.separator();
-                    if ui.button("Exit").clicked() { ctx.send_viewport_cmd(egui::ViewportCommand::Close); }
+                    if ui.button("Exit").clicked() {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
                 });
                 ui.menu_button("View", |ui| {
                     if let Some(tree) = self.dock_states.get_mut(&self.active_panel) {
@@ -905,7 +1273,8 @@ impl eframe::App for App {
                                 self.pending_split_after = Some(tab.clone());
                                 self.pending_split_vertical = false;
                                 if let Some((surface, node, _)) = tree.find_tab(tab) {
-                                    self.pending_new_terminal = Some((self.active_panel, surface, node));
+                                    self.pending_new_terminal =
+                                        Some((self.active_panel, surface, node));
                                 }
                                 ui.close_menu();
                             }
@@ -913,22 +1282,29 @@ impl eframe::App for App {
                                 self.pending_split_after = Some(tab.clone());
                                 self.pending_split_vertical = true;
                                 if let Some((surface, node, _)) = tree.find_tab(tab) {
-                                    self.pending_new_terminal = Some((self.active_panel, surface, node));
+                                    self.pending_new_terminal =
+                                        Some((self.active_panel, surface, node));
                                 }
                                 ui.close_menu();
                             }
                         }
                     }
                 });
-                if ui.button("Settings").clicked() { self.show_settings = true; self.settings_edit = self.settings.clone(); }
+                if ui.button("Settings").clicked() {
+                    self.show_settings = true;
+                    self.settings_edit = self.settings.clone();
+                }
             });
         });
 
         if self.show_settings {
             let mut open = self.show_settings;
             let ws = &self.settings_edit.settings_window;
-            egui::Window::new("Settings").open(&mut open).resizable(true)
-                .default_pos([ws.x, ws.y]).default_size([ws.width, ws.height])
+            egui::Window::new("Settings")
+                .open(&mut open)
+                .resizable(true)
+                .default_pos([ws.x, ws.y])
+                .default_size([ws.width, ws.height])
                 .show(ctx, |ui| {
                     ui.horizontal(|ui| {
                         let tabs = ["通用", "外观", "快捷键", "锁定"];
@@ -950,63 +1326,110 @@ impl eframe::App for App {
                             ui.label("历史记录:");
                             ui.horizontal(|ui| {
                                 ui.label("最大条数:");
-                                ui.add(egui::DragValue::new(&mut self.settings_edit.max_history).range(10..=10000));
+                                ui.add(
+                                    egui::DragValue::new(&mut self.settings_edit.max_history)
+                                        .range(10..=10000),
+                                );
                             });
                             ui.horizontal(|ui| {
                                 ui.label("滚动回溯:");
-                                ui.add(egui::DragValue::new(&mut self.settings_edit.scrollback).range(100..=50000));
+                                ui.add(
+                                    egui::DragValue::new(&mut self.settings_edit.scrollback)
+                                        .range(100..=50000),
+                                );
                             });
-                            if ui.button("清空所有历史").clicked() { self.pending_clear_history = true; }
+                            if ui.button("清空所有历史").clicked() {
+                                self.pending_clear_history = true;
+                            }
                         }
                         1 => {
                             ui.label("终端外观:");
                             ui.horizontal(|ui| {
                                 ui.label("字号:");
-                                ui.add(egui::DragValue::new(&mut self.settings_edit.font_size).range(8.0..=32.0));
+                                ui.add(
+                                    egui::DragValue::new(&mut self.settings_edit.font_size)
+                                        .range(8.0..=32.0),
+                                );
                             });
                             ui.horizontal(|ui| {
                                 ui.label("字间距:");
-                                ui.add(egui::Slider::new(&mut self.settings_edit.cell_spacing, 0.5..=2.0).text("x"));
+                                ui.add(
+                                    egui::Slider::new(
+                                        &mut self.settings_edit.cell_spacing,
+                                        0.5..=2.0,
+                                    )
+                                    .text("x"),
+                                );
                             });
                             ui.horizontal(|ui| {
                                 ui.label("字体:");
                                 let current = &self.settings_edit.font_family;
                                 egui::ComboBox::from_id_salt("font_family_select")
-                                    .selected_text(if current.is_empty() { "monospace" } else { current })
+                                    .selected_text(if current.is_empty() {
+                                        "monospace"
+                                    } else {
+                                        current
+                                    })
                                     .show_ui(ui, |ui| {
-                                        ui.selectable_value(&mut self.settings_edit.font_family, String::new(), "monospace (默认)");
+                                        ui.selectable_value(
+                                            &mut self.settings_edit.font_family,
+                                            String::new(),
+                                            "monospace (默认)",
+                                        );
                                         for name in &self.system_fonts {
-                                            ui.selectable_value(&mut self.settings_edit.font_family, name.clone(), name);
+                                            ui.selectable_value(
+                                                &mut self.settings_edit.font_family,
+                                                name.clone(),
+                                                name,
+                                            );
                                         }
                                     });
                             });
                             ui.horizontal(|ui| {
                                 ui.label("背景色:");
-                                egui::widgets::color_picker::color_edit_button_srgb(ui, &mut self.settings_edit.bg_color);
+                                egui::widgets::color_picker::color_edit_button_srgb(
+                                    ui,
+                                    &mut self.settings_edit.bg_color,
+                                );
                             });
                             ui.horizontal(|ui| {
                                 ui.label("前景色:");
-                                egui::widgets::color_picker::color_edit_button_srgb(ui, &mut self.settings_edit.fg_color);
+                                egui::widgets::color_picker::color_edit_button_srgb(
+                                    ui,
+                                    &mut self.settings_edit.fg_color,
+                                );
                             });
                             ui.separator();
                             ui.label("指令菜单:");
                             ui.horizontal(|ui| {
                                 ui.label("背景色:");
-                                egui::widgets::color_picker::color_edit_button_srgb(ui, &mut self.settings_edit.menu_bg_color);
+                                egui::widgets::color_picker::color_edit_button_srgb(
+                                    ui,
+                                    &mut self.settings_edit.menu_bg_color,
+                                );
                             });
                             ui.horizontal(|ui| {
                                 ui.label("文字色:");
-                                egui::widgets::color_picker::color_edit_button_srgb(ui, &mut self.settings_edit.menu_fg_color);
+                                egui::widgets::color_picker::color_edit_button_srgb(
+                                    ui,
+                                    &mut self.settings_edit.menu_fg_color,
+                                );
                             });
                             ui.horizontal(|ui| {
                                 ui.label("字号:");
-                                ui.add(egui::DragValue::new(&mut self.settings_edit.menu_font_size).range(8.0..=32.0));
+                                ui.add(
+                                    egui::DragValue::new(&mut self.settings_edit.menu_font_size)
+                                        .range(8.0..=32.0),
+                                );
                             });
                             ui.separator();
                             ui.label("锁定:");
                             ui.horizontal(|ui| {
                                 ui.label("遮罩色:");
-                                egui::widgets::color_picker::color_edit_button_srgb(ui, &mut self.settings_edit.lock_color);
+                                egui::widgets::color_picker::color_edit_button_srgb(
+                                    ui,
+                                    &mut self.settings_edit.lock_color,
+                                );
                             });
                         }
                         2 => {
@@ -1020,22 +1443,30 @@ impl eframe::App for App {
                                 ("panel_left", "左侧 Panel"),
                                 ("panel_right", "右侧 Panel"),
                                 ("lock_workspace", "锁定/解锁 Workspace"),
+                                ("history_up", "显示指令历史"),
+                                ("history_down", "历史指令导航"),
                             ];
                             for (id, label) in &labels {
                                 ui.horizontal(|ui| {
                                     ui.label(*label);
-                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                        let text = if self.binding_recording.as_deref() == Some(id) {
-                                            "按下按键...".to_string()
-                                        } else if let Some(b) = self.settings_edit.key_binds.get(*id) {
-                                            shortcut_display(b)
-                                        } else {
-                                            "(未设置)".to_string()
-                                        };
-                                        if ui.button(text).clicked() {
-                                            self.binding_recording = Some(id.to_string());
-                                        }
-                                    });
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            let text =
+                                                if self.binding_recording.as_deref() == Some(id) {
+                                                    "按下按键...".to_string()
+                                                } else if let Some(b) =
+                                                    self.settings_edit.key_binds.get(*id)
+                                                {
+                                                    shortcut_display(b)
+                                                } else {
+                                                    "(未设置)".to_string()
+                                                };
+                                            if ui.button(text).clicked() {
+                                                self.binding_recording = Some(id.to_string());
+                                            }
+                                        },
+                                    );
                                 });
                             }
                         }
@@ -1078,7 +1509,6 @@ impl eframe::App for App {
                             let new_size = self.settings.font_size;
                             for td in self.terminals.values_mut() {
                                 td.font_size = new_size;
-                                td.instance.font_size = new_size;
                             }
                             // Apply font family: rebuild FontDefinitions with selected font first
                             let ctx2 = ctx.clone();
@@ -1091,22 +1521,43 @@ impl eframe::App for App {
                                     let paths = scan_system_fonts();
                                     if let Some((_, path)) = paths.iter().find(|(n, _)| n == name) {
                                         if let Ok(data) = std::fs::read(path) {
-                                            fonts.font_data.insert(name.clone(), std::sync::Arc::new(egui::FontData::from_owned(data)));
+                                            fonts.font_data.insert(
+                                                name.clone(),
+                                                std::sync::Arc::new(egui::FontData::from_owned(
+                                                    data,
+                                                )),
+                                            );
                                         }
                                     }
                                 }
                                 // CJK font
-                                if let Ok(cjk_data) = std::fs::read("/usr/share/fonts/opentype/noto/NotoSansCJK-Medium.ttc") {
-                                    fonts.font_data.insert("noto-cjk".into(), std::sync::Arc::new(egui::FontData::from_owned(cjk_data).tweak(egui::FontTweak { scale: 0.9, ..Default::default() })));
+                                if let Ok(cjk_data) = std::fs::read(
+                                    "/usr/share/fonts/opentype/noto/NotoSansCJK-Medium.ttc",
+                                ) {
+                                    fonts.font_data.insert(
+                                        "noto-cjk".into(),
+                                        std::sync::Arc::new(
+                                            egui::FontData::from_owned(cjk_data).tweak(
+                                                egui::FontTweak {
+                                                    scale: 0.9,
+                                                    ..Default::default()
+                                                },
+                                            ),
+                                        ),
+                                    );
                                 }
                                 // Put selected font first in Monospace
-                                if let Some(mono) = fonts.families.get_mut(&egui::FontFamily::Monospace) {
+                                if let Some(mono) =
+                                    fonts.families.get_mut(&egui::FontFamily::Monospace)
+                                {
                                     if !ff.is_empty() && fonts.font_data.contains_key(&ff) {
                                         mono.insert(0, ff.clone());
                                     }
                                     mono.push("noto-cjk".into());
                                 }
-                                if let Some(prop) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
+                                if let Some(prop) =
+                                    fonts.families.get_mut(&egui::FontFamily::Proportional)
+                                {
                                     prop.insert(0, "noto-cjk".into());
                                 }
                                 ctx2.set_fonts(fonts);
@@ -1128,7 +1579,11 @@ impl eframe::App for App {
         // Close workspace confirmation
         if let Some(panel_idx) = self.close_confirm_panel {
             let mut open = true;
-            let panel_name = self.panels.get(panel_idx).map(|p| p.name.clone()).unwrap_or_default();
+            let panel_name = self
+                .panels
+                .get(panel_idx)
+                .map(|p| p.name.clone())
+                .unwrap_or_default();
             egui::Window::new("确认关闭")
                 .open(&mut open)
                 .resizable(false)
@@ -1151,57 +1606,6 @@ impl eframe::App for App {
             }
         }
 
-        // Unlock workspace popup
-        if let Some(panel_idx) = self.unlock_popup {
-            let mut open = true;
-            let panel_name = self.panels.get(panel_idx).map(|p| p.name.clone()).unwrap_or_default();
-            egui::Window::new("解锁工作区")
-                .open(&mut open)
-                .resizable(false)
-                .collapsible(false)
-                .show(ctx, |ui| {
-                    ui.label(format!("工作区「{}」已锁定", panel_name));
-                    ui.add_space(10.0);
-                    ui.horizontal(|ui| {
-                        ui.label("密码:");
-                        let resp = ui.add(egui::TextEdit::singleline(&mut self.lock_password_input)
-                            .password(true).desired_width(150.0).id_source("unlock_pw"));
-                        resp.request_focus();
-                    });
-                    if !self.pw_message.is_empty() {
-                        ui.label(egui::RichText::new(&self.pw_message).color(egui::Color32::RED));
-                    }
-                    ui.add_space(10.0);
-                    let enter_pressed = ui.input(|i| i.key_pressed(egui::Key::Enter));
-                    let esc_pressed = ui.input(|i| i.key_pressed(egui::Key::Escape));
-                    ui.horizontal(|ui| {
-                        if ui.button("确认").clicked() || enter_pressed {
-                            if self.settings.lock_password.is_empty()
-                                || self.lock_password_input == self.settings.lock_password
-                            {
-                                self.locked_panels.remove(&panel_idx);
-                                self.lock_password_input.clear();
-                                self.pw_message.clear();
-                                self.unlock_popup = None;
-                            } else {
-                                self.pw_message = "密码错误".into();
-                                self.lock_password_input.clear();
-                            }
-                        }
-                        if ui.button("取消").clicked() || esc_pressed {
-                            self.lock_password_input.clear();
-                            self.pw_message.clear();
-                            self.unlock_popup = None;
-                        }
-                    });
-                });
-            if !open {
-                self.unlock_popup = None;
-                self.lock_password_input.clear();
-                self.pw_message.clear();
-            }
-        }
-
         // Password popup windows
         if let Some(popup) = self.pw_popup {
             let mut open = true;
@@ -1215,129 +1619,163 @@ impl eframe::App for App {
                 .open(&mut open)
                 .resizable(false)
                 .collapsible(false)
-                .show(ctx, |ui| {
-                    match popup {
-                        "set" => {
-                            ui.horizontal(|ui| {
-                                ui.label("输入密码:");
-                                ui.add(egui::TextEdit::singleline(&mut self.pw_set1).password(true).desired_width(150.0).id_source("pw_set1"));
-                            });
-                            ui.horizontal(|ui| {
-                                ui.label("确认密码:");
-                                ui.add(egui::TextEdit::singleline(&mut self.pw_set2).password(true).desired_width(150.0).id_source("pw_set2"));
-                                if !self.pw_set2.is_empty() && self.pw_set1 != self.pw_set2 {
-                                    ui.label(egui::RichText::new("不一致").color(egui::Color32::RED));
-                                } else if !self.pw_set2.is_empty() {
-                                    ui.label(egui::RichText::new("一致").color(egui::Color32::GREEN));
-                                }
-                            });
-                            if !self.pw_message.is_empty() {
-                                ui.label(egui::RichText::new(&self.pw_message).color(egui::Color32::RED));
+                .show(ctx, |ui| match popup {
+                    "set" => {
+                        ui.horizontal_centered(|ui| {
+                            ui.label("输入密码:");
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.pw_set1)
+                                    .password(true)
+                                    .desired_width(150.0)
+                                    .id_source("pw_set1"),
+                            );
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("确认密码:");
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.pw_set2)
+                                    .password(true)
+                                    .desired_width(150.0)
+                                    .id_source("pw_set2"),
+                            );
+                            if !self.pw_set2.is_empty() && self.pw_set1 != self.pw_set2 {
+                                ui.label(egui::RichText::new("不一致").color(egui::Color32::RED));
+                            } else if !self.pw_set2.is_empty() {
+                                ui.label(egui::RichText::new("一致").color(egui::Color32::GREEN));
                             }
-                            ui.horizontal(|ui| {
-                                if ui.button("确认").clicked() {
-                                    if self.pw_set1.is_empty() {
-                                        self.pw_message = "密码不能为空".into();
-                                    } else if self.pw_set1 != self.pw_set2 {
-                                        self.pw_message = "两次输入的密码不一致".into();
-                                    } else {
-                                        self.settings_edit.lock_password = self.pw_set1.clone();
-                                        self.settings.lock_password = self.pw_set1.clone();
-                                        let _ = save_settings(&self.settings);
-                                        self.pw_set1.clear();
-                                        self.pw_set2.clear();
-                                        self.pw_message.clear();
-                                        self.pw_popup = None;
-                                    }
-                                }
-                                if ui.button("取消").clicked() {
+                        });
+                        if !self.pw_message.is_empty() {
+                            ui.label(
+                                egui::RichText::new(&self.pw_message).color(egui::Color32::RED),
+                            );
+                        }
+                        ui.horizontal(|ui| {
+                            if ui.button("确认").clicked() {
+                                if self.pw_set1.is_empty() {
+                                    self.pw_message = "密码不能为空".into();
+                                } else if self.pw_set1 != self.pw_set2 {
+                                    self.pw_message = "两次输入的密码不一致".into();
+                                } else {
+                                    self.settings_edit.lock_password = self.pw_set1.clone();
+                                    self.settings.lock_password = self.pw_set1.clone();
+                                    let _ = save_settings(&self.settings);
                                     self.pw_set1.clear();
                                     self.pw_set2.clear();
                                     self.pw_message.clear();
                                     self.pw_popup = None;
                                 }
-                            });
-                        }
-                        "change" => {
-                            ui.horizontal(|ui| {
-                                ui.label("原密码:");
-                                ui.add(egui::TextEdit::singleline(&mut self.pw_old).password(true).desired_width(150.0).id_source("pw_old"));
-                            });
-                            ui.horizontal(|ui| {
-                                ui.label("新密码:");
-                                ui.add(egui::TextEdit::singleline(&mut self.pw_new1).password(true).desired_width(150.0).id_source("pw_new1"));
-                            });
-                            ui.horizontal(|ui| {
-                                ui.label("确认新密码:");
-                                ui.add(egui::TextEdit::singleline(&mut self.pw_new2).password(true).desired_width(150.0).id_source("pw_new2"));
-                                if !self.pw_new2.is_empty() && self.pw_new1 != self.pw_new2 {
-                                    ui.label(egui::RichText::new("不一致").color(egui::Color32::RED));
-                                } else if !self.pw_new2.is_empty() {
-                                    ui.label(egui::RichText::new("一致").color(egui::Color32::GREEN));
-                                }
-                            });
-                            if !self.pw_message.is_empty() {
-                                ui.label(egui::RichText::new(&self.pw_message).color(egui::Color32::RED));
                             }
-                            ui.horizontal(|ui| {
-                                if ui.button("确认").clicked() {
-                                    if self.pw_old != self.settings.lock_password {
-                                        self.pw_message = "原密码错误".into();
-                                    } else if self.pw_new1.is_empty() {
-                                        self.pw_message = "新密码不能为空".into();
-                                    } else if self.pw_new1 != self.pw_new2 {
-                                        self.pw_message = "两次输入的新密码不一致".into();
-                                    } else {
-                                        self.settings_edit.lock_password = self.pw_new1.clone();
-                                        self.settings.lock_password = self.pw_new1.clone();
-                                        let _ = save_settings(&self.settings);
-                                        self.pw_old.clear();
-                                        self.pw_new1.clear();
-                                        self.pw_new2.clear();
-                                        self.pw_message.clear();
-                                        self.pw_popup = None;
-                                    }
-                                }
-                                if ui.button("取消").clicked() {
+                            if ui.button("取消").clicked() {
+                                self.pw_set1.clear();
+                                self.pw_set2.clear();
+                                self.pw_message.clear();
+                                self.pw_popup = None;
+                            }
+                        });
+                    }
+                    "change" => {
+                        ui.horizontal(|ui| {
+                            ui.label("原密码:");
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.pw_old)
+                                    .password(true)
+                                    .desired_width(150.0)
+                                    .id_source("pw_old"),
+                            );
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("新密码:");
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.pw_new1)
+                                    .password(true)
+                                    .desired_width(150.0)
+                                    .id_source("pw_new1"),
+                            );
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("确认新密码:");
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.pw_new2)
+                                    .password(true)
+                                    .desired_width(150.0)
+                                    .id_source("pw_new2"),
+                            );
+                            if !self.pw_new2.is_empty() && self.pw_new1 != self.pw_new2 {
+                                ui.label(egui::RichText::new("不一致").color(egui::Color32::RED));
+                            } else if !self.pw_new2.is_empty() {
+                                ui.label(egui::RichText::new("一致").color(egui::Color32::GREEN));
+                            }
+                        });
+                        if !self.pw_message.is_empty() {
+                            ui.label(
+                                egui::RichText::new(&self.pw_message).color(egui::Color32::RED),
+                            );
+                        }
+                        ui.horizontal(|ui| {
+                            if ui.button("确认").clicked() {
+                                if self.pw_old != self.settings.lock_password {
+                                    self.pw_message = "原密码错误".into();
+                                } else if self.pw_new1.is_empty() {
+                                    self.pw_message = "新密码不能为空".into();
+                                } else if self.pw_new1 != self.pw_new2 {
+                                    self.pw_message = "两次输入的新密码不一致".into();
+                                } else {
+                                    self.settings_edit.lock_password = self.pw_new1.clone();
+                                    self.settings.lock_password = self.pw_new1.clone();
+                                    let _ = save_settings(&self.settings);
                                     self.pw_old.clear();
                                     self.pw_new1.clear();
                                     self.pw_new2.clear();
                                     self.pw_message.clear();
                                     self.pw_popup = None;
                                 }
-                            });
-                        }
-                        "clear" => {
-                            ui.horizontal(|ui| {
-                                ui.label("密码:");
-                                ui.add(egui::TextEdit::singleline(&mut self.pw_clear).password(true).desired_width(150.0).id_source("pw_clear"));
-                            });
-                            if !self.pw_message.is_empty() {
-                                ui.label(egui::RichText::new(&self.pw_message).color(egui::Color32::RED));
                             }
-                            ui.horizontal(|ui| {
-                                if ui.button("确认").clicked() {
-                                    if self.pw_clear != self.settings.lock_password {
-                                        self.pw_message = "密码错误".into();
-                                    } else {
-                                        self.settings_edit.lock_password.clear();
-                                        self.settings.lock_password.clear();
-                                        self.locked_panels.clear();
-                                        let _ = save_settings(&self.settings);
-                                        self.pw_clear.clear();
-                                        self.pw_message.clear();
-                                        self.pw_popup = None;
-                                    }
-                                }
-                                if ui.button("取消").clicked() {
+                            if ui.button("取消").clicked() {
+                                self.pw_old.clear();
+                                self.pw_new1.clear();
+                                self.pw_new2.clear();
+                                self.pw_message.clear();
+                                self.pw_popup = None;
+                            }
+                        });
+                    }
+                    "clear" => {
+                        ui.horizontal(|ui| {
+                            ui.label("密码:");
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.pw_clear)
+                                    .password(true)
+                                    .desired_width(150.0)
+                                    .id_source("pw_clear"),
+                            );
+                        });
+                        if !self.pw_message.is_empty() {
+                            ui.label(
+                                egui::RichText::new(&self.pw_message).color(egui::Color32::RED),
+                            );
+                        }
+                        ui.horizontal(|ui| {
+                            if ui.button("确认").clicked() {
+                                if self.pw_clear != self.settings.lock_password {
+                                    self.pw_message = "密码错误".into();
+                                } else {
+                                    self.settings_edit.lock_password.clear();
+                                    self.settings.lock_password.clear();
+                                    self.locked_panels.clear();
+                                    let _ = save_settings(&self.settings);
                                     self.pw_clear.clear();
                                     self.pw_message.clear();
                                     self.pw_popup = None;
                                 }
-                            });
-                        }
-                        _ => {}
+                            }
+                            if ui.button("取消").clicked() {
+                                self.pw_clear.clear();
+                                self.pw_message.clear();
+                                self.pw_popup = None;
+                            }
+                        });
                     }
+                    _ => {}
                 });
             if !open {
                 self.pw_popup = None;
@@ -1351,162 +1789,193 @@ impl eframe::App for App {
             }
         }
 
-        egui::SidePanel::left("navigation").default_width(160.0).show(ctx, |ui| {
-            ui.heading("Workspaces");
-            ui.separator();
-            let mut to_select = None;
-            let panel_count = self.panels.len();
-            let mut reorder = None;
-            self.panel_rects.clear();
-            self.panel_rects.resize(panel_count, egui::Rect::NOTHING);
+        egui::SidePanel::left("navigation")
+            .default_width(160.0)
+            .show(ctx, |ui| {
+                ui.heading("Workspaces");
+                ui.separator();
+                let mut to_select = None;
+                let panel_count = self.panels.len();
+                let mut reorder = None;
+                self.panel_rects.clear();
+                self.panel_rects.resize(panel_count, egui::Rect::NOTHING);
 
-            // Detect drag state from pointer
-            let pointer_down = ui.input(|i| i.pointer.primary_down());
-            let pointer_pos = ui.input(|i| i.pointer.interact_pos());
-            let pointer_delta = ui.input(|i| i.pointer.delta());
+                // Detect drag state from pointer
+                let pointer_down = ui.input(|i| i.pointer.primary_down());
+                let pointer_pos = ui.input(|i| i.pointer.interact_pos());
+                let pointer_delta = ui.input(|i| i.pointer.delta());
 
-            for i in 0..panel_count {
-                let is_active = i == self.active_panel;
-                if self.renaming_panel == Some(i) {
-                    let response = ui.add(
-                        egui::TextEdit::singleline(&mut self.rename_buffer)
-                            .font(egui::FontId::monospace(14.0))
-                            .desired_width(ui.available_width())
-                            .id_source("workspace_rename"),
-                    );
-                    ui.memory_mut(|mem| mem.request_focus(response.id));
-                    self.panel_rects[i] = response.rect;
-                    let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
-                    if enter {
-                        if !self.rename_buffer.is_empty() {
-                            self.panels[i].name = self.rename_buffer.clone();
+                for i in 0..panel_count {
+                    let is_active = i == self.active_panel;
+                    if self.renaming_panel == Some(i) {
+                        let response = ui.add(
+                            egui::TextEdit::singleline(&mut self.rename_buffer)
+                                .font(egui::FontId::monospace(14.0))
+                                .desired_width(ui.available_width())
+                                .id_source("workspace_rename"),
+                        );
+                        ui.memory_mut(|mem| mem.request_focus(response.id));
+                        self.panel_rects[i] = response.rect;
+                        let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
+                        if enter {
+                            if !self.rename_buffer.is_empty() {
+                                self.panels[i].name = self.rename_buffer.clone();
+                            }
+                            self.renaming_panel = None;
                         }
-                        self.renaming_panel = None;
+                    } else {
+                        ui.horizontal(|ui| {
+                            let panel_name = self.panels[i].name.clone();
+                            let response = ui.selectable_label(is_active, &panel_name);
+                            self.panel_rects[i] = response.rect;
+
+                            // Click to select
+                            if response.double_clicked() && !renaming {
+                                self.renaming_panel = Some(i);
+                                self.rename_buffer = panel_name;
+                                self.rename_frame_count = 0;
+                                to_select = None;
+                            } else if response.clicked() && !renaming {
+                                to_select = Some(i);
+                            }
+
+                            // Drag to reorder: detect drag via pointer delta on this rect
+                            if pointer_down && pointer_delta.length() > 2.0 {
+                                if let Some(pos) = pointer_pos {
+                                    // Start drag if not already dragging and pointer is on this rect
+                                    if self.drag_src_panel.is_none() && response.rect.contains(pos)
+                                    {
+                                        self.drag_src_panel = Some(i);
+                                    }
+                                    // Find drag target
+                                    if let Some(src) = self.drag_src_panel {
+                                        if src != i {
+                                            // Use this panel's rect as potential target
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Context menu
+                            response.context_menu(|ui| {
+                                if ui.button("重命名").clicked() {
+                                    self.renaming_panel = Some(i);
+                                    self.rename_buffer = self.panels[i].name.clone();
+                                    self.rename_frame_count = 0;
+                                    ui.close_menu();
+                                }
+                                if ui.button("保存为模版").clicked() {
+                                    self.save_as_template(i);
+                                    ui.close_menu();
+                                }
+                                ui.separator();
+                                if ui.button("关闭").clicked() {
+                                    self.close_confirm_panel = Some(i);
+                                    ui.close_menu();
+                                }
+                            });
+
+                            // Lock and close buttons
+                            if self.panels.len() > 1 || self.locked_panels.contains(&i) {
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        if self.panels.len() > 1 {
+                                            if ui.small_button("x").clicked() {
+                                                self.close_confirm_panel = Some(i);
+                                                return;
+                                            }
+                                        }
+                                        let is_locked = self.locked_panels.contains(&i);
+                                        let lock_label = if is_locked { "🔓" } else { "🔒" };
+                                        if ui.small_button(lock_label).clicked() {
+                                            if is_locked {
+                                                // Switch to the locked panel; the overlay
+                                                // has its own password input.
+                                                self.active_panel = i;
+                                                self.lock_password_input.clear();
+                                                self.pw_message.clear();
+                                            } else {
+                                                self.locked_panels.insert(i);
+                                                self.lock_password_input.clear();
+                                                self.pw_message.clear();
+                                            }
+                                        }
+                                    },
+                                );
+                            }
+                        });
+                    }
+                }
+
+                // Handle drag target detection after all rects are known
+                if pointer_down && pointer_delta.length() > 2.0 {
+                    if let Some(src) = self.drag_src_panel {
+                        if let Some(pos) = pointer_pos {
+                            for j in (0..panel_count).rev() {
+                                if j == src {
+                                    continue;
+                                }
+                                if j < self.panel_rects.len() && self.panel_rects[j].contains(pos) {
+                                    if self.drag_dst_panel != Some(j) {
+                                        self.drag_dst_panel = Some(j);
+                                        reorder = Some((src, j));
+                                    }
+                                    break;
+                                }
+                            }
+                        }
                     }
                 } else {
-                    ui.horizontal(|ui| {
-                        let panel_name = self.panels[i].name.clone();
-                        let response = ui.selectable_label(is_active, &panel_name);
-                        self.panel_rects[i] = response.rect;
+                    // Pointer released: reset drag state
+                    self.drag_src_panel = None;
+                    self.drag_dst_panel = None;
+                }
 
-                        // Click to select
-                        if response.double_clicked() && !renaming {
-                            self.renaming_panel = Some(i);
-                            self.rename_buffer = panel_name;
-                            self.rename_frame_count = 0;
-                            to_select = None;
-                        } else if response.clicked() && !renaming {
-                            to_select = Some(i);
-                        }
-
-                        // Drag to reorder: detect drag via pointer delta on this rect
-                        if pointer_down && pointer_delta.length() > 2.0 {
-                            if let Some(pos) = pointer_pos {
-                                // Start drag if not already dragging and pointer is on this rect
-                                if self.drag_src_panel.is_none() && response.rect.contains(pos) {
-                                    self.drag_src_panel = Some(i);
+                // Perform reorder
+                if let Some((src, dst)) = reorder {
+                    self.reorder_panel(src, dst);
+                }
+                if let Some(i) = to_select {
+                    self.active_panel = i;
+                }
+                ui.separator();
+                if ui.button("+ New Workspace").clicked() {
+                    self.add_panel(ui.ctx());
+                }
+                if self.cached_template_files.is_empty() {
+                    self.refresh_template_files();
+                }
+                let template_files = self.cached_template_files.clone();
+                ui.menu_button("Templates", |ui| {
+                    if template_files.is_empty() {
+                        ui.label("(empty)");
+                    } else {
+                        for (display_name, path) in &template_files {
+                            let path = path.clone();
+                            let display_name = display_name.clone();
+                            ui.horizontal(|ui| {
+                                if ui.button(display_name.as_str()).clicked() {
+                                    self.pending_load_from_template = Some(path.clone());
+                                    ui.close_menu();
                                 }
-                                // Find drag target
-                                if let Some(src) = self.drag_src_panel {
-                                    if src != i {
-                                        // Use this panel's rect as potential target
-                                    }
-                                }
-                            }
-                        }
-
-                        // Context menu
-                        response.context_menu(|ui| {
-                            if ui.button("重命名").clicked() {
-                                self.renaming_panel = Some(i);
-                                self.rename_buffer = self.panels[i].name.clone();
-                                self.rename_frame_count = 0;
-                                ui.close_menu();
-                            }
-                            if ui.button("保存为模版").clicked() { self.save_as_template(i); ui.close_menu(); }
-                            ui.separator();
-                            if ui.button("关闭").clicked() { self.close_confirm_panel = Some(i); ui.close_menu(); }
-                        });
-
-                        // Lock and close buttons
-                        if self.panels.len() > 1 || self.locked_panels.contains(&i) {
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                if self.panels.len() > 1 {
-                                    if ui.small_button("x").clicked() { self.close_confirm_panel = Some(i); return; }
-                                }
-                                let is_locked = self.locked_panels.contains(&i);
-                                let lock_label = if is_locked { "🔓" } else { "🔒" };
-                                if ui.small_button(lock_label).clicked() {
-                                    if is_locked {
-                                        self.unlock_popup = Some(i);
-                                        self.lock_password_input.clear();
-                                    } else {
-                                        self.locked_panels.insert(i);
-                                    }
+                                if ui.small_button("×").clicked() {
+                                    self.pending_delete_template = Some(path);
+                                    ui.close_menu();
                                 }
                             });
                         }
-                    });
-                }
-            }
-
-            // Handle drag target detection after all rects are known
-            if pointer_down && pointer_delta.length() > 2.0 {
-                if let Some(src) = self.drag_src_panel {
-                    if let Some(pos) = pointer_pos {
-                        for j in (0..panel_count).rev() {
-                            if j == src { continue; }
-                            if j < self.panel_rects.len() && self.panel_rects[j].contains(pos) {
-                                if self.drag_dst_panel != Some(j) {
-                                    self.drag_dst_panel = Some(j);
-                                    reorder = Some((src, j));
-                                }
-                                break;
-                            }
-                        }
                     }
-                }
-            } else {
-                // Pointer released: reset drag state
-                self.drag_src_panel = None;
-                self.drag_dst_panel = None;
-            }
-
-            // Perform reorder
-            if let Some((src, dst)) = reorder {
-                self.reorder_panel(src, dst);
-            }
-            if let Some(i) = to_select { self.active_panel = i; }
-            ui.separator();
-            if ui.button("+ New Workspace").clicked() { self.add_panel(ui.ctx()); }
-            if self.cached_template_files.is_empty() { self.refresh_template_files(); }
-            let template_files = self.cached_template_files.clone();
-            ui.menu_button("Templates", |ui| {
-                if template_files.is_empty() { ui.label("(empty)"); }
-                else {
-                    for (display_name, path) in &template_files {
-                        let path = path.clone();
-                        let display_name = display_name.clone();
-                        ui.horizontal(|ui| {
-                            if ui.button(display_name.as_str()).clicked() {
-                                self.pending_load_from_template = Some(path.clone());
-                                ui.close_menu();
-                            }
-                            if ui.small_button("×").clicked() {
-                                self.pending_delete_template = Some(path);
-                                ui.close_menu();
-                            }
-                        });
-                    }
-                }
+                });
+                ui.separator();
+                ui.label("L1: Workspaces");
+                ui.label("L2: Dock panels");
+                ui.label("L3: Terminal tabs");
             });
-            ui.separator();
-            ui.label("L1: Workspaces");
-            ui.label("L2: Dock panels");
-            ui.label("L3: Terminal tabs");
-        });
 
-        let active_tab = self.dock_states.get_mut(&self.active_panel)
+        let active_tab = self
+            .dock_states
+            .get_mut(&self.active_panel)
             .and_then(|t| t.find_active_focused().map(|(_, t)| t.clone()));
         egui::CentralPanel::default().show(ctx, |ui| {
             let is_locked = self.locked_panels.contains(&self.active_panel);
@@ -1521,12 +1990,81 @@ impl eframe::App for App {
                 let painter = ui.painter_at(rect);
                 painter.rect_filled(rect, 0.0, lock_color);
 
-                ui.allocate_ui_at_rect(rect, |ui| {
+                let form_width = 320.0;
+                let heading_height = ui.fonts(|fonts| {
+                    fonts
+                        .layout_no_wrap(
+                            "🔒 此工作区已锁定".to_owned(),
+                            egui::FontId::proportional(24.0),
+                            egui::Color32::WHITE,
+                        )
+                        .size()
+                        .y
+                });
+                let row_height = ui.spacing().interact_size.y;
+                let item_spacing = ui.spacing().item_spacing.y;
+                let message_height = if self.pw_message.is_empty() {
+                    0.0
+                } else {
+                    ui.text_style_height(&egui::TextStyle::Body)
+                };
+                let form_height = heading_height
+                    + item_spacing
+                    + 16.0
+                    + row_height
+                    + if message_height > 0.0 {
+                        item_spacing + 4.0 + message_height
+                    } else {
+                        0.0
+                    };
+                let form_top =
+                    rect.center().y - heading_height - item_spacing - 16.0 - row_height * 0.5;
+                let form_rect = egui::Rect::from_center_size(
+                    egui::pos2(rect.center().x, form_top + form_height * 0.5),
+                    egui::vec2(form_width, form_height),
+                );
+                let pw_id = egui::Id::new("lock_overlay_pw_input");
+                ui.allocate_new_ui(egui::UiBuilder::new().max_rect(form_rect), |ui| {
                     ui.vertical_centered(|ui| {
-                        ui.add_space(rect.height() / 3.0);
-                        ui.heading(egui::RichText::new("🔒 此工作区已锁定").size(24.0).color(egui::Color32::WHITE));
-                        ui.add_space(10.0);
-                        ui.label(egui::RichText::new("点击列表中的 🔒 按钮解锁").color(egui::Color32::from_gray(180)));
+                        ui.heading(
+                            egui::RichText::new("🔒 此工作区已锁定")
+                                .size(24.0)
+                                .color(egui::Color32::WHITE),
+                        );
+                        ui.add_space(16.0);
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                egui::RichText::new("密码:").color(egui::Color32::from_gray(200)),
+                            );
+                            let resp = ui.add(
+                                egui::TextEdit::singleline(&mut self.lock_password_input)
+                                    .password(true)
+                                    .desired_width(160.0)
+                                    .id(pw_id),
+                            );
+                            resp.request_focus();
+                            let enter_pressed = ui.input(|i| i.key_pressed(egui::Key::Enter));
+                            if ui.button("解锁").clicked() || (enter_pressed && resp.has_focus())
+                            {
+                                if self.settings.lock_password.is_empty()
+                                    || self.lock_password_input == self.settings.lock_password
+                                {
+                                    self.locked_panels.remove(&self.active_panel);
+                                    self.lock_password_input.clear();
+                                    self.pw_message.clear();
+                                } else {
+                                    self.pw_message = "密码错误".into();
+                                    self.lock_password_input.clear();
+                                }
+                            }
+                        });
+                        if !self.pw_message.is_empty() {
+                            ui.add_space(4.0);
+                            ui.label(
+                                egui::RichText::new(&self.pw_message)
+                                    .color(egui::Color32::from_rgb(240, 100, 100)),
+                            );
+                        }
                     });
                 });
             } else if let Some(tree) = self.dock_states.get_mut(&self.active_panel) {
@@ -1534,34 +2072,70 @@ impl eframe::App for App {
                     .style(Style::from_egui(ui.style().as_ref()))
                     .show_add_buttons(true)
                     .show_add_popup(false)
-                    .show_inside(ui, &mut TerminalTabViewer {
-                        terminals: &mut self.terminals,
-                        completion: &self.completion,
-                        history_db: &self.history_db,
-                        max_history: self.settings.max_history,
-                        cell_spacing: self.settings.cell_spacing,
-                        bg_color: self.settings.bg_color,
-                        fg_color: self.settings.fg_color,
-                        menu_bg_color: self.settings.menu_bg_color,
-                        menu_fg_color: self.settings.menu_fg_color,
-                        menu_font_size: self.settings.menu_font_size,
-                        pending_close: &mut self.pending_close,
-                        pending_new_terminal: &mut self.pending_new_terminal,
-                        pending_split_after: &mut self.pending_split_after,
-                        pending_split_vertical: &mut self.pending_split_vertical,
-                        active_panel: self.active_panel,
-                        renaming_terminal: &mut self.renaming_terminal,
-                        terminal_rename_buffer: &mut self.terminal_rename_buffer,
-                        renaming,
-                        rename_frame_count: self.rename_frame_count,
-                        active_tab,
-                        focused_terminal: &mut self.focused_terminal,
-                        show_settings: self.show_settings,
-                    });
+                    .show_inside(
+                        ui,
+                        &mut TerminalTabViewer {
+                            terminals: &mut self.terminals,
+                            completion: &self.completion,
+                            history_db: &self.history_db,
+                            max_history: self.settings.max_history,
+                            cell_spacing: self.settings.cell_spacing,
+                            bg_color: self.settings.bg_color,
+                            fg_color: self.settings.fg_color,
+                            menu_bg_color: self.settings.menu_bg_color,
+                            menu_fg_color: self.settings.menu_fg_color,
+                            menu_font_size: self.settings.menu_font_size,
+                            pending_close: &mut self.pending_close,
+                            pending_new_terminal: &mut self.pending_new_terminal,
+                            pending_split_after: &mut self.pending_split_after,
+                            pending_split_vertical: &mut self.pending_split_vertical,
+                            active_panel: self.active_panel,
+                            renaming_terminal: &mut self.renaming_terminal,
+                            terminal_rename_buffer: &mut self.terminal_rename_buffer,
+                            renaming,
+                            rename_frame_count: self.rename_frame_count,
+                            active_tab,
+                            focused_terminal: &mut self.focused_terminal,
+                            show_settings: self.show_settings,
+                        },
+                    );
             } else {
-                ui.centered_and_justified(|ui| { ui.label("Click '+ New Workspace' to create one."); });
+                ui.centered_and_justified(|ui| {
+                    ui.label("Click '+ New Workspace' to create one.");
+                });
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TerminalStatePersist;
+
+    #[test]
+    fn terminal_state_does_not_serialize_snapshots() {
+        let state = TerminalStatePersist {
+            name: "Terminal 1".into(),
+            font_size: 14.0,
+            working_directory: "/tmp".into(),
+        };
+
+        let value = serde_json::to_value(state).unwrap();
+        assert!(!value.as_object().unwrap().contains_key("snapshot"));
+    }
+
+    #[test]
+    fn legacy_terminal_state_ignores_snapshot_fields() {
+        let state: TerminalStatePersist = serde_json::from_value(serde_json::json!({
+            "name": "Terminal 1",
+            "font_size": 14.0,
+            "working_directory": "/tmp",
+            "snapshot": {"grid": []},
+            "process_info": {"pid": 1}
+        }))
+        .unwrap();
+
+        assert_eq!(state.working_directory, "/tmp");
     }
 }
 
@@ -1594,7 +2168,10 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
     type Tab = String;
 
     fn title(&mut self, tab: &mut Self::Tab) -> egui::WidgetText {
-        self.terminals.get(tab).map(|d| d.name.clone().into()).unwrap_or_else(|| tab.clone().into())
+        self.terminals
+            .get(tab)
+            .map(|d| d.name.clone().into())
+            .unwrap_or_else(|| tab.clone().into())
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab) {
@@ -1602,7 +2179,9 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
             ui.horizontal(|ui| {
                 let response = ui.add(
                     egui::TextEdit::singleline(self.terminal_rename_buffer)
-                        .font(egui::FontId::monospace(14.0)).desired_width(200.0).hint_text("Enter name...")
+                        .font(egui::FontId::monospace(14.0))
+                        .desired_width(200.0)
+                        .hint_text("Enter name...")
                         .id_source("tab_rename"),
                 );
                 ui.memory_mut(|mem| mem.request_focus(response.id));
@@ -1620,230 +2199,192 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
         }
 
         if let Some(td) = self.terminals.get_mut(tab) {
-            let has_snapshot = td.restored_snapshot.is_some();
-            if has_snapshot {
-                let snapshot = td.restored_snapshot.as_ref().unwrap();
-                let response = render_snapshot(ui, snapshot, td.font_size);
-                if response.clicked() || response.hovered() {
-                    td.restored_snapshot = None;
-                }
-                ui.label("Click to restore terminal");
-            } else {
-                let mouse_over = ui.rect_contains_pointer(ui.clip_rect());
-                if mouse_over {
-                    let scroll: f32 = ui.input(|i| i.events.iter().filter_map(|e| {
-                        if let egui::Event::MouseWheel { delta, modifiers, .. } = e {
-                            if modifiers.ctrl { Some(delta.y) } else { None }
-                        } else { None }
-                    }).sum());
-                    if scroll > 0.0 { td.font_size = (td.font_size + FONT_SIZE_STEP).min(MAX_FONT_SIZE); }
-                    else if scroll < 0.0 { td.font_size = (td.font_size - FONT_SIZE_STEP).max(MIN_FONT_SIZE); }
-                }
-                if self.active_tab.as_ref() == Some(tab) {
-                    if ui.input(|i| i.key_pressed(egui::Key::Equals) && i.modifiers.ctrl) {
-                        td.font_size = (td.font_size + FONT_SIZE_STEP).min(MAX_FONT_SIZE);
-                    }
-                    if ui.input(|i| i.key_pressed(egui::Key::Minus) && i.modifiers.ctrl) {
-                        td.font_size = (td.font_size - FONT_SIZE_STEP).max(MIN_FONT_SIZE);
-                    }
-                }
-
-                let font_id = egui::FontId::monospace(td.font_size);
-                let cell_w = ui.fonts(|f| f.glyph_width(&font_id, 'm'));
-                let cell_h = ui.fonts(|f| f.row_height(&font_id));
-                let avail = ui.available_size();
-                let effective_cell_w = cell_w * self.cell_spacing;
-                let pty_cols = (avail.x / effective_cell_w).floor() as u16;
-                let pty_rows = (avail.y / cell_h).floor() as u16;
-                if pty_cols > 0 && pty_rows > 0 {
-                    td.instance.resize(pty_cols, pty_rows);
-                }
-
-                let is_focused = self.focused_terminal.as_ref() == Some(tab);
-
-                // Auto-focus when this tab becomes active
-                if self.active_tab.as_ref() == Some(tab) {
-                    *self.focused_terminal = Some(tab.clone());
-                }
-
-                // Close menu when terminal loses focus
-                if !is_focused {
-                    td.instance.history_nav = None;
-                }
-
-                let terminal_response = render_terminal(ui, &td.instance, cell_w, cell_h,
-                    egui::Color32::from_rgb(self.bg_color[0], self.bg_color[1], self.bg_color[2]),
-                    egui::Color32::from_rgb(self.fg_color[0], self.fg_color[1], self.fg_color[2]),
-                    self.cell_spacing);
-
-                if is_focused && !self.renaming && !self.show_settings {
-                    terminal_response.request_focus();
-                    ui.ctx().memory_mut(|mem| {
-                        mem.set_focus_lock_filter(terminal_response.id, EventFilter {
-                            tab: true,
-                            horizontal_arrows: true,
-                            vertical_arrows: true,
-                            escape: true,
-                        });
-                    });
-                }
-
-                if terminal_response.clicked() {
-                    *self.focused_terminal = Some(tab.clone());
-                }
-
-                if is_focused && !self.renaming && !self.show_settings {
-                    let any_key = ui.input(|i| {
-                        i.events.iter().any(|e| matches!(e, egui::Event::Text(_) | egui::Event::Key { .. }))
-                    });
-                    if any_key {
-                        td.restored_snapshot = None;
-                    }
-
-                    let input = ui.input(|i| i.clone());
-                    for event in &input.events {
-                        match event {
-                            egui::Event::Text(text) => {
-                                td.instance.write(text.as_bytes());
-                            }
-                            egui::Event::Key { key, pressed, modifiers, .. } if *pressed => {
-                                match key {
-                                    egui::Key::Enter => {
-                                        if td.instance.history_nav.is_some() {
-                                            // Menu is open: Enter is handled by the rendering section
-                                        } else {
-                                            let line = td.instance.get_current_line();
-                                            let prompt_end = line.rfind("$ ").or_else(|| line.rfind("# ")).map(|p| p + 2).unwrap_or(0);
-                                            let cmd = line[prompt_end..].trim().to_string();
-                                            if !cmd.is_empty() {
-                                                self.history_db.add(tab, &cmd);
-                                            }
-                                            td.instance.write(b"\r");
-                                        }
-                                    }
-                                    egui::Key::ArrowUp => {
-                                        if td.instance.history_nav.is_some() {
-                                            if let Some(ref mut nav) = td.instance.history_nav {
-                                                if nav.selected > 0 {
-                                                    nav.selected -= 1;
-                                                }
-                                            }
-                                        } else {
-                                            let entries = self.history_db.get(tab, self.max_history);
-                                            if !entries.is_empty() {
-                                                td.instance.history_nav = Some(HistoryNav { entries, selected: 0 });
-                                            } else {
-                                                td.instance.write(b"\x1b[A");
-                                            }
-                                        }
-                                    }
-                                    egui::Key::ArrowDown => {
-                                        if let Some(ref mut nav) = td.instance.history_nav {
-                                            if nav.selected + 1 < nav.entries.len() {
-                                                nav.selected += 1;
-                                            }
-                                        } else {
-                                            td.instance.write(b"\x1b[B");
-                                        }
-                                    }
-                                    egui::Key::ArrowRight => {
-                                        if td.instance.history_nav.is_none() {
-                                            let line = td.instance.get_current_line();
-                                            let prompt_end = line.rfind("$ ").or_else(|| line.rfind("# ")).map(|p| p + 2).unwrap_or(0);
-                                            let input_text = line[prompt_end..].trim().to_string();
-                                            if !input_text.is_empty() {
-                                                if let Some(best) = self.completion.suggest(&input_text).first() {
-                                                    if best.len() > input_text.len() {
-                                                        let remaining = &best[input_text.len()..];
-                                                        td.instance.write(remaining.as_bytes());
-                                                    } else {
-                                                        td.instance.write(b"\x1b[C");
-                                                    }
-                                                } else {
-                                                    td.instance.write(b"\x1b[C");
-                                                }
-                                            } else {
-                                                td.instance.write(b"\x1b[C");
-                                            }
-                                        } else {
-                                            td.instance.write(b"\x1b[C");
-                                        }
-                                    }
-                                    egui::Key::Escape => {
-                                        if td.instance.history_nav.is_some() {
-                                            td.instance.history_nav = None;
-                                        } else {
-                                            td.instance.write(b"\x1b");
-                                        }
-                                    }
-                                    egui::Key::Backspace => td.instance.write(b"\x7f"),
-                                    egui::Key::Delete => td.instance.write(b"\x1b[3~"),
-                                    egui::Key::Home => td.instance.write(b"\x1b[H"),
-                                    egui::Key::End => td.instance.write(b"\x1b[F"),
-                                    egui::Key::PageUp => td.instance.write(b"\x1b[5~"),
-                                    egui::Key::PageDown => td.instance.write(b"\x1b[6~"),
-                                    egui::Key::ArrowLeft => td.instance.write(b"\x1b[D"),
-                                    _ => {
-                                        if let Some(c) = key_to_char(key, modifiers) {
-                                            td.instance.write(&[c as u8]);
-                                        }
-                                    }
+            let mouse_over = ui.rect_contains_pointer(ui.clip_rect());
+            if mouse_over {
+                let scroll: f32 = ui.input(|i| {
+                    i.events
+                        .iter()
+                        .filter_map(|e| {
+                            if let egui::Event::MouseWheel {
+                                delta, modifiers, ..
+                            } = e
+                            {
+                                if modifiers.ctrl {
+                                    Some(delta.y)
+                                } else {
+                                    None
                                 }
-                            }
-                            _ => {}
-                        }
-                    }
-
-                    if let Some(ref nav) = td.instance.history_nav {
-                        let (_, cursor_row) = td.instance.cursor_position();
-                        let list_width = 400.0;
-                        let max_visible = 10;
-                        let visible_count = nav.entries.len().min(max_visible);
-                        let list_height = visible_count as f32 * cell_h;
-                        let below_top = terminal_response.rect.min.y + (cursor_row as f32 + 1.0) * cell_h;
-                        let below_space = terminal_response.rect.max.y - below_top;
-                        let list_top = if below_space >= list_height {
-                            below_top
-                        } else {
-                            (terminal_response.rect.min.y + cursor_row as f32 * cell_h - list_height)
-                                .max(terminal_response.rect.min.y)
-                        };
-                        let list_rect = egui::Rect::from_min_size(
-                            egui::pos2(terminal_response.rect.min.x, list_top),
-                            egui::vec2(list_width, list_height),
-                        );
-                        let menu_bg = egui::Color32::from_rgb(self.menu_bg_color[0], self.menu_bg_color[1], self.menu_bg_color[2]);
-                        let menu_fg = egui::Color32::from_rgb(self.menu_fg_color[0], self.menu_fg_color[1], self.menu_fg_color[2]);
-                        ui.painter().rect_filled(list_rect, 0.0, menu_bg);
-
-                        let start_idx = if nav.selected >= max_visible { nav.selected - max_visible + 1 } else { 0 };
-                        for (i, entry) in nav.entries[start_idx..].iter().enumerate().take(max_visible) {
-                            let y = list_top + i as f32 * cell_h;
-                            let is_selected = start_idx + i == nav.selected;
-                            let item_bg = if is_selected {
-                                egui::Color32::from_rgba_unmultiplied(60, 60, 80, 255)
                             } else {
-                                menu_bg
-                            };
-                            ui.painter().rect_filled(
-                                egui::Rect::from_min_size(egui::pos2(terminal_response.rect.min.x, y), egui::vec2(list_width, cell_h)),
-                                0.0, item_bg,
-                            );
-                            ui.painter().text(
-                                egui::pos2(terminal_response.rect.min.x + 4.0, y),
-                                egui::Align2::LEFT_TOP,
-                                &entry,
-                                egui::FontId::monospace(self.menu_font_size),
-                                menu_fg,
-                            );
-                        }
-
-                        if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                            if let Some(selected) = td.instance.history_nav.as_ref().map(|n| n.entries[n.selected].clone()) {
-                                td.instance.write(selected.as_bytes());
-                                td.instance.history_nav = None;
+                                None
                             }
-                        }
+                        })
+                        .sum()
+                });
+                if scroll > 0.0 {
+                    td.font_size = (td.font_size + FONT_SIZE_STEP).min(MAX_FONT_SIZE);
+                } else if scroll < 0.0 {
+                    td.font_size = (td.font_size - FONT_SIZE_STEP).max(MIN_FONT_SIZE);
+                }
+            }
+            if self.active_tab.as_ref() == Some(tab) {
+                if ui.input(|i| i.key_pressed(egui::Key::Equals) && i.modifiers.ctrl) {
+                    td.font_size = (td.font_size + FONT_SIZE_STEP).min(MAX_FONT_SIZE);
+                }
+                if ui.input(|i| i.key_pressed(egui::Key::Minus) && i.modifiers.ctrl) {
+                    td.font_size = (td.font_size - FONT_SIZE_STEP).max(MIN_FONT_SIZE);
+                }
+            }
+
+            let is_focused = self.focused_terminal.as_ref() == Some(tab);
+
+            // Auto-focus when this tab becomes active
+            if self.active_tab.as_ref() == Some(tab) {
+                *self.focused_terminal = Some(tab.clone());
+            }
+
+            // Close menu when terminal loses focus
+            if !is_focused {
+                td.instance.history_nav = None;
+            }
+
+            let terminal_view = {
+                let mut tv = egui_term::TerminalView::new(ui, &mut td.instance.backend);
+                tv = tv.set_theme(egui_term::TerminalTheme::new(Box::new(
+                    egui_term::ColorPalette {
+                        foreground: format!(
+                            "#{:02x}{:02x}{:02x}",
+                            self.fg_color[0], self.fg_color[1], self.fg_color[2]
+                        ),
+                        background: format!(
+                            "#{:02x}{:02x}{:02x}",
+                            self.bg_color[0], self.bg_color[1], self.bg_color[2]
+                        ),
+                        ..Default::default()
+                    },
+                )));
+                tv = tv.set_font(egui_term::TerminalFont::new(egui_term::FontSettings {
+                    font_type: egui::FontId::monospace(td.font_size),
+                }));
+                tv = tv.set_focus(is_focused);
+                // Override keys handled by app-level history UI
+                tv = tv.add_bindings(vec![
+                    (
+                        egui_term::Binding {
+                            target: egui_term::InputKind::KeyCode(egui::Key::PageUp),
+                            modifiers: egui::Modifiers::NONE,
+                            terminal_mode_include: egui_term::TerminalMode::empty(),
+                            terminal_mode_exclude: egui_term::TerminalMode::empty(),
+                        },
+                        egui_term::BindingAction::Ignore,
+                    ),
+                    (
+                        egui_term::Binding {
+                            target: egui_term::InputKind::KeyCode(egui::Key::PageDown),
+                            modifiers: egui::Modifiers::NONE,
+                            terminal_mode_include: egui_term::TerminalMode::empty(),
+                            terminal_mode_exclude: egui_term::TerminalMode::empty(),
+                        },
+                        egui_term::BindingAction::Ignore,
+                    ),
+                    (
+                        egui_term::Binding {
+                            target: egui_term::InputKind::KeyCode(egui::Key::Enter),
+                            modifiers: egui::Modifiers::NONE,
+                            terminal_mode_include: egui_term::TerminalMode::empty(),
+                            terminal_mode_exclude: egui_term::TerminalMode::empty(),
+                        },
+                        egui_term::BindingAction::Ignore,
+                    ),
+                    (
+                        egui_term::Binding {
+                            target: egui_term::InputKind::KeyCode(egui::Key::Escape),
+                            modifiers: egui::Modifiers::NONE,
+                            terminal_mode_include: egui_term::TerminalMode::empty(),
+                            terminal_mode_exclude: egui_term::TerminalMode::empty(),
+                        },
+                        egui_term::BindingAction::Ignore,
+                    ),
+                ]);
+                tv
+            };
+            let terminal_response = ui.add(terminal_view);
+
+            if is_focused && !self.renaming && !self.show_settings {
+                terminal_response.request_focus();
+            }
+
+            if terminal_response.clicked() {
+                *self.focused_terminal = Some(tab.clone());
+            }
+
+            if is_focused && !self.renaming && !self.show_settings {
+                // Cache cell_h for overlay rendering
+                let cell_h = ui.fonts(|f| f.row_height(&egui::FontId::monospace(td.font_size)));
+
+                // History overlay: entries are [newest ... oldest], selected=0 is top
+                if let Some(ref nav) = td.instance.history_nav {
+                    let (_, cursor_row) = td.instance.cursor_position();
+                    let list_width = 400.0;
+                    let max_visible = 10;
+                    let visible_count = nav.entries.len().min(max_visible);
+                    let list_height = visible_count as f32 * cell_h;
+                    let below_top =
+                        terminal_response.rect.min.y + (cursor_row as f32 + 1.0) * cell_h;
+                    let below_space = terminal_response.rect.max.y - below_top;
+                    let list_top = if below_space >= list_height {
+                        below_top
+                    } else {
+                        (terminal_response.rect.min.y + cursor_row as f32 * cell_h - list_height)
+                            .max(terminal_response.rect.min.y)
+                    };
+                    let list_rect = egui::Rect::from_min_size(
+                        egui::pos2(terminal_response.rect.min.x, list_top),
+                        egui::vec2(list_width, list_height),
+                    );
+                    let menu_bg = egui::Color32::from_rgb(
+                        self.menu_bg_color[0],
+                        self.menu_bg_color[1],
+                        self.menu_bg_color[2],
+                    );
+                    let menu_fg = egui::Color32::from_rgb(
+                        self.menu_fg_color[0],
+                        self.menu_fg_color[1],
+                        self.menu_fg_color[2],
+                    );
+                    ui.painter().rect_filled(list_rect, 0.0, menu_bg);
+
+                    let start_idx = if nav.selected >= max_visible {
+                        nav.selected - max_visible + 1
+                    } else {
+                        0
+                    };
+                    for (i, entry) in nav.entries[start_idx..]
+                        .iter()
+                        .enumerate()
+                        .take(max_visible)
+                    {
+                        let y = list_top + i as f32 * cell_h;
+                        let is_selected = start_idx + i == nav.selected;
+                        let item_bg = if is_selected {
+                            egui::Color32::from_rgba_unmultiplied(60, 60, 80, 255)
+                        } else {
+                            menu_bg
+                        };
+                        ui.painter().rect_filled(
+                            egui::Rect::from_min_size(
+                                egui::pos2(terminal_response.rect.min.x, y),
+                                egui::vec2(list_width, cell_h),
+                            ),
+                            0.0,
+                            item_bg,
+                        );
+                        ui.painter().text(
+                            egui::pos2(terminal_response.rect.min.x + 4.0, y),
+                            egui::Align2::LEFT_TOP,
+                            entry,
+                            egui::FontId::monospace(self.menu_font_size),
+                            menu_fg,
+                        );
                     }
                 }
             }
@@ -1870,7 +2411,13 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
         });
     }
 
-    fn context_menu(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab, surface: SurfaceIndex, node: NodeIndex) {
+    fn context_menu(
+        &mut self,
+        ui: &mut egui::Ui,
+        tab: &mut Self::Tab,
+        surface: SurfaceIndex,
+        node: NodeIndex,
+    ) {
         if ui.button("Rename").clicked() {
             *self.renaming_terminal = Some(tab.clone());
             if let Some(data) = self.terminals.get(tab) {
@@ -1893,31 +2440,5 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
 
     fn scroll_bars(&self, _tab: &Self::Tab) -> [bool; 2] {
         [false, false]
-    }
-}
-
-fn key_to_char(key: &egui::Key, modifiers: &egui::Modifiers) -> Option<char> {
-    if modifiers.ctrl {
-        return match key {
-            egui::Key::A => Some('\x01'), egui::Key::B => Some('\x02'),
-            egui::Key::C => Some('\x03'), egui::Key::D => Some('\x04'),
-            egui::Key::E => Some('\x05'), egui::Key::F => Some('\x06'),
-            egui::Key::G => Some('\x07'), egui::Key::H => Some('\x08'),
-            egui::Key::I => Some('\x09'), egui::Key::J => Some('\x0a'),
-            egui::Key::K => Some('\x0b'), egui::Key::L => Some('\x0c'),
-            egui::Key::M => Some('\x0d'), egui::Key::N => Some('\x0e'),
-            egui::Key::O => Some('\x0f'), egui::Key::P => Some('\x10'),
-            egui::Key::Q => Some('\x11'), egui::Key::R => Some('\x12'),
-            egui::Key::S => Some('\x13'), egui::Key::T => Some('\x14'),
-            egui::Key::U => Some('\x15'), egui::Key::V => Some('\x16'),
-            egui::Key::W => Some('\x17'), egui::Key::X => Some('\x18'),
-            egui::Key::Y => Some('\x19'), egui::Key::Z => Some('\x1a'),
-            egui::Key::Num0 => Some('\x00'),
-            _ => None,
-        };
-    }
-    match key {
-        egui::Key::Space => Some(' '),
-        _ => None,
     }
 }

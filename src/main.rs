@@ -4,7 +4,6 @@ use eframe::egui;
 mod app;
 mod completion;
 mod history_db;
-mod snapshot;
 mod terminal;
 
 fn main() -> Result<()> {

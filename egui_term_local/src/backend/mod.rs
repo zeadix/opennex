@@ -22,11 +22,10 @@ use std::borrow::Cow;
 use std::cmp::min;
 use std::io::Result;
 use std::ops::{Index, RangeInclusive};
-use std::sync::mpsc::Sender;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 
 pub type TerminalMode = TermMode;
-pub type PtyEvent = Event;
 pub type SelectionType = AlacrittySelectionType;
 
 #[derive(Debug, Clone)]
@@ -135,18 +134,19 @@ impl From<TerminalSize> for WindowSize {
 
 pub struct TerminalBackend {
     pub id: u64,
+    child_pid: u32,
     pub url_regex: RegexSearch,
     term: Arc<FairMutex<Term<EventProxy>>>,
     size: TerminalSize,
     notifier: Notifier,
     last_content: RenderableContent,
+    dirty: Arc<AtomicBool>,
 }
 
 impl TerminalBackend {
     pub fn new(
         id: u64,
         app_context: egui::Context,
-        pty_event_proxy_sender: Sender<(u64, PtyEvent)>,
         settings: BackendSettings,
     ) -> Result<Self> {
         let pty_config = tty::Options {
@@ -157,6 +157,7 @@ impl TerminalBackend {
         let config = term::Config::default();
         let terminal_size = TerminalSize::default();
         let pty = tty::new(&pty_config, terminal_size.into(), id)?;
+        let child_pid = pty.child().id();
         let (event_sender, event_receiver) = mpsc::channel();
         let event_proxy = EventProxy(event_sender);
         let mut term = Term::new(config, &terminal_size, event_proxy.clone());
@@ -174,29 +175,23 @@ impl TerminalBackend {
         let notifier = Notifier(pty_event_loop.channel());
         let url_regex = RegexSearch::new(r#"(ipfs:|ipns:|magnet:|mailto:|gemini://|gopher://|https://|http://|news:|file://|git://|ssh:|ftp://)[^\u{0000}-\u{001F}\u{007F}-\u{009F}<>"\s{-}\^⟨⟩`]+"#).unwrap();
         let _pty_event_loop_thread = pty_event_loop.spawn();
+        let dirty = Arc::new(AtomicBool::new(true));
+        let dirty_thread = dirty.clone();
         let _pty_event_subscription = std::thread::Builder::new()
             .name(format!("pty_event_subscription_{}", id))
-            .spawn(move || loop {
-                if let Ok(event) = event_receiver.recv() {
-                    pty_event_proxy_sender
-                        .send((id, event.clone()))
-                        .unwrap_or_else(|_| {
-                            panic!("pty_event_subscription_{}: sending PtyEvent is failed", id)
-                        });
-                    app_context.clone().request_repaint();
-                    if let Event::Exit = event {
-                        break;
-                    }
-                }
+            .spawn(move || {
+                receive_events(event_receiver, dirty_thread, app_context)
             })?;
 
         Ok(Self {
             id,
+            child_pid,
             url_regex,
             term: term.clone(),
             size: terminal_size,
             notifier,
             last_content: initial_content,
+            dirty,
         })
     }
 
@@ -212,8 +207,9 @@ impl TerminalBackend {
                 self.scroll(&mut term, delta);
             },
             BackendCommand::Resize(layout_size, font_size) => {
+                // Do not force scroll-to-bottom on resize: it fights reflow and
+                // can make content look duplicated while the window is dragged.
                 self.resize(&mut term, layout_size, font_size);
-                term.scroll_display(Scroll::Bottom);
             },
             BackendCommand::SelectStart(selection_type, x, y) => {
                 self.start_selection(&mut term, selection_type, x, y);
@@ -259,6 +255,9 @@ impl TerminalBackend {
     }
 
     pub fn sync(&mut self) -> &RenderableContent {
+        if !self.dirty.swap(false, Ordering::Relaxed) {
+            return self.last_content();
+        }
         let term = self.term.clone();
         let mut terminal = term.lock();
         let selectable_range = match &terminal.selection {
@@ -267,7 +266,6 @@ impl TerminalBackend {
         };
 
         let cursor = terminal.grid_mut().cursor_cell().clone();
-        let display_offset = terminal.grid().display_offset();
         self.last_content.grid = terminal.grid().clone();
         self.last_content.selectable_range = selectable_range;
         self.last_content.cursor = cursor.clone();
@@ -276,8 +274,16 @@ impl TerminalBackend {
         self.last_content()
     }
 
+    pub fn set_dirty(&mut self) {
+        self.dirty.store(true, Ordering::Relaxed);
+    }
+
     pub fn last_content(&self) -> &RenderableContent {
         &self.last_content
+    }
+
+    pub fn child_pid(&self) -> u32 {
+        self.child_pid
     }
 
     fn process_link_action(
@@ -411,6 +417,7 @@ impl TerminalBackend {
         x: f32,
         y: f32,
     ) {
+        self.dirty.store(true, Ordering::Relaxed);
         let location = Self::selection_point(
             x,
             y,
@@ -430,6 +437,7 @@ impl TerminalBackend {
         x: f32,
         y: f32,
     ) {
+        self.dirty.store(true, Ordering::Relaxed);
         let display_offset = terminal.grid().display_offset();
         if let Some(ref mut selection) = terminal.selection {
             let location =
@@ -455,34 +463,49 @@ impl TerminalBackend {
         layout_size: Size,
         font_size: Size,
     ) {
-        let new_cols = (layout_size.width / font_size.width.floor()) as u16;
-        let new_lines = (layout_size.height / font_size.height.floor()) as u16;
-        if new_cols == 0 || new_lines == 0 {
+        let cell_w = font_size.width.floor().max(1.0);
+        let cell_h = font_size.height.floor().max(1.0);
+        let cols = ((layout_size.width + 0.5) / cell_w).floor() as u16;
+        let lines = ((layout_size.height + 0.5) / cell_h).floor() as u16;
+        if cols == 0 || lines == 0 {
             return;
         }
-        if new_cols == self.size.num_cols && new_lines == self.size.num_lines
-            && font_size.width as u16 == self.size.cell_width
-            && font_size.height as u16 == self.size.cell_height
+
+        let cell_width = cell_w as u16;
+        let cell_height = cell_h as u16;
+
+        // Only reflow / SIGWINCH when the integer grid size changes.
+        if cols == self.size.num_cols
+            && lines == self.size.num_lines
+            && cell_width == self.size.cell_width
+            && cell_height == self.size.cell_height
         {
+            self.size.layout_size = layout_size;
             return;
         }
 
-        let lines = (layout_size.height / font_size.height.floor()) as u16;
-        let cols = (layout_size.width / font_size.width.floor()) as u16;
-        if lines > 0 && cols > 0 {
-            self.size = TerminalSize {
-                layout_size,
-                cell_height: font_size.height as u16,
-                cell_width: font_size.width as u16,
-                num_lines: lines,
-                num_cols: cols,
-            };
+        let grid_changed =
+            cols != self.size.num_cols || lines != self.size.num_lines;
 
+        self.size = TerminalSize {
+            layout_size,
+            cell_height,
+            cell_width,
+            num_lines: lines,
+            num_cols: cols,
+        };
+
+        if grid_changed {
+            self.dirty.store(true, Ordering::Relaxed);
+            // Notify PTY first, then reflow the emulator grid once.
             self.notifier.on_resize(self.size.into());
             terminal.resize(TermSize::new(
                 self.size.num_cols as usize,
                 self.size.num_lines as usize,
             ));
+            // After reflow, pin view to the bottom so scrollback/history does not
+            // leave the viewport mid-screen (looks like duplicated lines).
+            terminal.scroll_display(Scroll::Bottom);
         }
     }
 
@@ -492,6 +515,7 @@ impl TerminalBackend {
 
     fn scroll(&mut self, terminal: &mut Term<EventProxy>, delta_value: i32) {
         if delta_value != 0 {
+            self.dirty.store(true, Ordering::Relaxed);
             let scroll = Scroll::Delta(delta_value);
             if terminal
                 .mode()
@@ -555,6 +579,47 @@ pub struct RenderableContent {
     pub terminal_size: TerminalSize,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+    use std::thread;
+    use std::time::Duration;
+
+    #[test]
+    fn backend_syncs_startup_output_without_external_event_receiver() {
+        let mut backend = TerminalBackend::new(
+            1,
+            egui::Context::default(),
+            BackendSettings {
+                shell: "/bin/sh".into(),
+                args: vec!["-c".into(), "printf startup; sleep 1".into()],
+                working_directory: Some(PathBuf::from("/tmp")),
+            },
+        )
+        .expect("terminal backend should start");
+
+        thread::sleep(Duration::from_millis(150));
+        let content = backend.sync();
+        let output: String =
+            content.grid.display_iter().map(|cell| cell.c).collect();
+
+        assert!(output.contains("startup"));
+    }
+
+    #[test]
+    fn event_subscription_stops_when_sender_is_dropped() {
+        let (sender, receiver) = mpsc::channel();
+        drop(sender);
+
+        receive_events(
+            receiver,
+            Arc::new(AtomicBool::new(false)),
+            egui::Context::default(),
+        );
+    }
+}
+
 impl Default for RenderableContent {
     fn default() -> Self {
         Self {
@@ -571,6 +636,20 @@ impl Default for RenderableContent {
 impl Drop for TerminalBackend {
     fn drop(&mut self) {
         let _ = self.notifier.0.send(Msg::Shutdown);
+    }
+}
+
+fn receive_events(
+    event_receiver: mpsc::Receiver<Event>,
+    dirty: Arc<AtomicBool>,
+    app_context: egui::Context,
+) {
+    while let Ok(event) = event_receiver.recv() {
+        dirty.store(true, Ordering::Relaxed);
+        app_context.request_repaint();
+        if matches!(event, Event::Exit) {
+            break;
+        }
     }
 }
 
