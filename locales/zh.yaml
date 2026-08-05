@@ -1,0 +1,131 @@
+display_name: "中文"
+
+menu:
+  file: "文件"
+  view: "视图"
+  language: "语言"
+
+file_menu:
+  save: "保存"
+  load: "加载"
+  save_as: "另存为..."
+  exit: "退出"
+
+view_menu:
+  split_right: "向右分屏"
+  split_down: "向下分屏"
+  settings: "设置"
+
+settings:
+  title: "设置"
+  tabs:
+    general: "通用"
+    appearance: "外观"
+    shortcuts: "快捷键"
+    lock: "锁定"
+  general:
+    heading: "通用"
+    scene_info: "场景和模板使用固定路径:"
+    scene_path: "  场景: ./scene.json"
+    templates_path: "  模板: ./templates/"
+    history_section: "历史记录"
+    max_history: "最大条数:"
+    scrollback: "滚动回溯:"
+    clear_all_history: "清空所有历史"
+  appearance:
+    heading: "外观"
+    terminal_section: "终端外观"
+    font_size: "字号:"
+    cell_spacing: "字间距:"
+    font_family: "字体:"
+    bg_color: "背景色:"
+    fg_color: "前景色:"
+    command_menu_section: "指令菜单"
+    menu_bg_color: "背景色:"
+    menu_fg_color: "文字色:"
+    menu_font_size: "字号:"
+  shortcuts:
+    heading: "快捷键"
+    hint: "点击快捷键名称后按下新按键即可修改"
+    not_set: "未设置"
+  lock:
+    heading: "锁定"
+    password_section: "密码配置:"
+    set_password: "设置密码"
+    change_password: "修改密码"
+    clear_password: "清除密码"
+    lock_section: "锁定:"
+    lock_overlay_color: "遮罩色:"
+  buttons:
+    apply: "应用"
+    close: "关闭"
+
+shortcut_labels:
+  new_terminal: "新建终端"
+  close_terminal: "关闭终端"
+  workspace_up: "工作区上移"
+  workspace_down: "工作区下移"
+  panel_left: "面板左移"
+  panel_right: "面板右移"
+  lock_workspace: "锁定工作区"
+  history_menu: "历史菜单"
+  history_prev: "历史上一条"
+  history_next: "历史下一条"
+  shortcuts_heading: "快捷键"
+
+workspace:
+  heading: "工作区"
+  new: "+ 新建工作区"
+  rename: "重命名"
+  save_as_template: "保存为模版"
+  close: "关闭"
+  rename_confirm: "确定"
+  rename_cancel: "取消"
+  drag_handle_hint: "拖动以调整 Workspace 顺序"
+  close_ws_hint: "关闭 Workspace"
+  locked_hint: "已锁定 Workspace"
+  unlocked_hint: "未锁定 Workspace"
+  empty_hint: "点击 '+ 新建工作区' 创建一个"
+  templates: "模板"
+  templates_empty: "(空)"
+  name_prefix: "工作区 "
+
+close_confirm:
+  message_prefix: "确定要关闭工作区「"
+  message_suffix: "」吗？"
+  confirm: "确认"
+  cancel: "取消"
+
+password:
+  enter: "输入密码:"
+  confirm: "确认密码:"
+  original: "原密码:"
+  new: "新密码:"
+  confirm_new: "确认新密码:"
+  input_label: "密码:"
+  mismatch: "不一致"
+  match: "一致"
+  empty_error: "密码不能为空"
+  mismatch_error: "两次输入的新密码不一致"
+  wrong_error: "原密码错误"
+  wrong_password: "密码错误"
+  confirm_button: "确认"
+  cancel_button: "取消"
+  set_title: "设置密码"
+  change_title: "修改密码"
+  clear_title: "清除密码"
+
+lock_overlay:
+  title: "🔒 此工作区已锁定"
+  password_label: "密码:"
+  unlock_button: "解锁"
+  wrong_password: "密码错误"
+
+terminal:
+  not_found: "未找到终端"
+  rename: "重命名"
+  clear_history: "清空指令历史"
+  new_tab: "+ 新建标签页"
+  add_tab: "+ 标签页"
+  rename_hint: "输入名称..."
+  default_name_prefix: "终端 "

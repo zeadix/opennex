@@ -42,6 +42,12 @@ struct AppSettings {
     settings_window: SettingsWindowState,
     #[serde(default = "default_key_binds")]
     key_binds: HashMap<String, ShortcutBinding>,
+    #[serde(default = "default_language")]
+    language: String,
+}
+
+fn default_language() -> String {
+    "zh".into()
 }
 
 fn default_font_family() -> String {
@@ -250,19 +256,35 @@ fn shortcut_display(b: &ShortcutBinding) -> String {
     s
 }
 
-fn shortcut_hint_labels() -> [(&'static str, &'static str); 10] {
+fn shortcut_hint_ids() -> [&'static str; 10] {
     [
-        ("new_terminal", "新建终端"),
-        ("close_terminal", "关闭终端"),
-        ("workspace_up", "上一个 Workspace"),
-        ("workspace_down", "下一个 Workspace"),
-        ("panel_left", "左侧 Panel"),
-        ("panel_right", "右侧 Panel"),
-        ("lock_workspace", "锁定/解锁 Workspace"),
-        ("history_menu", "历史菜单"),
-        ("history_prev", "历史上一条"),
-        ("history_next", "历史下一条"),
+        "new_terminal",
+        "close_terminal",
+        "workspace_up",
+        "workspace_down",
+        "panel_left",
+        "panel_right",
+        "lock_workspace",
+        "history_menu",
+        "history_prev",
+        "history_next",
     ]
+}
+
+fn shortcut_label_for<'a>(texts: &'a crate::i18n::Texts, id: &str) -> &'a str {
+    match id {
+        "new_terminal" => &texts.shortcut_labels.new_terminal,
+        "close_terminal" => &texts.shortcut_labels.close_terminal,
+        "workspace_up" => &texts.shortcut_labels.workspace_up,
+        "workspace_down" => &texts.shortcut_labels.workspace_down,
+        "panel_left" => &texts.shortcut_labels.panel_left,
+        "panel_right" => &texts.shortcut_labels.panel_right,
+        "lock_workspace" => &texts.shortcut_labels.lock_workspace,
+        "history_menu" => &texts.shortcut_labels.history_menu,
+        "history_prev" => &texts.shortcut_labels.history_prev,
+        "history_next" => &texts.shortcut_labels.history_next,
+        _ => "",
+    }
 }
 
 fn shortcut_hint_available_height(available_height: f32) -> f32 {
@@ -507,6 +529,7 @@ impl Default for AppSettings {
             lock_color: default_lock_color(),
             settings_window: SettingsWindowState::default(),
             key_binds: default_key_binds(),
+            language: default_language(),
         }
     }
 }
@@ -667,6 +690,8 @@ pub struct App {
     cwd_poll_frame: u8,
     alt_key: AltKeyState,
     terminal_focus_id: Option<egui::Id>,
+    texts: crate::i18n::Texts,
+    available_languages: Vec<(String, String)>,
 }
 
 struct TerminalData {
@@ -824,6 +849,8 @@ impl App {
         let db_path = std::env::current_dir()
             .unwrap_or_default()
             .join("history.db");
+        let language = settings.language.clone();
+        let available_languages = crate::i18n::scan_available_languages();
         let mut app = App {
             panels: Vec::new(),
             active_panel: 0,
@@ -874,6 +901,8 @@ impl App {
             cwd_poll_frame: 0,
             alt_key: AltKeyState::default(),
             terminal_focus_id: None,
+            texts: crate::i18n::load_language(&language),
+            available_languages,
         };
 
         let scene_path = scene_path();
@@ -991,7 +1020,7 @@ impl App {
     }
 
     fn add_initial_terminal(&mut self, ctx: &egui::Context) {
-        let name = "Workspace 1".to_string();
+        let name = format!("{}1", self.texts.workspace.name_prefix);
         let Some(tab_id) = self.create_terminal_inner(ctx) else {
             return;
         };
@@ -1055,7 +1084,10 @@ impl App {
             id.clone(),
             TerminalData {
                 instance,
-                name: format!("Terminal {}", random_suffix),
+                name: format!(
+                    "{}{}",
+                    self.texts.terminal.default_name_prefix, random_suffix
+                ),
                 font_size: DEFAULT_FONT_SIZE,
             },
         );
@@ -1172,7 +1204,7 @@ impl App {
 
     fn add_panel(&mut self, ctx: &egui::Context) {
         let n = self.panels.len() + 1;
-        let name = format!("Workspace {}", n);
+        let name = format!("{}{}", self.texts.workspace.name_prefix, n);
         let Some(tab_id) = self.create_terminal_inner(ctx) else {
             return;
         };
@@ -1239,6 +1271,13 @@ impl App {
             .unlock_popup
             .and_then(|index| remap_panel_index(index, &old_to_new));
         self.save_scene();
+    }
+
+    fn switch_language(&mut self, code: &str) {
+        self.texts = crate::i18n::load_language(code);
+        self.settings.language = code.to_string();
+        self.settings_edit.language = code.to_string();
+        let _ = save_settings(&self.settings);
     }
 
     fn focus_adjacent_panel(&mut self, direction: i32) {
@@ -1544,29 +1583,32 @@ impl eframe::App for App {
 
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
-                ui.menu_button("File", |ui| {
-                    if ui.button("Save").clicked() {
+                ui.menu_button(self.texts.menu.file.clone(), |ui| {
+                    if ui.button(self.texts.file_menu.save.clone()).clicked() {
                         self.save_scene();
                         ui.close_menu();
                     }
-                    if ui.button("Load").clicked() {
+                    if ui.button(self.texts.file_menu.load.clone()).clicked() {
                         self.pending_load_scene = true;
                         ui.close_menu();
                     }
-                    if ui.button("Save As...").clicked() {
+                    if ui.button(self.texts.file_menu.save_as.clone()).clicked() {
                         self.pending_save_scene_as = true;
                         ui.close_menu();
                     }
                     ui.separator();
-                    if ui.button("Exit").clicked() {
+                    if ui.button(self.texts.file_menu.exit.clone()).clicked() {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                     }
                 });
-                ui.menu_button("View", |ui| {
+                ui.menu_button(self.texts.menu.view.clone(), |ui| {
                     if let Some(tree) = self.dock_states.get_mut(&self.active_panel) {
                         let active_tab = tree.find_active_focused().map(|(_, t)| t.clone());
                         if let Some(ref tab) = active_tab {
-                            if ui.button("Split Right").clicked() {
+                            if ui
+                                .button(self.texts.view_menu.split_right.clone())
+                                .clicked()
+                            {
                                 self.pending_split_after = Some(tab.clone());
                                 self.pending_split_vertical = false;
                                 if let Some((surface, node, _)) = tree.find_tab(tab) {
@@ -1575,7 +1617,7 @@ impl eframe::App for App {
                                 }
                                 ui.close_menu();
                             }
-                            if ui.button("Split Down").clicked() {
+                            if ui.button(self.texts.view_menu.split_down.clone()).clicked() {
                                 self.pending_split_after = Some(tab.clone());
                                 self.pending_split_vertical = true;
                                 if let Some((surface, node, _)) = tree.find_tab(tab) {
@@ -1587,7 +1629,22 @@ impl eframe::App for App {
                         }
                     }
                 });
-                if ui.button("Settings").clicked() {
+                ui.menu_button(self.texts.menu.language.clone(), |ui| {
+                    let current_code = self.settings.language.clone();
+                    let languages = self.available_languages.clone();
+                    for (code, display_name) in &languages {
+                        let label = if *code == current_code {
+                            format!("✓ {}", display_name)
+                        } else {
+                            display_name.clone()
+                        };
+                        if ui.button(&label).clicked() {
+                            self.switch_language(code);
+                            ui.close_menu();
+                        }
+                    }
+                });
+                if ui.button(self.texts.view_menu.settings.clone()).clicked() {
                     self.show_settings = true;
                     self.settings_edit = self.settings.clone();
                 }
@@ -1597,17 +1654,22 @@ impl eframe::App for App {
         if self.show_settings {
             let mut open = self.show_settings;
             let ws = &self.settings_edit.settings_window;
-            egui::Window::new("Settings")
+            egui::Window::new(&self.texts.settings.title)
                 .open(&mut open)
                 .resizable(true)
                 .default_pos([ws.x, ws.y])
                 .default_size([ws.width, ws.height])
                 .show(ctx, |ui| {
                     ui.horizontal(|ui| {
-                        let tabs = ["通用", "外观", "快捷键", "锁定"];
+                        let tabs = [
+                            &self.texts.settings.tabs.general,
+                            &self.texts.settings.tabs.appearance,
+                            &self.texts.settings.tabs.shortcuts,
+                            &self.texts.settings.tabs.lock,
+                        ];
                         for (i, label) in tabs.iter().enumerate() {
                             let selected = self.settings_tab == i;
-                            if ui.selectable_label(selected, *label).clicked() {
+                            if ui.selectable_label(selected, label.as_str()).clicked() {
                                 self.settings_tab = i;
                             }
                         }
@@ -1616,40 +1678,43 @@ impl eframe::App for App {
 
                     match self.settings_tab {
                         0 => {
-                            ui.label("Scene and templates use fixed paths:");
-                            ui.label("  Scene: ./scene.json");
-                            ui.label("  Templates: ./templates/");
+                            ui.label(&self.texts.settings.general.scene_info);
+                            ui.label(&self.texts.settings.general.scene_path);
+                            ui.label(&self.texts.settings.general.templates_path);
                             ui.separator();
-                            ui.label("历史记录:");
+                            ui.label(&self.texts.settings.general.history_section);
                             ui.horizontal(|ui| {
-                                ui.label("最大条数:");
+                                ui.label(&self.texts.settings.general.max_history);
                                 ui.add(
                                     egui::DragValue::new(&mut self.settings_edit.max_history)
                                         .range(10..=10000),
                                 );
                             });
                             ui.horizontal(|ui| {
-                                ui.label("滚动回溯:");
+                                ui.label(&self.texts.settings.general.scrollback);
                                 ui.add(
                                     egui::DragValue::new(&mut self.settings_edit.scrollback)
                                         .range(100..=50000),
                                 );
                             });
-                            if ui.button("清空所有历史").clicked() {
+                            if ui
+                                .button(&self.texts.settings.general.clear_all_history)
+                                .clicked()
+                            {
                                 self.pending_clear_history = true;
                             }
                         }
                         1 => {
-                            ui.label("终端外观:");
+                            ui.label(&self.texts.settings.appearance.terminal_section);
                             ui.horizontal(|ui| {
-                                ui.label("字号:");
+                                ui.label(&self.texts.settings.appearance.font_size);
                                 ui.add(
                                     egui::DragValue::new(&mut self.settings_edit.font_size)
                                         .range(8.0..=32.0),
                                 );
                             });
                             ui.horizontal(|ui| {
-                                ui.label("字间距:");
+                                ui.label(&self.texts.settings.appearance.cell_spacing);
                                 ui.add(
                                     egui::Slider::new(
                                         &mut self.settings_edit.cell_spacing,
@@ -1659,7 +1724,7 @@ impl eframe::App for App {
                                 );
                             });
                             ui.horizontal(|ui| {
-                                ui.label("字体:");
+                                ui.label(&self.texts.settings.appearance.font_family);
                                 let current = &self.settings_edit.font_family;
                                 egui::ComboBox::from_id_salt("font_family_select")
                                     .selected_text(if current.is_empty() {
@@ -1683,46 +1748,46 @@ impl eframe::App for App {
                                     });
                             });
                             ui.horizontal(|ui| {
-                                ui.label("背景色:");
+                                ui.label(&self.texts.settings.appearance.bg_color);
                                 egui::widgets::color_picker::color_edit_button_srgb(
                                     ui,
                                     &mut self.settings_edit.bg_color,
                                 );
                             });
                             ui.horizontal(|ui| {
-                                ui.label("前景色:");
+                                ui.label(&self.texts.settings.appearance.fg_color);
                                 egui::widgets::color_picker::color_edit_button_srgb(
                                     ui,
                                     &mut self.settings_edit.fg_color,
                                 );
                             });
                             ui.separator();
-                            ui.label("指令菜单:");
+                            ui.label(&self.texts.settings.appearance.command_menu_section);
                             ui.horizontal(|ui| {
-                                ui.label("背景色:");
+                                ui.label(&self.texts.settings.appearance.menu_bg_color);
                                 egui::widgets::color_picker::color_edit_button_srgb(
                                     ui,
                                     &mut self.settings_edit.menu_bg_color,
                                 );
                             });
                             ui.horizontal(|ui| {
-                                ui.label("文字色:");
+                                ui.label(&self.texts.settings.appearance.menu_fg_color);
                                 egui::widgets::color_picker::color_edit_button_srgb(
                                     ui,
                                     &mut self.settings_edit.menu_fg_color,
                                 );
                             });
                             ui.horizontal(|ui| {
-                                ui.label("字号:");
+                                ui.label(&self.texts.settings.appearance.menu_font_size);
                                 ui.add(
                                     egui::DragValue::new(&mut self.settings_edit.menu_font_size)
                                         .range(8.0..=32.0),
                                 );
                             });
                             ui.separator();
-                            ui.label("锁定:");
+                            ui.label(&self.texts.settings.lock.lock_section);
                             ui.horizontal(|ui| {
-                                ui.label("遮罩色:");
+                                ui.label(&self.texts.settings.lock.lock_overlay_color);
                                 egui::widgets::color_picker::color_edit_button_srgb(
                                     ui,
                                     &mut self.settings_edit.lock_color,
@@ -1730,11 +1795,12 @@ impl eframe::App for App {
                             });
                         }
                         2 => {
-                            ui.label("点击快捷键名称后按下新按键即可修改");
+                            ui.label(&self.texts.settings.shortcuts.hint);
                             ui.separator();
-                            for (id, label) in shortcut_hint_labels() {
+                            for id in shortcut_hint_ids() {
+                                let label = shortcut_label_for(&self.texts, id).to_string();
                                 ui.horizontal(|ui| {
-                                    ui.label(label);
+                                    ui.label(&label);
                                     ui.with_layout(
                                         egui::Layout::right_to_left(egui::Align::Center),
                                         |ui| {
@@ -1746,7 +1812,7 @@ impl eframe::App for App {
                                                 {
                                                     shortcut_display(b)
                                                 } else {
-                                                    "(未设置)".to_string()
+                                                    self.texts.settings.shortcuts.not_set.clone()
                                                 };
                                             if ui.button(text).clicked() {
                                                 self.binding_recording = Some(id.to_string());
@@ -1757,17 +1823,20 @@ impl eframe::App for App {
                             }
                         }
                         3 => {
-                            ui.label("密码配置:");
+                            ui.label(&self.texts.settings.lock.password_section);
                             ui.separator();
                             if self.settings.lock_password.is_empty() {
-                                if ui.button("设置密码").clicked() {
+                                if ui.button(&self.texts.settings.lock.set_password).clicked() {
                                     self.pw_popup = Some("set");
                                     self.pw_set1.clear();
                                     self.pw_set2.clear();
                                     self.pw_message.clear();
                                 }
                             } else {
-                                if ui.button("修改密码").clicked() {
+                                if ui
+                                    .button(&self.texts.settings.lock.change_password)
+                                    .clicked()
+                                {
                                     self.pw_popup = Some("change");
                                     self.pw_old.clear();
                                     self.pw_new1.clear();
@@ -1775,7 +1844,10 @@ impl eframe::App for App {
                                     self.pw_message.clear();
                                 }
                                 ui.add_space(10.0);
-                                if ui.button("清除密码").clicked() {
+                                if ui
+                                    .button(&self.texts.settings.lock.clear_password)
+                                    .clicked()
+                                {
                                     self.pw_popup = Some("clear");
                                     self.pw_clear.clear();
                                     self.pw_message.clear();
@@ -1787,7 +1859,7 @@ impl eframe::App for App {
 
                     ui.separator();
                     ui.horizontal(|ui| {
-                        if ui.button("应用").clicked() {
+                        if ui.button(&self.texts.settings.buttons.apply).clicked() {
                             self.settings = self.settings_edit.clone();
                             self.history_db.set_max_entries(self.settings.max_history);
                             let _ = save_settings(&self.settings);
@@ -1853,7 +1925,7 @@ impl eframe::App for App {
                                 ctx2.set_fonts(fonts);
                             });
                         }
-                        if ui.button("关闭").clicked() {
+                        if ui.button(&self.texts.workspace.close).clicked() {
                             self.settings_edit = self.settings.clone();
                             self.show_settings = false;
                         }
@@ -1874,19 +1946,24 @@ impl eframe::App for App {
                 .get(panel_idx)
                 .map(|p| p.name.clone())
                 .unwrap_or_default();
-            egui::Window::new("确认关闭")
+            egui::Window::new(&self.texts.close_confirm.confirm)
                 .open(&mut open)
                 .resizable(false)
                 .collapsible(false)
                 .show(ctx, |ui| {
-                    ui.label(format!("确定要关闭工作区「{}」吗？", panel_name));
+                    ui.label(format!(
+                        "{}{}{}",
+                        self.texts.close_confirm.message_prefix,
+                        panel_name,
+                        self.texts.close_confirm.message_suffix
+                    ));
                     ui.add_space(10.0);
                     ui.horizontal(|ui| {
-                        if ui.button("确认").clicked() {
+                        if ui.button(&self.texts.close_confirm.confirm).clicked() {
                             self.close_workspace(panel_idx);
                             self.close_confirm_panel = None;
                         }
-                        if ui.button("取消").clicked() {
+                        if ui.button(&self.texts.close_confirm.cancel).clicked() {
                             self.close_confirm_panel = None;
                         }
                     });
@@ -1900,9 +1977,9 @@ impl eframe::App for App {
         if let Some(popup) = self.pw_popup {
             let mut open = true;
             let title = match popup {
-                "set" => "设置密码",
-                "change" => "修改密码",
-                "clear" => "清除密码",
+                "set" => self.texts.password.set_title.as_str(),
+                "change" => self.texts.password.change_title.as_str(),
+                "clear" => self.texts.password.clear_title.as_str(),
                 _ => "",
             };
             egui::Window::new(title)
@@ -1912,7 +1989,7 @@ impl eframe::App for App {
                 .show(ctx, |ui| match popup {
                     "set" => {
                         ui.horizontal_centered(|ui| {
-                            ui.label("输入密码:");
+                            ui.label(&self.texts.password.enter);
                             ui.add(
                                 egui::TextEdit::singleline(&mut self.pw_set1)
                                     .password(true)
@@ -1921,7 +1998,7 @@ impl eframe::App for App {
                             );
                         });
                         ui.horizontal(|ui| {
-                            ui.label("确认密码:");
+                            ui.label(&self.texts.password.confirm);
                             ui.add(
                                 egui::TextEdit::singleline(&mut self.pw_set2)
                                     .password(true)
@@ -1929,9 +2006,15 @@ impl eframe::App for App {
                                     .id_source("pw_set2"),
                             );
                             if !self.pw_set2.is_empty() && self.pw_set1 != self.pw_set2 {
-                                ui.label(egui::RichText::new("不一致").color(egui::Color32::RED));
+                                ui.label(
+                                    egui::RichText::new(&self.texts.password.mismatch)
+                                        .color(egui::Color32::RED),
+                                );
                             } else if !self.pw_set2.is_empty() {
-                                ui.label(egui::RichText::new("一致").color(egui::Color32::GREEN));
+                                ui.label(
+                                    egui::RichText::new(&self.texts.password.r#match)
+                                        .color(egui::Color32::GREEN),
+                                );
                             }
                         });
                         if !self.pw_message.is_empty() {
@@ -1940,11 +2023,11 @@ impl eframe::App for App {
                             );
                         }
                         ui.horizontal(|ui| {
-                            if ui.button("确认").clicked() {
+                            if ui.button(&self.texts.password.confirm_button).clicked() {
                                 if self.pw_set1.is_empty() {
-                                    self.pw_message = "密码不能为空".into();
+                                    self.pw_message = self.texts.password.empty_error.clone();
                                 } else if self.pw_set1 != self.pw_set2 {
-                                    self.pw_message = "两次输入的密码不一致".into();
+                                    self.pw_message = self.texts.password.mismatch_error.clone();
                                 } else {
                                     self.settings_edit.lock_password = self.pw_set1.clone();
                                     self.settings.lock_password = self.pw_set1.clone();
@@ -1955,7 +2038,7 @@ impl eframe::App for App {
                                     self.pw_popup = None;
                                 }
                             }
-                            if ui.button("取消").clicked() {
+                            if ui.button(&self.texts.password.cancel_button).clicked() {
                                 self.pw_set1.clear();
                                 self.pw_set2.clear();
                                 self.pw_message.clear();
@@ -1965,7 +2048,7 @@ impl eframe::App for App {
                     }
                     "change" => {
                         ui.horizontal(|ui| {
-                            ui.label("原密码:");
+                            ui.label(&self.texts.password.original);
                             ui.add(
                                 egui::TextEdit::singleline(&mut self.pw_old)
                                     .password(true)
@@ -1974,7 +2057,7 @@ impl eframe::App for App {
                             );
                         });
                         ui.horizontal(|ui| {
-                            ui.label("新密码:");
+                            ui.label(&self.texts.password.new);
                             ui.add(
                                 egui::TextEdit::singleline(&mut self.pw_new1)
                                     .password(true)
@@ -1983,7 +2066,7 @@ impl eframe::App for App {
                             );
                         });
                         ui.horizontal(|ui| {
-                            ui.label("确认新密码:");
+                            ui.label(&self.texts.password.confirm_new);
                             ui.add(
                                 egui::TextEdit::singleline(&mut self.pw_new2)
                                     .password(true)
@@ -1991,9 +2074,15 @@ impl eframe::App for App {
                                     .id_source("pw_new2"),
                             );
                             if !self.pw_new2.is_empty() && self.pw_new1 != self.pw_new2 {
-                                ui.label(egui::RichText::new("不一致").color(egui::Color32::RED));
+                                ui.label(
+                                    egui::RichText::new(&self.texts.password.mismatch)
+                                        .color(egui::Color32::RED),
+                                );
                             } else if !self.pw_new2.is_empty() {
-                                ui.label(egui::RichText::new("一致").color(egui::Color32::GREEN));
+                                ui.label(
+                                    egui::RichText::new(&self.texts.password.r#match)
+                                        .color(egui::Color32::GREEN),
+                                );
                             }
                         });
                         if !self.pw_message.is_empty() {
@@ -2002,13 +2091,13 @@ impl eframe::App for App {
                             );
                         }
                         ui.horizontal(|ui| {
-                            if ui.button("确认").clicked() {
+                            if ui.button(&self.texts.password.confirm_button).clicked() {
                                 if self.pw_old != self.settings.lock_password {
-                                    self.pw_message = "原密码错误".into();
+                                    self.pw_message = self.texts.password.wrong_error.clone();
                                 } else if self.pw_new1.is_empty() {
-                                    self.pw_message = "新密码不能为空".into();
+                                    self.pw_message = self.texts.password.empty_error.clone();
                                 } else if self.pw_new1 != self.pw_new2 {
-                                    self.pw_message = "两次输入的新密码不一致".into();
+                                    self.pw_message = self.texts.password.mismatch_error.clone();
                                 } else {
                                     self.settings_edit.lock_password = self.pw_new1.clone();
                                     self.settings.lock_password = self.pw_new1.clone();
@@ -2020,7 +2109,7 @@ impl eframe::App for App {
                                     self.pw_popup = None;
                                 }
                             }
-                            if ui.button("取消").clicked() {
+                            if ui.button(&self.texts.password.cancel_button).clicked() {
                                 self.pw_old.clear();
                                 self.pw_new1.clear();
                                 self.pw_new2.clear();
@@ -2031,7 +2120,7 @@ impl eframe::App for App {
                     }
                     "clear" => {
                         ui.horizontal(|ui| {
-                            ui.label("密码:");
+                            ui.label(&self.texts.password.input_label);
                             ui.add(
                                 egui::TextEdit::singleline(&mut self.pw_clear)
                                     .password(true)
@@ -2045,9 +2134,9 @@ impl eframe::App for App {
                             );
                         }
                         ui.horizontal(|ui| {
-                            if ui.button("确认").clicked() {
+                            if ui.button(&self.texts.password.confirm_button).clicked() {
                                 if self.pw_clear != self.settings.lock_password {
-                                    self.pw_message = "密码错误".into();
+                                    self.pw_message = self.texts.password.wrong_password.clone();
                                 } else {
                                     self.settings_edit.lock_password.clear();
                                     self.settings.lock_password.clear();
@@ -2058,7 +2147,7 @@ impl eframe::App for App {
                                     self.pw_popup = None;
                                 }
                             }
-                            if ui.button("取消").clicked() {
+                            if ui.button(&self.texts.password.cancel_button).clicked() {
                                 self.pw_clear.clear();
                                 self.pw_message.clear();
                                 self.pw_popup = None;
@@ -2082,7 +2171,7 @@ impl eframe::App for App {
         egui::SidePanel::left("navigation")
             .default_width(WORKSPACE_SIDEBAR_DEFAULT_WIDTH)
             .show(ctx, |ui| {
-                ui.heading("Workspaces");
+                ui.heading(&self.texts.workspace.heading);
                 ui.separator();
                 let mut to_select = None;
                 let panel_count = self.panels.len();
@@ -2109,8 +2198,8 @@ impl eframe::App for App {
                                         .id_source("workspace_rename"),
                                 );
                                 response.request_focus();
-                                confirm = ui.button("确定").clicked();
-                                cancel = ui.button("取消").clicked();
+                                confirm = ui.button(&self.texts.workspace.rename_confirm).clicked();
+                                cancel = ui.button(&self.texts.workspace.rename_cancel).clicked();
                                 response
                             })
                             .response;
@@ -2145,7 +2234,8 @@ impl eframe::App for App {
                                 egui::FontId::proportional(14.0),
                                 handle_color,
                             );
-                            let handle = handle.on_hover_text("拖动以调整 Workspace 顺序");
+                            let handle =
+                                handle.on_hover_text(&self.texts.workspace.drag_handle_hint);
                             if handle.drag_started() {
                                 self.drag_src_panel = Some(i);
                                 self.drag_dst_panel = None;
@@ -2165,18 +2255,18 @@ impl eframe::App for App {
 
                             // Context menu
                             response.context_menu(|ui| {
-                                if ui.button("重命名").clicked() {
+                                if ui.button(&self.texts.workspace.rename).clicked() {
                                     self.renaming_panel = Some(i);
                                     self.rename_buffer = self.panels[i].name.clone();
                                     self.rename_frame_count = 0;
                                     ui.close_menu();
                                 }
-                                if ui.button("保存为模版").clicked() {
+                                if ui.button(&self.texts.workspace.save_as_template).clicked() {
                                     self.save_as_template(i);
                                     ui.close_menu();
                                 }
                                 ui.separator();
-                                if ui.button("关闭").clicked() {
+                                if ui.button(&self.texts.settings.buttons.close).clicked() {
                                     self.close_confirm_panel = Some(i);
                                     ui.close_menu();
                                 }
@@ -2193,7 +2283,7 @@ impl eframe::App for App {
                                                     WORKSPACE_ACTION_BUTTON_SIZE,
                                                     egui::Button::new(egui_phosphor::regular::X),
                                                 )
-                                                .on_hover_text("关闭 Workspace")
+                                                .on_hover_text(&self.texts.workspace.close_ws_hint)
                                                 .clicked()
                                             {
                                                 self.close_confirm_panel = Some(i);
@@ -2207,9 +2297,9 @@ impl eframe::App for App {
                                                 egui::Button::new(workspace_lock_icon(is_locked)),
                                             )
                                             .on_hover_text(if is_locked {
-                                                "已锁定 Workspace"
+                                                &self.texts.workspace.locked_hint
                                             } else {
-                                                "未锁定 Workspace"
+                                                &self.texts.workspace.unlocked_hint
                                             })
                                             .clicked()
                                         {
@@ -2316,16 +2406,16 @@ impl eframe::App for App {
                     self.active_panel = i;
                 }
                 ui.separator();
-                if ui.button("+ New Workspace").clicked() {
+                if ui.button(&self.texts.workspace.new).clicked() {
                     self.add_panel(ui.ctx());
                 }
                 if self.cached_template_files.is_empty() {
                     self.refresh_template_files();
                 }
                 let template_files = self.cached_template_files.clone();
-                ui.menu_button("Templates", |ui| {
+                ui.menu_button(&self.texts.workspace.templates, |ui| {
                     if template_files.is_empty() {
-                        ui.label("(empty)");
+                        ui.label(&self.texts.workspace.templates_empty);
                     } else {
                         for (display_name, path) in &template_files {
                             let path = path.clone();
@@ -2352,7 +2442,7 @@ impl eframe::App for App {
                     egui::Layout::top_down(egui::Align::Min),
                     |ui| {
                         ui.label(
-                            egui::RichText::new("快捷键")
+                            egui::RichText::new(&self.texts.shortcut_labels.shortcuts_heading)
                                 .small()
                                 .strong()
                                 .color(ui.visuals().weak_text_color()),
@@ -2361,10 +2451,11 @@ impl eframe::App for App {
                             .id_salt("navigation_shortcuts")
                             .auto_shrink([false, false])
                             .show(ui, |ui| {
-                                for (id, label) in shortcut_hint_labels() {
+                                for id in shortcut_hint_ids() {
+                                    let label = shortcut_label_for(&self.texts, id).to_string();
                                     ui.horizontal(|ui| {
                                         ui.label(
-                                            egui::RichText::new(label)
+                                            egui::RichText::new(&label)
                                                 .small()
                                                 .color(ui.visuals().weak_text_color()),
                                         );
@@ -2373,7 +2464,9 @@ impl eframe::App for App {
                                             .key_binds
                                             .get(id)
                                             .map(shortcut_display)
-                                            .unwrap_or_else(|| "未设置".into());
+                                            .unwrap_or_else(|| {
+                                                self.texts.settings.shortcuts.not_set.clone()
+                                            });
                                         ui.with_layout(
                                             egui::Layout::right_to_left(egui::Align::Center),
                                             |ui| {
@@ -2425,7 +2518,7 @@ impl eframe::App for App {
                 let heading_height = ui.fonts(|fonts| {
                     fonts
                         .layout_no_wrap(
-                            "🔒 此工作区已锁定".to_owned(),
+                            self.texts.lock_overlay.title.clone(),
                             egui::FontId::proportional(24.0),
                             egui::Color32::WHITE,
                         )
@@ -2458,14 +2551,15 @@ impl eframe::App for App {
                 ui.allocate_new_ui(egui::UiBuilder::new().max_rect(form_rect), |ui| {
                     ui.vertical_centered(|ui| {
                         ui.heading(
-                            egui::RichText::new("🔒 此工作区已锁定")
+                            egui::RichText::new(&self.texts.lock_overlay.title)
                                 .size(24.0)
                                 .color(egui::Color32::WHITE),
                         );
                         ui.add_space(16.0);
                         ui.horizontal(|ui| {
                             ui.label(
-                                egui::RichText::new("密码:").color(egui::Color32::from_gray(200)),
+                                egui::RichText::new(&self.texts.lock_overlay.password_label)
+                                    .color(egui::Color32::from_gray(200)),
                             );
                             let resp = ui.add(
                                 egui::TextEdit::singleline(&mut self.lock_password_input)
@@ -2475,7 +2569,8 @@ impl eframe::App for App {
                             );
                             resp.request_focus();
                             let enter_pressed = ui.input(|i| i.key_pressed(egui::Key::Enter));
-                            if ui.button("解锁").clicked() || (enter_pressed && resp.has_focus())
+                            if ui.button(&self.texts.lock_overlay.unlock_button).clicked()
+                                || (enter_pressed && resp.has_focus())
                             {
                                 if self.settings.lock_password.is_empty()
                                     || self.lock_password_input == self.settings.lock_password
@@ -2484,7 +2579,8 @@ impl eframe::App for App {
                                     self.lock_password_input.clear();
                                     self.pw_message.clear();
                                 } else {
-                                    self.pw_message = "密码错误".into();
+                                    self.pw_message =
+                                        self.texts.lock_overlay.wrong_password.clone();
                                     self.lock_password_input.clear();
                                 }
                             }
@@ -2530,11 +2626,12 @@ impl eframe::App for App {
                             focused_terminal: &mut self.focused_terminal,
                             terminal_focus_id: &mut self.terminal_focus_id,
                             show_settings: self.show_settings,
+                            texts: &self.texts,
                         },
                     );
             } else {
                 ui.centered_and_justified(|ui| {
-                    ui.label("Click '+ New Workspace' to create one.");
+                    ui.label(&self.texts.workspace.empty_hint);
                 });
             }
         });
@@ -2551,10 +2648,7 @@ mod tests {
 
     #[test]
     fn shortcut_hint_labels_cover_all_configurable_actions() {
-        let ids: Vec<_> = super::shortcut_hint_labels()
-            .iter()
-            .map(|(id, _)| *id)
-            .collect();
+        let ids: Vec<_> = super::shortcut_hint_ids().iter().copied().collect();
 
         for id in [
             "new_terminal",
@@ -2864,6 +2958,7 @@ struct TerminalTabViewer<'a> {
     focused_terminal: &'a mut Option<String>,
     terminal_focus_id: &'a mut Option<egui::Id>,
     show_settings: bool,
+    texts: &'a crate::i18n::Texts,
 }
 
 impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
@@ -2883,7 +2978,7 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                     egui::TextEdit::singleline(self.terminal_rename_buffer)
                         .font(egui::FontId::monospace(14.0))
                         .desired_width(200.0)
-                        .hint_text("Enter name...")
+                        .hint_text(&self.texts.terminal.rename_hint)
                         .id_source("tab_rename"),
                 );
                 ui.memory_mut(|mem| mem.request_focus(response.id));
@@ -3096,7 +3191,7 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                 }
             }
         } else {
-            ui.label("Terminal not found");
+            ui.label(&self.texts.terminal.not_found);
         }
     }
 
@@ -3115,7 +3210,7 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
 
     fn add_popup(&mut self, ui: &mut egui::Ui, surface: SurfaceIndex, node: NodeIndex) {
         ui.horizontal(|ui| {
-            if ui.button("+ Tab").clicked() {
+            if ui.button(&self.texts.terminal.add_tab).clicked() {
                 *self.pending_new_terminal = Some((self.active_panel, surface, node));
                 ui.close_menu();
             }
@@ -3129,7 +3224,7 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
         surface: SurfaceIndex,
         node: NodeIndex,
     ) {
-        if ui.button("Rename").clicked() {
+        if ui.button(&self.texts.terminal.rename).clicked() {
             *self.renaming_terminal = Some(tab.clone());
             if let Some(data) = self.terminals.get(tab) {
                 *self.terminal_rename_buffer = data.name.clone();
@@ -3138,12 +3233,12 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
             ui.close_menu();
         }
         ui.separator();
-        if ui.button("清空指令历史").clicked() {
+        if ui.button(&self.texts.terminal.clear_history).clicked() {
             self.history_db.clear(tab);
             ui.close_menu();
         }
         ui.separator();
-        if ui.button("+ New Tab").clicked() {
+        if ui.button(&self.texts.terminal.new_tab).clicked() {
             *self.pending_new_terminal = Some((self.active_panel, surface, node));
             ui.close_menu();
         }

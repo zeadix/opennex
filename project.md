@@ -39,6 +39,7 @@
 - [x] Workspace 重命名确认 - 提供确定/取消按钮并支持 Esc 取消
 - [x] Workspace 重命名焦点 - 编辑时输入框独占焦点并优先处理 Esc
 - [x] Workspace 单终端保护 - 仅有一个 terminal 时隐藏 tab 关闭按钮
+- [x] 多国语言系统 - locales/ YAML 资源、Language 菜单实时切换、UI 文字标签全部国际化
 
 ## In Progress
 

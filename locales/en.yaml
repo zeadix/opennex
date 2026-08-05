@@ -1,0 +1,131 @@
+display_name: "English"
+
+menu:
+  file: "File"
+  view: "View"
+  language: "Language"
+
+file_menu:
+  save: "Save"
+  load: "Load"
+  save_as: "Save As..."
+  exit: "Exit"
+
+view_menu:
+  split_right: "Split Right"
+  split_down: "Split Down"
+  settings: "Settings"
+
+settings:
+  title: "Settings"
+  tabs:
+    general: "General"
+    appearance: "Appearance"
+    shortcuts: "Shortcuts"
+    lock: "Lock"
+  general:
+    heading: "General"
+    scene_info: "Scene and templates use fixed paths:"
+    scene_path: "  Scene: ./scene.json"
+    templates_path: "  Templates: ./templates/"
+    history_section: "History"
+    max_history: "Max entries:"
+    scrollback: "Scrollback:"
+    clear_all_history: "Clear all history"
+  appearance:
+    heading: "Appearance"
+    terminal_section: "Terminal Appearance"
+    font_size: "Font Size:"
+    cell_spacing: "Cell Spacing:"
+    font_family: "Font:"
+    bg_color: "Background:"
+    fg_color: "Foreground:"
+    command_menu_section: "Command Menu"
+    menu_bg_color: "Background:"
+    menu_fg_color: "Text Color:"
+    menu_font_size: "Font Size:"
+  shortcuts:
+    heading: "Shortcuts"
+    hint: "Click a shortcut name then press a new key to change it"
+    not_set: "Not set"
+  lock:
+    heading: "Lock"
+    password_section: "Password Configuration:"
+    set_password: "Set Password"
+    change_password: "Change Password"
+    clear_password: "Clear Password"
+    lock_section: "Lock:"
+    lock_overlay_color: "Overlay Color:"
+  buttons:
+    apply: "Apply"
+    close: "Close"
+
+shortcut_labels:
+  new_terminal: "New Terminal"
+  close_terminal: "Close Terminal"
+  workspace_up: "Workspace Up"
+  workspace_down: "Workspace Down"
+  panel_left: "Panel Left"
+  panel_right: "Panel Right"
+  lock_workspace: "Lock Workspace"
+  history_menu: "History Menu"
+  history_prev: "History Previous"
+  history_next: "History Next"
+  shortcuts_heading: "Shortcuts"
+
+workspace:
+  heading: "Workspaces"
+  new: "+ New Workspace"
+  rename: "Rename"
+  save_as_template: "Save as Template"
+  close: "Close"
+  rename_confirm: "OK"
+  rename_cancel: "Cancel"
+  drag_handle_hint: "Drag to reorder Workspace"
+  close_ws_hint: "Close Workspace"
+  locked_hint: "Locked Workspace"
+  unlocked_hint: "Unlocked Workspace"
+  empty_hint: "Click '+ New Workspace' to create one"
+  templates: "Templates"
+  templates_empty: "(empty)"
+  name_prefix: "Workspace "
+
+close_confirm:
+  message_prefix: "Are you sure you want to close workspace \""
+  message_suffix: "\"?"
+  confirm: "Confirm"
+  cancel: "Cancel"
+
+password:
+  enter: "Enter Password:"
+  confirm: "Confirm Password:"
+  original: "Current Password:"
+  new: "New Password:"
+  confirm_new: "Confirm New Password:"
+  input_label: "Password:"
+  mismatch: "Mismatch"
+  match: "Match"
+  empty_error: "Password cannot be empty"
+  mismatch_error: "Passwords do not match"
+  wrong_error: "Current password is incorrect"
+  wrong_password: "Wrong password"
+  confirm_button: "Confirm"
+  cancel_button: "Cancel"
+  set_title: "Set Password"
+  change_title: "Change Password"
+  clear_title: "Clear Password"
+
+lock_overlay:
+  title: "🔒 This workspace is locked"
+  password_label: "Password:"
+  unlock_button: "Unlock"
+  wrong_password: "Wrong password"
+
+terminal:
+  not_found: "Terminal not found"
+  rename: "Rename"
+  clear_history: "Clear Command History"
+  new_tab: "+ New Tab"
+  add_tab: "+ Tab"
+  rename_hint: "Enter name..."
+  default_name_prefix: "Terminal "
