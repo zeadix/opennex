@@ -9,6 +9,8 @@ const DEFAULT_FONT_SIZE: f32 = 14.0;
 const MIN_FONT_SIZE: f32 = 8.0;
 const MAX_FONT_SIZE: f32 = 32.0;
 const FONT_SIZE_STEP: f32 = 1.0;
+const WORKSPACE_SIDEBAR_DEFAULT_WIDTH: f32 = 192.0;
+const WORKSPACE_DRAG_HANDLE_WIDTH: f32 = 20.0;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct AppSettings {
@@ -274,6 +276,76 @@ fn workspace_lock_icon(is_locked: bool) -> &'static str {
         egui_phosphor::regular::LOCK
     } else {
         egui_phosphor::regular::LOCK_OPEN
+    }
+}
+
+fn panel_order_after_move(src: usize, dst: usize, len: usize) -> Vec<usize> {
+    if src >= len || dst >= len {
+        return (0..len).collect();
+    }
+    let mut order: Vec<_> = (0..len).collect();
+    let panel = order.remove(src);
+    order.insert(dst, panel);
+    order
+}
+
+fn remap_panel_index(index: usize, old_to_new: &[usize]) -> Option<usize> {
+    old_to_new.get(index).copied()
+}
+
+fn apply_panel_rename(panel: &mut Panel, value: &str) {
+    if !value.is_empty() {
+        panel.name = value.to_string();
+    }
+}
+
+fn terminal_should_have_focus(
+    terminal_is_active: bool,
+    workspace_is_renaming: bool,
+    terminal_is_renaming: bool,
+) -> bool {
+    terminal_is_active && !workspace_is_renaming && !terminal_is_renaming
+}
+
+fn terminal_focus_lock_allowed(workspace_is_renaming: bool, terminal_is_renaming: bool) -> bool {
+    !workspace_is_renaming && !terminal_is_renaming
+}
+
+fn drag_row_is_source(index: usize, source: Option<usize>) -> bool {
+    source == Some(index)
+}
+
+fn drag_row_is_target(index: usize, target: Option<usize>) -> bool {
+    target == Some(index)
+}
+
+fn drag_insertion_y(rect: egui::Rect, pointer_y: f32) -> f32 {
+    if pointer_y <= rect.center().y {
+        rect.top()
+    } else {
+        rect.bottom()
+    }
+}
+
+fn drag_drop_destination(src: usize, target: usize, after_target: bool, len: usize) -> usize {
+    if src >= len || target >= len || src == target {
+        return target;
+    }
+
+    let target_after_removal = if src < target { target - 1 } else { target };
+    (target_after_removal + usize::from(after_target)).min(len - 1)
+}
+
+fn terminal_tab_is_closeable(terminal_count: usize) -> bool {
+    terminal_count > 1
+}
+
+fn cancel_workspace_rename(renaming_panel: &mut Option<usize>, escape_pressed: bool) -> bool {
+    if escape_pressed && renaming_panel.is_some() {
+        *renaming_panel = None;
+        true
+    } else {
+        false
     }
 }
 
@@ -1128,49 +1200,45 @@ impl App {
         if src == dst || src >= self.panels.len() || dst >= self.panels.len() {
             return;
         }
-        // Reorder panels
+        let old_to_new = {
+            let new_order = panel_order_after_move(src, dst, self.panels.len());
+            let mut mapping = vec![0; new_order.len()];
+            for (new_idx, old_idx) in new_order.into_iter().enumerate() {
+                mapping[old_idx] = new_idx;
+            }
+            mapping
+        };
+
         let panel = self.panels.remove(src);
         self.panels.insert(dst, panel);
-        // Reorder dock_states: rebuild with new indices
         let mut old_states: Vec<(usize, DockState<String>)> = self.dock_states.drain().collect();
         old_states.sort_by_key(|(k, _)| *k);
         let mut new_states = HashMap::new();
-        // Build a mapping: old index -> new index
-        let mut old_to_new = vec![0usize; self.panels.len() + 1];
-        let mut new_idx = 0;
-        // The panel that was at src is now at dst
-        // All other panels shift
-        for old_idx in 0..self.panels.len() {
-            if old_idx == dst {
-                old_to_new[src] = new_idx;
-            } else {
-                let actual_old = if old_idx < dst && old_idx < src {
-                    old_idx
-                } else if old_idx >= dst && old_idx < src {
-                    old_idx + 1
-                } else if old_idx >= dst && old_idx >= src {
-                    old_idx
-                } else {
-                    old_idx
-                };
-                old_to_new[actual_old] = new_idx;
-            }
-            new_idx += 1;
-        }
         for (old_k, state) in old_states {
             if old_k < old_to_new.len() {
                 new_states.insert(old_to_new[old_k], state);
             }
         }
         self.dock_states = new_states;
-        // Update active_panel
-        if self.active_panel == src {
-            self.active_panel = dst;
-        } else if src < self.active_panel && dst >= self.active_panel {
-            self.active_panel -= 1;
-        } else if src > self.active_panel && dst <= self.active_panel {
-            self.active_panel += 1;
+
+        if let Some(active_panel) = remap_panel_index(self.active_panel, &old_to_new) {
+            self.active_panel = active_panel;
         }
+        self.locked_panels = self
+            .locked_panels
+            .iter()
+            .filter_map(|index| remap_panel_index(*index, &old_to_new))
+            .collect();
+        self.close_confirm_panel = self
+            .close_confirm_panel
+            .and_then(|index| remap_panel_index(index, &old_to_new));
+        self.renaming_panel = self
+            .renaming_panel
+            .and_then(|index| remap_panel_index(index, &old_to_new));
+        self.unlock_popup = self
+            .unlock_popup
+            .and_then(|index| remap_panel_index(index, &old_to_new));
+        self.save_scene();
     }
 
     fn focus_adjacent_panel(&mut self, direction: i32) {
@@ -1216,9 +1284,17 @@ impl App {
 impl eframe::App for App {
     fn raw_input_hook(&mut self, ctx: &egui::Context, _raw_input: &mut egui::RawInput) {
         if let Some(id) = self.terminal_focus_id {
-            ctx.memory_mut(|memory| {
-                memory.set_focus_lock_filter(id, egui_term::terminal_focus_event_filter())
-            });
+            if terminal_focus_lock_allowed(
+                self.renaming_panel.is_some(),
+                self.renaming_terminal.is_some(),
+            ) {
+                ctx.memory_mut(|memory| {
+                    memory.set_focus_lock_filter(id, egui_term::terminal_focus_event_filter())
+                });
+            } else {
+                ctx.memory_mut(|memory| memory.surrender_focus(id));
+                self.terminal_focus_id = None;
+            }
         }
     }
 
@@ -1236,6 +1312,16 @@ impl eframe::App for App {
             self.rename_frame_count += 1;
         }
 
+        let workspace_rename_escape = self.renaming_panel.is_some()
+            && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+        cancel_workspace_rename(&mut self.renaming_panel, workspace_rename_escape);
+        let workspace_renaming = self.renaming_panel.is_some();
+        if workspace_renaming {
+            if let Some(id) = self.terminal_focus_id.take() {
+                ctx.memory_mut(|memory| memory.surrender_focus(id));
+            }
+        }
+
         // Keep focused_terminal in sync with dock active tab before handling shortcuts
         if let Some(tree) = self.dock_states.get_mut(&self.active_panel) {
             if let Some((_, tab)) = tree.find_active_focused() {
@@ -1247,7 +1333,7 @@ impl eframe::App for App {
         if self.binding_recording.is_some() || !ctx.input(|input| input.focused) {
             self.alt_key = AltKeyState::default();
         }
-        let menu_requested = if self.binding_recording.is_some() {
+        let menu_requested = if workspace_renaming || self.binding_recording.is_some() {
             false
         } else if binds
             .get("history_menu")
@@ -1273,7 +1359,7 @@ impl eframe::App for App {
             .is_some_and(|td| td.instance.history_nav.is_some());
 
         let mut history_menu_handled = false;
-        if history_menu_active {
+        if !workspace_renaming && history_menu_active {
             let close =
                 ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
             let confirm =
@@ -1315,7 +1401,9 @@ impl eframe::App for App {
         }
 
         // Consume Tab key to prevent egui focus navigation, send to focused terminal
-        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab)) {
+        if !workspace_renaming
+            && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab))
+        {
             if let Some(tab) = &self.focused_terminal.clone() {
                 if let Some(td) = self.terminals.get_mut(tab) {
                     td.instance.write(&[0x09]);
@@ -1324,7 +1412,8 @@ impl eframe::App for App {
         }
 
         // Enter: select history entry, or record command + send CR to terminal
-        if !history_menu_handled
+        if !workspace_renaming
+            && !history_menu_handled
             && !self.locked_panels.contains(&self.active_panel)
             && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter))
         {
@@ -1354,7 +1443,8 @@ impl eframe::App for App {
         }
 
         // Escape: close history menu
-        if !history_menu_handled
+        if !workspace_renaming
+            && !history_menu_handled
             && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
         {
             if let Some(tab) = &self.focused_terminal.clone() {
@@ -1412,35 +1502,35 @@ impl eframe::App for App {
 
         // Configurable shortcuts
 
-        if check_shortcut(ctx, &binds, "new_terminal") {
+        if !workspace_renaming && check_shortcut(ctx, &binds, "new_terminal") {
             if let Some(tree) = self.dock_states.get_mut(&self.active_panel) {
                 if let Some((surface, node)) = tree.focused_leaf() {
                     self.pending_new_terminal = Some((self.active_panel, surface, node));
                 }
             }
         }
-        if check_shortcut(ctx, &binds, "close_terminal") {
+        if !workspace_renaming && check_shortcut(ctx, &binds, "close_terminal") {
             if let Some(tab) = &self.focused_terminal.clone() {
                 self.pending_close = Some(tab.clone());
             }
         }
-        if check_shortcut(ctx, &binds, "workspace_up") {
+        if !workspace_renaming && check_shortcut(ctx, &binds, "workspace_up") {
             if self.active_panel > 0 {
                 self.active_panel -= 1;
             }
         }
-        if check_shortcut(ctx, &binds, "workspace_down") {
+        if !workspace_renaming && check_shortcut(ctx, &binds, "workspace_down") {
             if self.active_panel + 1 < self.panels.len() {
                 self.active_panel += 1;
             }
         }
-        if check_shortcut(ctx, &binds, "panel_left") {
+        if !workspace_renaming && check_shortcut(ctx, &binds, "panel_left") {
             self.focus_adjacent_panel(-1);
         }
-        if check_shortcut(ctx, &binds, "panel_right") {
+        if !workspace_renaming && check_shortcut(ctx, &binds, "panel_right") {
             self.focus_adjacent_panel(1);
         }
-        if check_shortcut(ctx, &binds, "lock_workspace") {
+        if !workspace_renaming && check_shortcut(ctx, &binds, "lock_workspace") {
             if self.locked_panels.contains(&self.active_panel) {
                 // Already locked: overlay already shows password input.
                 self.lock_password_input.clear();
@@ -1990,7 +2080,7 @@ impl eframe::App for App {
         }
 
         egui::SidePanel::left("navigation")
-            .default_width(160.0)
+            .default_width(WORKSPACE_SIDEBAR_DEFAULT_WIDTH)
             .show(ctx, |ui| {
                 ui.heading("Workspaces");
                 ui.separator();
@@ -2003,29 +2093,63 @@ impl eframe::App for App {
                 // Detect drag state from pointer
                 let pointer_down = ui.input(|i| i.pointer.primary_down());
                 let pointer_pos = ui.input(|i| i.pointer.interact_pos());
-                let pointer_delta = ui.input(|i| i.pointer.delta());
+                let pointer_released = ui.input(|i| i.pointer.primary_released());
 
                 for i in 0..panel_count {
                     let is_active = i == self.active_panel;
                     if self.renaming_panel == Some(i) {
-                        let response = ui.add(
-                            egui::TextEdit::singleline(&mut self.rename_buffer)
-                                .font(egui::FontId::monospace(14.0))
-                                .desired_width(ui.available_width())
-                                .id_source("workspace_rename"),
-                        );
-                        ui.memory_mut(|mem| mem.request_focus(response.id));
+                        let mut confirm = false;
+                        let mut cancel = false;
+                        let response = ui
+                            .horizontal(|ui| {
+                                let response = ui.add(
+                                    egui::TextEdit::singleline(&mut self.rename_buffer)
+                                        .font(egui::FontId::monospace(14.0))
+                                        .desired_width((ui.available_width() - 112.0).max(80.0))
+                                        .id_source("workspace_rename"),
+                                );
+                                response.request_focus();
+                                confirm = ui.button("确定").clicked();
+                                cancel = ui.button("取消").clicked();
+                                response
+                            })
+                            .response;
                         self.panel_rects[i] = response.rect;
                         let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
-                        if enter {
-                            if !self.rename_buffer.is_empty() {
-                                self.panels[i].name = self.rename_buffer.clone();
-                            }
+                        let escape = ui
+                            .input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+                        if confirm || enter {
+                            apply_panel_rename(&mut self.panels[i], &self.rename_buffer);
                             self.renaming_panel = None;
+                        } else if cancel || escape {
+                            cancel_workspace_rename(&mut self.renaming_panel, true);
                         }
                     } else {
-                        ui.horizontal(|ui| {
+                        let row = ui.horizontal(|ui| {
                             let panel_name = self.panels[i].name.clone();
+                            let handle_size = egui::vec2(
+                                WORKSPACE_DRAG_HANDLE_WIDTH,
+                                ui.spacing().interact_size.y,
+                            );
+                            let (handle_rect, handle) =
+                                ui.allocate_exact_size(handle_size, egui::Sense::drag());
+                            let handle_color = if handle.hovered() {
+                                ui.visuals().text_color()
+                            } else {
+                                ui.visuals().weak_text_color()
+                            };
+                            ui.painter().text(
+                                handle_rect.center(),
+                                egui::Align2::CENTER_CENTER,
+                                egui_phosphor::regular::DOTS_SIX_VERTICAL,
+                                egui::FontId::proportional(14.0),
+                                handle_color,
+                            );
+                            let handle = handle.on_hover_text("拖动以调整 Workspace 顺序");
+                            if handle.drag_started() {
+                                self.drag_src_panel = Some(i);
+                                self.drag_dst_panel = None;
+                            }
                             let response = ui.selectable_label(is_active, &panel_name);
                             self.panel_rects[i] = response.rect;
 
@@ -2037,23 +2161,6 @@ impl eframe::App for App {
                                 to_select = None;
                             } else if response.clicked() && !renaming {
                                 to_select = Some(i);
-                            }
-
-                            // Drag to reorder: detect drag via pointer delta on this rect
-                            if pointer_down && pointer_delta.length() > 2.0 {
-                                if let Some(pos) = pointer_pos {
-                                    // Start drag if not already dragging and pointer is on this rect
-                                    if self.drag_src_panel.is_none() && response.rect.contains(pos)
-                                    {
-                                        self.drag_src_panel = Some(i);
-                                    }
-                                    // Find drag target
-                                    if let Some(src) = self.drag_src_panel {
-                                        if src != i {
-                                            // Use this panel's rect as potential target
-                                        }
-                                    }
-                                }
                             }
 
                             // Context menu
@@ -2122,29 +2229,81 @@ impl eframe::App for App {
                                 );
                             }
                         });
+                        self.panel_rects[i] = row.response.rect;
                     }
                 }
 
                 // Handle drag target detection after all rects are known
-                if pointer_down && pointer_delta.length() > 2.0 {
-                    if let Some(src) = self.drag_src_panel {
+                if let Some(src) = self.drag_src_panel {
+                    if pointer_down || pointer_released {
+                        self.drag_dst_panel = None;
                         if let Some(pos) = pointer_pos {
                             for j in (0..panel_count).rev() {
                                 if j == src {
                                     continue;
                                 }
                                 if j < self.panel_rects.len() && self.panel_rects[j].contains(pos) {
-                                    if self.drag_dst_panel != Some(j) {
-                                        self.drag_dst_panel = Some(j);
-                                        reorder = Some((src, j));
-                                    }
+                                    self.drag_dst_panel = Some(j);
                                     break;
                                 }
                             }
                         }
                     }
-                } else {
-                    // Pointer released: reset drag state
+
+                    if pointer_down || pointer_released {
+                        ui.ctx().request_repaint();
+                        let painter = ui.painter();
+                        let source_fill = ui.visuals().faint_bg_color.linear_multiply(0.65);
+                        let target_stroke =
+                            egui::Stroke::new(1.5, ui.visuals().selection.stroke.color);
+
+                        if drag_row_is_source(src, self.drag_src_panel) {
+                            let source_rect = self.panel_rects[src];
+                            if source_rect.is_positive() {
+                                painter.rect_filled(source_rect, 3.0, source_fill);
+                            }
+                        }
+
+                        if let Some(dst) = self.drag_dst_panel {
+                            if drag_row_is_target(dst, self.drag_dst_panel) {
+                                let target_rect = self.panel_rects[dst];
+                                if target_rect.is_positive() {
+                                    painter.rect_stroke(
+                                        target_rect.expand(1.0),
+                                        3.0,
+                                        target_stroke,
+                                        egui::StrokeKind::Outside,
+                                    );
+                                    if let Some(pos) = pointer_pos {
+                                        let insertion_y = drag_insertion_y(target_rect, pos.y);
+                                        painter.line_segment(
+                                            [
+                                                egui::pos2(target_rect.left(), insertion_y),
+                                                egui::pos2(target_rect.right(), insertion_y),
+                                            ],
+                                            egui::Stroke::new(2.0, target_stroke.color),
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if pointer_released {
+                        reorder = self.drag_dst_panel.take().map(|target| {
+                            let after_target = pointer_pos.is_some_and(|pos| {
+                                self.panel_rects
+                                    .get(target)
+                                    .is_some_and(|rect| pos.y > rect.center().y)
+                            });
+                            (
+                                src,
+                                drag_drop_destination(src, target, after_target, panel_count),
+                            )
+                        });
+                        self.drag_src_panel = None;
+                    }
+                } else if pointer_released {
                     self.drag_src_panel = None;
                     self.drag_dst_panel = None;
                 }
@@ -2232,6 +2391,19 @@ impl eframe::App for App {
                 );
             });
 
+        // The sidebar can enter rename mode during this frame. Read the state again so the
+        // terminal view cannot reclaim focus after the rename input requests it.
+        let renaming = self.is_renaming();
+        let terminal_count = self
+            .dock_states
+            .get(&self.active_panel)
+            .map(|tree| {
+                self.terminals
+                    .keys()
+                    .filter(|tab| tree.find_tab(tab).is_some())
+                    .count()
+            })
+            .unwrap_or(0);
         let active_tab = self
             .dock_states
             .get_mut(&self.active_panel)
@@ -2349,6 +2521,7 @@ impl eframe::App for App {
                             pending_split_after: &mut self.pending_split_after,
                             pending_split_vertical: &mut self.pending_split_vertical,
                             active_panel: self.active_panel,
+                            terminal_count,
                             renaming_terminal: &mut self.renaming_terminal,
                             terminal_rename_buffer: &mut self.terminal_rename_buffer,
                             renaming,
@@ -2374,6 +2547,7 @@ mod tests {
         default_key_binds, toggle_history_menu, update_alt_key_state, AltKeyState, AppSettings,
         HistoryNav, ShortcutBinding, TerminalStatePersist,
     };
+    use egui_dock::DockState;
 
     #[test]
     fn shortcut_hint_labels_cover_all_configurable_actions() {
@@ -2413,6 +2587,139 @@ mod tests {
         assert_eq!(
             super::workspace_lock_icon(false),
             egui_phosphor::regular::LOCK_OPEN
+        );
+    }
+
+    #[test]
+    fn panel_order_move_maps_source_to_destination() {
+        assert_eq!(super::panel_order_after_move(0, 2, 4), vec![1, 2, 0, 3]);
+        assert_eq!(super::panel_order_after_move(3, 1, 4), vec![0, 3, 1, 2]);
+    }
+
+    #[test]
+    fn panel_index_remap_keeps_state_attached_to_workspace() {
+        let order = super::panel_order_after_move(0, 2, 4);
+        let mut old_to_new = vec![0; order.len()];
+        for (new_index, old_index) in order.into_iter().enumerate() {
+            old_to_new[old_index] = new_index;
+        }
+
+        assert_eq!(super::remap_panel_index(0, &old_to_new), Some(2));
+        assert_eq!(super::remap_panel_index(2, &old_to_new), Some(1));
+        assert_eq!(super::remap_panel_index(4, &old_to_new), None);
+    }
+
+    #[test]
+    fn panel_rename_accepts_non_empty_value_and_keeps_name_for_empty_value() {
+        let mut panel = super::Panel {
+            name: "Original".into(),
+            bound_file: None,
+        };
+
+        super::apply_panel_rename(&mut panel, "Renamed");
+        assert_eq!(panel.name, "Renamed");
+        super::apply_panel_rename(&mut panel, "");
+        assert_eq!(panel.name, "Renamed");
+    }
+
+    #[test]
+    fn workspace_rename_keeps_focus_out_of_terminal() {
+        assert!(!super::terminal_should_have_focus(true, true, false));
+        assert!(!super::terminal_should_have_focus(true, false, true));
+        assert!(super::terminal_should_have_focus(true, false, false));
+        assert!(!super::terminal_focus_lock_allowed(true, false));
+        assert!(!super::terminal_focus_lock_allowed(false, true));
+        assert!(super::terminal_focus_lock_allowed(false, false));
+    }
+
+    #[test]
+    fn drag_feedback_marks_only_source_and_target_rows() {
+        assert!(super::drag_row_is_source(2, Some(2)));
+        assert!(!super::drag_row_is_source(1, Some(2)));
+        assert!(super::drag_row_is_target(2, Some(2)));
+        assert!(!super::drag_row_is_target(1, Some(2)));
+    }
+
+    #[test]
+    fn drag_feedback_places_insertion_line_on_nearest_target_edge() {
+        let rect = egui::Rect::from_min_max(egui::pos2(0.0, 10.0), egui::pos2(100.0, 30.0));
+
+        assert_eq!(super::drag_insertion_y(rect, 12.0), rect.top());
+        assert_eq!(super::drag_insertion_y(rect, 28.0), rect.bottom());
+    }
+
+    #[test]
+    fn drag_feedback_drop_index_matches_insertion_edge() {
+        assert_eq!(super::drag_drop_destination(0, 2, false, 4), 1);
+        assert_eq!(super::drag_drop_destination(0, 2, true, 4), 2);
+        assert_eq!(super::drag_drop_destination(3, 1, false, 4), 1);
+        assert_eq!(super::drag_drop_destination(3, 1, true, 4), 2);
+    }
+
+    #[test]
+    fn workspace_sidebar_uses_wider_default_and_drag_handle_width() {
+        assert_eq!(super::WORKSPACE_SIDEBAR_DEFAULT_WIDTH, 192.0);
+        assert_eq!(super::WORKSPACE_DRAG_HANDLE_WIDTH, 20.0);
+    }
+
+    #[test]
+    fn last_terminal_tab_is_not_closeable() {
+        assert!(!super::terminal_tab_is_closeable(1));
+        assert!(super::terminal_tab_is_closeable(2));
+    }
+
+    #[test]
+    fn escape_cancels_workspace_rename_without_changing_name() {
+        let mut renaming_panel = Some(1);
+
+        assert!(super::cancel_workspace_rename(&mut renaming_panel, true));
+        assert_eq!(renaming_panel, None);
+    }
+
+    #[test]
+    fn scene_serialization_preserves_workspace_order() {
+        let scene = super::SceneState {
+            panels: vec![
+                super::ScenePanel {
+                    name: "Workspace 2".into(),
+                    dock_state: DockState::new(vec!["terminal-2".into()]),
+                    terminals: [(
+                        "terminal-2".into(),
+                        super::TerminalStatePersist {
+                            name: "Terminal 2".into(),
+                            font_size: 14.0,
+                            working_directory: ".".into(),
+                        },
+                    )]
+                    .into_iter()
+                    .collect(),
+                },
+                super::ScenePanel {
+                    name: "Workspace 1".into(),
+                    dock_state: DockState::new(vec!["terminal-1".into()]),
+                    terminals: [(
+                        "terminal-1".into(),
+                        super::TerminalStatePersist {
+                            name: "Terminal 1".into(),
+                            font_size: 14.0,
+                            working_directory: ".".into(),
+                        },
+                    )]
+                    .into_iter()
+                    .collect(),
+                },
+            ],
+        };
+
+        let serialized = serde_json::to_value(&scene).unwrap();
+        assert_eq!(
+            serialized["panels"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|panel| panel["name"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            vec!["Workspace 2", "Workspace 1"]
         );
     }
 
@@ -2548,6 +2855,7 @@ struct TerminalTabViewer<'a> {
     pending_split_after: &'a mut Option<String>,
     pending_split_vertical: &'a mut bool,
     active_panel: usize,
+    terminal_count: usize,
     renaming_terminal: &'a mut Option<String>,
     terminal_rename_buffer: &'a mut String,
     renaming: bool,
@@ -2629,7 +2937,11 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                 }
             }
 
-            let is_focused = self.focused_terminal.as_ref() == Some(tab);
+            let is_focused = terminal_should_have_focus(
+                self.focused_terminal.as_ref() == Some(tab),
+                self.renaming,
+                self.renaming_terminal.is_some(),
+            );
 
             // Auto-focus when this tab becomes active
             if self.active_tab.as_ref() == Some(tab) {
@@ -2791,6 +3103,10 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
     fn on_close(&mut self, tab: &mut Self::Tab) -> bool {
         *self.pending_close = Some(tab.clone());
         true
+    }
+
+    fn closeable(&mut self, _tab: &mut Self::Tab) -> bool {
+        terminal_tab_is_closeable(self.terminal_count)
     }
 
     fn on_add(&mut self, surface: SurfaceIndex, node: NodeIndex) {

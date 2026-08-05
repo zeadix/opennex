@@ -33,6 +33,12 @@
 - [x] 终端焦点键盘隔离 - 上下方向键不会触发 Dock 折叠按钮焦点导航
 - [x] Workspace 快捷键说明 - 左侧栏底部显示当前快捷键绑定
 - [x] Workspace 操作图标 - 使用 Phosphor 图标并统一关闭/锁定按钮尺寸
+- [x] Workspace 顺序拖拽 - 通过左侧手柄调整并自动持久化列表顺序
+- [x] Workspace 拖拽反馈 - 拖拽源弱化、目标高亮并显示插入线
+- [x] Workspace 拖拽手柄防选中 - 图标使用独立绘制响应区，侧栏默认宽度调整为 192px
+- [x] Workspace 重命名确认 - 提供确定/取消按钮并支持 Esc 取消
+- [x] Workspace 重命名焦点 - 编辑时输入框独占焦点并优先处理 Esc
+- [x] Workspace 单终端保护 - 仅有一个 terminal 时隐藏 tab 关闭按钮
 
 ## In Progress
 
