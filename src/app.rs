@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::terminal::TerminalInstance;
+use crate::theme::ThemeMode;
 
 const DEFAULT_FONT_SIZE: f32 = 14.0;
 const MIN_FONT_SIZE: f32 = 8.0;
@@ -44,6 +45,8 @@ struct AppSettings {
     key_binds: HashMap<String, ShortcutBinding>,
     #[serde(default = "default_language")]
     language: String,
+    #[serde(default)]
+    theme: ThemeMode,
 }
 
 fn default_language() -> String {
@@ -530,6 +533,7 @@ impl Default for AppSettings {
             settings_window: SettingsWindowState::default(),
             key_binds: default_key_binds(),
             language: default_language(),
+            theme: ThemeMode::default(),
         }
     }
 }
@@ -844,6 +848,8 @@ impl App {
             }
         }
         ctx.set_fonts(fonts);
+
+        crate::theme::apply_egui_theme(ctx, settings.theme);
 
         let font_names: Vec<String> = registered_names;
         let db_path = std::env::current_dir()
@@ -1280,6 +1286,13 @@ impl App {
         let _ = save_settings(&self.settings);
     }
 
+    fn switch_theme(&mut self, ctx: &egui::Context, mode: ThemeMode) {
+        self.settings.theme = mode;
+        self.settings_edit.theme = mode;
+        crate::theme::apply_egui_theme(ctx, mode);
+        let _ = save_settings(&self.settings);
+    }
+
     fn focus_adjacent_panel(&mut self, direction: i32) {
         use egui_dock::{Node, Surface};
         let Some(tree) = self.dock_states.get_mut(&self.active_panel) else {
@@ -1640,6 +1653,23 @@ impl eframe::App for App {
                         };
                         if ui.button(&label).clicked() {
                             self.switch_language(code);
+                            ui.close_menu();
+                        }
+                    }
+                });
+                ui.menu_button(self.texts.menu.theme.clone(), |ui| {
+                    let current = self.settings.theme;
+                    let light = self.texts.theme.light.clone();
+                    let dark = self.texts.theme.dark.clone();
+                    let modes = [(ThemeMode::Light, light), (ThemeMode::Dark, dark)];
+                    for (mode, label) in &modes {
+                        let text = if *mode == current {
+                            format!("✓ {}", label)
+                        } else {
+                            label.clone()
+                        };
+                        if ui.button(text).clicked() {
+                            self.switch_theme(ctx, *mode);
                             ui.close_menu();
                         }
                     }

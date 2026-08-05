@@ -4,6 +4,7 @@ menu:
   file: "File"
   view: "View"
   language: "Language"
+  theme: "Theme"
 
 file_menu:
   save: "Save"
@@ -129,3 +130,7 @@ terminal:
   add_tab: "+ Tab"
   rename_hint: "Enter name..."
   default_name_prefix: "Terminal "
+
+theme:
+  light: "Light"
+  dark: "Dark"

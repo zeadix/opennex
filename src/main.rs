@@ -6,6 +6,7 @@ mod completion;
 mod history_db;
 mod i18n;
 mod terminal;
+mod theme;
 
 fn main() -> Result<()> {
     env_logger::init();

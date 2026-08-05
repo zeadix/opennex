@@ -15,6 +15,7 @@ pub struct Texts {
     pub password: PasswordTexts,
     pub lock_overlay: LockOverlayTexts,
     pub terminal: TerminalTexts,
+    pub theme: ThemeTexts,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -22,6 +23,7 @@ pub struct MenuTexts {
     pub file: String,
     pub view: String,
     pub language: String,
+    pub theme: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -191,6 +193,12 @@ pub struct TerminalTexts {
     pub default_name_prefix: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ThemeTexts {
+    pub light: String,
+    pub dark: String,
+}
+
 impl Texts {
     pub fn zh_default() -> Self {
         Self {
@@ -199,6 +207,7 @@ impl Texts {
                 file: "文件".into(),
                 view: "视图".into(),
                 language: "语言".into(),
+                theme: "主题".into(),
             },
             file_menu: FileMenuTexts {
                 save: "保存".into(),
@@ -330,6 +339,10 @@ impl Texts {
                 add_tab: "+ 标签页".into(),
                 rename_hint: "输入名称...".into(),
                 default_name_prefix: "终端 ".into(),
+            },
+            theme: ThemeTexts {
+                light: "浅色".into(),
+                dark: "深色".into(),
             },
         }
     }

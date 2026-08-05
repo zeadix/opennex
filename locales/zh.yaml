@@ -4,6 +4,7 @@ menu:
   file: "文件"
   view: "视图"
   language: "语言"
+  theme: "主题"
 
 file_menu:
   save: "保存"
@@ -129,3 +130,7 @@ terminal:
   add_tab: "+ 标签页"
   rename_hint: "输入名称..."
   default_name_prefix: "终端 "
+
+theme:
+  light: "浅色"
+  dark: "深色"
