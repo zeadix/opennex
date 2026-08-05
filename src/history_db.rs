@@ -1,9 +1,39 @@
-use rusqlite::{Connection, params};
+use rusqlite::{params, Connection};
 use std::path::Path;
 
 pub struct HistoryDb {
     conn: Connection,
     max_entries: usize,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::HistoryDb;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn test_db() -> (HistoryDb, std::path::PathBuf) {
+        let path = std::env::temp_dir().join(format!(
+            "open_zoo_history_{}-{}.db",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        (HistoryDb::new(&path, 10), path)
+    }
+
+    #[test]
+    fn adding_existing_command_moves_it_to_the_front_without_duplicates() {
+        let (db, path) = test_db();
+
+        db.add("terminal", "first");
+        db.add("terminal", "second");
+        db.add("terminal", "first");
+
+        assert_eq!(db.get("terminal", 10), vec!["first", "second"]);
+        let _ = std::fs::remove_file(path);
+    }
 }
 
 impl HistoryDb {
@@ -16,8 +46,9 @@ impl HistoryDb {
                 command TEXT NOT NULL,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             );
-            CREATE INDEX IF NOT EXISTS idx_terminal ON command_history(terminal_id);"
-        ).expect("Failed to create history table");
+            CREATE INDEX IF NOT EXISTS idx_terminal ON command_history(terminal_id);",
+        )
+        .expect("Failed to create history table");
         Self { conn, max_entries }
     }
 
@@ -26,44 +57,58 @@ impl HistoryDb {
         if trimmed.is_empty() || trimmed.len() <= 1 {
             return;
         }
-        let last: Result<String, _> = self.conn.query_row(
-            "SELECT command FROM command_history WHERE terminal_id = ?1 ORDER BY id DESC LIMIT 1",
-            params![terminal_id],
-            |row| row.get(0),
-        );
-        if let Ok(last_cmd) = last {
-            if last_cmd.trim() == trimmed {
-                return;
-            }
+        let Ok(tx) = self.conn.unchecked_transaction() else {
+            return;
+        };
+        if tx
+            .execute(
+                "DELETE FROM command_history WHERE terminal_id = ?1 AND command = ?2",
+                params![terminal_id, trimmed],
+            )
+            .is_err()
+            || tx
+                .execute(
+                    "INSERT INTO command_history (terminal_id, command) VALUES (?1, ?2)",
+                    params![terminal_id, trimmed],
+                )
+                .is_err()
+            || tx
+                .execute(
+                    "DELETE FROM command_history WHERE terminal_id = ?1 AND id NOT IN (
+                    SELECT id FROM command_history WHERE terminal_id = ?1 ORDER BY id DESC LIMIT ?2
+                )",
+                    params![terminal_id, self.max_entries],
+                )
+                .is_err()
+        {
+            let _ = tx.rollback();
+            return;
         }
-        self.conn.execute(
-            "INSERT INTO command_history (terminal_id, command) VALUES (?1, ?2)",
-            params![terminal_id, trimmed],
-        ).ok();
-        // Cleanup old entries beyond max
-        self.conn.execute(
-            "DELETE FROM command_history WHERE terminal_id = ?1 AND id NOT IN (
-                SELECT id FROM command_history WHERE terminal_id = ?1 ORDER BY id DESC LIMIT ?2
-            )",
-            params![terminal_id, self.max_entries],
-        ).ok();
+        let _ = tx.commit();
     }
 
     pub fn get(&self, terminal_id: &str, limit: usize) -> Vec<String> {
-        let mut stmt = self.conn.prepare(
-            "SELECT command FROM command_history WHERE terminal_id = ?1 ORDER BY id DESC LIMIT ?2"
-        ).unwrap();
-        let rows = stmt.query_map(params![terminal_id, limit], |row| {
-            row.get::<_, String>(0)
-        }).unwrap();
-        rows.filter_map(|r| r.ok()).collect()
+        let mut stmt = self
+            .conn
+            .prepare("SELECT command FROM command_history WHERE terminal_id = ?1 ORDER BY id DESC")
+            .unwrap();
+        let rows = stmt
+            .query_map(params![terminal_id], |row| row.get::<_, String>(0))
+            .unwrap();
+        let mut seen = std::collections::HashSet::new();
+        rows.filter_map(|r| r.ok())
+            .filter(|command| seen.insert(command.clone()))
+            .take(limit)
+            .collect()
     }
 
     pub fn clear(&self, terminal_id: &str) {
-        self.conn.execute(
-            "DELETE FROM command_history WHERE terminal_id = ?1",
-            params![terminal_id],
-        ).ok();
+        self.conn
+            .execute(
+                "DELETE FROM command_history WHERE terminal_id = ?1",
+                params![terminal_id],
+            )
+            .ok();
     }
 
     pub fn clear_all(&self) {

@@ -147,18 +147,27 @@ fn default_key_binds() -> HashMap<String, ShortcutBinding> {
         },
     );
     m.insert(
-        "history_up".into(),
+        "history_menu".into(),
         ShortcutBinding {
-            key: "PageUp".into(),
+            key: "Alt".into(),
+            ctrl: false,
+            shift: false,
+            alt: true,
+        },
+    );
+    m.insert(
+        "history_prev".into(),
+        ShortcutBinding {
+            key: "ArrowUp".into(),
             ctrl: false,
             shift: false,
             alt: false,
         },
     );
     m.insert(
-        "history_down".into(),
+        "history_next".into(),
         ShortcutBinding {
-            key: "PageDown".into(),
+            key: "ArrowDown".into(),
             ctrl: false,
             shift: false,
             alt: false,
@@ -182,6 +191,9 @@ fn binding_to_modifiers(b: &ShortcutBinding) -> egui::Modifiers {
 }
 
 fn binding_to_key(b: &ShortcutBinding) -> Option<egui::Key> {
+    if b.key == "Alt" {
+        return None;
+    }
     match b.key.as_str() {
         "N" => Some(egui::Key::N),
         "W" => Some(egui::Key::W),
@@ -219,6 +231,9 @@ fn key_display_name(k: &str) -> &str {
 }
 
 fn shortcut_display(b: &ShortcutBinding) -> String {
+    if b.key == "Alt" {
+        return "Alt".into();
+    }
     let mut s = String::new();
     if b.ctrl {
         s.push_str("Ctrl+");
@@ -233,6 +248,35 @@ fn shortcut_display(b: &ShortcutBinding) -> String {
     s
 }
 
+fn shortcut_hint_labels() -> [(&'static str, &'static str); 10] {
+    [
+        ("new_terminal", "新建终端"),
+        ("close_terminal", "关闭终端"),
+        ("workspace_up", "上一个 Workspace"),
+        ("workspace_down", "下一个 Workspace"),
+        ("panel_left", "左侧 Panel"),
+        ("panel_right", "右侧 Panel"),
+        ("lock_workspace", "锁定/解锁 Workspace"),
+        ("history_menu", "历史菜单"),
+        ("history_prev", "历史上一条"),
+        ("history_next", "历史下一条"),
+    ]
+}
+
+fn shortcut_hint_available_height(available_height: f32) -> f32 {
+    available_height.max(0.0)
+}
+
+const WORKSPACE_ACTION_BUTTON_SIZE: egui::Vec2 = egui::vec2(24.0, 24.0);
+
+fn workspace_lock_icon(is_locked: bool) -> &'static str {
+    if is_locked {
+        egui_phosphor::regular::LOCK
+    } else {
+        egui_phosphor::regular::LOCK_OPEN
+    }
+}
+
 fn check_shortcut(
     ctx: &egui::Context,
     binds: &HashMap<String, ShortcutBinding>,
@@ -245,6 +289,61 @@ fn check_shortcut(
         }
     }
     false
+}
+
+fn history_menu_shortcut_released(
+    ctx: &egui::Context,
+    binds: &HashMap<String, ShortcutBinding>,
+    state: &mut AltKeyState,
+) -> bool {
+    let Some(binding) = binds.get("history_menu") else {
+        return false;
+    };
+    if binding.key != "Alt" || binding.ctrl || binding.shift || !binding.alt {
+        return false;
+    }
+
+    let other_key_pressed = ctx.input(|input| {
+        input.events.iter().any(|event| {
+            matches!(
+                event,
+                egui::Event::Key {
+                    pressed: true,
+                    modifiers,
+                    ..
+                } if modifiers.alt
+            )
+        })
+    });
+    ctx.input(|input| update_alt_key_state(state, input.modifiers.alt, other_key_pressed))
+}
+
+fn update_alt_key_state(state: &mut AltKeyState, alt_down: bool, other_key_pressed: bool) -> bool {
+    let mut released = false;
+    if alt_down && !state.pressed {
+        state.pressed = true;
+        state.used_with_other_key = false;
+    }
+    if other_key_pressed {
+        state.used_with_other_key = true;
+    }
+    if !alt_down && state.pressed {
+        released = !state.used_with_other_key;
+        state.pressed = false;
+        state.used_with_other_key = false;
+    }
+    released
+}
+
+fn toggle_history_menu(nav: &mut Option<HistoryNav>, entries: Vec<String>) {
+    if nav.is_some() {
+        *nav = None;
+    } else if !entries.is_empty() {
+        *nav = Some(HistoryNav {
+            entries,
+            selected: 0,
+        });
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -277,11 +376,40 @@ fn load_settings() -> AppSettings {
     if path.exists() {
         if let Ok(content) = std::fs::read_to_string(&path) {
             if let Ok(settings) = serde_json::from_str(&content) {
-                return settings;
+                return normalize_history_bindings(settings);
             }
         }
     }
     AppSettings::default()
+}
+
+fn normalize_history_bindings(mut settings: AppSettings) -> AppSettings {
+    let defaults = default_key_binds();
+    if !settings.key_binds.contains_key("history_menu") {
+        settings.key_binds.insert(
+            "history_menu".into(),
+            defaults.get("history_menu").unwrap().clone(),
+        );
+    }
+    if !settings.key_binds.contains_key("history_prev") {
+        let binding = settings
+            .key_binds
+            .remove("history_up")
+            .or_else(|| defaults.get("history_prev").cloned())
+            .unwrap();
+        settings.key_binds.insert("history_prev".into(), binding);
+    }
+    if !settings.key_binds.contains_key("history_next") {
+        let binding = settings
+            .key_binds
+            .remove("history_down")
+            .or_else(|| defaults.get("history_next").cloned())
+            .unwrap();
+        settings.key_binds.insert("history_next".into(), binding);
+    }
+    settings.key_binds.remove("history_up");
+    settings.key_binds.remove("history_down");
+    settings
 }
 
 fn save_settings(settings: &AppSettings) -> Result<(), anyhow::Error> {
@@ -399,6 +527,24 @@ pub struct HistoryNav {
     pub selected: usize,
 }
 
+impl HistoryNav {
+    fn move_previous(&mut self) {
+        self.selected = self.selected.saturating_sub(1);
+    }
+
+    fn move_next(&mut self) {
+        if self.selected + 1 < self.entries.len() {
+            self.selected += 1;
+        }
+    }
+}
+
+#[derive(Default)]
+struct AltKeyState {
+    pressed: bool,
+    used_with_other_key: bool,
+}
+
 pub struct App {
     panels: Vec<Panel>,
     active_panel: usize,
@@ -447,6 +593,8 @@ pub struct App {
     system_fonts: Vec<String>,
     unlock_popup: Option<usize>,
     cwd_poll_frame: u8,
+    alt_key: AltKeyState,
+    terminal_focus_id: Option<egui::Id>,
 }
 
 struct TerminalData {
@@ -560,6 +708,7 @@ impl App {
         let system_fonts = scan_system_fonts();
         // Register all found fonts in egui
         let mut fonts = egui::FontDefinitions::default();
+        egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
         let mut registered_names: Vec<String> = Vec::new();
         for (name, path) in &system_fonts {
             if let Ok(data) = std::fs::read(path) {
@@ -651,6 +800,8 @@ impl App {
             system_fonts: font_names,
             unlock_popup: None,
             cwd_poll_frame: 0,
+            alt_key: AltKeyState::default(),
+            terminal_focus_id: None,
         };
 
         let scene_path = scene_path();
@@ -1063,6 +1214,14 @@ impl App {
 }
 
 impl eframe::App for App {
+    fn raw_input_hook(&mut self, ctx: &egui::Context, _raw_input: &mut egui::RawInput) {
+        if let Some(id) = self.terminal_focus_id {
+            ctx.memory_mut(|memory| {
+                memory.set_focus_lock_filter(id, egui_term::terminal_focus_event_filter())
+            });
+        }
+    }
+
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.process_pending(ctx);
         self.cwd_poll_frame = self.cwd_poll_frame.wrapping_add(1);
@@ -1084,6 +1243,77 @@ impl eframe::App for App {
             }
         }
 
+        let binds = self.settings.key_binds.clone();
+        if self.binding_recording.is_some() || !ctx.input(|input| input.focused) {
+            self.alt_key = AltKeyState::default();
+        }
+        let menu_requested = if self.binding_recording.is_some() {
+            false
+        } else if binds
+            .get("history_menu")
+            .is_some_and(|binding| binding.key == "Alt")
+        {
+            history_menu_shortcut_released(ctx, &binds, &mut self.alt_key)
+        } else {
+            check_shortcut(ctx, &binds, "history_menu")
+        };
+        if menu_requested && !self.locked_panels.contains(&self.active_panel) {
+            if let Some(tab) = self.focused_terminal.clone() {
+                let entries = self.history_db.get(&tab, self.settings.max_history);
+                if let Some(td) = self.terminals.get_mut(&tab) {
+                    toggle_history_menu(&mut td.instance.history_nav, entries);
+                }
+            }
+        }
+
+        let history_menu_active = self
+            .focused_terminal
+            .as_ref()
+            .and_then(|tab| self.terminals.get(tab))
+            .is_some_and(|td| td.instance.history_nav.is_some());
+
+        let mut history_menu_handled = false;
+        if history_menu_active {
+            let close =
+                ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+            let confirm =
+                ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+            let previous = !close && !confirm && check_shortcut(ctx, &binds, "history_prev");
+            let next = !close && !confirm && check_shortcut(ctx, &binds, "history_next");
+
+            if let Some(tab) = self.focused_terminal.clone() {
+                history_menu_handled = previous || next || close || confirm;
+                if previous || next {
+                    if let Some(td) = self.terminals.get_mut(&tab) {
+                        if let Some(nav) = td.instance.history_nav.as_mut() {
+                            if previous {
+                                nav.move_previous();
+                            }
+                            if next {
+                                nav.move_next();
+                            }
+                        }
+                    }
+                }
+                if close {
+                    if let Some(td) = self.terminals.get_mut(&tab) {
+                        td.instance.history_nav = None;
+                    }
+                }
+                if confirm {
+                    let selected = self.terminals.get_mut(&tab).and_then(|td| {
+                        let nav = td.instance.history_nav.take()?;
+                        let command = nav.entries.get(nav.selected)?.clone();
+                        td.instance.write(command.as_bytes());
+                        Some(command)
+                    });
+                    if let Some(command) = selected {
+                        self.history_db.add(&tab, &command);
+                    }
+                }
+            }
+        }
+
         // Consume Tab key to prevent egui focus navigation, send to focused terminal
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab)) {
             if let Some(tab) = &self.focused_terminal.clone() {
@@ -1094,7 +1324,8 @@ impl eframe::App for App {
         }
 
         // Enter: select history entry, or record command + send CR to terminal
-        if !self.locked_panels.contains(&self.active_panel)
+        if !history_menu_handled
+            && !self.locked_panels.contains(&self.active_panel)
             && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter))
         {
             if let Some(tab) = &self.focused_terminal.clone() {
@@ -1123,7 +1354,9 @@ impl eframe::App for App {
         }
 
         // Escape: close history menu
-        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+        if !history_menu_handled
+            && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+        {
             if let Some(tab) = &self.focused_terminal.clone() {
                 if let Some(td) = self.terminals.get_mut(tab) {
                     if td.instance.history_nav.is_some() {
@@ -1135,75 +1368,49 @@ impl eframe::App for App {
             }
         }
 
-        // PageUp / history_up: open history (newest on top) or move highlight up
-        let history_up = check_shortcut(ctx, &self.settings.key_binds, "history_up")
-            || ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::PageUp));
-        if history_up {
-            if let Some(tab) = &self.focused_terminal.clone() {
-                if let Some(td) = self.terminals.get_mut(tab) {
-                    if let Some(ref mut nav) = td.instance.history_nav {
-                        if nav.selected > 0 {
-                            nav.selected -= 1;
-                        }
-                    } else {
-                        let entries = self.history_db.get(tab, self.settings.max_history);
-                        if !entries.is_empty() {
-                            // entries: [newest, ..., oldest] — select top (newest)
-                            td.instance.history_nav = Some(HistoryNav {
-                                entries,
-                                selected: 0,
-                            });
-                        }
-                    }
-                }
-            }
-        }
-        // PageDown / history_down: move highlight down (toward older commands)
-        let history_down = check_shortcut(ctx, &self.settings.key_binds, "history_down")
-            || ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::PageDown));
-        if history_down {
-            if let Some(tab) = &self.focused_terminal.clone() {
-                if let Some(td) = self.terminals.get_mut(tab) {
-                    if let Some(ref mut nav) = td.instance.history_nav {
-                        if nav.selected + 1 < nav.entries.len() {
-                            nav.selected += 1;
-                        }
-                    }
-                }
-            }
-        }
-
         // Handle key binding recording in settings
         if let Some(recording) = self.binding_recording.clone() {
-            let input = ctx.input(|i| i.clone());
-            for event in &input.events {
-                if let egui::Event::Key {
-                    key,
-                    pressed: true,
-                    modifiers,
-                    ..
-                } = event
-                {
-                    if *key != egui::Key::Escape {
-                        let key_name = format!("{:?}", key);
-                        self.settings_edit.key_binds.insert(
-                            recording.clone(),
-                            ShortcutBinding {
-                                key: key_name,
-                                ctrl: modifiers.ctrl,
-                                shift: modifiers.shift,
-                                alt: modifiers.alt,
-                            },
-                        );
+            if recording == "history_menu" && ctx.input(|i| i.modifiers.alt) {
+                self.settings_edit.key_binds.insert(
+                    recording,
+                    ShortcutBinding {
+                        key: "Alt".into(),
+                        ctrl: false,
+                        shift: false,
+                        alt: true,
+                    },
+                );
+                self.binding_recording = None;
+            } else {
+                let input = ctx.input(|i| i.clone());
+                for event in &input.events {
+                    if let egui::Event::Key {
+                        key,
+                        pressed: true,
+                        modifiers,
+                        ..
+                    } = event
+                    {
+                        if *key != egui::Key::Escape {
+                            let key_name = format!("{:?}", key);
+                            self.settings_edit.key_binds.insert(
+                                recording.clone(),
+                                ShortcutBinding {
+                                    key: key_name,
+                                    ctrl: modifiers.ctrl,
+                                    shift: modifiers.shift,
+                                    alt: modifiers.alt,
+                                },
+                            );
+                        }
+                        self.binding_recording = None;
+                        break;
                     }
-                    self.binding_recording = None;
-                    break;
                 }
             }
         }
 
         // Configurable shortcuts
-        let binds = self.settings.key_binds.clone();
 
         if check_shortcut(ctx, &binds, "new_terminal") {
             if let Some(tree) = self.dock_states.get_mut(&self.active_panel) {
@@ -1435,20 +1642,9 @@ impl eframe::App for App {
                         2 => {
                             ui.label("点击快捷键名称后按下新按键即可修改");
                             ui.separator();
-                            let labels = [
-                                ("new_terminal", "新建终端"),
-                                ("close_terminal", "关闭终端"),
-                                ("workspace_up", "上一个 Workspace"),
-                                ("workspace_down", "下一个 Workspace"),
-                                ("panel_left", "左侧 Panel"),
-                                ("panel_right", "右侧 Panel"),
-                                ("lock_workspace", "锁定/解锁 Workspace"),
-                                ("history_up", "显示指令历史"),
-                                ("history_down", "历史指令导航"),
-                            ];
-                            for (id, label) in &labels {
+                            for (id, label) in shortcut_hint_labels() {
                                 ui.horizontal(|ui| {
-                                    ui.label(*label);
+                                    ui.label(label);
                                     ui.with_layout(
                                         egui::Layout::right_to_left(egui::Align::Center),
                                         |ui| {
@@ -1456,7 +1652,7 @@ impl eframe::App for App {
                                                 if self.binding_recording.as_deref() == Some(id) {
                                                     "按下按键...".to_string()
                                                 } else if let Some(b) =
-                                                    self.settings_edit.key_binds.get(*id)
+                                                    self.settings_edit.key_binds.get(id)
                                                 {
                                                     shortcut_display(b)
                                                 } else {
@@ -1516,6 +1712,10 @@ impl eframe::App for App {
                             let sys_fonts = self.system_fonts.clone();
                             std::thread::spawn(move || {
                                 let mut fonts = egui::FontDefinitions::default();
+                                egui_phosphor::add_to_fonts(
+                                    &mut fonts,
+                                    egui_phosphor::Variant::Regular,
+                                );
                                 // Register all system fonts
                                 for name in &sys_fonts {
                                     let paths = scan_system_fonts();
@@ -1881,14 +2081,31 @@ impl eframe::App for App {
                                     egui::Layout::right_to_left(egui::Align::Center),
                                     |ui| {
                                         if self.panels.len() > 1 {
-                                            if ui.small_button("x").clicked() {
+                                            if ui
+                                                .add_sized(
+                                                    WORKSPACE_ACTION_BUTTON_SIZE,
+                                                    egui::Button::new(egui_phosphor::regular::X),
+                                                )
+                                                .on_hover_text("关闭 Workspace")
+                                                .clicked()
+                                            {
                                                 self.close_confirm_panel = Some(i);
                                                 return;
                                             }
                                         }
                                         let is_locked = self.locked_panels.contains(&i);
-                                        let lock_label = if is_locked { "🔓" } else { "🔒" };
-                                        if ui.small_button(lock_label).clicked() {
+                                        if ui
+                                            .add_sized(
+                                                WORKSPACE_ACTION_BUTTON_SIZE,
+                                                egui::Button::new(workspace_lock_icon(is_locked)),
+                                            )
+                                            .on_hover_text(if is_locked {
+                                                "已锁定 Workspace"
+                                            } else {
+                                                "未锁定 Workspace"
+                                            })
+                                            .clicked()
+                                        {
                                             if is_locked {
                                                 // Switch to the locked panel; the overlay
                                                 // has its own password input.
@@ -1968,9 +2185,51 @@ impl eframe::App for App {
                     }
                 });
                 ui.separator();
-                ui.label("L1: Workspaces");
-                ui.label("L2: Dock panels");
-                ui.label("L3: Terminal tabs");
+                ui.allocate_ui_with_layout(
+                    egui::vec2(
+                        ui.available_width(),
+                        shortcut_hint_available_height(ui.available_height()),
+                    ),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        ui.label(
+                            egui::RichText::new("快捷键")
+                                .small()
+                                .strong()
+                                .color(ui.visuals().weak_text_color()),
+                        );
+                        egui::ScrollArea::vertical()
+                            .id_salt("navigation_shortcuts")
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| {
+                                for (id, label) in shortcut_hint_labels() {
+                                    ui.horizontal(|ui| {
+                                        ui.label(
+                                            egui::RichText::new(label)
+                                                .small()
+                                                .color(ui.visuals().weak_text_color()),
+                                        );
+                                        let binding = self
+                                            .settings
+                                            .key_binds
+                                            .get(id)
+                                            .map(shortcut_display)
+                                            .unwrap_or_else(|| "未设置".into());
+                                        ui.with_layout(
+                                            egui::Layout::right_to_left(egui::Align::Center),
+                                            |ui| {
+                                                ui.label(
+                                                    egui::RichText::new(binding)
+                                                        .small()
+                                                        .color(ui.visuals().text_color()),
+                                                );
+                                            },
+                                        );
+                                    });
+                                }
+                            });
+                    },
+                );
             });
 
         let active_tab = self
@@ -2096,6 +2355,7 @@ impl eframe::App for App {
                             rename_frame_count: self.rename_frame_count,
                             active_tab,
                             focused_terminal: &mut self.focused_terminal,
+                            terminal_focus_id: &mut self.terminal_focus_id,
                             show_settings: self.show_settings,
                         },
                     );
@@ -2110,7 +2370,140 @@ impl eframe::App for App {
 
 #[cfg(test)]
 mod tests {
-    use super::TerminalStatePersist;
+    use super::{
+        default_key_binds, toggle_history_menu, update_alt_key_state, AltKeyState, AppSettings,
+        HistoryNav, ShortcutBinding, TerminalStatePersist,
+    };
+
+    #[test]
+    fn shortcut_hint_labels_cover_all_configurable_actions() {
+        let ids: Vec<_> = super::shortcut_hint_labels()
+            .iter()
+            .map(|(id, _)| *id)
+            .collect();
+
+        for id in [
+            "new_terminal",
+            "close_terminal",
+            "workspace_up",
+            "workspace_down",
+            "panel_left",
+            "panel_right",
+            "lock_workspace",
+            "history_menu",
+            "history_prev",
+            "history_next",
+        ] {
+            assert!(ids.contains(&id), "missing shortcut hint for {id}");
+        }
+    }
+
+    #[test]
+    fn shortcut_hint_area_uses_all_remaining_sidebar_height() {
+        assert_eq!(super::shortcut_hint_available_height(240.0), 240.0);
+        assert_eq!(super::shortcut_hint_available_height(-1.0), 0.0);
+    }
+
+    #[test]
+    fn workspace_lock_icon_matches_lock_state() {
+        assert_eq!(
+            super::workspace_lock_icon(true),
+            egui_phosphor::regular::LOCK
+        );
+        assert_eq!(
+            super::workspace_lock_icon(false),
+            egui_phosphor::regular::LOCK_OPEN
+        );
+    }
+
+    #[test]
+    fn default_history_bindings_use_alt_menu_and_arrow_navigation() {
+        let binds = default_key_binds();
+
+        assert_eq!(binds["history_menu"].key, "Alt");
+        assert!(binds["history_menu"].alt);
+        assert_eq!(binds["history_prev"].key, "ArrowUp");
+        assert_eq!(binds["history_next"].key, "ArrowDown");
+    }
+
+    #[test]
+    fn standalone_alt_release_opens_menu_but_alt_combo_does_not() {
+        let mut state = AltKeyState::default();
+
+        assert!(!update_alt_key_state(&mut state, true, false));
+        assert!(update_alt_key_state(&mut state, false, false));
+
+        assert!(!update_alt_key_state(&mut state, true, false));
+        assert!(!update_alt_key_state(&mut state, true, true));
+        assert!(!update_alt_key_state(&mut state, false, false));
+    }
+
+    #[test]
+    fn alt_combo_released_in_one_frame_does_not_open_menu() {
+        let mut state = AltKeyState::default();
+
+        assert!(!update_alt_key_state(&mut state, true, false));
+        assert!(!update_alt_key_state(&mut state, false, true));
+    }
+
+    #[test]
+    fn legacy_history_bindings_are_renamed_without_losing_custom_keys() {
+        let mut settings = AppSettings::default();
+        settings.key_binds.remove("history_menu");
+        settings.key_binds.remove("history_prev");
+        settings.key_binds.remove("history_next");
+        settings.key_binds.insert(
+            "history_up".into(),
+            ShortcutBinding {
+                key: "PageUp".into(),
+                ctrl: true,
+                shift: false,
+                alt: false,
+            },
+        );
+        settings.key_binds.insert(
+            "history_down".into(),
+            ShortcutBinding {
+                key: "PageDown".into(),
+                ctrl: false,
+                shift: true,
+                alt: false,
+            },
+        );
+
+        let migrated = super::normalize_history_bindings(settings);
+        assert_eq!(migrated.key_binds["history_menu"].key, "Alt");
+        assert_eq!(migrated.key_binds["history_prev"].key, "PageUp");
+        assert!(migrated.key_binds["history_prev"].ctrl);
+        assert_eq!(migrated.key_binds["history_next"].key, "PageDown");
+        assert!(migrated.key_binds["history_next"].shift);
+        assert!(!migrated.key_binds.contains_key("history_up"));
+        assert!(!migrated.key_binds.contains_key("history_down"));
+    }
+
+    #[test]
+    fn history_navigation_stays_within_newest_to_oldest_entries() {
+        let mut nav = HistoryNav {
+            entries: vec!["newest".into(), "oldest".into()],
+            selected: 0,
+        };
+
+        nav.move_previous();
+        assert_eq!(nav.selected, 0);
+        nav.move_next();
+        assert_eq!(nav.selected, 1);
+        nav.move_next();
+        assert_eq!(nav.selected, 1);
+    }
+
+    #[test]
+    fn history_menu_shortcut_toggles_open_and_closed() {
+        let mut nav = None;
+        toggle_history_menu(&mut nav, vec!["command".into()]);
+        assert!(nav.is_some());
+        toggle_history_menu(&mut nav, vec!["command".into()]);
+        assert!(nav.is_none());
+    }
 
     #[test]
     fn terminal_state_does_not_serialize_snapshots() {
@@ -2161,6 +2554,7 @@ struct TerminalTabViewer<'a> {
     rename_frame_count: u32,
     active_tab: Option<String>,
     focused_terminal: &'a mut Option<String>,
+    terminal_focus_id: &'a mut Option<egui::Id>,
     show_settings: bool,
 }
 
@@ -2309,10 +2703,11 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
             };
             let terminal_response = ui.add(terminal_view);
 
-            if is_focused && !self.renaming && !self.show_settings {
-                terminal_response.request_focus();
+            if is_focused {
+                *self.terminal_focus_id = Some(terminal_response.id);
             }
 
+            // TerminalView owns keyboard focus and its arrow-key focus lock.
             if terminal_response.clicked() {
                 *self.focused_terminal = Some(tab.clone());
             }

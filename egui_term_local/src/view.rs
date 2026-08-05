@@ -1,14 +1,15 @@
 use alacritty_terminal::index::Point as TerminalGridPoint;
 use alacritty_terminal::term::cell;
+use alacritty_terminal::term::point_to_viewport;
 use alacritty_terminal::term::TermMode;
 use alacritty_terminal::vte::ansi::{Color, NamedColor};
 use egui::epaint::RectShape;
-use egui::{CornerRadius, Key};
 use egui::Modifiers;
 use egui::MouseWheelUnit;
 use egui::Shape;
 use egui::Widget;
 use egui::{Align2, Painter, Pos2, Rect, Response, Stroke, Vec2};
+use egui::{CornerRadius, Key};
 use egui::{Id, PointerButton};
 
 use crate::backend::BackendCommand;
@@ -29,11 +30,29 @@ enum InputAction {
     Ignore,
 }
 
+const RESIZE_DEBOUNCE_SECS: f64 = 0.08;
+
+pub fn terminal_focus_event_filter() -> egui::EventFilter {
+    egui::EventFilter {
+        tab: true,
+        horizontal_arrows: true,
+        vertical_arrows: true,
+        escape: true,
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct TerminalViewState {
     is_dragged: bool,
     scroll_pixels: f32,
     current_mouse_position_on_grid: TerminalGridPoint,
+    /// Last cols/rows actually applied to the terminal backend.
+    last_cols: u16,
+    last_rows: u16,
+    /// Pending size while layout is still changing (drag).
+    pending_cols: u16,
+    pending_rows: u16,
+    pending_since: Option<f64>,
 }
 
 pub struct TerminalView<'a> {
@@ -59,7 +78,7 @@ impl Widget for TerminalView<'_> {
         });
 
         self.focus(&layout)
-            .resize(&layout)
+            .resize(&layout, &mut state)
             .process_input(&layout, &mut state)
             .show(&mut state, &layout, &painter);
 
@@ -122,6 +141,12 @@ impl<'a> TerminalView<'a> {
     fn focus(self, layout: &Response) -> Self {
         if self.has_focus {
             layout.request_focus();
+            layout.ctx.memory_mut(|memory| {
+                memory.set_focus_lock_filter(
+                    layout.id,
+                    terminal_focus_event_filter(),
+                )
+            });
         } else {
             layout.surrender_focus();
         }
@@ -129,11 +154,78 @@ impl<'a> TerminalView<'a> {
         self
     }
 
-    fn resize(self, layout: &Response) -> Self {
-        self.backend.process_command(BackendCommand::Resize(
-            Size::from(layout.rect.size()),
-            self.font.font_measure(&layout.ctx),
-        ));
+    /// Compute stable integer cols/rows and only apply backend resize when
+    /// the grid size actually changes and has settled (debounce). This avoids
+    /// thrashing reflow when dock splitters / window edges jitter by <1 cell.
+    fn resize(self, layout: &Response, state: &mut TerminalViewState) -> Self {
+        let font_size = self.font.font_measure(&layout.ctx);
+        let layout_size = Size::from(layout.rect.size());
+
+        let cell_w = font_size.width.floor().max(1.0);
+        let cell_h = font_size.height.floor().max(1.0);
+        // Slight positive bias so a nearly-full cell still counts, without
+        // oscillating at the exact boundary.
+        let cols = ((layout_size.width + 0.5) / cell_w).floor() as u16;
+        let rows = ((layout_size.height + 0.5) / cell_h).floor() as u16;
+
+        if cols == 0 || rows == 0 {
+            return self;
+        }
+
+        // First real size: apply immediately so the PTY matches the view.
+        if state.last_cols == 0 || state.last_rows == 0 {
+            state.last_cols = cols;
+            state.last_rows = rows;
+            state.pending_cols = cols;
+            state.pending_rows = rows;
+            state.pending_since = None;
+            self.backend.process_command(BackendCommand::Resize(
+                layout_size,
+                font_size,
+            ));
+            return self;
+        }
+
+        // Already at this grid size — nothing to do (even if pixels jitter).
+        if cols == state.last_cols && rows == state.last_rows {
+            state.pending_cols = cols;
+            state.pending_rows = rows;
+            state.pending_since = None;
+            return self;
+        }
+
+        let now = layout.ctx.input(|i| i.time);
+
+        // Size still changing: restart debounce timer.
+        if cols != state.pending_cols || rows != state.pending_rows {
+            state.pending_cols = cols;
+            state.pending_rows = rows;
+            state.pending_since = Some(now);
+            layout.ctx.request_repaint_after(
+                std::time::Duration::from_secs_f64(RESIZE_DEBOUNCE_SECS),
+            );
+            return self;
+        }
+
+        // Pending size stable long enough — commit reflow once.
+        if let Some(since) = state.pending_since {
+            let elapsed = now - since;
+            if elapsed >= RESIZE_DEBOUNCE_SECS {
+                state.last_cols = cols;
+                state.last_rows = rows;
+                state.pending_since = None;
+                self.backend.process_command(BackendCommand::Resize(
+                    layout_size,
+                    font_size,
+                ));
+            } else {
+                layout.ctx.request_repaint_after(
+                    std::time::Duration::from_secs_f64(
+                        RESIZE_DEBOUNCE_SECS - elapsed,
+                    ),
+                );
+            }
+        }
 
         self
     }
@@ -143,10 +235,11 @@ impl<'a> TerminalView<'a> {
         layout: &Response,
         state: &mut TerminalViewState,
     ) -> Self {
-        if !layout.has_focus() || !layout.contains_pointer() {
+        if !layout.has_focus() {
             return self;
         }
 
+        let pointer_inside = layout.contains_pointer();
         let modifiers = layout.ctx.input(|i| i.modifiers);
         let events = layout.ctx.input(|i| i.events.clone());
         for event in events {
@@ -164,30 +257,40 @@ impl<'a> TerminalView<'a> {
                         modifiers,
                     ))
                 },
-                egui::Event::MouseWheel { unit, delta, .. } => input_actions
-                    .push(process_mouse_wheel(
+                egui::Event::MouseWheel { unit, delta, .. }
+                    if pointer_inside =>
+                {
+                    input_actions.push(process_mouse_wheel(
                         state,
                         self.font.font_type().size,
                         unit,
                         delta,
-                    )),
+                    ))
+                },
                 egui::Event::PointerButton {
                     button,
                     pressed,
                     modifiers,
                     pos,
                     ..
-                } => input_actions.push(process_button_click(
-                    state,
-                    layout,
-                    self.backend,
-                    &self.bindings_layout,
-                    button,
-                    pos,
-                    &modifiers,
+                } if should_process_pointer_button(
+                    pointer_inside,
                     pressed,
-                )),
-                egui::Event::PointerMoved(pos) => {
+                    state.is_dragged,
+                ) =>
+                {
+                    input_actions.push(process_button_click(
+                        state,
+                        layout,
+                        self.backend,
+                        &self.bindings_layout,
+                        button,
+                        pos,
+                        &modifiers,
+                        pressed,
+                    ))
+                },
+                egui::Event::PointerMoved(pos) if pointer_inside => {
                     input_actions = process_mouse_move(
                         state,
                         layout,
@@ -195,6 +298,9 @@ impl<'a> TerminalView<'a> {
                         pos,
                         &modifiers,
                     )
+                },
+                egui::Event::PointerGone => {
+                    state.is_dragged = false;
                 },
                 _ => {},
             };
@@ -224,6 +330,7 @@ impl<'a> TerminalView<'a> {
         // Request repaint for cursor blinking when focused
         if self.has_focus {
             painter.ctx().request_repaint();
+            self.backend.set_dirty();
         }
 
         let content = self.backend.sync();
@@ -233,9 +340,7 @@ impl<'a> TerminalView<'a> {
         let cell_width = content.terminal_size.cell_width as f32;
         let global_bg =
             self.theme.get_color(Color::Named(NamedColor::Background));
-
-        let max_cols = (layout.rect.width() / cell_width) as usize;
-        let max_lines = (layout.rect.height() / cell_height) as usize;
+        let display_offset = content.grid.display_offset();
 
         let mut shapes = vec![Shape::Rect(RectShape::filled(
             Rect::from_min_max(layout_min, layout_max),
@@ -243,11 +348,18 @@ impl<'a> TerminalView<'a> {
             global_bg,
         ))];
 
+        // Grid points use absolute line coords; convert to viewport rows via
+        // alacritty's point_to_viewport (same as Alacritty's own renderer).
+        // Using `line + display_offset` alone is wrong for some reflow cases and
+        // draws the same logical content stacked → looks like "copy on wrap".
         for indexed in content.grid.display_iter() {
+            let Some(vp) = point_to_viewport(display_offset, indexed.point)
+            else {
+                continue;
+            };
+
             let flags = indexed.cell.flags;
-            let is_wide_char_spacer =
-                flags.contains(cell::Flags::WIDE_CHAR_SPACER);
-            if is_wide_char_spacer {
+            if flags.contains(cell::Flags::WIDE_CHAR_SPACER) {
                 continue;
             }
 
@@ -260,24 +372,18 @@ impl<'a> TerminalView<'a> {
             let is_selected = content
                 .selectable_range
                 .is_some_and(|r| r.contains(indexed.point));
-            let is_hovered_hyperling =
+            let is_hovered_hyperlink =
                 content.hovered_hyperlink.as_ref().is_some_and(|r| {
                     r.contains(&indexed.point)
                         && r.contains(&state.current_mouse_position_on_grid)
                 });
 
-            let x = layout_min.x + (cell_width * indexed.point.column.0 as f32);
-            let line_num =
-                indexed.point.line.0 + content.grid.display_offset() as i32;
-            let y = layout_min.y + (cell_height * line_num as f32);
-
-            if indexed.point.column.0 >= max_cols || line_num as usize >= max_lines {
-                continue;
-            }
+            let x = layout_min.x + (cell_width * vp.column.0 as f32);
+            let y = layout_min.y + (cell_height * vp.line as f32);
 
             let mut fg = self.theme.get_color(indexed.fg);
             let mut bg = self.theme.get_color(indexed.bg);
-            let cell_width = if is_wide_char {
+            let draw_w = if is_wide_char {
                 cell_width * 2.0
             } else {
                 cell_width
@@ -295,29 +401,24 @@ impl<'a> TerminalView<'a> {
                 shapes.push(Shape::Rect(RectShape::filled(
                     Rect::from_min_size(
                         Pos2::new(x, y),
-                        // + 1.0 is to fill grid border
-                        Vec2::new(cell_width + 1., cell_height + 1.),
+                        Vec2::new(draw_w + 1.0, cell_height + 1.0),
                     ),
                     CornerRadius::ZERO,
                     bg,
                 )));
             }
 
-            // Handle hovered hyperlink underline
-            if is_hovered_hyperling {
+            if is_hovered_hyperlink {
                 let underline_height = y + cell_height;
                 shapes.push(Shape::LineSegment {
                     points: [
                         Pos2::new(x, underline_height),
-                        Pos2::new(x + cell_width, underline_height),
+                        Pos2::new(x + draw_w, underline_height),
                     ],
                     stroke: Stroke::new(cell_height * 0.15, fg).into(),
                 });
             }
 
-            // Cursor rendered clamped below, after loop
-
-            // Draw text content
             if indexed.c != ' ' && indexed.c != '\t' {
                 if content.grid.cursor.point == indexed.point
                     && is_app_cursor_mode
@@ -328,7 +429,7 @@ impl<'a> TerminalView<'a> {
                 shapes.push(Shape::text(
                     &painter.fonts(|c| c.clone()),
                     Pos2 {
-                        x: x + (cell_width / 2.0),
+                        x: x + (draw_w / 2.0),
                         y,
                     },
                     Align2::CENTER_TOP,
@@ -339,26 +440,26 @@ impl<'a> TerminalView<'a> {
             }
         }
 
-        // Render cursor clamped to visible area (supports grid larger than view)
+        // Cursor: map absolute grid point → viewport, then draw if visible.
         if self.has_focus {
             let time = painter.ctx().input(|i| i.time);
             let blink_on = (time * 2.0) as i64 % 2 == 0;
             if blink_on {
-                let cursor_col = content.grid.cursor.point.column.0 as usize;
-                let cursor_line = content.grid.cursor.point.line.0 + content.grid.display_offset() as i32;
-                let clamped_col = cursor_col.min(max_cols.saturating_sub(1));
-                let clamped_line = (cursor_line as usize).min(max_lines.saturating_sub(1));
-                let cx = layout_min.x + (cell_width * clamped_col as f32);
-                let cy = layout_min.y + (cell_height * clamped_line as f32);
-                let cursor_color = self.theme.get_color(content.cursor.fg);
-                shapes.push(Shape::Rect(RectShape::filled(
-                    Rect::from_min_size(
-                        Pos2::new(cx, cy),
-                        Vec2::new(cell_width, cell_height),
-                    ),
-                    CornerRadius::default(),
-                    cursor_color,
-                )));
+                if let Some(vp) =
+                    point_to_viewport(display_offset, content.grid.cursor.point)
+                {
+                    let cx = layout_min.x + (cell_width * vp.column.0 as f32);
+                    let cy = layout_min.y + (cell_height * vp.line as f32);
+                    let cursor_color = self.theme.get_color(content.cursor.fg);
+                    shapes.push(Shape::Rect(RectShape::filled(
+                        Rect::from_min_size(
+                            Pos2::new(cx, cy),
+                            Vec2::new(cell_width, cell_height),
+                        ),
+                        CornerRadius::default(),
+                        cursor_color,
+                    )));
+                }
             }
         }
 
@@ -528,6 +629,14 @@ fn process_button_click(
     }
 }
 
+fn should_process_pointer_button(
+    pointer_inside: bool,
+    pressed: bool,
+    was_dragged: bool,
+) -> bool {
+    pointer_inside || (!pressed && was_dragged)
+}
+
 fn process_left_button(
     state: &mut TerminalViewState,
     layout: &Response,
@@ -665,4 +774,25 @@ fn process_mouse_move(
     }
 
     actions
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{should_process_pointer_button, terminal_focus_event_filter};
+
+    #[test]
+    fn pointer_release_outside_is_processed_when_button_was_pressed_inside() {
+        assert!(should_process_pointer_button(false, false, true));
+        assert!(!should_process_pointer_button(false, false, false));
+    }
+
+    #[test]
+    fn focused_terminal_keeps_vertical_arrows_from_moving_egui_focus() {
+        let filter = terminal_focus_event_filter();
+
+        assert!(filter.tab);
+        assert!(filter.horizontal_arrows);
+        assert!(filter.vertical_arrows);
+        assert!(filter.escape);
+    }
 }
