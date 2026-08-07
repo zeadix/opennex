@@ -16,6 +16,7 @@ pub struct Texts {
     pub lock_overlay: LockOverlayTexts,
     pub terminal: TerminalTexts,
     pub theme: ThemeTexts,
+    pub about: AboutTexts,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -39,6 +40,7 @@ pub struct ViewMenuTexts {
     pub split_right: String,
     pub split_down: String,
     pub settings: String,
+    pub workspace_toggle: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -92,6 +94,7 @@ pub struct SettingsShortcutsTexts {
     pub heading: String,
     pub hint: String,
     pub not_set: String,
+    pub reset_defaults: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -123,6 +126,9 @@ pub struct ShortcutLabelTexts {
     pub history_menu: String,
     pub history_prev: String,
     pub history_next: String,
+    pub toggle_workspace_sidebar: String,
+    pub zoom_in: String,
+    pub zoom_out: String,
     pub shortcuts_heading: String,
 }
 
@@ -199,6 +205,19 @@ pub struct ThemeTexts {
     pub dark: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AboutTexts {
+    pub menu_label: String,
+    pub title: String,
+    pub version_label: String,
+    pub description: String,
+    pub homepage_label: String,
+    pub license_label: String,
+    pub credits_label: String,
+    pub credits: String,
+    pub close: String,
+}
+
 impl Texts {
     pub fn zh_default() -> Self {
         Self {
@@ -219,6 +238,7 @@ impl Texts {
                 split_right: "向右分屏".into(),
                 split_down: "向下分屏".into(),
                 settings: "设置".into(),
+                workspace_toggle: "工作区".into(),
             },
             settings: SettingsTexts {
                 title: "设置".into(),
@@ -255,6 +275,7 @@ impl Texts {
                     heading: "快捷键".into(),
                     hint: "点击快捷键名称后按下新按键即可修改".into(),
                     not_set: "未设置".into(),
+                    reset_defaults: "恢复默认按键".into(),
                 },
                 lock: SettingsLockTexts {
                     heading: "锁定".into(),
@@ -281,6 +302,9 @@ impl Texts {
                 history_menu: "历史菜单".into(),
                 history_prev: "历史上一条".into(),
                 history_next: "历史下一条".into(),
+                toggle_workspace_sidebar: "显示/隐藏工作区栏".into(),
+                zoom_in: "整体放大".into(),
+                zoom_out: "整体缩小".into(),
                 shortcuts_heading: "快捷键".into(),
             },
             workspace: WorkspaceTexts {
@@ -326,7 +350,7 @@ impl Texts {
                 clear_title: "清除密码".into(),
             },
             lock_overlay: LockOverlayTexts {
-                title: "🔒 此工作区已锁定".into(),
+                title: "此工作区已锁定".into(),
                 password_label: "密码:".into(),
                 unlock_button: "解锁".into(),
                 wrong_password: "密码错误".into(),
@@ -343,6 +367,17 @@ impl Texts {
             theme: ThemeTexts {
                 light: "浅色".into(),
                 dark: "深色".into(),
+            },
+            about: AboutTexts {
+                menu_label: "关于".into(),
+                title: "关于 OpenZoo".into(),
+                version_label: "版本".into(),
+                description: "多功能堆叠式终端管理器，集成标签布局、会话命令记忆、全局界面缩放与加密工作区，高效管控你的终端环境。".into(),
+                homepage_label: "主页".into(),
+                license_label: "开源协议".into(),
+                credits_label: "致谢".into(),
+                credits: "基于 egui、egui_dock、alacritty_terminal、egui_term 等开源项目构建。".into(),
+                close: "关闭".into(),
             },
         }
     }
@@ -363,26 +398,55 @@ pub fn locales_dir() -> PathBuf {
     PathBuf::from("locales")
 }
 
+fn embedded_locale(code: &str) -> Option<&'static str> {
+    match code {
+        "zh" => Some(include_str!("../locales/zh.yaml")),
+        "en" => Some(include_str!("../locales/en.yaml")),
+        "zh-TW" => Some(include_str!("../locales/zh-TW.yaml")),
+        "de" => Some(include_str!("../locales/de.yaml")),
+        "fr" => Some(include_str!("../locales/fr.yaml")),
+        "ja" => Some(include_str!("../locales/ja.yaml")),
+        "it" => Some(include_str!("../locales/it.yaml")),
+        "ko" => Some(include_str!("../locales/ko.yaml")),
+        "hi" => Some(include_str!("../locales/hi.yaml")),
+        _ => None,
+    }
+}
+
+fn known_locale_codes() -> Vec<&'static str> {
+    vec!["zh", "en", "zh-TW", "de", "fr", "ja", "it", "ko", "hi"]
+}
+
 pub fn scan_available_languages() -> Vec<(String, String)> {
     let dir = locales_dir();
     let mut languages = Vec::new();
+    let mut seen_codes = std::collections::HashSet::new();
 
-    let entries = match fs::read_dir(&dir) {
-        Ok(e) => e,
-        Err(_) => return vec![("zh".to_string(), "中文".to_string())],
-    };
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("yaml") {
-            continue;
+    // 1. Try filesystem locales first
+    if let Ok(entries) = fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("yaml") {
+                continue;
+            }
+            if let Some(code) = path.file_stem().and_then(|s| s.to_str()) {
+                if seen_codes.insert(code.to_string()) {
+                    if let Some(texts) = Texts::load_from_yaml(&path) {
+                        languages.push((code.to_string(), texts.display_name));
+                    }
+                }
+            }
         }
-        let code = match path.file_stem().and_then(|s| s.to_str()) {
-            Some(c) => c.to_string(),
-            None => continue,
-        };
-        if let Some(texts) = Texts::load_from_yaml(&path) {
-            languages.push((code, texts.display_name));
+    }
+
+    // 2. Add embedded locales not already found
+    for code in known_locale_codes() {
+        if seen_codes.insert(code.to_string()) {
+            if let Some(yaml_str) = embedded_locale(code) {
+                if let Ok(texts) = serde_yaml::from_str::<Texts>(yaml_str) {
+                    languages.push((code.to_string(), texts.display_name));
+                }
+            }
         }
     }
 
@@ -394,12 +458,20 @@ pub fn scan_available_languages() -> Vec<(String, String)> {
 }
 
 pub fn load_language(code: &str) -> Texts {
+    // 1. Try filesystem
     let path = locales_dir().join(format!("{}.yaml", code));
     if path.exists() {
         if let Some(texts) = Texts::load_from_yaml(&path) {
             return texts;
         }
     }
+    // 2. Try embedded
+    if let Some(yaml_str) = embedded_locale(code) {
+        if let Ok(texts) = serde_yaml::from_str::<Texts>(yaml_str) {
+            return texts;
+        }
+    }
+    // 3. Fallback to default
     Texts::zh_default()
 }
 

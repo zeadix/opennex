@@ -1,0 +1,152 @@
+display_name: "Deutsch"
+
+menu:
+  file: "Datei"
+  view: "Ansicht"
+  language: "Sprache"
+  theme: "Design"
+
+file_menu:
+  save: "Speichern"
+  load: "Laden"
+  save_as: "Speichern unter..."
+  exit: "Beenden"
+
+view_menu:
+  split_right: "Rechts teilen"
+  split_down: "Nach unten teilen"
+  settings: "Einstellungen"
+  workspace_toggle: "Arbeitsbereich"
+
+settings:
+  title: "Einstellungen"
+  tabs:
+    general: "Allgemein"
+    appearance: "Darstellung"
+    shortcuts: "Tastenkürzel"
+    lock: "Sperre"
+  general:
+    heading: "Allgemein"
+    scene_info: "Szene und Vorlagen verwenden feste Pfade:"
+    scene_path: "  Szene: ./scene.json"
+    templates_path: "  Vorlagen: ./templates/"
+    history_section: "Verlauf"
+    max_history: "Max. Einträge:"
+    scrollback: "Scrollback:"
+    clear_all_history: "Gesamten Verlauf löschen"
+  appearance:
+    heading: "Darstellung"
+    terminal_section: "Terminal-Darstellung"
+    font_size: "Schriftgröße:"
+    cell_spacing: "Zeichenabstand:"
+    font_family: "Schriftart:"
+    bg_color: "Hintergrund:"
+    fg_color: "Vordergrund:"
+    command_menu_section: "Befehlsmenü"
+    menu_bg_color: "Hintergrund:"
+    menu_fg_color: "Textfarbe:"
+    menu_font_size: "Schriftgröße:"
+  shortcuts:
+    heading: "Tastenkürzel"
+    hint: "Auf einen Tastenkürzelnamen klicken und neue Taste drücken"
+    not_set: "Nicht festgelegt"
+    reset_defaults: "Auf Standard zurücksetzen"
+  lock:
+    heading: "Sperre"
+    password_section: "Passwortkonfiguration:"
+    set_password: "Passwort festlegen"
+    change_password: "Passwort ändern"
+    clear_password: "Passwort löschen"
+    lock_section: "Sperre:"
+    lock_overlay_color: "Overlay-Farbe:"
+  buttons:
+    apply: "Anwenden"
+    close: "Schließen"
+
+shortcut_labels:
+  new_terminal: "Neues Terminal"
+  close_terminal: "Terminal schließen"
+  workspace_up: "Arbeitsbereich nach oben"
+  workspace_down: "Arbeitsbereich nach unten"
+  panel_left: "Panel links"
+  panel_right: "Panel rechts"
+  lock_workspace: "Arbeitsbereich sperren"
+  history_menu: "Verlaufsmenü"
+  history_prev: "Vorheriger Verlauf"
+  history_next: "Nächster Verlauf"
+  toggle_workspace_sidebar: "Arbeitsbereichsleiste ein/ausblenden"
+  zoom_in: "Vergrößern"
+  zoom_out: "Verkleinern"
+  shortcuts_heading: "Tastenkürzel"
+
+workspace:
+  heading: "Arbeitsbereiche"
+  new: "+ Neuer Arbeitsbereich"
+  rename: "Umbenennen"
+  save_as_template: "Als Vorlage speichern"
+  close: "Schließen"
+  rename_confirm: "OK"
+  rename_cancel: "Abbrechen"
+  drag_handle_hint: "Ziehen zum Neuanordnen"
+  close_ws_hint: "Arbeitsbereich schließen"
+  locked_hint: "Gesperrter Arbeitsbereich"
+  unlocked_hint: "Entsperrter Arbeitsbereich"
+  empty_hint: "Auf '+ Neuer Arbeitsbereich' klicken zum Erstellen"
+  templates: "Vorlagen"
+  templates_empty: "(leer)"
+  name_prefix: "Arbeitsbereich "
+
+close_confirm:
+  message_prefix: "Möchten Sie den Arbeitsbereich \""
+  message_suffix: "\" wirklich schließen?"
+  confirm: "Bestätigen"
+  cancel: "Abbrechen"
+
+password:
+  enter: "Passwort eingeben:"
+  confirm: "Passwort bestätigen:"
+  original: "Aktuelles Passwort:"
+  new: "Neues Passwort:"
+  confirm_new: "Neues Passwort bestätigen:"
+  input_label: "Passwort:"
+  mismatch: "Keine Übereinstimmung"
+  match: "Übereinstimmung"
+  empty_error: "Passwort darf nicht leer sein"
+  mismatch_error: "Passwörter stimmen nicht überein"
+  wrong_error: "Aktuelles Passwort falsch"
+  wrong_password: "Falsches Passwort"
+  confirm_button: "Bestätigen"
+  cancel_button: "Abbrechen"
+  set_title: "Passwort festlegen"
+  change_title: "Passwort ändern"
+  clear_title: "Passwort löschen"
+
+lock_overlay:
+  title: "Dieser Arbeitsbereich ist gesperrt"
+  password_label: "Passwort:"
+  unlock_button: "Entsperren"
+  wrong_password: "Falsches Passwort"
+
+terminal:
+  not_found: "Terminal nicht gefunden"
+  rename: "Umbenennen"
+  clear_history: "Befehlsverlauf löschen"
+  new_tab: "+ Neuer Tab"
+  add_tab: "+ Tab"
+  rename_hint: "Name eingeben..."
+  default_name_prefix: "Terminal "
+
+theme:
+  light: "Hell"
+  dark: "Dunkel"
+
+about:
+  menu_label: "Über"
+  title: "Über OpenZoo"
+  version_label: "Version"
+  description: "Multifunktionaler Terminalmanager mit Registerkartenlayout, Befehlsverlauf, globaler Skalierung und verschlüsselten Arbeitsbereichen für effiziente Terminalverwaltung."
+  homepage_label: "Webseite"
+  license_label: "Lizenz"
+  credits_label: "Danksagung"
+  credits: "Basiert auf Open-Source-Projekten wie egui, egui_dock, alacritty_terminal und egui_term."
+  close: "Schließen"

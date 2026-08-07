@@ -1,0 +1,153 @@
+display_name: "हिन्दी"
+
+menu:
+  file: "फ़ाइल"
+  view: "दृश्य"
+  language: "भाषा"
+  theme: "थीम"
+
+file_menu:
+  save: "सहेजें"
+  load: "लोड करें"
+  save_as: "नाम सहेजें..."
+
+  exit: "बाहर निकलें"
+
+view_menu:
+  split_right: "दाईं ओर विभाजित करें"
+  split_down: "नीचे विभाजित करें"
+  settings: "सेटिंग्स"
+  workspace_toggle: "कार्यक्षेत्र"
+
+settings:
+  title: "सेटिंग्स"
+  tabs:
+    general: "सामान्य"
+    appearance: "रूप"
+    shortcuts: "शॉर्टकट"
+    lock: "लॉक"
+  general:
+    heading: "सामान्य"
+    scene_info: "दृश्य और टेम्पलेट निश्चित पथ का उपयोग करते हैं:"
+    scene_path: "  दृश्य: ./scene.json"
+    templates_path: "  टेम्पलेट: ./templates/"
+    history_section: "इतिहास"
+    max_history: "अधिकतम प्रविष्टियाँ:"
+    scrollback: "स्क्रॉलबैक:"
+    clear_all_history: "सभी इतिहास साफ़ करें"
+  appearance:
+    heading: "रूप"
+    terminal_section: "टर्मिनल रूप"
+    font_size: "फ़ॉन्ट आकार:"
+    cell_spacing: "अक्षर अंतराल:"
+    font_family: "फ़ॉन्ट:"
+    bg_color: "पृष्ठभूमि:"
+    fg_color: "अग्रभूमि:"
+    command_menu_section: "कमांड मेनू"
+    menu_bg_color: "पृष्ठभूमि:"
+    menu_fg_color: "पाठ रंग:"
+    menu_font_size: "फ़ॉन्ट आकार:"
+  shortcuts:
+    heading: "शॉर्टकट"
+    hint: "एक शॉर्टकट पर क्लिक करें और नई कुंजी दबाएँ"
+    not_set: "सेट नहीं है"
+    reset_defaults: "डिफ़ॉल्ट पर पुनर्स्थापित करें"
+  lock:
+    heading: "लॉक"
+    password_section: "पासवर्ड कॉन्फ़िगरेशन:"
+    set_password: "पासवर्ड सेट करें"
+    change_password: "पासवर्ड बदलें"
+    clear_password: "पासवर्ड साफ़ करें"
+    lock_section: "लॉक:"
+    lock_overlay_color: "ओवरले रंग:"
+  buttons:
+    apply: "लागू करें"
+    close: "बंद करें"
+
+shortcut_labels:
+  new_terminal: "नया टर्मिनल"
+  close_terminal: "टर्मिनल बंद करें"
+  workspace_up: "कार्यक्षेत्र ऊपर"
+  workspace_down: "कार्यक्षेत्र नीचे"
+  panel_left: "पैनल बाएँ"
+  panel_right: "पैनल दाएँ"
+  lock_workspace: "कार्यक्षेत्र लॉक करें"
+  history_menu: "इतिहास मेनू"
+  history_prev: "पिछला इतिहास"
+  history_next: "अगला इतिहास"
+  toggle_workspace_sidebar: "कार्यक्षेत्र पट्टी दिखाएँ/छुपाएँ"
+  zoom_in: "बड़ा करें"
+  zoom_out: "छोटा करें"
+  shortcuts_heading: "शॉर्टकट"
+
+workspace:
+  heading: "कार्यक्षेत्र"
+  new: "+ नया कार्यक्षेत्र"
+  rename: "नाम बदलें"
+  save_as_template: "टेम्पलेट के रूप में सहेजें"
+  close: "बंद करें"
+  rename_confirm: "ठीक है"
+  rename_cancel: "रद्द करें"
+  drag_handle_hint: "पुनर्व्यवस्थित करने के लिए खींचें"
+  close_ws_hint: "कार्यक्षेत्र बंद करें"
+  locked_hint: "लॉक किया गया कार्यक्षेत्र"
+  unlocked_hint: "अनलॉक किया गया कार्यक्षेत्र"
+  empty_hint: "बनाने के लिए '+ नया कार्यक्षेत्र' पर क्लिक करें"
+  templates: "टेम्पलेट"
+  templates_empty: "(खाली)"
+  name_prefix: "कार्यक्षेत्र "
+
+close_confirm:
+  message_prefix: "क्या आप वाकई कार्यक्षेत्र \""
+  message_suffix: "\" को बंद करना चाहते हैं?"
+  confirm: "पुष्टि करें"
+  cancel: "रद्द करें"
+
+password:
+  enter: "पासवर्ड दर्ज करें:"
+  confirm: "पासवर्ड पुष्टि करें:"
+  original: "वर्तमान पासवर्ड:"
+  new: "नया पासवर्ड:"
+  confirm_new: "नया पासवर्ड पुष्टि करें:"
+  input_label: "पासवर्ड:"
+  mismatch: "मेल नहीं खाता"
+  match: "मेल खाता है"
+  empty_error: "पासवर्ड खाली नहीं हो सकता"
+  mismatch_error: "पासवर्ड मेल नहीं खाते"
+  wrong_error: "वर्तमान पासवर्ड गलत है"
+  wrong_password: "गलत पासवर्ड"
+  confirm_button: "पुष्टि करें"
+  cancel_button: "रद्द करें"
+  set_title: "पासवर्ड सेट करें"
+  change_title: "पासवर्ड बदलें"
+  clear_title: "पासवर्ड साफ़ करें"
+
+lock_overlay:
+  title: "यह कार्यक्षेत्र लॉक है"
+  password_label: "पासवर्ड:"
+  unlock_button: "अनलॉक करें"
+  wrong_password: "गलत पासवर्ड"
+
+terminal:
+  not_found: "टर्मिनल नहीं मिला"
+  rename: "नाम बदलें"
+  clear_history: "कमांड इतिहास साफ़ करें"
+  new_tab: "+ नया टैब"
+  add_tab: "+ टैब"
+  rename_hint: "नाम दर्ज करें..."
+  default_name_prefix: "टर्मिनल "
+
+theme:
+  light: "हल्का"
+  dark: "गहरा"
+
+about:
+  menu_label: "के बारे में"
+  title: "OpenZoo के बारे में"
+  version_label: "संस्करण"
+  description: "टैब लेआउट, कमांड इतिहास, वैश्विक इंटरफ़ेस स्केलिंग और एन्क्रिप्टेड कार्यक्षेत्र के साथ बहुउपयोगी स्टैक्ड टर्मिनल प्रबंधक।"
+  homepage_label: "मुखपृष्ठ"
+  license_label: "लाइसेंस"
+  credits_label: "आभार"
+  credits: "egui, egui_dock, alacritty_terminal, और egui_term सहित ओपन-सोर्स परियोजनाओं पर निर्मित।"
+  close: "बंद करें"

@@ -84,7 +84,7 @@ fn default_menu_font_size() -> f32 {
 fn default_lock_color() -> [u8; 3] {
     [30, 30, 60]
 }
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct ShortcutBinding {
     key: String,
     ctrl: bool,
@@ -184,6 +184,15 @@ fn default_key_binds() -> HashMap<String, ShortcutBinding> {
             alt: false,
         },
     );
+    m.insert(
+        "toggle_workspace_sidebar".into(),
+        ShortcutBinding {
+            key: "Tab".into(),
+            ctrl: false,
+            shift: false,
+            alt: false,
+        },
+    );
     m
 }
 
@@ -259,7 +268,7 @@ fn shortcut_display(b: &ShortcutBinding) -> String {
     s
 }
 
-fn shortcut_hint_ids() -> [&'static str; 10] {
+fn shortcut_hint_ids() -> [&'static str; 11] {
     [
         "new_terminal",
         "close_terminal",
@@ -271,6 +280,7 @@ fn shortcut_hint_ids() -> [&'static str; 10] {
         "history_menu",
         "history_prev",
         "history_next",
+        "toggle_workspace_sidebar",
     ]
 }
 
@@ -286,7 +296,29 @@ fn shortcut_label_for<'a>(texts: &'a crate::i18n::Texts, id: &str) -> &'a str {
         "history_menu" => &texts.shortcut_labels.history_menu,
         "history_prev" => &texts.shortcut_labels.history_prev,
         "history_next" => &texts.shortcut_labels.history_next,
+        "toggle_workspace_sidebar" => &texts.shortcut_labels.toggle_workspace_sidebar,
+        "zoom_in" => &texts.shortcut_labels.zoom_in,
+        "zoom_out" => &texts.shortcut_labels.zoom_out,
         _ => "",
+    }
+}
+
+#[cfg(test)]
+fn binding_matches_key(
+    binding: &ShortcutBinding,
+    key: egui::Key,
+    modifiers: egui::Modifiers,
+) -> bool {
+    binding_to_key(binding) == Some(key) && binding_to_modifiers(binding) == modifiers
+}
+
+fn workspace_action_column_width(has_close: bool, has_lock: bool, item_spacing: f32) -> f32 {
+    let count = usize::from(has_close) + usize::from(has_lock);
+    if count == 0 {
+        0.0
+    } else {
+        count as f32 * WORKSPACE_ACTION_BUTTON_SIZE.x
+            + (count.saturating_sub(1) as f32 * item_spacing)
     }
 }
 
@@ -294,7 +326,47 @@ fn shortcut_hint_available_height(available_height: f32) -> f32 {
     available_height.max(0.0)
 }
 
+fn paint_keycap(ui: &mut egui::Ui, text: &str) {
+    let galley = ui.fonts(|f| {
+        f.layout_no_wrap(
+            text.to_string(),
+            egui::FontId::proportional(11.0),
+            ui.visuals().text_color(),
+        )
+    });
+    let pad = egui::vec2(5.0, 2.0);
+    let size = galley.size() + pad * 2.0;
+    let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+    let visuals = ui.visuals();
+    let bg = visuals.widgets.inactive.weak_bg_fill.linear_multiply(0.6)
+        + visuals.window_fill.linear_multiply(0.4);
+    let stroke = visuals.widgets.noninteractive.bg_stroke;
+    ui.painter()
+        .rect(rect, 3.0, bg, stroke, egui::StrokeKind::Inside);
+    ui.painter()
+        .galley(rect.min + pad, galley, visuals.text_color());
+}
+
 const WORKSPACE_ACTION_BUTTON_SIZE: egui::Vec2 = egui::vec2(24.0, 24.0);
+
+fn check_column_width(ui: &egui::Ui) -> f32 {
+    ui.spacing().icon_width + ui.spacing().icon_spacing + ui.spacing().button_padding.x
+}
+
+fn check_indicator(ui: &mut egui::Ui, selected: bool, width: f32) {
+    let height = ui.spacing().interact_size.y;
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
+    if selected {
+        let color = ui.visuals().text_color();
+        ui.painter().text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            "✓",
+            egui::FontId::proportional(14.0),
+            color,
+        );
+    }
+}
 
 fn workspace_lock_icon(is_locked: bool) -> &'static str {
     if is_locked {
@@ -388,6 +460,48 @@ fn check_shortcut(
     false
 }
 
+fn consume_exact_shortcut(
+    ctx: &egui::Context,
+    binds: &HashMap<String, ShortcutBinding>,
+    name: &str,
+) -> bool {
+    let Some(binding) = binds.get(name) else {
+        return false;
+    };
+    let Some(key) = binding_to_key(binding) else {
+        return false;
+    };
+    consume_exact_key(ctx, key, binding_to_modifiers(binding))
+}
+
+fn consume_exact_key(ctx: &egui::Context, key: egui::Key, modifiers: egui::Modifiers) -> bool {
+    let mut matched = false;
+    ctx.input_mut(|input| {
+        input.events.retain(|event| {
+            let is_match = matches!(
+                event,
+                egui::Event::Key {
+                    key: event_key,
+                    modifiers: event_modifiers,
+                    pressed: true,
+                    ..
+                } if *event_key == key && *event_modifiers == modifiers
+            );
+            matched |= is_match;
+            !is_match
+        });
+    });
+    matched
+}
+
+fn global_shortcuts_allowed(app: &App) -> bool {
+    !app.show_settings
+        && !app.show_about
+        && app.pw_popup.is_none()
+        && app.unlock_popup.is_none()
+        && app.binding_recording.is_none()
+}
+
 fn history_menu_shortcut_released(
     ctx: &egui::Context,
     binds: &HashMap<String, ShortcutBinding>,
@@ -443,6 +557,147 @@ fn toggle_history_menu(nav: &mut Option<HistoryNav>, entries: Vec<String>) {
     }
 }
 
+fn load_multilingual_fonts(fonts: &mut egui::FontDefinitions) {
+    // Bundled fonts — guaranteed cross-platform
+    let bundled: &[(&str, &[u8])] = &[
+        (
+            "noto-cjk",
+            include_bytes!("../assets/fonts/NotoSansCJK-Regular.ttc"),
+        ),
+        (
+            "noto-devanagari",
+            include_bytes!("../assets/fonts/Lohit-Devanagari.ttf"),
+        ),
+        (
+            "noto-arabic",
+            include_bytes!("../assets/fonts/NotoSansArabic-Regular.ttf"),
+        ),
+    ];
+    for (name, data) in bundled {
+        if !fonts.font_data.contains_key(*name) {
+            fonts.font_data.insert(
+                (*name).into(),
+                std::sync::Arc::new(egui::FontData::from_owned(data.to_vec()).tweak(
+                    egui::FontTweak {
+                        scale: 0.9,
+                        ..Default::default()
+                    },
+                )),
+            );
+        }
+    }
+    // Also try to load system CJK/Devanagari/Arabic fonts as fallback/supplement
+    let system_candidates: &[(&str, &[&str])] = &[
+        (
+            "noto-cjk-sys",
+            &["NotoSansCJK-Regular.ttc", "NotoSansCJK-Medium.ttc"],
+        ),
+        (
+            "noto-devanagari-sys",
+            &["Lohit-Devanagari.ttf", "kalimati.ttf"],
+        ),
+        ("freefont-sys", &["FreeSans.ttf", "FreeSerif.ttf"]),
+    ];
+    for (name, filenames) in system_candidates {
+        if fonts.font_data.contains_key(*name) {
+            continue;
+        }
+        if let Some(path) = find_system_font(filenames) {
+            if let Ok(data) = std::fs::read(&path) {
+                fonts.font_data.insert(
+                    (*name).into(),
+                    std::sync::Arc::new(egui::FontData::from_owned(data).tweak(egui::FontTweak {
+                        scale: 0.9,
+                        ..Default::default()
+                    })),
+                );
+            }
+        }
+    }
+
+    let order = [
+        "noto-cjk",
+        "noto-devanagari",
+        "noto-arabic",
+        "noto-cjk-sys",
+        "noto-devanagari-sys",
+        "freefont-sys",
+    ];
+    // Append to END of font families — egui tries fonts front-to-back,
+    // so default fonts render Latin first, CJK is fallback only.
+    // This preserves the original layout metrics.
+    if let Some(prop) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
+        for name in &order {
+            if fonts.font_data.contains_key(*name) {
+                prop.push((*name).into());
+            }
+        }
+    }
+    if let Some(mono) = fonts.families.get_mut(&egui::FontFamily::Monospace) {
+        for name in &order {
+            if fonts.font_data.contains_key(*name) {
+                mono.push((*name).into());
+            }
+        }
+    }
+}
+
+fn font_search_dirs() -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    #[cfg(target_os = "linux")]
+    {
+        dirs.push(PathBuf::from("/usr/share/fonts"));
+        dirs.push(PathBuf::from("/usr/local/share/fonts"));
+        if let Some(home) = std::env::var_os("HOME") {
+            let h = PathBuf::from(home);
+            dirs.push(h.join(".local/share/fonts"));
+            dirs.push(h.join(".fonts"));
+        }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(win) = std::env::var_os("WINDIR") {
+            dirs.push(PathBuf::from(win).join("Fonts"));
+        }
+        if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+            dirs.push(PathBuf::from(local).join("Microsoft/Windows/Fonts"));
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        dirs.push(PathBuf::from("/System/Library/Fonts"));
+        dirs.push(PathBuf::from("/Library/Fonts"));
+        if let Some(home) = dirs::home_dir() {
+            dirs.push(home.join("Library/Fonts"));
+        }
+    }
+    dirs
+}
+
+fn find_system_font(filenames: &[&str]) -> Option<PathBuf> {
+    for dir in &font_search_dirs() {
+        for name in filenames {
+            let path = dir.join(name);
+            if path.exists() {
+                return Some(path);
+            }
+            // Also search subdirectories (Linux font structure)
+            if let Ok(entries) = std::fs::read_dir(dir) {
+                for entry in entries.flatten() {
+                    let p = entry.path();
+                    if p.is_dir() {
+                        let candidate = p.join(name);
+                        if candidate.exists() {
+                            return Some(candidate);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct SettingsWindowState {
     x: f32,
@@ -462,10 +717,40 @@ impl Default for SettingsWindowState {
     }
 }
 
+fn app_data_dir() -> PathBuf {
+    let base = dirs::config_dir().unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+    base.join("open-zoo")
+}
+
+fn ensure_data_dir() {
+    let _ = std::fs::create_dir_all(app_data_dir());
+}
+
+fn migrate_file(filename: &str) {
+    let old = std::env::current_dir().unwrap_or_default().join(filename);
+    let new = app_data_dir().join(filename);
+    if old.exists() && !new.exists() {
+        let _ = std::fs::copy(&old, &new);
+    }
+}
+
+fn migrate_dir(dirname: &str) {
+    let old = std::env::current_dir().unwrap_or_default().join(dirname);
+    let new = app_data_dir().join(dirname);
+    if old.exists() && !new.exists() {
+        let _ = std::fs::create_dir_all(&new);
+        if let Ok(entries) = std::fs::read_dir(&old) {
+            for entry in entries.flatten() {
+                if let Some(name) = entry.file_name().to_str() {
+                    let _ = std::fs::copy(entry.path(), new.join(name));
+                }
+            }
+        }
+    }
+}
+
 fn settings_path() -> PathBuf {
-    std::env::current_dir()
-        .unwrap_or_default()
-        .join("settings.json")
+    app_data_dir().join("settings.json")
 }
 
 fn load_settings() -> AppSettings {
@@ -473,15 +758,26 @@ fn load_settings() -> AppSettings {
     if path.exists() {
         if let Ok(content) = std::fs::read_to_string(&path) {
             if let Ok(settings) = serde_json::from_str(&content) {
-                return normalize_history_bindings(settings);
+                let (settings, changed) = normalize_settings(settings);
+                if changed {
+                    let _ = save_settings(&settings);
+                }
+                return settings;
             }
         }
     }
     AppSettings::default()
 }
 
-fn normalize_history_bindings(mut settings: AppSettings) -> AppSettings {
+fn normalize_settings(mut settings: AppSettings) -> (AppSettings, bool) {
+    let original = settings.key_binds.clone();
     let defaults = default_key_binds();
+    if !settings.key_binds.contains_key("toggle_workspace_sidebar") {
+        settings.key_binds.insert(
+            "toggle_workspace_sidebar".into(),
+            defaults.get("toggle_workspace_sidebar").cloned().unwrap(),
+        );
+    }
     if !settings.key_binds.contains_key("history_menu") {
         settings.key_binds.insert(
             "history_menu".into(),
@@ -506,7 +802,13 @@ fn normalize_history_bindings(mut settings: AppSettings) -> AppSettings {
     }
     settings.key_binds.remove("history_up");
     settings.key_binds.remove("history_down");
-    settings
+    let changed = settings.key_binds != original;
+    (settings, changed)
+}
+
+#[cfg(test)]
+fn normalize_history_bindings(settings: AppSettings) -> AppSettings {
+    normalize_settings(settings).0
 }
 
 fn save_settings(settings: &AppSettings) -> Result<(), anyhow::Error> {
@@ -540,19 +842,12 @@ impl Default for AppSettings {
 
 fn scan_system_fonts() -> Vec<(String, String)> {
     let mut result = Vec::new();
-    let font_dirs = [
-        "/usr/share/fonts",
-        "/usr/local/share/fonts",
-        "/home/kunpengwang/.local/share/fonts",
-        "/home/kunpengwang/.fonts",
-    ];
     let mut seen = std::collections::HashSet::new();
-    for dir in &font_dirs {
-        let path = std::path::Path::new(dir);
-        if !path.exists() {
+    for dir in &font_search_dirs() {
+        if !dir.exists() {
             continue;
         }
-        for entry in walk_font_dir(path) {
+        for entry in walk_font_dir(dir) {
             if !seen.contains(&entry.0) {
                 seen.insert(entry.0.clone());
                 result.push(entry);
@@ -585,9 +880,7 @@ fn walk_font_dir(dir: &std::path::Path) -> Vec<(String, String)> {
 }
 
 fn scene_path() -> PathBuf {
-    std::env::current_dir()
-        .unwrap_or_default()
-        .join("scene.json")
+    app_data_dir().join("scene.json")
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -668,6 +961,7 @@ pub struct App {
     pending_clear_history: bool,
     settings: AppSettings,
     show_settings: bool,
+    show_about: bool,
     settings_edit: AppSettings,
     settings_tab: usize,
     binding_recording: Option<String>,
@@ -696,6 +990,7 @@ pub struct App {
     terminal_focus_id: Option<egui::Id>,
     texts: crate::i18n::Texts,
     available_languages: Vec<(String, String)>,
+    workspace_sidebar_visible: bool,
 }
 
 struct TerminalData {
@@ -709,10 +1004,12 @@ fn create_terminal(
     working_dir: &str,
     id_counter: &mut u64,
 ) -> Option<TerminalInstance> {
-    #[cfg(unix)]
+    #[cfg(target_os = "windows")]
+    let shell = std::env::var("COMSPEC").unwrap_or_else(|_| "powershell.exe".to_string());
+    #[cfg(target_os = "macos")]
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+    #[cfg(all(unix, not(target_os = "macos")))]
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
-    #[cfg(not(unix))]
-    let shell = "cmd.exe".to_string();
 
     let cwd_str = if std::path::PathBuf::from(working_dir).exists() {
         working_dir.to_string()
@@ -820,27 +1117,8 @@ impl App {
                 registered_names.push(name.clone());
             }
         }
-        // Also try CJK font
-        if let Ok(cjk_data) = std::fs::read("/usr/share/fonts/opentype/noto/NotoSansCJK-Medium.ttc")
-        {
-            fonts.font_data.insert(
-                "noto-cjk".into(),
-                std::sync::Arc::new(egui::FontData::from_owned(cjk_data).tweak(egui::FontTweak {
-                    scale: 0.9,
-                    ..Default::default()
-                })),
-            );
-            fonts
-                .families
-                .get_mut(&egui::FontFamily::Proportional)
-                .unwrap()
-                .insert(0, "noto-cjk".into());
-            fonts
-                .families
-                .get_mut(&egui::FontFamily::Monospace)
-                .unwrap()
-                .push("noto-cjk".into());
-        }
+        // Load CJK, Devanagari, and other multilingual fonts
+        load_multilingual_fonts(&mut fonts);
         // Register found fonts into Monospace family
         if let Some(mono_family) = fonts.families.get_mut(&egui::FontFamily::Monospace) {
             for name in &registered_names {
@@ -852,9 +1130,12 @@ impl App {
         crate::theme::apply_egui_theme(ctx, settings.theme);
 
         let font_names: Vec<String> = registered_names;
-        let db_path = std::env::current_dir()
-            .unwrap_or_default()
-            .join("history.db");
+        ensure_data_dir();
+        migrate_file("settings.json");
+        migrate_file("scene.json");
+        migrate_file("history.db");
+        migrate_dir("templates");
+        let db_path = app_data_dir().join("history.db");
         let language = settings.language.clone();
         let available_languages = crate::i18n::scan_available_languages();
         let mut app = App {
@@ -881,6 +1162,7 @@ impl App {
             pending_clear_history: false,
             settings,
             show_settings: false,
+            show_about: false,
             settings_edit: AppSettings::default(),
             settings_tab: 0,
             binding_recording: None,
@@ -909,6 +1191,7 @@ impl App {
             terminal_focus_id: None,
             texts: crate::i18n::load_language(&language),
             available_languages,
+            workspace_sidebar_visible: true,
         };
 
         let scene_path = scene_path();
@@ -960,9 +1243,7 @@ impl App {
     }
 
     fn templates_dir(&self) -> PathBuf {
-        std::env::current_dir()
-            .unwrap_or_default()
-            .join("templates")
+        app_data_dir().join("templates")
     }
 
     fn refresh_template_files(&mut self) {
@@ -1382,6 +1663,7 @@ impl eframe::App for App {
         }
 
         let binds = self.settings.key_binds.clone();
+        let binding_was_recording = self.binding_recording.is_some();
         if self.binding_recording.is_some() || !ctx.input(|input| input.focused) {
             self.alt_key = AltKeyState::default();
         }
@@ -1452,9 +1734,19 @@ impl eframe::App for App {
             }
         }
 
-        // Consume Tab key to prevent egui focus navigation, send to focused terminal
         if !workspace_renaming
-            && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab))
+            && global_shortcuts_allowed(self)
+            && !binding_was_recording
+            && consume_exact_shortcut(ctx, &binds, "toggle_workspace_sidebar")
+        {
+            self.workspace_sidebar_visible = !self.workspace_sidebar_visible;
+        }
+
+        // Ctrl+Tab sends a tab character to the focused terminal. Plain Tab toggles the sidebar.
+        if !workspace_renaming
+            && global_shortcuts_allowed(self)
+            && !binding_was_recording
+            && consume_exact_key(ctx, egui::Key::Tab, egui::Modifiers::CTRL)
         {
             if let Some(tab) = &self.focused_terminal.clone() {
                 if let Some(td) = self.terminals.get_mut(tab) {
@@ -1641,20 +1933,39 @@ impl eframe::App for App {
                             }
                         }
                     }
+                    ui.separator();
+                    let check_width = check_column_width(ui);
+                    let visible = self.workspace_sidebar_visible;
+                    let eye_icon = if visible {
+                        egui_phosphor::regular::EYE
+                    } else {
+                        egui_phosphor::regular::EYE_SLASH
+                    };
+                    ui.horizontal(|ui| {
+                        check_indicator(ui, visible, check_width);
+                        if ui.button(eye_icon).clicked() {
+                            self.workspace_sidebar_visible = !self.workspace_sidebar_visible;
+                            ui.close_menu();
+                        }
+                        if ui.button(&self.texts.view_menu.workspace_toggle).clicked() {
+                            self.workspace_sidebar_visible = !self.workspace_sidebar_visible;
+                            ui.close_menu();
+                        }
+                    });
                 });
                 ui.menu_button(self.texts.menu.language.clone(), |ui| {
                     let current_code = self.settings.language.clone();
                     let languages = self.available_languages.clone();
+                    let check_width = check_column_width(ui);
                     for (code, display_name) in &languages {
-                        let label = if *code == current_code {
-                            format!("✓ {}", display_name)
-                        } else {
-                            display_name.clone()
-                        };
-                        if ui.button(&label).clicked() {
-                            self.switch_language(code);
-                            ui.close_menu();
-                        }
+                        let selected = *code == current_code;
+                        ui.horizontal(|ui| {
+                            check_indicator(ui, selected, check_width);
+                            if ui.button(display_name).clicked() {
+                                self.switch_language(code);
+                                ui.close_menu();
+                            }
+                        });
                     }
                 });
                 ui.menu_button(self.texts.menu.theme.clone(), |ui| {
@@ -1662,21 +1973,24 @@ impl eframe::App for App {
                     let light = self.texts.theme.light.clone();
                     let dark = self.texts.theme.dark.clone();
                     let modes = [(ThemeMode::Light, light), (ThemeMode::Dark, dark)];
+                    let check_width = check_column_width(ui);
                     for (mode, label) in &modes {
-                        let text = if *mode == current {
-                            format!("✓ {}", label)
-                        } else {
-                            label.clone()
-                        };
-                        if ui.button(text).clicked() {
-                            self.switch_theme(ctx, *mode);
-                            ui.close_menu();
-                        }
+                        let selected = *mode == current;
+                        ui.horizontal(|ui| {
+                            check_indicator(ui, selected, check_width);
+                            if ui.button(label).clicked() {
+                                self.switch_theme(ctx, *mode);
+                                ui.close_menu();
+                            }
+                        });
                     }
                 });
                 if ui.button(self.texts.view_menu.settings.clone()).clicked() {
                     self.show_settings = true;
                     self.settings_edit = self.settings.clone();
+                }
+                if ui.button(self.texts.about.menu_label.clone()).clicked() {
+                    self.show_about = true;
                 }
             });
         });
@@ -1851,6 +2165,14 @@ impl eframe::App for App {
                                     );
                                 });
                             }
+                            ui.separator();
+                            if ui
+                                .button(&self.texts.settings.shortcuts.reset_defaults)
+                                .clicked()
+                            {
+                                self.settings_edit.key_binds = default_key_binds();
+                                self.binding_recording = None;
+                            }
                         }
                         3 => {
                             ui.label(&self.texts.settings.lock.password_section);
@@ -1888,7 +2210,12 @@ impl eframe::App for App {
                     }
 
                     ui.separator();
-                    ui.horizontal(|ui| {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button(&self.texts.workspace.close).clicked() {
+                            self.settings_edit = self.settings.clone();
+                            self.binding_recording = None;
+                            self.show_settings = false;
+                        }
                         if ui.button(&self.texts.settings.buttons.apply).clicked() {
                             self.settings = self.settings_edit.clone();
                             self.history_db.set_max_entries(self.settings.max_history);
@@ -1922,22 +2249,8 @@ impl eframe::App for App {
                                         }
                                     }
                                 }
-                                // CJK font
-                                if let Ok(cjk_data) = std::fs::read(
-                                    "/usr/share/fonts/opentype/noto/NotoSansCJK-Medium.ttc",
-                                ) {
-                                    fonts.font_data.insert(
-                                        "noto-cjk".into(),
-                                        std::sync::Arc::new(
-                                            egui::FontData::from_owned(cjk_data).tweak(
-                                                egui::FontTweak {
-                                                    scale: 0.9,
-                                                    ..Default::default()
-                                                },
-                                            ),
-                                        ),
-                                    );
-                                }
+                                // Load multilingual fonts (CJK, Devanagari, etc.)
+                                load_multilingual_fonts(&mut fonts);
                                 // Put selected font first in Monospace
                                 if let Some(mono) =
                                     fonts.families.get_mut(&egui::FontFamily::Monospace)
@@ -1945,26 +2258,69 @@ impl eframe::App for App {
                                     if !ff.is_empty() && fonts.font_data.contains_key(&ff) {
                                         mono.insert(0, ff.clone());
                                     }
-                                    mono.push("noto-cjk".into());
-                                }
-                                if let Some(prop) =
-                                    fonts.families.get_mut(&egui::FontFamily::Proportional)
-                                {
-                                    prop.insert(0, "noto-cjk".into());
                                 }
                                 ctx2.set_fonts(fonts);
                             });
-                        }
-                        if ui.button(&self.texts.workspace.close).clicked() {
-                            self.settings_edit = self.settings.clone();
-                            self.show_settings = false;
                         }
                     });
                 });
             if !open {
                 self.show_settings = false;
+                self.binding_recording = None;
                 self.settings.settings_window = self.settings_edit.settings_window.clone();
                 let _ = save_settings(&self.settings);
+            }
+        }
+
+        if self.show_about {
+            let mut open = self.show_about;
+            let mut clicked_close = false;
+            egui::Window::new(&self.texts.about.title)
+                .open(&mut open)
+                .resizable(false)
+                .collapsible(false)
+                .default_width(380.0)
+                .show(ctx, |ui| {
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(4.0);
+                        ui.heading(
+                            egui::RichText::new(env!("CARGO_PKG_NAME"))
+                                .size(22.0)
+                                .strong(),
+                        );
+                        ui.add_space(2.0);
+                        ui.label(format!(
+                            "{}: v{}",
+                            self.texts.about.version_label,
+                            env!("CARGO_PKG_VERSION")
+                        ));
+                    });
+                    ui.separator();
+                    ui.label(&self.texts.about.description);
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        ui.label(&self.texts.about.homepage_label);
+                        ui.hyperlink_to(
+                            "https://github.com/155366311/open-zoo",
+                            "https://github.com/155366311/open-zoo",
+                        );
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label(&self.texts.about.license_label);
+                        ui.label(env!("CARGO_PKG_LICENSE"));
+                    });
+                    ui.separator();
+                    ui.label(&self.texts.about.credits_label);
+                    ui.label(&self.texts.about.credits);
+                    ui.add_space(4.0);
+                    ui.vertical_centered(|ui| {
+                        if ui.button(&self.texts.about.close).clicked() {
+                            clicked_close = true;
+                        }
+                    });
+                });
+            if !open || clicked_close {
+                self.show_about = false;
             }
         }
 
@@ -2198,321 +2554,391 @@ impl eframe::App for App {
             }
         }
 
-        egui::SidePanel::left("navigation")
-            .default_width(WORKSPACE_SIDEBAR_DEFAULT_WIDTH)
-            .show(ctx, |ui| {
-                ui.heading(&self.texts.workspace.heading);
-                ui.separator();
-                let mut to_select = None;
-                let panel_count = self.panels.len();
-                let mut reorder = None;
-                self.panel_rects.clear();
-                self.panel_rects.resize(panel_count, egui::Rect::NOTHING);
-
-                // Detect drag state from pointer
-                let pointer_down = ui.input(|i| i.pointer.primary_down());
-                let pointer_pos = ui.input(|i| i.pointer.interact_pos());
-                let pointer_released = ui.input(|i| i.pointer.primary_released());
-
-                for i in 0..panel_count {
-                    let is_active = i == self.active_panel;
-                    if self.renaming_panel == Some(i) {
-                        let mut confirm = false;
-                        let mut cancel = false;
-                        let response = ui
-                            .horizontal(|ui| {
-                                let response = ui.add(
-                                    egui::TextEdit::singleline(&mut self.rename_buffer)
-                                        .font(egui::FontId::monospace(14.0))
-                                        .desired_width((ui.available_width() - 112.0).max(80.0))
-                                        .id_source("workspace_rename"),
-                                );
-                                response.request_focus();
-                                confirm = ui.button(&self.texts.workspace.rename_confirm).clicked();
-                                cancel = ui.button(&self.texts.workspace.rename_cancel).clicked();
-                                response
-                            })
-                            .response;
-                        self.panel_rects[i] = response.rect;
-                        let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
-                        let escape = ui
-                            .input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
-                        if confirm || enter {
-                            apply_panel_rename(&mut self.panels[i], &self.rename_buffer);
-                            self.renaming_panel = None;
-                        } else if cancel || escape {
-                            cancel_workspace_rename(&mut self.renaming_panel, true);
+        if self.workspace_sidebar_visible {
+            egui::SidePanel::left("navigation")
+                .default_width(WORKSPACE_SIDEBAR_DEFAULT_WIDTH)
+                .show(ctx, |ui| {
+                    ui.heading(&self.texts.workspace.heading);
+                    ui.separator();
+                    // New workspace + templates buttons in one row above the list
+                    ui.horizontal(|ui| {
+                        if ui.button(&self.texts.workspace.new).clicked() {
+                            self.add_panel(ui.ctx());
                         }
-                    } else {
-                        let row = ui.horizontal(|ui| {
-                            let panel_name = self.panels[i].name.clone();
-                            let handle_size = egui::vec2(
-                                WORKSPACE_DRAG_HANDLE_WIDTH,
-                                ui.spacing().interact_size.y,
-                            );
-                            let (handle_rect, handle) =
-                                ui.allocate_exact_size(handle_size, egui::Sense::drag());
-                            let handle_color = if handle.hovered() {
-                                ui.visuals().text_color()
+                        if self.cached_template_files.is_empty() {
+                            self.refresh_template_files();
+                        }
+                        let template_files = self.cached_template_files.clone();
+                        ui.menu_button(&self.texts.workspace.templates, |ui| {
+                            if template_files.is_empty() {
+                                ui.label(&self.texts.workspace.templates_empty);
                             } else {
-                                ui.visuals().weak_text_color()
-                            };
-                            ui.painter().text(
-                                handle_rect.center(),
-                                egui::Align2::CENTER_CENTER,
-                                egui_phosphor::regular::DOTS_SIX_VERTICAL,
-                                egui::FontId::proportional(14.0),
-                                handle_color,
-                            );
-                            let handle =
-                                handle.on_hover_text(&self.texts.workspace.drag_handle_hint);
-                            if handle.drag_started() {
-                                self.drag_src_panel = Some(i);
-                                self.drag_dst_panel = None;
+                                for (display_name, path) in &template_files {
+                                    let path = path.clone();
+                                    let display_name = display_name.clone();
+                                    ui.horizontal(|ui| {
+                                        if ui.button(display_name.as_str()).clicked() {
+                                            self.pending_load_from_template = Some(path.clone());
+                                            ui.close_menu();
+                                        }
+                                        if ui.small_button("×").clicked() {
+                                            self.pending_delete_template = Some(path);
+                                            ui.close_menu();
+                                        }
+                                    });
+                                }
                             }
-                            let response = ui.selectable_label(is_active, &panel_name);
+                        });
+                    });
+                    ui.separator();
+                    let mut to_select = None;
+                    let panel_count = self.panels.len();
+                    let mut reorder = None;
+                    self.panel_rects.clear();
+                    self.panel_rects.resize(panel_count, egui::Rect::NOTHING);
+
+                    // Detect drag state from pointer
+                    let pointer_down = ui.input(|i| i.pointer.primary_down());
+                    let pointer_pos = ui.input(|i| i.pointer.interact_pos());
+                    let pointer_released = ui.input(|i| i.pointer.primary_released());
+
+                    for i in 0..panel_count {
+                        let is_active = i == self.active_panel;
+                        if self.renaming_panel == Some(i) {
+                            let mut confirm = false;
+                            let mut cancel = false;
+                            let response = ui
+                                .horizontal(|ui| {
+                                    let response = ui.add(
+                                        egui::TextEdit::singleline(&mut self.rename_buffer)
+                                            .font(egui::FontId::monospace(14.0))
+                                            .desired_width((ui.available_width() - 112.0).max(80.0))
+                                            .id_source("workspace_rename"),
+                                    );
+                                    response.request_focus();
+                                    confirm =
+                                        ui.button(&self.texts.workspace.rename_confirm).clicked();
+                                    cancel =
+                                        ui.button(&self.texts.workspace.rename_cancel).clicked();
+                                    response
+                                })
+                                .response;
                             self.panel_rects[i] = response.rect;
-
-                            // Click to select
-                            if response.double_clicked() && !renaming {
-                                self.renaming_panel = Some(i);
-                                self.rename_buffer = panel_name;
-                                self.rename_frame_count = 0;
-                                to_select = None;
-                            } else if response.clicked() && !renaming {
-                                to_select = Some(i);
-                            }
-
-                            // Context menu
-                            response.context_menu(|ui| {
-                                if ui.button(&self.texts.workspace.rename).clicked() {
-                                    self.renaming_panel = Some(i);
-                                    self.rename_buffer = self.panels[i].name.clone();
-                                    self.rename_frame_count = 0;
-                                    ui.close_menu();
-                                }
-                                if ui.button(&self.texts.workspace.save_as_template).clicked() {
-                                    self.save_as_template(i);
-                                    ui.close_menu();
-                                }
-                                ui.separator();
-                                if ui.button(&self.texts.settings.buttons.close).clicked() {
-                                    self.close_confirm_panel = Some(i);
-                                    ui.close_menu();
-                                }
+                            let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
+                            let escape = ui.input_mut(|i| {
+                                i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
                             });
+                            if confirm || enter {
+                                apply_panel_rename(&mut self.panels[i], &self.rename_buffer);
+                                self.renaming_panel = None;
+                            } else if cancel || escape {
+                                cancel_workspace_rename(&mut self.renaming_panel, true);
+                            }
+                        } else {
+                            let row = ui.horizontal(|ui| {
+                                let panel_name = self.panels[i].name.clone();
+                                let handle_size = egui::vec2(
+                                    WORKSPACE_DRAG_HANDLE_WIDTH,
+                                    ui.spacing().interact_size.y,
+                                );
+                                let (handle_rect, handle) =
+                                    ui.allocate_exact_size(handle_size, egui::Sense::drag());
+                                let handle_color = if handle.hovered() {
+                                    ui.visuals().text_color()
+                                } else {
+                                    ui.visuals().weak_text_color()
+                                };
+                                ui.painter().text(
+                                    handle_rect.center(),
+                                    egui::Align2::CENTER_CENTER,
+                                    egui_phosphor::regular::DOTS_SIX_VERTICAL,
+                                    egui::FontId::proportional(14.0),
+                                    handle_color,
+                                );
+                                let handle =
+                                    handle.on_hover_text(&self.texts.workspace.drag_handle_hint);
+                                if handle.drag_started() {
+                                    self.drag_src_panel = Some(i);
+                                    self.drag_dst_panel = None;
+                                }
+                                let has_close = self.panels.len() > 1;
+                                let has_lock = has_close || self.locked_panels.contains(&i);
+                                let action_width = workspace_action_column_width(
+                                    has_close,
+                                    has_lock,
+                                    ui.spacing().item_spacing.x,
+                                );
+                                let name_width = (ui.available_width()
+                                    - action_width
+                                    - ui.spacing().item_spacing.x)
+                                    .max(0.0);
+                                let response = ui.add_sized(
+                                    egui::vec2(name_width, ui.spacing().interact_size.y),
+                                    egui::SelectableLabel::new(is_active, &panel_name),
+                                );
+                                self.panel_rects[i] = response.rect;
 
-                            // Lock and close buttons
-                            if self.panels.len() > 1 || self.locked_panels.contains(&i) {
-                                ui.with_layout(
-                                    egui::Layout::right_to_left(egui::Align::Center),
-                                    |ui| {
-                                        if self.panels.len() > 1 {
+                                // Click to select
+                                if response.double_clicked() && !renaming {
+                                    self.renaming_panel = Some(i);
+                                    self.rename_buffer = panel_name;
+                                    self.rename_frame_count = 0;
+                                    to_select = None;
+                                } else if response.clicked() && !renaming {
+                                    to_select = Some(i);
+                                }
+
+                                // Context menu
+                                response.context_menu(|ui| {
+                                    if ui.button(&self.texts.workspace.rename).clicked() {
+                                        self.renaming_panel = Some(i);
+                                        self.rename_buffer = self.panels[i].name.clone();
+                                        self.rename_frame_count = 0;
+                                        ui.close_menu();
+                                    }
+                                    if ui.button(&self.texts.workspace.save_as_template).clicked() {
+                                        self.save_as_template(i);
+                                        ui.close_menu();
+                                    }
+                                    ui.separator();
+                                    if ui.button(&self.texts.settings.buttons.close).clicked() {
+                                        self.close_confirm_panel = Some(i);
+                                        ui.close_menu();
+                                    }
+                                });
+
+                                // Lock and close buttons
+                                if has_lock {
+                                    ui.allocate_ui_with_layout(
+                                        egui::vec2(action_width, ui.spacing().interact_size.y),
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            let action_rect = ui.max_rect();
+                                            ui.painter().rect_filled(
+                                                action_rect,
+                                                0.0,
+                                                ui.visuals().faint_bg_color,
+                                            );
+                                            if has_close {
+                                                if ui
+                                                    .add_sized(
+                                                        WORKSPACE_ACTION_BUTTON_SIZE,
+                                                        egui::Button::new(
+                                                            egui_phosphor::regular::X,
+                                                        ),
+                                                    )
+                                                    .on_hover_text(
+                                                        &self.texts.workspace.close_ws_hint,
+                                                    )
+                                                    .clicked()
+                                                {
+                                                    self.close_confirm_panel = Some(i);
+                                                    return;
+                                                }
+                                            }
+                                            let is_locked = self.locked_panels.contains(&i);
                                             if ui
                                                 .add_sized(
                                                     WORKSPACE_ACTION_BUTTON_SIZE,
-                                                    egui::Button::new(egui_phosphor::regular::X),
+                                                    egui::Button::new(workspace_lock_icon(
+                                                        is_locked,
+                                                    )),
                                                 )
-                                                .on_hover_text(&self.texts.workspace.close_ws_hint)
+                                                .on_hover_text(if is_locked {
+                                                    &self.texts.workspace.locked_hint
+                                                } else {
+                                                    &self.texts.workspace.unlocked_hint
+                                                })
                                                 .clicked()
                                             {
-                                                self.close_confirm_panel = Some(i);
-                                                return;
+                                                if is_locked {
+                                                    // Switch to the locked panel; the overlay
+                                                    // has its own password input.
+                                                    self.active_panel = i;
+                                                    self.lock_password_input.clear();
+                                                    self.pw_message.clear();
+                                                } else {
+                                                    self.locked_panels.insert(i);
+                                                    self.lock_password_input.clear();
+                                                    self.pw_message.clear();
+                                                }
                                             }
-                                        }
-                                        let is_locked = self.locked_panels.contains(&i);
-                                        if ui
-                                            .add_sized(
-                                                WORKSPACE_ACTION_BUTTON_SIZE,
-                                                egui::Button::new(workspace_lock_icon(is_locked)),
-                                            )
-                                            .on_hover_text(if is_locked {
-                                                &self.texts.workspace.locked_hint
-                                            } else {
-                                                &self.texts.workspace.unlocked_hint
-                                            })
-                                            .clicked()
-                                        {
-                                            if is_locked {
-                                                // Switch to the locked panel; the overlay
-                                                // has its own password input.
-                                                self.active_panel = i;
-                                                self.lock_password_input.clear();
-                                                self.pw_message.clear();
-                                            } else {
-                                                self.locked_panels.insert(i);
-                                                self.lock_password_input.clear();
-                                                self.pw_message.clear();
-                                            }
-                                        }
-                                    },
-                                );
-                            }
-                        });
-                        self.panel_rects[i] = row.response.rect;
-                    }
-                }
-
-                // Handle drag target detection after all rects are known
-                if let Some(src) = self.drag_src_panel {
-                    if pointer_down || pointer_released {
-                        self.drag_dst_panel = None;
-                        if let Some(pos) = pointer_pos {
-                            for j in (0..panel_count).rev() {
-                                if j == src {
-                                    continue;
-                                }
-                                if j < self.panel_rects.len() && self.panel_rects[j].contains(pos) {
-                                    self.drag_dst_panel = Some(j);
-                                    break;
-                                }
-                            }
-                        }
-                    }
-
-                    if pointer_down || pointer_released {
-                        ui.ctx().request_repaint();
-                        let painter = ui.painter();
-                        let source_fill = ui.visuals().faint_bg_color.linear_multiply(0.65);
-                        let target_stroke =
-                            egui::Stroke::new(1.5, ui.visuals().selection.stroke.color);
-
-                        if drag_row_is_source(src, self.drag_src_panel) {
-                            let source_rect = self.panel_rects[src];
-                            if source_rect.is_positive() {
-                                painter.rect_filled(source_rect, 3.0, source_fill);
-                            }
-                        }
-
-                        if let Some(dst) = self.drag_dst_panel {
-                            if drag_row_is_target(dst, self.drag_dst_panel) {
-                                let target_rect = self.panel_rects[dst];
-                                if target_rect.is_positive() {
-                                    painter.rect_stroke(
-                                        target_rect.expand(1.0),
-                                        3.0,
-                                        target_stroke,
-                                        egui::StrokeKind::Outside,
+                                        },
                                     );
-                                    if let Some(pos) = pointer_pos {
-                                        let insertion_y = drag_insertion_y(target_rect, pos.y);
-                                        painter.line_segment(
-                                            [
-                                                egui::pos2(target_rect.left(), insertion_y),
-                                                egui::pos2(target_rect.right(), insertion_y),
-                                            ],
-                                            egui::Stroke::new(2.0, target_stroke.color),
-                                        );
+                                }
+                            });
+                            self.panel_rects[i] = row.response.rect;
+                        }
+                    }
+
+                    // Handle drag target detection after all rects are known
+                    if let Some(src) = self.drag_src_panel {
+                        if pointer_down || pointer_released {
+                            self.drag_dst_panel = None;
+                            if let Some(pos) = pointer_pos {
+                                for j in (0..panel_count).rev() {
+                                    if j == src {
+                                        continue;
+                                    }
+                                    if j < self.panel_rects.len()
+                                        && self.panel_rects[j].contains(pos)
+                                    {
+                                        self.drag_dst_panel = Some(j);
+                                        break;
                                     }
                                 }
                             }
                         }
-                    }
 
-                    if pointer_released {
-                        reorder = self.drag_dst_panel.take().map(|target| {
-                            let after_target = pointer_pos.is_some_and(|pos| {
-                                self.panel_rects
-                                    .get(target)
-                                    .is_some_and(|rect| pos.y > rect.center().y)
-                            });
-                            (
-                                src,
-                                drag_drop_destination(src, target, after_target, panel_count),
-                            )
-                        });
-                        self.drag_src_panel = None;
-                    }
-                } else if pointer_released {
-                    self.drag_src_panel = None;
-                    self.drag_dst_panel = None;
-                }
+                        if pointer_down || pointer_released {
+                            ui.ctx().request_repaint();
+                            let painter = ui.painter();
+                            let source_fill = ui.visuals().faint_bg_color.linear_multiply(0.65);
+                            let target_stroke =
+                                egui::Stroke::new(1.5, ui.visuals().selection.stroke.color);
 
-                // Perform reorder
-                if let Some((src, dst)) = reorder {
-                    self.reorder_panel(src, dst);
-                }
-                if let Some(i) = to_select {
-                    self.active_panel = i;
-                }
-                ui.separator();
-                if ui.button(&self.texts.workspace.new).clicked() {
-                    self.add_panel(ui.ctx());
-                }
-                if self.cached_template_files.is_empty() {
-                    self.refresh_template_files();
-                }
-                let template_files = self.cached_template_files.clone();
-                ui.menu_button(&self.texts.workspace.templates, |ui| {
-                    if template_files.is_empty() {
-                        ui.label(&self.texts.workspace.templates_empty);
-                    } else {
-                        for (display_name, path) in &template_files {
-                            let path = path.clone();
-                            let display_name = display_name.clone();
-                            ui.horizontal(|ui| {
-                                if ui.button(display_name.as_str()).clicked() {
-                                    self.pending_load_from_template = Some(path.clone());
-                                    ui.close_menu();
+                            if drag_row_is_source(src, self.drag_src_panel) {
+                                let source_rect = self.panel_rects[src];
+                                if source_rect.is_positive() {
+                                    painter.rect_filled(source_rect, 3.0, source_fill);
                                 }
-                                if ui.small_button("×").clicked() {
-                                    self.pending_delete_template = Some(path);
-                                    ui.close_menu();
+                            }
+
+                            if let Some(dst) = self.drag_dst_panel {
+                                if drag_row_is_target(dst, self.drag_dst_panel) {
+                                    let target_rect = self.panel_rects[dst];
+                                    if target_rect.is_positive() {
+                                        painter.rect_stroke(
+                                            target_rect.expand(1.0),
+                                            3.0,
+                                            target_stroke,
+                                            egui::StrokeKind::Outside,
+                                        );
+                                        if let Some(pos) = pointer_pos {
+                                            let insertion_y = drag_insertion_y(target_rect, pos.y);
+                                            painter.line_segment(
+                                                [
+                                                    egui::pos2(target_rect.left(), insertion_y),
+                                                    egui::pos2(target_rect.right(), insertion_y),
+                                                ],
+                                                egui::Stroke::new(2.0, target_stroke.color),
+                                            );
+                                        }
+                                    }
                                 }
-                            });
+                            }
                         }
-                    }
-                });
-                ui.separator();
-                ui.allocate_ui_with_layout(
-                    egui::vec2(
-                        ui.available_width(),
-                        shortcut_hint_available_height(ui.available_height()),
-                    ),
-                    egui::Layout::top_down(egui::Align::Min),
-                    |ui| {
-                        ui.label(
-                            egui::RichText::new(&self.texts.shortcut_labels.shortcuts_heading)
-                                .small()
-                                .strong()
-                                .color(ui.visuals().weak_text_color()),
-                        );
-                        egui::ScrollArea::vertical()
-                            .id_salt("navigation_shortcuts")
-                            .auto_shrink([false, false])
-                            .show(ui, |ui| {
-                                for id in shortcut_hint_ids() {
-                                    let label = shortcut_label_for(&self.texts, id).to_string();
-                                    ui.horizontal(|ui| {
-                                        ui.label(
-                                            egui::RichText::new(&label)
-                                                .small()
-                                                .color(ui.visuals().weak_text_color()),
-                                        );
-                                        let binding = self
-                                            .settings
-                                            .key_binds
-                                            .get(id)
-                                            .map(shortcut_display)
-                                            .unwrap_or_else(|| {
-                                                self.texts.settings.shortcuts.not_set.clone()
-                                            });
-                                        ui.with_layout(
-                                            egui::Layout::right_to_left(egui::Align::Center),
-                                            |ui| {
-                                                ui.label(
-                                                    egui::RichText::new(binding)
-                                                        .small()
-                                                        .color(ui.visuals().text_color()),
-                                                );
-                                            },
-                                        );
-                                    });
-                                }
+
+                        if pointer_released {
+                            reorder = self.drag_dst_panel.take().map(|target| {
+                                let after_target = pointer_pos.is_some_and(|pos| {
+                                    self.panel_rects
+                                        .get(target)
+                                        .is_some_and(|rect| pos.y > rect.center().y)
+                                });
+                                (
+                                    src,
+                                    drag_drop_destination(src, target, after_target, panel_count),
+                                )
                             });
-                    },
-                );
-            });
+                            self.drag_src_panel = None;
+                        }
+                    } else if pointer_released {
+                        self.drag_src_panel = None;
+                        self.drag_dst_panel = None;
+                    }
+
+                    // Perform reorder
+                    if let Some((src, dst)) = reorder {
+                        self.reorder_panel(src, dst);
+                    }
+                    if let Some(i) = to_select {
+                        self.active_panel = i;
+                    }
+                    ui.separator();
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(
+                            ui.available_width(),
+                            shortcut_hint_available_height(ui.available_height()),
+                        ),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| {
+                            ui.label(
+                                egui::RichText::new(&self.texts.shortcut_labels.shortcuts_heading)
+                                    .small()
+                                    .strong()
+                                    .color(ui.visuals().text_color()),
+                            );
+                            egui::ScrollArea::vertical()
+                                .id_salt("navigation_shortcuts")
+                                .auto_shrink([false, false])
+                                .show(ui, |ui| {
+                                    let extra_shortcuts: [(&str, Vec<&str>); 2] = [
+                                        ("zoom_in", vec!["Ctrl", "+"]),
+                                        ("zoom_out", vec!["Ctrl", "-"]),
+                                    ];
+                                    let ids: Vec<(&str, Vec<String>)> = shortcut_hint_ids()
+                                        .iter()
+                                        .map(|id| {
+                                            let binding = self
+                                                .settings
+                                                .key_binds
+                                                .get(*id)
+                                                .map(shortcut_display)
+                                                .unwrap_or_else(|| {
+                                                    self.texts.settings.shortcuts.not_set.clone()
+                                                });
+                                            (
+                                                *id,
+                                                binding
+                                                    .split('+')
+                                                    .map(|s| s.trim().to_string())
+                                                    .collect(),
+                                            )
+                                        })
+                                        .chain(extra_shortcuts.iter().map(|(id, parts)| {
+                                            (*id, parts.iter().map(|s| s.to_string()).collect())
+                                        }))
+                                        .collect();
+                                    for (id, parts) in ids {
+                                        let label = shortcut_label_for(&self.texts, id).to_string();
+                                        ui.horizontal(|ui| {
+                                            ui.label(
+                                                egui::RichText::new(&label)
+                                                    .small()
+                                                    .color(ui.visuals().text_color()),
+                                            );
+                                            ui.with_layout(
+                                                egui::Layout::right_to_left(egui::Align::Center),
+                                                |ui| {
+                                                    let mut parts_rev = parts.clone();
+                                                    parts_rev.reverse();
+                                                    ui.horizontal(|ui| {
+                                                        for (i, part) in
+                                                            parts_rev.iter().enumerate()
+                                                        {
+                                                            if i > 0 {
+                                                                ui.label(
+                                                                    egui::RichText::new("+")
+                                                                        .small()
+                                                                        .color(
+                                                                            ui.visuals()
+                                                                                .weak_text_color(),
+                                                                        ),
+                                                                );
+                                                            }
+                                                            paint_keycap(ui, part);
+                                                        }
+                                                    });
+                                                },
+                                            );
+                                        });
+                                    }
+                                });
+                        },
+                    );
+                });
+        }
 
         // The sidebar can enter rename mode during this frame. Read the state again so the
         // terminal view cannot reclaim focus after the rename input requests it.
@@ -2544,86 +2970,111 @@ impl eframe::App for App {
                 let painter = ui.painter_at(rect);
                 painter.rect_filled(rect, 0.0, lock_color);
 
-                let form_width = 320.0;
-                let heading_height = ui.fonts(|fonts| {
-                    fonts
-                        .layout_no_wrap(
-                            self.texts.lock_overlay.title.clone(),
-                            egui::FontId::proportional(24.0),
-                            egui::Color32::WHITE,
-                        )
-                        .size()
-                        .y
-                });
-                let row_height = ui.spacing().interact_size.y;
-                let item_spacing = ui.spacing().item_spacing.y;
-                let message_height = if self.pw_message.is_empty() {
-                    0.0
-                } else {
-                    ui.text_style_height(&egui::TextStyle::Body)
-                };
-                let form_height = heading_height
-                    + item_spacing
-                    + 16.0
-                    + row_height
-                    + if message_height > 0.0 {
-                        item_spacing + 4.0 + message_height
-                    } else {
-                        0.0
-                    };
-                let form_top =
-                    rect.center().y - heading_height - item_spacing - 16.0 - row_height * 0.5;
-                let form_rect = egui::Rect::from_center_size(
-                    egui::pos2(rect.center().x, form_top + form_height * 0.5),
-                    egui::vec2(form_width, form_height),
-                );
                 let pw_id = egui::Id::new("lock_overlay_pw_input");
-                ui.allocate_new_ui(egui::UiBuilder::new().max_rect(form_rect), |ui| {
-                    ui.vertical_centered(|ui| {
-                        ui.heading(
-                            egui::RichText::new(&self.texts.lock_overlay.title)
-                                .size(24.0)
-                                .color(egui::Color32::WHITE),
-                        );
-                        ui.add_space(16.0);
-                        ui.horizontal(|ui| {
+                let form_width = 360.0;
+                let form_rect =
+                    egui::Rect::from_center_size(rect.center(), egui::vec2(form_width, 220.0));
+                let ui_content =
+                    ui.allocate_new_ui(egui::UiBuilder::new().max_rect(form_rect), |ui| {
+                        ui.vertical_centered(|ui| {
+                            // Lock icon
                             ui.label(
-                                egui::RichText::new(&self.texts.lock_overlay.password_label)
-                                    .color(egui::Color32::from_gray(200)),
+                                egui::RichText::new(egui_phosphor::regular::LOCK_SIMPLE)
+                                    .size(36.0)
+                                    .color(egui::Color32::WHITE),
                             );
-                            let resp = ui.add(
-                                egui::TextEdit::singleline(&mut self.lock_password_input)
-                                    .password(true)
-                                    .desired_width(160.0)
-                                    .id(pw_id),
+                            ui.add_space(8.0);
+                            // Title
+                            ui.heading(
+                                egui::RichText::new(&self.texts.lock_overlay.title)
+                                    .size(18.0)
+                                    .color(egui::Color32::WHITE),
                             );
-                            resp.request_focus();
-                            let enter_pressed = ui.input(|i| i.key_pressed(egui::Key::Enter));
-                            if ui.button(&self.texts.lock_overlay.unlock_button).clicked()
-                                || (enter_pressed && resp.has_focus())
-                            {
-                                if self.settings.lock_password.is_empty()
-                                    || self.lock_password_input == self.settings.lock_password
-                                {
-                                    self.locked_panels.remove(&self.active_panel);
-                                    self.lock_password_input.clear();
-                                    self.pw_message.clear();
-                                } else {
-                                    self.pw_message =
-                                        self.texts.lock_overlay.wrong_password.clone();
-                                    self.lock_password_input.clear();
-                                }
+                            ui.add_space(20.0);
+                            // Password input row — manually center by measuring content width
+                            let label_galley = ui.fonts(|f| {
+                                f.layout_no_wrap(
+                                    self.texts.lock_overlay.password_label.clone(),
+                                    egui::FontId::proportional(14.0),
+                                    egui::Color32::from_gray(220),
+                                )
+                            });
+                            let input_width = 130.0;
+                            let button_galley = ui.fonts(|f| {
+                                f.layout_no_wrap(
+                                    self.texts.lock_overlay.unlock_button.clone(),
+                                    egui::FontId::proportional(14.0),
+                                    egui::Color32::BLACK,
+                                )
+                            });
+                            let item_spacing = ui.spacing().item_spacing.x;
+                            let row_h = ui.spacing().interact_size.y;
+                            let content_width = label_galley.size().x
+                                + input_width
+                                + button_galley.size().x
+                                + ui.spacing().button_padding.x * 2.0
+                                + item_spacing * 2.0;
+                            let avail_w = ui.available_width();
+                            let _ = avail_w;
+                            ui.allocate_ui_with_layout(
+                                egui::vec2(content_width, row_h),
+                                egui::Layout::left_to_right(egui::Align::Center),
+                                |ui| {
+                                    ui.label(
+                                        egui::RichText::new(
+                                            &self.texts.lock_overlay.password_label,
+                                        )
+                                        .color(egui::Color32::from_gray(220)),
+                                    );
+                                    let resp = ui.add(
+                                        egui::TextEdit::singleline(&mut self.lock_password_input)
+                                            .password(true)
+                                            .desired_width(input_width)
+                                            .id(pw_id),
+                                    );
+                                    resp.request_focus();
+                                    let enter_pressed =
+                                        ui.input(|i| i.key_pressed(egui::Key::Enter));
+                                    if ui
+                                        .add(
+                                            egui::Button::new(
+                                                egui::RichText::new(
+                                                    &self.texts.lock_overlay.unlock_button,
+                                                )
+                                                .color(egui::Color32::BLACK),
+                                            )
+                                            .fill(egui::Color32::WHITE)
+                                            .stroke(egui::Stroke::new(1.0, egui::Color32::BLACK)),
+                                        )
+                                        .clicked()
+                                        || (enter_pressed && resp.has_focus())
+                                    {
+                                        if self.settings.lock_password.is_empty()
+                                            || self.lock_password_input
+                                                == self.settings.lock_password
+                                        {
+                                            self.locked_panels.remove(&self.active_panel);
+                                            self.lock_password_input.clear();
+                                            self.pw_message.clear();
+                                        } else {
+                                            self.pw_message =
+                                                self.texts.lock_overlay.wrong_password.clone();
+                                            self.lock_password_input.clear();
+                                        }
+                                    }
+                                },
+                            );
+                            // Error message
+                            if !self.pw_message.is_empty() {
+                                ui.add_space(8.0);
+                                ui.label(
+                                    egui::RichText::new(&self.pw_message)
+                                        .color(egui::Color32::from_rgb(255, 120, 120)),
+                                );
                             }
                         });
-                        if !self.pw_message.is_empty() {
-                            ui.add_space(4.0);
-                            ui.label(
-                                egui::RichText::new(&self.pw_message)
-                                    .color(egui::Color32::from_rgb(240, 100, 100)),
-                            );
-                        }
                     });
-                });
+                let _ = ui_content;
             } else if let Some(tree) = self.dock_states.get_mut(&self.active_panel) {
                 DockArea::new(tree)
                     .style(Style::from_egui(ui.style().as_ref()))
@@ -2691,6 +3142,7 @@ mod tests {
             "history_menu",
             "history_prev",
             "history_next",
+            "toggle_workspace_sidebar",
         ] {
             assert!(ids.contains(&id), "missing shortcut hint for {id}");
         }
@@ -2855,6 +3307,90 @@ mod tests {
         assert!(binds["history_menu"].alt);
         assert_eq!(binds["history_prev"].key, "ArrowUp");
         assert_eq!(binds["history_next"].key, "ArrowDown");
+    }
+
+    #[test]
+    fn workspace_sidebar_defaults_to_plain_tab() {
+        let binds = default_key_binds();
+        let binding = &binds["toggle_workspace_sidebar"];
+
+        assert_eq!(binding.key, "Tab");
+        assert!(!binding.ctrl);
+        assert!(!binding.shift);
+        assert!(!binding.alt);
+    }
+
+    #[test]
+    fn legacy_settings_gain_sidebar_shortcut_without_overwriting_bindings() {
+        let mut settings = AppSettings::default();
+        settings.key_binds.remove("toggle_workspace_sidebar");
+        settings.key_binds.insert(
+            "new_terminal".into(),
+            ShortcutBinding {
+                key: "T".into(),
+                ctrl: true,
+                shift: false,
+                alt: false,
+            },
+        );
+
+        let migrated = super::normalize_history_bindings(settings);
+        assert_eq!(migrated.key_binds["toggle_workspace_sidebar"].key, "Tab");
+        assert_eq!(migrated.key_binds["new_terminal"].key, "T");
+    }
+
+    #[test]
+    fn tab_shortcuts_are_separated_between_sidebar_and_terminal() {
+        let sidebar = default_key_binds()["toggle_workspace_sidebar"].clone();
+        let terminal = ShortcutBinding {
+            key: "Tab".into(),
+            ctrl: true,
+            shift: false,
+            alt: false,
+        };
+
+        assert!(super::binding_matches_key(
+            &sidebar,
+            egui::Key::Tab,
+            egui::Modifiers::NONE
+        ));
+        assert!(!super::binding_matches_key(
+            &sidebar,
+            egui::Key::Tab,
+            egui::Modifiers::CTRL
+        ));
+        assert!(super::binding_matches_key(
+            &terminal,
+            egui::Key::Tab,
+            egui::Modifiers::CTRL
+        ));
+    }
+
+    #[test]
+    fn exact_tab_shortcut_does_not_match_extra_modifiers() {
+        let ctx = egui::Context::default();
+        let mut input = egui::RawInput::default();
+        input.events.push(egui::Event::Key {
+            key: egui::Key::Tab,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::SHIFT,
+        });
+        ctx.begin_pass(input);
+        assert!(!super::consume_exact_key(
+            &ctx,
+            egui::Key::Tab,
+            egui::Modifiers::NONE
+        ));
+        let _ = ctx.end_pass();
+    }
+
+    #[test]
+    fn workspace_action_column_width_covers_buttons() {
+        assert_eq!(super::workspace_action_column_width(false, false, 4.0), 0.0);
+        assert_eq!(super::workspace_action_column_width(false, true, 4.0), 24.0);
+        assert_eq!(super::workspace_action_column_width(true, true, 4.0), 52.0);
     }
 
     #[test]

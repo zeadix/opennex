@@ -16,6 +16,7 @@ view_menu:
   split_right: "Split Right"
   split_down: "Split Down"
   settings: "Settings"
+  workspace_toggle: "Workspace"
 
 settings:
   title: "Settings"
@@ -49,6 +50,7 @@ settings:
     heading: "Shortcuts"
     hint: "Click a shortcut name then press a new key to change it"
     not_set: "Not set"
+    reset_defaults: "Reset to Defaults"
   lock:
     heading: "Lock"
     password_section: "Password Configuration:"
@@ -72,6 +74,9 @@ shortcut_labels:
   history_menu: "History Menu"
   history_prev: "History Previous"
   history_next: "History Next"
+  toggle_workspace_sidebar: "Show/Hide Workspace Sidebar"
+  zoom_in: "Zoom In"
+  zoom_out: "Zoom Out"
   shortcuts_heading: "Shortcuts"
 
 workspace:
@@ -117,7 +122,7 @@ password:
   clear_title: "Clear Password"
 
 lock_overlay:
-  title: "🔒 This workspace is locked"
+  title: "This workspace is locked"
   password_label: "Password:"
   unlock_button: "Unlock"
   wrong_password: "Wrong password"
@@ -134,3 +139,14 @@ terminal:
 theme:
   light: "Light"
   dark: "Dark"
+
+about:
+  menu_label: "About"
+  title: "About OpenZoo"
+  version_label: "Version"
+  description: "Multi-functional stacked terminal manager with tabbed layouts, session command history, global interface scaling, and encrypted workspaces for efficient terminal management."
+  homepage_label: "Homepage"
+  license_label: "License"
+  credits_label: "Credits"
+  credits: "Built on open-source projects including egui, egui_dock, alacritty_terminal, and egui_term."
+  close: "Close"

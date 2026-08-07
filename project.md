@@ -41,6 +41,7 @@
 - [x] Workspace 单终端保护 - 仅有一个 terminal 时隐藏 tab 关闭按钮
 - [x] 多国语言系统 - locales/ YAML 资源、Language 菜单实时切换、UI 文字标签全部国际化
 - [x] 主题切换 - 浅色/深色主题菜单和设置持久化
+- [x] Workspace 侧栏控制 - Tab 显示/隐藏侧栏、Ctrl+Tab 输入制表符、操作列背景遮罩和菜单宽度优化
 
 ## In Progress
 

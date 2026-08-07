@@ -9,6 +9,20 @@ pub struct TerminalInstance {
     pub cwd: String,
     pub shell_info: adapter::ShellInfo,
     pub history_nav: Option<crate::app::HistoryNav>,
+    osc_buffer: String,
+}
+
+fn shell_integration_sequence(shell: &str) -> Vec<u8> {
+    if shell.contains("bash") || shell.ends_with("/sh") {
+        format!("export PROMPT_COMMAND='printf \"\\033]9;$PWD\\007\"'\n",).into_bytes()
+    } else if shell.contains("zsh") {
+        format!("precmd() {{ printf '\\033]9;$PWD\\007' }}\n",).into_bytes()
+    } else if shell.contains("powershell") || shell.contains("pwsh") {
+        format!("function prompt {{ Write-Host -NoNewline \"`e]9;$(Get-Location)`e\\\" }}\n",)
+            .into_bytes()
+    } else {
+        Vec::new()
+    }
 }
 
 impl TerminalInstance {
@@ -33,12 +47,21 @@ impl TerminalInstance {
             *cwd_guard = cwd.to_string();
         }
 
-        Some(TerminalInstance {
+        let mut instance = TerminalInstance {
             backend,
             cwd: cwd.to_string(),
             shell_info,
             history_nav: None,
-        })
+            osc_buffer: String::new(),
+        };
+
+        // Inject shell integration
+        let integration = shell_integration_sequence(shell);
+        if !integration.is_empty() {
+            instance.write(&integration);
+        }
+
+        Some(instance)
     }
 
     pub fn resize(&mut self, _cols: u16, _rows: u16) {}
@@ -62,7 +85,6 @@ impl TerminalInstance {
 
     pub fn get_current_line(&mut self) -> String {
         use alacritty_terminal::grid::Dimensions;
-        // Force sync so we read the latest grid content
         self.backend.set_dirty();
         let content = self.backend.sync();
         let grid = &content.grid;
@@ -81,19 +103,79 @@ impl TerminalInstance {
     }
 
     pub fn poll_cwd(&mut self) {
-        #[cfg(not(unix))]
-        return;
+        // Scan terminal output for OSC 9;cwd sequences
+        self.backend.set_dirty();
+        let content = self.backend.sync();
+        use alacritty_terminal::grid::Dimensions;
+        let grid = &content.grid;
 
-        #[cfg(unix)]
-        let proc_path = format!("/proc/{}/cwd", self.backend.child_pid());
+        // Read the visible screen content to find OSC sequences
+        let mut screen_text = String::new();
+        for row_idx in 0..grid.screen_lines() {
+            for col_idx in 0..grid.columns() {
+                let point = alacritty_terminal::index::Point {
+                    line: alacritty_terminal::index::Line(row_idx as i32),
+                    column: alacritty_terminal::index::Column(col_idx),
+                };
+                let cell = &grid[point];
+                screen_text.push(cell.c);
+            }
+            screen_text.push('\n');
+        }
 
-        #[cfg(unix)]
-        if let Ok(path) = std::fs::read_link(proc_path) {
-            let cwd_str = path.to_string_lossy().to_string();
-            if self.cwd != cwd_str {
-                self.cwd = cwd_str.clone();
-                if let Ok(mut cwd_guard) = self.shell_info.cwd.lock() {
-                    *cwd_guard = cwd_str;
+        // Parse OSC 9;... sequences from the screen text
+        // The sequence format is: ESC ] 9 ; <path> BEL  or  ESC ] 9 ; <path> ESC \
+        // On screen these may appear as leftover characters in the grid
+        // We look for the pattern "9;" followed by a path ending with BEL (0x07) or ESC
+        self.osc_buffer.push_str(&screen_text);
+
+        // Try to extract cwd from OSC 9; sequences
+        while let Some(start) = self.osc_buffer.find("9;") {
+            let after_start = start + 2;
+            if after_start >= self.osc_buffer.len() {
+                break;
+            }
+            // Find end: BEL (\x07) or ESC (\x1b)
+            let rest = &self.osc_buffer[after_start..];
+            let end = rest.find(|c| c == '\x07' || c == '\x1b');
+            if let Some(end_pos) = end {
+                let path = &rest[..end_pos];
+                if !path.is_empty() {
+                    let cwd_str = path.to_string();
+                    if self.cwd != cwd_str {
+                        self.cwd = cwd_str.clone();
+                        if let Ok(mut cwd_guard) = self.shell_info.cwd.lock() {
+                            *cwd_guard = cwd_str;
+                        }
+                    }
+                }
+                // Consume up to and including the terminator
+                let consume_to = after_start + end_pos + 1;
+                self.osc_buffer =
+                    self.osc_buffer[consume_to.min(self.osc_buffer.len())..].to_string();
+            } else {
+                // Incomplete sequence, keep buffer and wait for more
+                self.osc_buffer = self.osc_buffer[start..].to_string();
+                break;
+            }
+        }
+
+        // Keep buffer bounded
+        if self.osc_buffer.len() > 8192 {
+            self.osc_buffer = self.osc_buffer[self.osc_buffer.len() - 4096..].to_string();
+        }
+
+        // Fallback: also try /proc on Linux if OSC didn't work
+        #[cfg(target_os = "linux")]
+        {
+            let proc_path = format!("/proc/{}/cwd", self.backend.child_pid());
+            if let Ok(path) = std::fs::read_link(&proc_path) {
+                let cwd_str = path.to_string_lossy().to_string();
+                if self.cwd != cwd_str && !cwd_str.is_empty() {
+                    self.cwd = cwd_str.clone();
+                    if let Ok(mut cwd_guard) = self.shell_info.cwd.lock() {
+                        *cwd_guard = cwd_str;
+                    }
                 }
             }
         }

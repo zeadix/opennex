@@ -1,5 +1,10 @@
 use std::path::PathBuf;
 
+#[cfg(target_os = "windows")]
+const DEFAULT_SHELL: &str = "powershell.exe";
+#[cfg(target_os = "macos")]
+const DEFAULT_SHELL: &str = "/bin/zsh";
+#[cfg(all(unix, not(target_os = "macos")))]
 const DEFAULT_SHELL: &str = "/bin/bash";
 
 #[derive(Debug, Clone)]

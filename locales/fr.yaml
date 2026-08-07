@@ -1,0 +1,152 @@
+display_name: "Français"
+
+menu:
+  file: "Fichier"
+  view: "Affichage"
+  language: "Langue"
+  theme: "Thème"
+
+file_menu:
+  save: "Enregistrer"
+  load: "Charger"
+  save_as: "Enregistrer sous..."
+  exit: "Quitter"
+
+view_menu:
+  split_right: "Diviser à droite"
+  split_down: "Diviser vers le bas"
+  settings: "Paramètres"
+  workspace_toggle: "Espace de travail"
+
+settings:
+  title: "Paramètres"
+  tabs:
+    general: "Général"
+    appearance: "Apparence"
+    shortcuts: "Raccourcis"
+    lock: "Verrouillage"
+  general:
+    heading: "Général"
+    scene_info: "Scène et modèles utilisent des chemins fixes :"
+    scene_path: "  Scène : ./scene.json"
+    templates_path: "  Modèles : ./templates/"
+    history_section: "Historique"
+    max_history: "Entrées max :"
+    scrollback: "Défilement :"
+    clear_all_history: "Effacer tout l'historique"
+  appearance:
+    heading: "Apparence"
+    terminal_section: "Apparence du terminal"
+    font_size: "Taille de police :"
+    cell_spacing: "Espacement :"
+    font_family: "Police :"
+    bg_color: "Arrière-plan :"
+    fg_color: "Premier plan :"
+    command_menu_section: "Menu de commandes"
+    menu_bg_color: "Arrière-plan :"
+    menu_fg_color: "Couleur du texte :"
+    menu_font_size: "Taille de police :"
+  shortcuts:
+    heading: "Raccourcis"
+    hint: "Cliquez sur un raccourci puis appuyez sur une nouvelle touche"
+    not_set: "Non défini"
+    reset_defaults: "Réinitialiser par défaut"
+  lock:
+    heading: "Verrouillage"
+    password_section: "Configuration du mot de passe :"
+    set_password: "Définir mot de passe"
+    change_password: "Changer mot de passe"
+    clear_password: "Effacer mot de passe"
+    lock_section: "Verrouillage :"
+    lock_overlay_color: "Couleur de superposition :"
+  buttons:
+    apply: "Appliquer"
+    close: "Fermer"
+
+shortcut_labels:
+  new_terminal: "Nouveau terminal"
+  close_terminal: "Fermer terminal"
+  workspace_up: "Espace de travail haut"
+  workspace_down: "Espace de travail bas"
+  panel_left: "Panneau gauche"
+  panel_right: "Panneau droit"
+  lock_workspace: "Verrouiller espace"
+  history_menu: "Menu historique"
+  history_prev: "Historique précédent"
+  history_next: "Historique suivant"
+  toggle_workspace_sidebar: "Afficher/Masquer barre latérale"
+  zoom_in: "Agrandir"
+  zoom_out: "Réduire"
+  shortcuts_heading: "Raccourcis"
+
+workspace:
+  heading: "Espaces de travail"
+  new: "+ Nouvel espace"
+  rename: "Renommer"
+  save_as_template: "Enregistrer comme modèle"
+  close: "Fermer"
+  rename_confirm: "OK"
+  rename_cancel: "Annuler"
+  drag_handle_hint: "Glisser pour réorganiser"
+  close_ws_hint: "Fermer l'espace"
+  locked_hint: "Espace verrouillé"
+  unlocked_hint: "Espace déverrouillé"
+  empty_hint: "Cliquez sur '+ Nouvel espace' pour en créer un"
+  templates: "Modèles"
+  templates_empty: "(vide)"
+  name_prefix: "Espace "
+
+close_confirm:
+  message_prefix: "Voulez-vous vraiment fermer l'espace \""
+  message_suffix: "\" ?"
+  confirm: "Confirmer"
+  cancel: "Annuler"
+
+password:
+  enter: "Entrer mot de passe :"
+  confirm: "Confirmer mot de passe :"
+  original: "Mot de passe actuel :"
+  new: "Nouveau mot de passe :"
+  confirm_new: "Confirmer nouveau mot de passe :"
+  input_label: "Mot de passe :"
+  mismatch: "Inadéquation"
+  match: "Correspondance"
+  empty_error: "Le mot de passe ne peut pas être vide"
+  mismatch_error: "Les mots de passe ne correspondent pas"
+  wrong_error: "Mot de passe actuel incorrect"
+  wrong_password: "Mot de passe incorrect"
+  confirm_button: "Confirmer"
+  cancel_button: "Annuler"
+  set_title: "Définir mot de passe"
+  change_title: "Changer mot de passe"
+  clear_title: "Effacer mot de passe"
+
+lock_overlay:
+  title: "Cet espace est verrouillé"
+  password_label: "Mot de passe :"
+  unlock_button: "Déverrouiller"
+  wrong_password: "Mot de passe incorrect"
+
+terminal:
+  not_found: "Terminal introuvable"
+  rename: "Renommer"
+  clear_history: "Effacer l'historique"
+  new_tab: "+ Nouvel onglet"
+  add_tab: "+ Onglet"
+  rename_hint: "Entrer le nom..."
+  default_name_prefix: "Terminal "
+
+theme:
+  light: "Clair"
+  dark: "Sombre"
+
+about:
+  menu_label: "À propos"
+  title: "À propos d'OpenZoo"
+  version_label: "Version"
+  description: "Gestionnaire de terminaux polyvalent avec disposition à onglets, historique des commandes, mise à l'échelle de l'interface et espaces de travail chiffrés pour une gestion efficace."
+  homepage_label: "Page d'accueil"
+  license_label: "Licence"
+  credits_label: "Crédits"
+  credits: "Construit sur des projets open source notamment egui, egui_dock, alacritty_terminal et egui_term."
+  close: "Fermer"

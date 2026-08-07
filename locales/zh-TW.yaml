@@ -1,0 +1,152 @@
+display_name: "繁體中文"
+
+menu:
+  file: "檔案"
+  view: "檢視"
+  language: "語言"
+  theme: "佈景主題"
+
+file_menu:
+  save: "儲存"
+  load: "載入"
+  save_as: "另存新檔..."
+  exit: "結束"
+
+view_menu:
+  split_right: "向右分割"
+  split_down: "向下分割"
+  settings: "設定"
+  workspace_toggle: "工作區"
+
+settings:
+  title: "設定"
+  tabs:
+    general: "一般"
+    appearance: "外觀"
+    shortcuts: "捷徑"
+    lock: "鎖定"
+  general:
+    heading: "一般"
+    scene_info: "場景和範本使用固定路徑:"
+    scene_path: "  場景: ./scene.json"
+    templates_path: "  範本: ./templates/"
+    history_section: "歷史記錄"
+    max_history: "最大筆數:"
+    scrollback: "回溯行數:"
+    clear_all_history: "清除所有歷史"
+  appearance:
+    heading: "外觀"
+    terminal_section: "終端機外觀"
+    font_size: "字型大小:"
+    cell_spacing: "字元間距:"
+    font_family: "字型:"
+    bg_color: "背景色:"
+    fg_color: "前景色:"
+    command_menu_section: "指令選單"
+    menu_bg_color: "背景色:"
+    menu_fg_color: "文字色:"
+    menu_font_size: "字型大小:"
+  shortcuts:
+    heading: "捷徑"
+    hint: "點擊捷徑名稱後按下新按鍵即可修改"
+    not_set: "未設定"
+    reset_defaults: "恢復預設按鍵"
+  lock:
+    heading: "鎖定"
+    password_section: "密碼設定:"
+    set_password: "設定密碼"
+    change_password: "修改密碼"
+    clear_password: "清除密碼"
+    lock_section: "鎖定:"
+    lock_overlay_color: "遮罩色:"
+  buttons:
+    apply: "套用"
+    close: "關閉"
+
+shortcut_labels:
+  new_terminal: "新增終端機"
+  close_terminal: "關閉終端機"
+  workspace_up: "工作區上移"
+  workspace_down: "工作區下移"
+  panel_left: "面板左移"
+  panel_right: "面板右移"
+  lock_workspace: "鎖定工作區"
+  history_menu: "歷史選單"
+  history_prev: "上一筆歷史"
+  history_next: "下一筆歷史"
+  toggle_workspace_sidebar: "顯示/隱藏工作區列"
+  zoom_in: "整體放大"
+  zoom_out: "整體縮小"
+  shortcuts_heading: "捷徑"
+
+workspace:
+  heading: "工作區"
+  new: "+ 新增工作區"
+  rename: "重新命名"
+  save_as_template: "儲存為範本"
+  close: "關閉"
+  rename_confirm: "確定"
+  rename_cancel: "取消"
+  drag_handle_hint: "拖曳以調整順序"
+  close_ws_hint: "關閉工作區"
+  locked_hint: "已鎖定工作區"
+  unlocked_hint: "未鎖定工作區"
+  empty_hint: "點擊 '+ 新增工作區' 建立一個"
+  templates: "範本"
+  templates_empty: "(空)"
+  name_prefix: "工作區 "
+
+close_confirm:
+  message_prefix: "確定要關閉工作區「"
+  message_suffix: "」嗎？"
+  confirm: "確認"
+  cancel: "取消"
+
+password:
+  enter: "輸入密碼:"
+  confirm: "確認密碼:"
+  original: "原密碼:"
+  new: "新密碼:"
+  confirm_new: "確認新密碼:"
+  input_label: "密碼:"
+  mismatch: "不一致"
+  match: "一致"
+  empty_error: "密碼不能為空"
+  mismatch_error: "兩次輸入的新密碼不一致"
+  wrong_error: "原密碼錯誤"
+  wrong_password: "密碼錯誤"
+  confirm_button: "確認"
+  cancel_button: "取消"
+  set_title: "設定密碼"
+  change_title: "修改密碼"
+  clear_title: "清除密碼"
+
+lock_overlay:
+  title: "此工作區已鎖定"
+  password_label: "密碼:"
+  unlock_button: "解鎖"
+  wrong_password: "密碼錯誤"
+
+terminal:
+  not_found: "找不到終端機"
+  rename: "重新命名"
+  clear_history: "清除指令歷史"
+  new_tab: "+ 新增分頁"
+  add_tab: "+ 分頁"
+  rename_hint: "輸入名稱..."
+  default_name_prefix: "終端機 "
+
+theme:
+  light: "淺色"
+  dark: "深色"
+
+about:
+  menu_label: "關於"
+  title: "關於 OpenZoo"
+  version_label: "版本"
+  description: "多功能堆疊式終端機管理器，整合分頁佈局、工作階段指令記憶、全域介面縮放與加密工作區，高效管控你的終端機環境。"
+  homepage_label: "首頁"
+  license_label: "授權條款"
+  credits_label: "鳴謝"
+  credits: "基於 egui、egui_dock、alacritty_terminal、egui_term 等開源專案建構。"
+  close: "關閉"

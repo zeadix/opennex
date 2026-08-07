@@ -1,0 +1,152 @@
+display_name: "Italiano"
+
+menu:
+  file: "File"
+  view: "Visualizza"
+  language: "Lingua"
+  theme: "Tema"
+
+file_menu:
+  save: "Salva"
+  load: "Carica"
+  save_as: "Salva con nome..."
+  exit: "Esci"
+
+view_menu:
+  split_right: "Dividi a destra"
+  split_down: "Dividi in basso"
+  settings: "Impostazioni"
+  workspace_toggle: "Area di lavoro"
+
+settings:
+  title: "Impostazioni"
+  tabs:
+    general: "Generale"
+    appearance: "Aspetto"
+    shortcuts: "Scorciatoie"
+    lock: "Blocco"
+  general:
+    heading: "Generale"
+    scene_info: "Scena e modelli usano percorsi fissi:"
+    scene_path: "  Scena: ./scene.json"
+    templates_path: "  Modelli: ./templates/"
+    history_section: "Cronologia"
+    max_history: "Voci max:"
+    scrollback: "Scrollback:"
+    clear_all_history: "Cancella tutta la cronologia"
+  appearance:
+    heading: "Aspetto"
+    terminal_section: "Aspetto terminale"
+    font_size: "Dimensione font:"
+    cell_spacing: "Spaziatura:"
+    font_family: "Font:"
+    bg_color: "Sfondo:"
+    fg_color: "Primo piano:"
+    command_menu_section: "Menu comandi"
+    menu_bg_color: "Sfondo:"
+    menu_fg_color: "Colore testo:"
+    menu_font_size: "Dimensione font:"
+  shortcuts:
+    heading: "Scorciatoie"
+    hint: "Clicca su uno scorciatoia e premi un nuovo tasto"
+    not_set: "Non impostato"
+    reset_defaults: "Ripristina predefiniti"
+  lock:
+    heading: "Blocco"
+    password_section: "Configurazione password:"
+    set_password: "Imposta password"
+    change_password: "Cambia password"
+    clear_password: "Cancella password"
+    lock_section: "Blocco:"
+    lock_overlay_color: "Colore sovrapposizione:"
+  buttons:
+    apply: "Applica"
+    close: "Chiudi"
+
+shortcut_labels:
+  new_terminal: "Nuovo terminale"
+  close_terminal: "Chiudi terminale"
+  workspace_up: "Area di lavoro su"
+  workspace_down: "Area di lavoro giù"
+  panel_left: "Pannello sinistra"
+  panel_right: "Pannello destra"
+  lock_workspace: "Blocca area di lavoro"
+  history_menu: "Menu cronologia"
+  history_prev: "Cronologia precedente"
+  history_next: "Cronologia successiva"
+  toggle_workspace_sidebar: "Mostra/Nascondi barra laterale"
+  zoom_in: "Ingrandisci"
+  zoom_out: "Riduci"
+  shortcuts_heading: "Scorciatoie"
+
+workspace:
+  heading: "Aree di lavoro"
+  new: "+ Nuova area"
+  rename: "Rinomina"
+  save_as_template: "Salva come modello"
+  close: "Chiudi"
+  rename_confirm: "OK"
+  rename_cancel: "Annulla"
+  drag_handle_hint: "Trascina per riordinare"
+  close_ws_hint: "Chiudi area di lavoro"
+  locked_hint: "Area bloccata"
+  unlocked_hint: "Area sbloccata"
+  empty_hint: "Clicca '+ Nuova area' per crearne una"
+  templates: "Modelli"
+  templates_empty: "(vuoto)"
+  name_prefix: "Area "
+
+close_confirm:
+  message_prefix: "Sei sicuro di voler chiudere l'area \""
+  message_suffix: "\"?"
+  confirm: "Conferma"
+  cancel: "Annulla"
+
+password:
+  enter: "Inserisci password:"
+  confirm: "Conferma password:"
+  original: "Password attuale:"
+  new: "Nuova password:"
+  confirm_new: "Conferma nuova password:"
+  input_label: "Password:"
+  mismatch: "Non corrisponde"
+  match: "Corrisponde"
+  empty_error: "La password non può essere vuota"
+  mismatch_error: "Le password non corrispondono"
+  wrong_error: "Password attuale errata"
+  wrong_password: "Password errata"
+  confirm_button: "Conferma"
+  cancel_button: "Annulla"
+  set_title: "Imposta password"
+  change_title: "Cambia password"
+  clear_title: "Cancella password"
+
+lock_overlay:
+  title: "Questa area è bloccata"
+  password_label: "Password:"
+  unlock_button: "Sblocca"
+  wrong_password: "Password errata"
+
+terminal:
+  not_found: "Terminale non trovato"
+  rename: "Rinomina"
+  clear_history: "Cancella cronologia comandi"
+  new_tab: "+ Nuova scheda"
+  add_tab: "+ Scheda"
+  rename_hint: "Inserisci nome..."
+  default_name_prefix: "Terminale "
+
+theme:
+  light: "Chiaro"
+  dark: "Scuro"
+
+about:
+  menu_label: "Informazioni"
+  title: "Informazioni su OpenZoo"
+  version_label: "Versione"
+  description: "Gestore di terminali multifunzionale con layout a schede, cronologia dei comandi, ridimensionamento dell'interfaccia e aree di lavoro crittografate per una gestione efficiente."
+  homepage_label: "Sito web"
+  license_label: "Licenza"
+  credits_label: "Riconoscimenti"
+  credits: "Basato su progetti open source tra cui egui, egui_dock, alacritty_terminal ed egui_term."
+  close: "Chiudi"

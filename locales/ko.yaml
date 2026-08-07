@@ -1,0 +1,152 @@
+display_name: "한국어"
+
+menu:
+  file: "파일"
+  view: "보기"
+  language: "언어"
+  theme: "테마"
+
+file_menu:
+  save: "저장"
+  load: "불러오기"
+  save_as: "다른 이름으로 저장..."
+  exit: "종료"
+
+view_menu:
+  split_right: "오른쪽 분할"
+  split_down: "아래로 분할"
+  settings: "설정"
+  workspace_toggle: "작업공간"
+
+settings:
+  title: "설정"
+  tabs:
+    general: "일반"
+    appearance: "외관"
+    shortcuts: "단축키"
+    lock: "잠금"
+  general:
+    heading: "일반"
+    scene_info: "장면과 템플릿은 고정 경로를 사용합니다:"
+    scene_path: "  장면: ./scene.json"
+    templates_path: "  템플릿: ./templates/"
+    history_section: "기록"
+    max_history: "최대 항목 수:"
+    scrollback: "스크롤백:"
+    clear_all_history: "모든 기록 삭제"
+  appearance:
+    heading: "외관"
+    terminal_section: "터미널 외관"
+    font_size: "글꼴 크기:"
+    cell_spacing: "문자 간격:"
+    font_family: "글꼴:"
+    bg_color: "배경색:"
+    fg_color: "전경색:"
+    command_menu_section: "명령 메뉴"
+    menu_bg_color: "배경색:"
+    menu_fg_color: "글자색:"
+    menu_font_size: "글꼴 크기:"
+  shortcuts:
+    heading: "단축키"
+    hint: "단축키 이름을 클릭하고 새 키를 누르세요"
+    not_set: "설정 안 됨"
+    reset_defaults: "기본값으로 복원"
+  lock:
+    heading: "잠금"
+    password_section: "비밀번호 설정:"
+    set_password: "비밀번호 설정"
+    change_password: "비밀번호 변경"
+    clear_password: "비밀번호 삭제"
+    lock_section: "잠금:"
+    lock_overlay_color: "오버레이 색상:"
+  buttons:
+    apply: "적용"
+    close: "닫기"
+
+shortcut_labels:
+  new_terminal: "새 터미널"
+  close_terminal: "터미널 닫기"
+  workspace_up: "작업공간 위로"
+  workspace_down: "작업공간 아래로"
+  panel_left: "패널 왼쪽"
+  panel_right: "패널 오른쪽"
+  lock_workspace: "작업공간 잠금"
+  history_menu: "기록 메뉴"
+  history_prev: "이전 기록"
+  history_next: "다음 기록"
+  toggle_workspace_sidebar: "작업공간 표시/숨기기"
+  zoom_in: "확대"
+  zoom_out: "축소"
+  shortcuts_heading: "단축키"
+
+workspace:
+  heading: "작업공간"
+  new: "+ 새 작업공간"
+  rename: "이름 변경"
+  save_as_template: "템플릿으로 저장"
+  close: "닫기"
+  rename_confirm: "확인"
+  rename_cancel: "취소"
+  drag_handle_hint: "드래그하여 재정렬"
+  close_ws_hint: "작업공간 닫기"
+  locked_hint: "잠긴 작업공간"
+  unlocked_hint: "잠금 해제된 작업공간"
+  empty_hint: "'+ 새 작업공간'을 클릭하여 생성"
+  templates: "템플릿"
+  templates_empty: "(비어있음)"
+  name_prefix: "작업공간 "
+
+close_confirm:
+  message_prefix: "작업공간 \""
+  message_suffix: "\"을(를) 닫으시겠습니까?"
+  confirm: "확인"
+  cancel: "취소"
+
+password:
+  enter: "비밀번호 입력:"
+  confirm: "비밀번호 확인:"
+  original: "현재 비밀번호:"
+  new: "새 비밀번호:"
+  confirm_new: "새 비밀번호 확인:"
+  input_label: "비밀번호:"
+  mismatch: "불일치"
+  match: "일치"
+  empty_error: "비밀번호는 비어있을 수 없습니다"
+  mismatch_error: "비밀번호가 일치하지 않습니다"
+  wrong_error: "현재 비밀번호가 올바르지 않습니다"
+  wrong_password: "잘못된 비밀번호"
+  confirm_button: "확인"
+  cancel_button: "취소"
+  set_title: "비밀번호 설정"
+  change_title: "비밀번호 변경"
+  clear_title: "비밀번호 삭제"
+
+lock_overlay:
+  title: "이 작업공간이 잠겨 있습니다"
+  password_label: "비밀번호:"
+  unlock_button: "잠금 해제"
+  wrong_password: "잘못된 비밀번호"
+
+terminal:
+  not_found: "터미널을 찾을 수 없음"
+  rename: "이름 변경"
+  clear_history: "명령 기록 삭제"
+  new_tab: "+ 새 탭"
+  add_tab: "+ 탭"
+  rename_hint: "이름 입력..."
+  default_name_prefix: "터미널 "
+
+theme:
+  light: "밝게"
+  dark: "어둡게"
+
+about:
+  menu_label: "정보"
+  title: "OpenZoo 정보"
+  version_label: "버전"
+  description: "탭 레이아웃, 명령 기록, 글로벌 인터페이스 확대/축소 및 암호화된 작업공간을 갖춘 다기능 스택형 터미널 관리자입니다."
+  homepage_label: "홈페이지"
+  license_label: "라이선스"
+  credits_label: "크레딧"
+  credits: "egui, egui_dock, alacritty_terminal, egui_term 등의 오픈 소스 프로젝트를 기반으로 구축되었습니다."
+  close: "닫기"
