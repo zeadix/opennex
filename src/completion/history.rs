@@ -1,6 +1,6 @@
+use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::path::PathBuf;
-use serde::{Deserialize, Serialize};
 
 const MAX_HISTORY: usize = 1000;
 
@@ -30,7 +30,10 @@ impl HistoryTracker {
         } else {
             VecDeque::new()
         };
-        Self { history, history_path }
+        Self {
+            history,
+            history_path,
+        }
     }
 
     pub fn save(&self) {
@@ -65,7 +68,7 @@ impl HistoryTracker {
     fn history_path() -> PathBuf {
         dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("."))
-            .join(".open_zoo")
+            .join(".opennex")
             .join("history.json")
     }
 }

@@ -101,6 +101,8 @@ close_confirm:
   message_suffix: "\" wirklich schließen?"
   confirm: "Bestätigen"
   cancel: "Abbrechen"
+  terminal_title: "Terminal schließen"
+  terminal_message: "Möchten Sie dieses Terminal wirklich schließen? Der Befehlsverlauf wird gelöscht."
 
 password:
   enter: "Passwort eingeben:"
@@ -142,7 +144,7 @@ theme:
 
 about:
   menu_label: "Über"
-  title: "Über OpenZoo"
+  title: "Über OpenNex"
   version_label: "Version"
   description: "Multifunktionaler Terminalmanager mit Registerkartenlayout, Befehlsverlauf, globaler Skalierung und verschlüsselten Arbeitsbereichen für effiziente Terminalverwaltung."
   homepage_label: "Webseite"

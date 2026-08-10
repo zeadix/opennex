@@ -1,5 +1,5 @@
 [package]
-name = "open-zoo"
+name = "opennex"
 version = "0.1.0"
 edition = "2021"
 description = "AI Terminal Manager"

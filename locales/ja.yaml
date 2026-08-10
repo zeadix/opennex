@@ -101,6 +101,8 @@ close_confirm:
   message_suffix: "」を閉じてもよろしいですか？"
   confirm: "確認"
   cancel: "キャンセル"
+  terminal_title: "ターミナルを閉じる"
+  terminal_message: "このターミナルを閉じますか？コマンド履歴が削除されます。"
 
 password:
   enter: "パスワード入力:"
@@ -142,7 +144,7 @@ theme:
 
 about:
   menu_label: "について"
-  title: "OpenZoo について"
+  title: "OpenNex について"
   version_label: "バージョン"
   description: "タブレイアウト、コマンド履歴、グローバルインターフェーススケーリング、暗号化ワークスペースを備えた多機能スタック型ターミナルマネージャー。"
   homepage_label: "ホームページ"

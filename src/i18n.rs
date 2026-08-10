@@ -157,6 +157,8 @@ pub struct CloseConfirmTexts {
     pub message_suffix: String,
     pub confirm: String,
     pub cancel: String,
+    pub terminal_title: String,
+    pub terminal_message: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -329,6 +331,8 @@ impl Texts {
                 message_suffix: "」吗？".into(),
                 confirm: "确认".into(),
                 cancel: "取消".into(),
+                terminal_title: "关闭终端".into(),
+                terminal_message: "确定要关闭此终端吗？历史指令将被删除。".into(),
             },
             password: PasswordTexts {
                 enter: "输入密码:".into(),
@@ -370,7 +374,7 @@ impl Texts {
             },
             about: AboutTexts {
                 menu_label: "关于".into(),
-                title: "关于 OpenZoo".into(),
+                title: "关于 OpenNex".into(),
                 version_label: "版本".into(),
                 description: "多功能堆叠式终端管理器，集成标签布局、会话命令记忆、全局界面缩放与加密工作区，高效管控你的终端环境。".into(),
                 homepage_label: "主页".into(),

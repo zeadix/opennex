@@ -13,7 +13,7 @@ mod tests {
 
     fn test_db() -> (HistoryDb, std::path::PathBuf) {
         let path = std::env::temp_dir().join(format!(
-            "open_zoo_history_{}-{}.db",
+            "opennex_history_{}-{}.db",
             std::process::id(),
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)

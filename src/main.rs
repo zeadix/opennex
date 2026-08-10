@@ -15,12 +15,12 @@ fn main() -> Result<()> {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1200.0, 800.0])
             .with_min_inner_size([600.0, 400.0])
-            .with_title("OpenZoo - AI Terminal Manager"),
+            .with_title("OpenNex - AI Terminal Manager"),
         ..Default::default()
     };
 
     eframe::run_native(
-        "OpenZoo",
+        "OpenNex",
         native_options,
         Box::new(|cc| Ok(Box::new(app::App::new(cc)))),
     )

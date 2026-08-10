@@ -101,6 +101,8 @@ close_confirm:
   message_suffix: "」吗？"
   confirm: "确认"
   cancel: "取消"
+  terminal_title: "关闭终端"
+  terminal_message: "确定要关闭此终端吗？历史指令将被删除。"
 
 password:
   enter: "输入密码:"
@@ -142,7 +144,7 @@ theme:
 
 about:
   menu_label: "关于"
-  title: "关于 OpenZoo"
+  title: "关于 OpenNex"
   version_label: "版本"
   description: "多功能堆叠式终端管理器，集成标签布局、会话命令记忆、全局界面缩放与加密工作区，高效管控你的终端环境。"
   homepage_label: "主页"

@@ -322,6 +322,10 @@ fn workspace_action_column_width(has_close: bool, has_lock: bool, item_spacing: 
     }
 }
 
+fn screen_center(ctx: &egui::Context) -> egui::Pos2 {
+    ctx.input(|i| i.screen_rect).center()
+}
+
 fn shortcut_hint_available_height(available_height: f32) -> f32 {
     available_height.max(0.0)
 }
@@ -500,6 +504,8 @@ fn global_shortcuts_allowed(app: &App) -> bool {
         && app.pw_popup.is_none()
         && app.unlock_popup.is_none()
         && app.binding_recording.is_none()
+        && app.close_confirm_panel.is_none()
+        && app.pending_close_confirm.is_none()
 }
 
 fn history_menu_shortcut_released(
@@ -719,7 +725,7 @@ impl Default for SettingsWindowState {
 
 fn app_data_dir() -> PathBuf {
     let base = dirs::config_dir().unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
-    base.join("open-zoo")
+    base.join("opennex")
 }
 
 fn ensure_data_dir() {
@@ -946,6 +952,7 @@ pub struct App {
     terminal_id_counter: u64,
     pending_new_terminal: Option<(usize, SurfaceIndex, NodeIndex)>,
     pending_close: Option<String>,
+    pending_close_confirm: Option<String>,
     pending_split_after: Option<String>,
     pending_split_vertical: bool,
     renaming_panel: Option<usize>,
@@ -1147,6 +1154,7 @@ impl App {
             terminal_id_counter: 0,
             pending_new_terminal: None,
             pending_close: None,
+            pending_close_confirm: None,
             pending_split_after: None,
             pending_split_vertical: false,
             renaming_panel: None,
@@ -1411,6 +1419,7 @@ impl App {
             if terminal_count <= 1 {
                 // Don't close the last terminal
             } else {
+                self.history_db.clear(&tab);
                 self.terminals.remove(&tab);
                 if self.focused_terminal.as_ref() == Some(&tab) {
                     self.focused_terminal = None;
@@ -1506,6 +1515,26 @@ impl App {
     fn close_workspace(&mut self, i: usize) {
         if self.panels.len() <= 1 {
             return;
+        }
+        // Delete history for all terminals in this workspace
+        if let Some(tree) = self.dock_states.get(&i) {
+            for tab_id in self.terminals.keys() {
+                if tree.find_tab(tab_id).is_some() {
+                    self.history_db.clear(tab_id);
+                }
+            }
+        }
+        // Remove all terminal instances belonging to this workspace
+        if let Some(tree) = self.dock_states.get(&i) {
+            let to_remove: Vec<String> = self
+                .terminals
+                .keys()
+                .filter(|t| tree.find_tab(t).is_some())
+                .cloned()
+                .collect();
+            for tab_id in to_remove {
+                self.terminals.remove(&tab_id);
+            }
         }
         let panel = self.panels.swap_remove(i);
         let _ = panel;
@@ -2001,7 +2030,8 @@ impl eframe::App for App {
             egui::Window::new(&self.texts.settings.title)
                 .open(&mut open)
                 .resizable(true)
-                .default_pos([ws.x, ws.y])
+                .current_pos(screen_center(ctx))
+                .pivot(egui::Align2::CENTER_CENTER)
                 .default_size([ws.width, ws.height])
                 .show(ctx, |ui| {
                     ui.horizontal(|ui| {
@@ -2279,6 +2309,8 @@ impl eframe::App for App {
                 .open(&mut open)
                 .resizable(false)
                 .collapsible(false)
+                .current_pos(screen_center(ctx))
+                .pivot(egui::Align2::CENTER_CENTER)
                 .default_width(380.0)
                 .show(ctx, |ui| {
                     ui.vertical_centered(|ui| {
@@ -2301,8 +2333,8 @@ impl eframe::App for App {
                     ui.horizontal(|ui| {
                         ui.label(&self.texts.about.homepage_label);
                         ui.hyperlink_to(
-                            "https://github.com/155366311/open-zoo",
-                            "https://github.com/155366311/open-zoo",
+                            "https://github.com/zeadix/opennex",
+                            "https://github.com/zeadix/opennex",
                         );
                     });
                     ui.horizontal(|ui| {
@@ -2336,6 +2368,8 @@ impl eframe::App for App {
                 .open(&mut open)
                 .resizable(false)
                 .collapsible(false)
+                .current_pos(screen_center(ctx))
+                .pivot(egui::Align2::CENTER_CENTER)
                 .show(ctx, |ui| {
                     ui.label(format!(
                         "{}{}{}",
@@ -2359,6 +2393,39 @@ impl eframe::App for App {
             }
         }
 
+        // Terminal close confirmation
+        if let Some(ref tab_id) = self.pending_close_confirm.clone() {
+            let mut open = true;
+            let mut confirmed = false;
+            let mut cancelled = false;
+            let tab_id = tab_id.clone();
+            egui::Window::new(&self.texts.close_confirm.terminal_title)
+                .open(&mut open)
+                .resizable(false)
+                .collapsible(false)
+                .current_pos(screen_center(ctx))
+                .pivot(egui::Align2::CENTER_CENTER)
+                .show(ctx, |ui| {
+                    ui.label(&self.texts.close_confirm.terminal_message);
+                    ui.add_space(10.0);
+                    ui.horizontal(|ui| {
+                        if ui.button(&self.texts.close_confirm.confirm).clicked() {
+                            confirmed = true;
+                        }
+                        if ui.button(&self.texts.close_confirm.cancel).clicked() {
+                            cancelled = true;
+                        }
+                    });
+                });
+            if confirmed {
+                self.pending_close_confirm = None;
+                self.pending_close = Some(tab_id);
+            }
+            if cancelled || !open {
+                self.pending_close_confirm = None;
+            }
+        }
+
         // Password popup windows
         if let Some(popup) = self.pw_popup {
             let mut open = true;
@@ -2372,6 +2439,8 @@ impl eframe::App for App {
                 .open(&mut open)
                 .resizable(false)
                 .collapsible(false)
+                .current_pos(screen_center(ctx))
+                .pivot(egui::Align2::CENTER_CENTER)
                 .show(ctx, |ui| match popup {
                     "set" => {
                         ui.horizontal_centered(|ui| {
@@ -3094,6 +3163,7 @@ impl eframe::App for App {
                             menu_fg_color: self.settings.menu_fg_color,
                             menu_font_size: self.settings.menu_font_size,
                             pending_close: &mut self.pending_close,
+                            pending_close_confirm: &mut self.pending_close_confirm,
                             pending_new_terminal: &mut self.pending_new_terminal,
                             pending_split_after: &mut self.pending_split_after,
                             pending_split_vertical: &mut self.pending_split_vertical,
@@ -3511,6 +3581,7 @@ struct TerminalTabViewer<'a> {
     menu_fg_color: [u8; 3],
     menu_font_size: f32,
     pending_close: &'a mut Option<String>,
+    pending_close_confirm: &'a mut Option<String>,
     pending_new_terminal: &'a mut Option<(usize, SurfaceIndex, NodeIndex)>,
     pending_split_after: &'a mut Option<String>,
     pending_split_vertical: &'a mut bool,
@@ -3762,8 +3833,8 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
     }
 
     fn on_close(&mut self, tab: &mut Self::Tab) -> bool {
-        *self.pending_close = Some(tab.clone());
-        true
+        *self.pending_close_confirm = Some(tab.clone());
+        false
     }
 
     fn closeable(&mut self, _tab: &mut Self::Tab) -> bool {

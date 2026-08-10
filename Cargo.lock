@@ -2741,7 +2741,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "open-zoo"
+name = "opennex"
 version = "0.1.0"
 dependencies = [
  "alacritty_terminal",

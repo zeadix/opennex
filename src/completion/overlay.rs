@@ -1,4 +1,4 @@
-use egui::{Pos2, Color32, Align2};
+use egui::{Align2, Color32, Pos2};
 
 pub struct SuggestionOverlay {
     pub suggestion: Option<String>,

@@ -1,4 +1,4 @@
-# Project: OpenZoo
+# Project: OpenNex
 
 ## Overview
 
@@ -70,7 +70,7 @@
 ## Project Structure
 
 ```
-open-zoo/
+opennex/
 ├── src-tauri/                  # Rust 后端
 │   ├── src/
 │   │   ├── main.rs             # Tauri 入口

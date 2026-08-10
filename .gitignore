@@ -1,6 +1,9 @@
 /target
-Cargo.lock
-workspace/
-debug.log
-history.db
-*.json
+node_modules/
+dist/
+src-tauri/
+*.db
+*.log
+scene.json
+settings.json
+templates/*.json

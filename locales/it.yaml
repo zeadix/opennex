@@ -101,6 +101,8 @@ close_confirm:
   message_suffix: "\"?"
   confirm: "Conferma"
   cancel: "Annulla"
+  terminal_title: "Chiudi terminale"
+  terminal_message: "Sei sicuro di voler chiudere questo terminale? La cronologia dei comandi verrà eliminata."
 
 password:
   enter: "Inserisci password:"
@@ -142,7 +144,7 @@ theme:
 
 about:
   menu_label: "Informazioni"
-  title: "Informazioni su OpenZoo"
+  title: "Informazioni su OpenNex"
   version_label: "Versione"
   description: "Gestore di terminali multifunzionale con layout a schede, cronologia dei comandi, ridimensionamento dell'interfaccia e aree di lavoro crittografate per una gestione efficiente."
   homepage_label: "Sito web"

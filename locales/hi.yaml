@@ -102,6 +102,8 @@ close_confirm:
   message_suffix: "\" को बंद करना चाहते हैं?"
   confirm: "पुष्टि करें"
   cancel: "रद्द करें"
+  terminal_title: "टर्मिनल बंद करें"
+  terminal_message: "क्या आप वाकई इस टर्मिनल को बंद करना चाहते हैं? कमांड इतिहास हटा दिया जाएगा।"
 
 password:
   enter: "पासवर्ड दर्ज करें:"
@@ -143,7 +145,7 @@ theme:
 
 about:
   menu_label: "के बारे में"
-  title: "OpenZoo के बारे में"
+  title: "OpenNex के बारे में"
   version_label: "संस्करण"
   description: "टैब लेआउट, कमांड इतिहास, वैश्विक इंटरफ़ेस स्केलिंग और एन्क्रिप्टेड कार्यक्षेत्र के साथ बहुउपयोगी स्टैक्ड टर्मिनल प्रबंधक।"
   homepage_label: "मुखपृष्ठ"

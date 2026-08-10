@@ -101,6 +101,8 @@ close_confirm:
   message_suffix: "\"?"
   confirm: "Confirm"
   cancel: "Cancel"
+  terminal_title: "Close Terminal"
+  terminal_message: "Are you sure you want to close this terminal? Command history will be deleted."
 
 password:
   enter: "Enter Password:"
@@ -142,7 +144,7 @@ theme:
 
 about:
   menu_label: "About"
-  title: "About OpenZoo"
+  title: "About OpenNex"
   version_label: "Version"
   description: "Multi-functional stacked terminal manager with tabbed layouts, session command history, global interface scaling, and encrypted workspaces for efficient terminal management."
   homepage_label: "Homepage"

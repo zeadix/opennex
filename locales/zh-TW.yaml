@@ -101,6 +101,8 @@ close_confirm:
   message_suffix: "」嗎？"
   confirm: "確認"
   cancel: "取消"
+  terminal_title: "關閉終端機"
+  terminal_message: "確定要關閉此終端機嗎？歷史指令將被刪除。"
 
 password:
   enter: "輸入密碼:"
@@ -142,7 +144,7 @@ theme:
 
 about:
   menu_label: "關於"
-  title: "關於 OpenZoo"
+  title: "關於 OpenNex"
   version_label: "版本"
   description: "多功能堆疊式終端機管理器，整合分頁佈局、工作階段指令記憶、全域介面縮放與加密工作區，高效管控你的終端機環境。"
   homepage_label: "首頁"

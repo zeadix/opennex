@@ -101,6 +101,8 @@ close_confirm:
   message_suffix: "\" ?"
   confirm: "Confirmer"
   cancel: "Annuler"
+  terminal_title: "Fermer le terminal"
+  terminal_message: "Voulez-vous vraiment fermer ce terminal ? L'historique des commandes sera supprimé."
 
 password:
   enter: "Entrer mot de passe :"
@@ -142,7 +144,7 @@ theme:
 
 about:
   menu_label: "À propos"
-  title: "À propos d'OpenZoo"
+  title: "À propos d'OpenNex"
   version_label: "Version"
   description: "Gestionnaire de terminaux polyvalent avec disposition à onglets, historique des commandes, mise à l'échelle de l'interface et espaces de travail chiffrés pour une gestion efficace."
   homepage_label: "Page d'accueil"
