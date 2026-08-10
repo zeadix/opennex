@@ -7,3 +7,5 @@ src-tauri/
 scene.json
 settings.json
 templates/*.json
+*.cargo-ok
+Cargo.toml.orig
