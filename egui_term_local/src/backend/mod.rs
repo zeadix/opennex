@@ -157,7 +157,10 @@ impl TerminalBackend {
         let config = term::Config::default();
         let terminal_size = TerminalSize::default();
         let pty = tty::new(&pty_config, terminal_size.into(), id)?;
+        #[cfg(unix)]
         let child_pid = pty.child().id();
+        #[cfg(not(unix))]
+        let child_pid = 0u32;
         let (event_sender, event_receiver) = mpsc::channel();
         let event_proxy = EventProxy(event_sender);
         let mut term = Term::new(config, &terminal_size, event_proxy.clone());
