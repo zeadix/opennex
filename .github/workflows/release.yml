@@ -35,8 +35,7 @@ jobs:
       - name: Create portable zip
         shell: bash
         run: |
-          cd target/release
-          7z a "../../../opennex-${{ steps.version.outputs.VERSION }}-windows-x86_64.zip" opennex.exe
+          7z a "opennex-${{ steps.version.outputs.VERSION }}-windows-x86_64.zip" "./target/release/opennex.exe"
 
       - name: Install cargo-wix
         run: cargo install cargo-wix
@@ -63,7 +62,12 @@ jobs:
       - name: Compute SHA256
         shell: bash
         run: |
-          sha256sum "opennex-${{ steps.version.outputs.VERSION }}-windows-x86_64.zip" | awk '{print $1}' > windows-zip.sha256
+          ls -la *.zip *.msi 2>/dev/null || true
+          if [ -f "opennex-${{ steps.version.outputs.VERSION }}-windows-x86_64.zip" ]; then
+            sha256sum "opennex-${{ steps.version.outputs.VERSION }}-windows-x86_64.zip" | awk '{print $1}' > windows-zip.sha256
+          else
+            echo "ERROR: zip file not found!" && exit 1
+          fi
           if [ -f "opennex-${{ steps.version.outputs.VERSION }}-windows-x86_64.msi" ]; then
             sha256sum "opennex-${{ steps.version.outputs.VERSION }}-windows-x86_64.msi" | awk '{print $1}' > windows-msi.sha256
           fi
