@@ -31,17 +31,19 @@ impl CommandDatabase {
         Self { commands }
     }
 
+    #[cfg(windows)]
     fn is_executable(path: &std::path::Path) -> bool {
-        if cfg!(windows) {
-            path.extension()
-                .map(|e| matches!(e.to_str(), Some("exe" | "cmd" | "bat" | "ps1")))
-                .unwrap_or(false)
-        } else {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::metadata(path)
-                .map(|m| m.permissions().mode() & 0o111 != 0)
-                .unwrap_or(false)
-        }
+        path.extension()
+            .map(|e| matches!(e.to_str(), Some("exe" | "cmd" | "bat" | "ps1")))
+            .unwrap_or(false)
+    }
+
+    #[cfg(not(windows))]
+    fn is_executable(path: &std::path::Path) -> bool {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(path)
+            .map(|m| m.permissions().mode() & 0o111 != 0)
+            .unwrap_or(false)
     }
 
     pub fn search(&self, prefix: &str) -> Vec<&str> {
