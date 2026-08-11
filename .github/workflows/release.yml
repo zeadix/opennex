@@ -44,14 +44,20 @@ jobs:
       - name: Generate WiX template if missing
         shell: bash
         run: |
+          mkdir -p wix
           if [ ! -f wix/main.wxs ]; then
-            cargo wix init --output wix/main.wxs
+            cargo wix init --output wix/main.wxs || echo "WiX init failed, skipping MSI"
           fi
 
       - name: Build MSI installer
         continue-on-error: true
         id: msi
+        shell: bash
         run: |
+          if [ ! -f wix/main.wxs ]; then
+            echo "WiX template not found, skipping MSI"
+            exit 0
+          fi
           cargo wix --output "opennex-${{ steps.version.outputs.VERSION }}-windows-x86_64.msi" -p Cargo.toml
 
       - name: Compute SHA256
