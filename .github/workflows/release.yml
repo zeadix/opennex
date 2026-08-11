@@ -1,0 +1,273 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  R2_BUCKET: opennex-ci
+  R2_PUBLIC_URL: https://opennex.download.zeadix.com
+  PAGES_PROJECT: opennex-website
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build
+        run: cargo build --release
+
+      - name: Get version
+        id: version
+        shell: bash
+        run: echo "VERSION=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
+
+      - name: Create portable zip
+        shell: bash
+        run: |
+          cd target/release
+          7z a "../../../opennex-${{ steps.version.outputs.VERSION }}-windows-x86_64.zip" opennex.exe
+
+      - name: Install cargo-wix
+        run: cargo install cargo-wix
+
+      - name: Generate WiX template if missing
+        shell: bash
+        run: |
+          if [ ! -f wix/main.wxs ]; then
+            cargo wix init --output wix/main.wxs
+          fi
+
+      - name: Build MSI installer
+        continue-on-error: true
+        id: msi
+        run: |
+          cargo wix --output "opennex-${{ steps.version.outputs.VERSION }}-windows-x86_64.msi" -p Cargo.toml
+
+      - name: Compute SHA256
+        shell: bash
+        run: |
+          sha256sum "opennex-${{ steps.version.outputs.VERSION }}-windows-x86_64.zip" | awk '{print $1}' > windows-zip.sha256
+          if [ -f "opennex-${{ steps.version.outputs.VERSION }}-windows-x86_64.msi" ]; then
+            sha256sum "opennex-${{ steps.version.outputs.VERSION }}-windows-x86_64.msi" | awk '{print $1}' > windows-msi.sha256
+          fi
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: |
+            opennex-${{ steps.version.outputs.VERSION }}-windows-x86_64.zip
+            opennex-${{ steps.version.outputs.VERSION }}-windows-x86_64.msi
+            windows-zip.sha256
+            windows-msi.sha256
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build
+        run: cargo build --release
+
+      - name: Get version
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
+
+      - name: Create portable tar.gz
+        run: |
+          cd target/release
+          tar czf "../../opennex-${{ steps.version.outputs.VERSION }}-macos-x86_64.tar.gz" opennex
+
+      - name: Install cargo-bundle
+        run: cargo install cargo-bundle
+
+      - name: Create app bundle
+        id: bundle
+        continue-on-error: true
+        run: cargo bundle --release
+
+      - name: Create DMG installer
+        id: dmg
+        continue-on-error: true
+        if: steps.bundle.outcome == 'success'
+        run: |
+          hdiutil create \
+            "opennex-${{ steps.version.outputs.VERSION }}-macos.dmg" \
+            -srcfolder target/release/bundle/osx/OpenNex.app \
+            -ov -fs HFS+
+
+      - name: Compute SHA256
+        run: |
+          shasum -a 256 "opennex-${{ steps.version.outputs.VERSION }}-macos-x86_64.tar.gz" | awk '{print $1}' > macos-tar.sha256
+          if [ -f "opennex-${{ steps.version.outputs.VERSION }}-macos.dmg" ]; then
+            shasum -a 256 "opennex-${{ steps.version.outputs.VERSION }}-macos.dmg" | awk '{print $1}' > macos-dmg.sha256
+          fi
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-build
+          path: |
+            opennex-${{ steps.version.outputs.VERSION }}-macos-x86_64.tar.gz
+            opennex-${{ steps.version.outputs.VERSION }}-macos.dmg
+            macos-tar.sha256
+            macos-dmg.sha256
+
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev pkg-config libfontconfig-dev
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build
+        run: cargo build --release
+
+      - name: Get version
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
+
+      - name: Create portable tar.gz
+        run: |
+          cd target/release
+          tar czf "../../opennex-${{ steps.version.outputs.VERSION }}-linux-x86_64.tar.gz" opennex
+
+      - name: Install cargo-deb
+        run: cargo install cargo-deb
+
+      - name: Build DEB package
+        run: |
+          cargo deb --output "opennex-${{ steps.version.outputs.VERSION }}-linux-amd64.deb"
+
+      - name: Compute SHA256
+        run: |
+          sha256sum "opennex-${{ steps.version.outputs.VERSION }}-linux-x86_64.tar.gz" | awk '{print $1}' > linux-tar.sha256
+          sha256sum "opennex-${{ steps.version.outputs.VERSION }}-linux-amd64.deb" | awk '{print $1}' > linux-deb.sha256
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-build
+          path: |
+            opennex-${{ steps.version.outputs.VERSION }}-linux-x86_64.tar.gz
+            opennex-${{ steps.version.outputs.VERSION }}-linux-amd64.deb
+            linux-tar.sha256
+            linux-deb.sha256
+
+  publish:
+    runs-on: ubuntu-latest
+    needs: [build-windows, build-macos, build-linux]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get version
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
+
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-build
+          path: artifacts/windows
+
+      - name: Download macOS artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-build
+          path: artifacts/macos
+
+      - name: Download Linux artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-build
+          path: artifacts/linux
+
+      - name: List artifacts
+        run: find artifacts/ -type f | sort
+
+      - name: Install Wrangler
+        run: npm install -g wrangler
+
+      - name: Upload to R2
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          VERSION: ${{ steps.version.outputs.VERSION }}
+        run: |
+          cd artifacts
+          for dir in windows macos linux; do
+            for file in "$dir"/*; do
+              [ -f "$file" ] || continue
+              filename=$(basename "$file")
+              echo "Uploading $filename to R2..."
+              wrangler r2 object put "${{ env.R2_BUCKET }}/${VERSION}/${filename}" --file="$file" --remote
+            done
+          done
+
+      - name: Generate latest.json
+        env:
+          VERSION: ${{ steps.version.outputs.VERSION }}
+          R2_PUBLIC_URL: ${{ env.R2_PUBLIC_URL }}
+        run: |
+          mkdir -p deploy
+          WIN_ZIP_SHA=$(cat artifacts/windows/windows-zip.sha256 2>/dev/null || echo "")
+          WIN_MSI_SHA=$(cat artifacts/windows/windows-msi.sha256 2>/dev/null || echo "")
+          MAC_TAR_SHA=$(cat artifacts/macos/macos-tar.sha256 2>/dev/null || echo "")
+          MAC_DMG_SHA=$(cat artifacts/macos/macos-dmg.sha256 2>/dev/null || echo "")
+          LIN_TAR_SHA=$(cat artifacts/linux/linux-tar.sha256 2>/dev/null || echo "")
+          LIN_DEB_SHA=$(cat artifacts/linux/linux-deb.sha256 2>/dev/null || echo "")
+
+          VERSION_NUM=$(echo "$VERSION" | sed 's/^v//')
+
+          cat > deploy/latest.json << ENDJSON
+          {
+            "version": "${VERSION_NUM}",
+            "files": {
+              "windows": {
+                "portable": "${R2_PUBLIC_URL}/${VERSION}/opennex-${VERSION}-windows-x86_64.zip",
+                "sha256": "${WIN_ZIP_SHA}",
+                "installer": "${R2_PUBLIC_URL}/${VERSION}/opennex-${VERSION}-windows-x86_64.msi",
+                "installer_sha256": "${WIN_MSI_SHA}"
+              },
+              "macos": {
+                "portable": "${R2_PUBLIC_URL}/${VERSION}/opennex-${VERSION}-macos-x86_64.tar.gz",
+                "sha256": "${MAC_TAR_SHA}",
+                "installer": "${R2_PUBLIC_URL}/${VERSION}/opennex-${VERSION}-macos.dmg",
+                "installer_sha256": "${MAC_DMG_SHA}"
+              },
+              "linux": {
+                "portable": "${R2_PUBLIC_URL}/${VERSION}/opennex-${VERSION}-linux-x86_64.tar.gz",
+                "sha256": "${LIN_TAR_SHA}",
+                "installer": "${R2_PUBLIC_URL}/${VERSION}/opennex-${VERSION}-linux-amd64.deb",
+                "installer_sha256": "${LIN_DEB_SHA}"
+              }
+            }
+          }
+          ENDJSON
+
+          echo "=== latest.json ==="
+          cat deploy/latest.json
+
+      - name: Deploy latest.json to Pages
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          wrangler pages deploy deploy/ \
+            --project-name=${{ env.PAGES_PROJECT }} \
+            --commit-dirty=true

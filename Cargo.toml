@@ -23,3 +23,10 @@ dirs = "6.0.0"
 rusqlite = { version = "0.31", features = ["bundled"] }
 alacritty_terminal = "0.25"
 egui_term = { path = "egui_term_local" }
+
+[package.metadata.deb]
+maintainer = "zeadix"
+depends = "$auto"
+assets = [
+    ["target/release/opennex", "usr/bin/", "755"],
+]
