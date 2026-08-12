@@ -233,12 +233,19 @@ jobs:
             done
           done
 
-      - name: Generate latest.json
+      - name: Generate latest.json with version history
         env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           VERSION: ${{ steps.version.outputs.VERSION }}
           R2_PUBLIC_URL: ${{ env.R2_PUBLIC_URL }}
+          R2_BUCKET: ${{ env.R2_BUCKET }}
         run: |
           mkdir -p deploy
+          VERSION_NUM=$(echo "$VERSION" | sed 's/^v//')
+          DATE=$(date -u +%Y-%m-%d)
+
+          # Read SHA256 values
           WIN_ZIP_SHA=$(cat artifacts/windows/windows-zip.sha256 2>/dev/null || echo "")
           WIN_MSI_SHA=$(cat artifacts/windows/windows-msi.sha256 2>/dev/null || echo "")
           MAC_TAR_SHA=$(cat artifacts/macos/macos-tar.sha256 2>/dev/null || echo "")
@@ -246,11 +253,11 @@ jobs:
           LIN_TAR_SHA=$(cat artifacts/linux/linux-tar.sha256 2>/dev/null || echo "")
           LIN_DEB_SHA=$(cat artifacts/linux/linux-deb.sha256 2>/dev/null || echo "")
 
-          VERSION_NUM=$(echo "$VERSION" | sed 's/^v//')
-
-          cat > deploy/latest.json << ENDJSON
+          # Build current version entry as JSON
+          CURRENT_ENTRY=$(cat << CURRENTEOF
           {
             "version": "${VERSION_NUM}",
+            "date": "${DATE}",
             "files": {
               "windows": {
                 "portable": "${R2_PUBLIC_URL}/${VERSION}/opennex-${VERSION}-windows-x86_64.zip",
@@ -272,10 +279,94 @@ jobs:
               }
             }
           }
-          ENDJSON
+          CURRENTEOF
+          )
 
-          echo "=== latest.json ==="
-          cat deploy/latest.json
+          # Try to download old latest.json
+          OLD_HISTORY="[]"
+          if wrangler r2 object get "${R2_BUCKET}/latest.json" --file=/tmp/old_latest.json --remote 2>/dev/null; then
+            OLD_HISTORY=$(python3 -c "
+          import json, sys
+          try:
+              data = json.load(open('/tmp/old_latest.json'))
+              history = data.get('history', [])
+              # Output as compact JSON
+              print(json.dumps(history))
+          except:
+              print('[]')
+          " 2>/dev/null || echo "[]")
+          fi
+
+          # Build new latest.json with history using Python
+          python3 << PYEOF
+          import json
+
+          current = json.loads('''${CURRENT_ENTRY}''')
+          old_history = json.loads('''${OLD_HISTORY}''')
+
+          # Build new history: current version first, then old ones, max 3
+          new_history = [current] + old_history
+          new_history = new_history[:3]
+
+          # Find versions to delete (beyond the 3 kept)
+          kept_versions = set(h["version"] for h in new_history)
+          all_old_versions = set(h["version"] for h in old_history)
+          to_delete = all_old_versions - kept_versions
+
+          # Also add current to old version list for deletion check
+          # (current version won't be in old list, so no issue)
+
+          latest = {
+              "version": current["version"],
+              "date": current["date"],
+              "files": current["files"],
+              "history": new_history
+          }
+
+          with open("deploy/latest.json", "w") as f:
+              json.dump(latest, f, indent=2)
+
+          # Write versions to delete to a file for the next step
+          with open("/tmp/versions_to_delete.txt", "w") as f:
+              for v in to_delete:
+                  f.write(v + "\n")
+
+          print("=== latest.json ===")
+          print(json.dumps(latest, indent=2))
+
+          if to_delete:
+              print("\n=== Versions to delete from R2 ===")
+              for v in to_delete:
+                  print(f"  v{v}")
+          PYEOF
+
+      - name: Clean up old R2 versions
+        if: success()
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          R2_BUCKET: ${{ env.R2_BUCKET }}
+        run: |
+          if [ -f /tmp/versions_to_delete.txt ]; then
+            while IFS= read -r version; do
+              [ -z "$version" ] && continue
+              echo "Deleting old version v${version} from R2..."
+              # List objects in the version directory
+              OBJECTS=$(wrangler r2 object list "${R2_BUCKET}/v${version}/" --remote 2>/dev/null | python3 -c "
+          import json, sys
+          try:
+              data = json.load(sys.stdin)
+              for obj in data:
+                  print(obj['key'])
+          except:
+              pass
+          " 2>/dev/null || echo "")
+              for obj_key in $OBJECTS; do
+                echo "  Deleting $obj_key..."
+                wrangler r2 object delete "${R2_BUCKET}/${obj_key}" --remote 2>/dev/null || true
+              done
+            done < /tmp/versions_to_delete.txt
+          fi
 
       - name: Upload latest.json to R2
         env:
