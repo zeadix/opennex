@@ -148,6 +148,7 @@ about:
   version_label: "版本"
   description: "多功能堆叠式终端管理器，集成标签布局、会话命令记忆、全局界面缩放与加密工作区，高效管控你的终端环境。"
   homepage_label: "主页"
+  source_label: "开源"
   license_label: "开源协议"
   credits_label: "致谢"
   credits: "基于 egui、egui_dock、alacritty_terminal、egui_term 等开源项目构建。"

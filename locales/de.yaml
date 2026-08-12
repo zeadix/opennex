@@ -148,6 +148,7 @@ about:
   version_label: "Version"
   description: "Multifunktionaler Terminalmanager mit Registerkartenlayout, Befehlsverlauf, globaler Skalierung und verschlüsselten Arbeitsbereichen für effiziente Terminalverwaltung."
   homepage_label: "Webseite"
+  source_label: "Quellcode"
   license_label: "Lizenz"
   credits_label: "Danksagung"
   credits: "Basiert auf Open-Source-Projekten wie egui, egui_dock, alacritty_terminal und egui_term."

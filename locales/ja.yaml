@@ -148,6 +148,7 @@ about:
   version_label: "バージョン"
   description: "タブレイアウト、コマンド履歴、グローバルインターフェーススケーリング、暗号化ワークスペースを備えた多機能スタック型ターミナルマネージャー。"
   homepage_label: "ホームページ"
+  source_label: "ソースコード"
   license_label: "ライセンス"
   credits_label: "クレジット"
   credits: "egui、egui_dock、alacritty_terminal、egui_term などのオープンソースプロジェクトに基づいて構築。"

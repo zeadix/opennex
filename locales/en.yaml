@@ -148,6 +148,7 @@ about:
   version_label: "Version"
   description: "Multi-functional stacked terminal manager with tabbed layouts, session command history, global interface scaling, and encrypted workspaces for efficient terminal management."
   homepage_label: "Homepage"
+  source_label: "Source"
   license_label: "License"
   credits_label: "Credits"
   credits: "Built on open-source projects including egui, egui_dock, alacritty_terminal, and egui_term."

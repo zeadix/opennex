@@ -148,6 +148,7 @@ about:
   version_label: "版本"
   description: "多功能堆疊式終端機管理器，整合分頁佈局、工作階段指令記憶、全域介面縮放與加密工作區，高效管控你的終端機環境。"
   homepage_label: "首頁"
+  source_label: "開源"
   license_label: "授權條款"
   credits_label: "鳴謝"
   credits: "基於 egui、egui_dock、alacritty_terminal、egui_term 等開源專案建構。"

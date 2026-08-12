@@ -149,6 +149,7 @@ about:
   version_label: "संस्करण"
   description: "टैब लेआउट, कमांड इतिहास, वैश्विक इंटरफ़ेस स्केलिंग और एन्क्रिप्टेड कार्यक्षेत्र के साथ बहुउपयोगी स्टैक्ड टर्मिनल प्रबंधक।"
   homepage_label: "मुखपृष्ठ"
+  source_label: "सोर्स कोड"
   license_label: "लाइसेंस"
   credits_label: "आभार"
   credits: "egui, egui_dock, alacritty_terminal, और egui_term सहित ओपन-सोर्स परियोजनाओं पर निर्मित।"

@@ -148,6 +148,7 @@ about:
   version_label: "Version"
   description: "Gestionnaire de terminaux polyvalent avec disposition à onglets, historique des commandes, mise à l'échelle de l'interface et espaces de travail chiffrés pour une gestion efficace."
   homepage_label: "Page d'accueil"
+  source_label: "Code source"
   license_label: "Licence"
   credits_label: "Crédits"
   credits: "Construit sur des projets open source notamment egui, egui_dock, alacritty_terminal et egui_term."

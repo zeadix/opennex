@@ -187,7 +187,7 @@ fn default_key_binds() -> HashMap<String, ShortcutBinding> {
     m.insert(
         "toggle_workspace_sidebar".into(),
         ShortcutBinding {
-            key: "Tab".into(),
+            key: "F1".into(),
             ctrl: false,
             shift: false,
             alt: false,
@@ -228,6 +228,18 @@ fn binding_to_key(b: &ShortcutBinding) -> Option<egui::Key> {
         "Escape" => Some(egui::Key::Escape),
         "Enter" => Some(egui::Key::Enter),
         "Space" => Some(egui::Key::Space),
+        "F1" => Some(egui::Key::F1),
+        "F2" => Some(egui::Key::F2),
+        "F3" => Some(egui::Key::F3),
+        "F4" => Some(egui::Key::F4),
+        "F5" => Some(egui::Key::F5),
+        "F6" => Some(egui::Key::F6),
+        "F7" => Some(egui::Key::F7),
+        "F8" => Some(egui::Key::F8),
+        "F9" => Some(egui::Key::F9),
+        "F10" => Some(egui::Key::F10),
+        "F11" => Some(egui::Key::F11),
+        "F12" => Some(egui::Key::F12),
         _ => None,
     }
 }
@@ -246,6 +258,18 @@ fn key_display_name(k: &str) -> &str {
         "Escape" => "Esc",
         "Enter" => "Enter",
         "Space" => "Space",
+        "F1" => "F1",
+        "F2" => "F2",
+        "F3" => "F3",
+        "F4" => "F4",
+        "F5" => "F5",
+        "F6" => "F6",
+        "F7" => "F7",
+        "F8" => "F8",
+        "F9" => "F9",
+        "F10" => "F10",
+        "F11" => "F11",
+        "F12" => "F12",
         _ => k,
     }
 }
@@ -776,6 +800,26 @@ fn load_settings() -> AppSettings {
 }
 
 fn normalize_settings(mut settings: AppSettings) -> (AppSettings, bool) {
+    #[cfg(debug_assertions)]
+    {
+        let original = settings.key_binds.clone();
+        let defaults = default_key_binds();
+        for (key, default_binding) in &defaults {
+            settings
+                .key_binds
+                .insert(key.clone(), default_binding.clone());
+        }
+        let changed = settings.key_binds != original;
+        return (settings, changed);
+    }
+
+    #[cfg(not(debug_assertions))]
+    {
+        normalize_settings_release_impl(settings)
+    }
+}
+
+fn normalize_settings_release_impl(mut settings: AppSettings) -> (AppSettings, bool) {
     let original = settings.key_binds.clone();
     let defaults = default_key_binds();
     if !settings.key_binds.contains_key("toggle_workspace_sidebar") {
@@ -814,7 +858,7 @@ fn normalize_settings(mut settings: AppSettings) -> (AppSettings, bool) {
 
 #[cfg(test)]
 fn normalize_history_bindings(settings: AppSettings) -> AppSettings {
-    normalize_settings(settings).0
+    normalize_settings_release_impl(settings).0
 }
 
 fn save_settings(settings: &AppSettings) -> Result<(), anyhow::Error> {
@@ -1771,19 +1815,6 @@ impl eframe::App for App {
             self.workspace_sidebar_visible = !self.workspace_sidebar_visible;
         }
 
-        // Ctrl+Tab sends a tab character to the focused terminal. Plain Tab toggles the sidebar.
-        if !workspace_renaming
-            && global_shortcuts_allowed(self)
-            && !binding_was_recording
-            && consume_exact_key(ctx, egui::Key::Tab, egui::Modifiers::CTRL)
-        {
-            if let Some(tab) = &self.focused_terminal.clone() {
-                if let Some(td) = self.terminals.get_mut(tab) {
-                    td.instance.write(&[0x09]);
-                }
-            }
-        }
-
         // Enter: select history entry, or record command + send CR to terminal
         if !workspace_renaming
             && !history_menu_handled
@@ -2333,6 +2364,13 @@ impl eframe::App for App {
                     ui.horizontal(|ui| {
                         ui.label(&self.texts.about.homepage_label);
                         ui.hyperlink_to(
+                            "https://opennex.zeadix.com/",
+                            "https://opennex.zeadix.com/",
+                        );
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label(&self.texts.about.source_label);
+                        ui.hyperlink_to(
                             "https://github.com/zeadix/opennex",
                             "https://github.com/zeadix/opennex",
                         );
@@ -2342,6 +2380,7 @@ impl eframe::App for App {
                         ui.label(env!("CARGO_PKG_LICENSE"));
                     });
                     ui.separator();
+                    ui.label("Author: KunPeng.Wang <msr.rsm@qq.com>");
                     ui.label(&self.texts.about.credits_label);
                     ui.label(&self.texts.about.credits);
                     ui.add_space(4.0);
@@ -3380,11 +3419,11 @@ mod tests {
     }
 
     #[test]
-    fn workspace_sidebar_defaults_to_plain_tab() {
+    fn workspace_sidebar_defaults_to_f1() {
         let binds = default_key_binds();
         let binding = &binds["toggle_workspace_sidebar"];
 
-        assert_eq!(binding.key, "Tab");
+        assert_eq!(binding.key, "F1");
         assert!(!binding.ctrl);
         assert!(!binding.shift);
         assert!(!binding.alt);
@@ -3405,55 +3444,24 @@ mod tests {
         );
 
         let migrated = super::normalize_history_bindings(settings);
-        assert_eq!(migrated.key_binds["toggle_workspace_sidebar"].key, "Tab");
+        assert_eq!(migrated.key_binds["toggle_workspace_sidebar"].key, "F1");
         assert_eq!(migrated.key_binds["new_terminal"].key, "T");
     }
 
     #[test]
-    fn tab_shortcuts_are_separated_between_sidebar_and_terminal() {
+    fn f1_shortcut_matches_correctly() {
         let sidebar = default_key_binds()["toggle_workspace_sidebar"].clone();
-        let terminal = ShortcutBinding {
-            key: "Tab".into(),
-            ctrl: true,
-            shift: false,
-            alt: false,
-        };
 
         assert!(super::binding_matches_key(
             &sidebar,
-            egui::Key::Tab,
+            egui::Key::F1,
             egui::Modifiers::NONE
         ));
         assert!(!super::binding_matches_key(
             &sidebar,
-            egui::Key::Tab,
+            egui::Key::F1,
             egui::Modifiers::CTRL
         ));
-        assert!(super::binding_matches_key(
-            &terminal,
-            egui::Key::Tab,
-            egui::Modifiers::CTRL
-        ));
-    }
-
-    #[test]
-    fn exact_tab_shortcut_does_not_match_extra_modifiers() {
-        let ctx = egui::Context::default();
-        let mut input = egui::RawInput::default();
-        input.events.push(egui::Event::Key {
-            key: egui::Key::Tab,
-            physical_key: None,
-            pressed: true,
-            repeat: false,
-            modifiers: egui::Modifiers::SHIFT,
-        });
-        ctx.begin_pass(input);
-        assert!(!super::consume_exact_key(
-            &ctx,
-            egui::Key::Tab,
-            egui::Modifiers::NONE
-        ));
-        let _ = ctx.end_pass();
     }
 
     #[test]

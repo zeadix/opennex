@@ -148,6 +148,7 @@ about:
   version_label: "Versione"
   description: "Gestore di terminali multifunzionale con layout a schede, cronologia dei comandi, ridimensionamento dell'interfaccia e aree di lavoro crittografate per una gestione efficiente."
   homepage_label: "Sito web"
+  source_label: "Codice sorgente"
   license_label: "Licenza"
   credits_label: "Riconoscimenti"
   credits: "Basato su progetti open source tra cui egui, egui_dock, alacritty_terminal ed egui_term."
