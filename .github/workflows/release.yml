@@ -8,7 +8,6 @@ on:
 env:
   R2_BUCKET: opennex-ci
   R2_PUBLIC_URL: https://opennex.download.zeadix.com
-  PAGES_PROJECT: opennex-website
 
 jobs:
   build-windows:
@@ -278,11 +277,9 @@ jobs:
           echo "=== latest.json ==="
           cat deploy/latest.json
 
-      - name: Deploy latest.json to Pages
+      - name: Upload latest.json to R2
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          wrangler pages deploy deploy/ \
-            --project-name=${{ env.PAGES_PROJECT }} \
-            --commit-dirty=true
+          wrangler r2 object put "${{ env.R2_BUCKET }}/latest.json" --file=deploy/latest.json --remote --content-type="application/json"
