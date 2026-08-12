@@ -9,3 +9,5 @@ settings.json
 templates/*.json
 *.cargo-ok
 Cargo.toml.orig
+AGENTS.md
+project.md
