@@ -44,15 +44,6 @@ pub enum UpdateState {
     UpToDate,
 }
 
-impl UpdateState {
-    fn clone_for_temp(&self) -> Self {
-        match self {
-            UpdateState::Ready(_) => UpdateState::Ready(PathBuf::new()),
-            other => other.clone(),
-        }
-    }
-}
-
 fn current_platform() -> &'static str {
     #[cfg(target_os = "windows")]
     {

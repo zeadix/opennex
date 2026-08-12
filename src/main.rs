@@ -6,6 +6,7 @@ mod completion;
 mod history_db;
 mod i18n;
 mod terminal;
+mod terminal_theme;
 mod theme;
 mod updater;
 

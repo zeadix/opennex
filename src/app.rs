@@ -47,6 +47,12 @@ struct AppSettings {
     language: String,
     #[serde(default)]
     theme: ThemeMode,
+    #[serde(default = "default_terminal_theme")]
+    terminal_theme: String,
+}
+
+fn default_terminal_theme() -> String {
+    "one-dark".into()
 }
 
 fn default_language() -> String {
@@ -886,6 +892,7 @@ impl Default for AppSettings {
             key_binds: default_key_binds(),
             language: default_language(),
             theme: ThemeMode::default(),
+            terminal_theme: default_terminal_theme(),
         }
     }
 }
@@ -2438,6 +2445,37 @@ impl eframe::App for App {
                                     &mut self.settings_edit.fg_color,
                                 );
                             });
+                            ui.horizontal(|ui| {
+                                ui.label(&self.texts.settings.appearance.terminal_theme);
+                                let themes = [
+                                    ("one-dark", "One Dark"),
+                                    ("solarized", "Solarized"),
+                                    ("gruvbox", "Gruvbox"),
+                                    ("dracula", "Dracula"),
+                                ];
+                                let current = &self.settings_edit.terminal_theme.clone();
+                                egui::ComboBox::from_id_salt("terminal_theme_select")
+                                    .selected_text(
+                                        themes
+                                            .iter()
+                                            .find(|(k, _)| *k == current)
+                                            .map(|(_, v)| *v)
+                                            .unwrap_or("One Dark"),
+                                    )
+                                    .show_ui(ui, |ui| {
+                                        for (key, label) in themes {
+                                            if ui
+                                                .selectable_value(
+                                                    &mut self.settings_edit.terminal_theme,
+                                                    key.to_string(),
+                                                    label,
+                                                )
+                                                .clicked()
+                                            {
+                                            }
+                                        }
+                                    });
+                            });
                             ui.separator();
                             ui.label(&self.texts.settings.appearance.command_menu_section);
                             ui.horizontal(|ui| {
@@ -3508,6 +3546,7 @@ impl eframe::App for App {
                             focused_terminal: &mut self.focused_terminal,
                             terminal_focus_id: &mut self.terminal_focus_id,
                             show_settings: self.show_settings,
+                            terminal_theme: self.settings.terminal_theme.clone(),
                             texts: &self.texts,
                         },
                     );
@@ -3895,6 +3934,7 @@ struct TerminalTabViewer<'a> {
     focused_terminal: &'a mut Option<String>,
     terminal_focus_id: &'a mut Option<egui::Id>,
     show_settings: bool,
+    terminal_theme: String,
     texts: &'a crate::i18n::Texts,
 }
 
@@ -3987,19 +4027,17 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
 
             let terminal_view = {
                 let mut tv = egui_term::TerminalView::new(ui, &mut td.instance.backend);
-                tv = tv.set_theme(egui_term::TerminalTheme::new(Box::new(
-                    egui_term::ColorPalette {
-                        foreground: format!(
-                            "#{:02x}{:02x}{:02x}",
-                            self.fg_color[0], self.fg_color[1], self.fg_color[2]
-                        ),
-                        background: format!(
-                            "#{:02x}{:02x}{:02x}",
-                            self.bg_color[0], self.bg_color[1], self.bg_color[2]
-                        ),
-                        ..Default::default()
-                    },
-                )));
+                let mut palette = crate::terminal_theme::get_theme(&self.terminal_theme);
+                // Override foreground/background with user settings
+                palette.foreground = format!(
+                    "#{:02x}{:02x}{:02x}",
+                    self.fg_color[0], self.fg_color[1], self.fg_color[2]
+                );
+                palette.background = format!(
+                    "#{:02x}{:02x}{:02x}",
+                    self.bg_color[0], self.bg_color[1], self.bg_color[2]
+                );
+                tv = tv.set_theme(egui_term::TerminalTheme::new(Box::new(palette)));
                 tv = tv.set_font(egui_term::TerminalFont::new(egui_term::FontSettings {
                     font_type: egui::FontId::monospace(td.font_size),
                 }));

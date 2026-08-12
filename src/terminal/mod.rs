@@ -14,12 +14,33 @@ pub struct TerminalInstance {
 
 fn shell_integration_sequence(shell: &str) -> Vec<u8> {
     if shell.contains("bash") || shell.ends_with("/sh") {
-        format!("export PROMPT_COMMAND='printf \"\\033]9;$PWD\\007\"'\n",).into_bytes()
+        // Append to PROMPT_COMMAND instead of overwriting, preserving the
+        // shell's original color/layout prompt configuration.
+        format!(
+            r#"__opennex_osc() {{ printf '\033]9;$PWD\007'; }}
+if [ -n "${{PROMPT_COMMAND}}" ]; then
+  PROMPT_COMMAND="__opennex_osc;${{PROMPT_COMMAND}}"
+else
+  PROMPT_COMMAND="__opennex_osc"
+fi
+"#,
+        )
+        .into_bytes()
     } else if shell.contains("zsh") {
-        format!("precmd() {{ printf '\\033]9;$PWD\\007' }}\n",).into_bytes()
+        format!(
+            r#"__opennex_osc() {{ printf '\033]9;$PWD\007'; }}
+precmd_functions+=(__opennex_osc)
+"#,
+        )
+        .into_bytes()
     } else if shell.contains("powershell") || shell.contains("pwsh") {
-        format!("function prompt {{ Write-Host -NoNewline \"`e]9;$(Get-Location)`e\\\" }}\n",)
-            .into_bytes()
+        format!(
+            r#"function __opennex_osc {{ Write-Host -NoNewline "`e]9;$(Get-Location)`e\"; }}
+$Global:prompt = $function:prompt
+function prompt {{ __opennex_osc; & $Global:prompt }}
+"#,
+        )
+        .into_bytes()
     } else {
         Vec::new()
     }
@@ -36,7 +57,7 @@ impl TerminalInstance {
     ) -> Option<Self> {
         let settings = BackendSettings {
             shell: shell.to_string(),
-            args: vec![],
+            args: vec!["-l".into(), "-i".into()],
             working_directory: Some(std::path::PathBuf::from(cwd)),
         };
 
