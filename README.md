@@ -2,37 +2,41 @@
 
 多功能堆叠式终端管理器，集成标签布局、会话命令记忆、全局界面缩放与加密工作区，高效管控你的终端环境。
 
-## 核心特性
+A multi-functional stacked terminal manager with tabbed layouts, unlimited session command memory, global interface scaling, and encrypted workspaces for efficient terminal management.
 
-### 多窗口与可堆叠布局
+## 核心特性 / Key Features
 
-- 支持多终端会话同时运行，每个终端独立管理
-- 水平/垂直分屏，可自由拖拽调整布局
-- 嵌套选项卡系统，支持多层级 TabSet
-- 拖拽拆分面板，实时调整窗口比例
+### 多窗口与可堆叠布局 / Multi-Window & Stackable Layouts
 
-### 可保存的终端布局
+支持多终端会话同时运行，每个终端独立管理。水平/垂直分屏，可自由拖拽调整布局。嵌套选项卡系统，支持多层级 TabSet。
 
-- 工作区布局自动持久化，重启后完整恢复
-- 支持保存/加载自定义布局模板
-- 多工作区管理，侧边栏快速切换
-- 工作区拖拽排序，操作直观
+Run multiple terminal sessions simultaneously with independent management. Split panes horizontally/vertically with free drag-to-resize. Nested tab system with multi-level TabSets.
 
-### 加密终端工作区
+### 可保存的终端布局 / Persistent Terminal Layouts
 
-- 密码保护工作区，防止未授权访问
-- 一键锁定/解锁，支持快捷键操作
-- 遮罩层覆盖，锁定状态下隐藏所有终端内容
+工作区布局自动持久化，重启后完整恢复。支持保存/加载自定义布局模板。多工作区管理，侧边栏快速切换。
 
-### 便捷快捷键
+Workspace layouts auto-persist and fully restore after restart. Save/load custom layout templates. Multi-workspace management with quick sidebar switching.
 
-- 11 个可自定义快捷键动作，支持交互式录制
-- `F1` 显示/隐藏工作区侧栏
-- `Alt` 呼出历史指令菜单，上下键快速导航
-- `Ctrl+Shift+N` 新建终端，`Ctrl+W` 关闭终端
-- 支持恢复默认快捷键
+### 无限指令记忆菜单 / Unlimited Command History Menu
 
-### 更多功能
+记录当前终端窗口的所有指令，支持快捷键召回。按 `Alt` 命出历史菜单，上下键快速导航，`Enter` 一键召回，自动去重置顶。
+
+Records all commands per terminal session with quick recall via shortcuts. Press `Alt` to open history menu, navigate with arrow keys, `Enter` to recall, with automatic deduplication and most-recent-first ordering.
+
+### 加密终端工作区 / Encrypted Terminal Workspaces
+
+密码保护工作区，防止未授权访问。一键锁定/解锁，支持快捷键操作。遮罩层覆盖，锁定状态下隐藏所有终端内容。
+
+Password-protect workspaces against unauthorized access. One-click lock/unlock with keyboard shortcuts. Overlay mask hides all terminal content when locked.
+
+### 便捷快捷键 / Convenient Shortcuts
+
+11 个可自定义快捷键动作，支持交互式录制。`F1` 显示/隐藏工作区侧栏。`Alt` 呼出历史指令菜单。支持恢复默认快捷键。
+
+11 customizable shortcut actions with interactive recording. `F1` to toggle workspace sidebar. `Alt` for command history menu. Reset to defaults supported.
+
+### 更多功能 / More Features
 
 - **命令历史**：SQLite 存储，自动去重置顶，按终端会话隔离
 - **多语言支持**：中文、繁体中文、英语、德语、法语、日语、意大利语、韩语、印地语
