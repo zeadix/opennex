@@ -23,6 +23,12 @@ dirs = "6.0.0"
 rusqlite = { version = "0.31", features = ["bundled"] }
 alacritty_terminal = "0.25"
 egui_term = { path = "egui_term_local" }
+ureq = { version = "2", features = ["json"] }
+serde_derive = "1"
+sha2 = "0.10"
+tar = "0.4"
+flate2 = "1.0"
+zip = "0.6"
 
 [package.metadata.deb]
 maintainer = "zeadix"

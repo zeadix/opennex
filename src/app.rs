@@ -1042,6 +1042,7 @@ pub struct App {
     texts: crate::i18n::Texts,
     available_languages: Vec<(String, String)>,
     workspace_sidebar_visible: bool,
+    update_state: crate::updater::UpdateState,
 }
 
 struct TerminalData {
@@ -1244,6 +1245,7 @@ impl App {
             texts: crate::i18n::load_language(&language),
             available_languages,
             workspace_sidebar_visible: true,
+            update_state: crate::updater::UpdateState::Idle,
         };
 
         let scene_path = scene_path();
@@ -1291,6 +1293,34 @@ impl App {
 
         app.add_initial_terminal(ctx);
         app.refresh_template_files();
+
+        // Start background update check
+        {
+            let ctx_clone = ctx.clone();
+            std::thread::spawn(move || {
+                match crate::updater::check_for_update() {
+                    Ok(Some(info)) => {
+                        ctx_clone.request_repaint();
+                        // Store result via a channel or shared state
+                        // For simplicity, we use egui's memory
+                        ctx_clone.memory_mut(|mem| {
+                            mem.data
+                                .insert_temp(egui::Id::new("update_info"), Some(info));
+                        });
+                    }
+                    Ok(None) => {
+                        ctx_clone.memory_mut(|mem| {
+                            mem.data.insert_temp(
+                                egui::Id::new("update_info"),
+                                None::<crate::updater::UpdateInfo>,
+                            );
+                        });
+                    }
+                    Err(_) => {}
+                }
+            });
+        }
+
         app
     }
 
@@ -1645,6 +1675,248 @@ impl App {
         self.settings_edit.theme = mode;
         crate::theme::apply_egui_theme(ctx, mode);
         let _ = save_settings(&self.settings);
+    }
+
+    fn check_update_manual(&mut self, ctx: &egui::Context) {
+        self.update_state = crate::updater::UpdateState::Checking;
+        let ctx_clone = ctx.clone();
+        std::thread::spawn(move || {
+            let result = crate::updater::check_for_update();
+            ctx_clone.memory_mut(|mem| {
+                let state = match result {
+                    Ok(Some(info)) => crate::updater::UpdateState::Available(info),
+                    Ok(None) => crate::updater::UpdateState::UpToDate,
+                    Err(e) => crate::updater::UpdateState::Error(e),
+                };
+                mem.data
+                    .insert_temp(egui::Id::new("manual_check_result"), state);
+            });
+            ctx_clone.request_repaint();
+        });
+    }
+
+    fn start_download(&mut self, ctx: &egui::Context, info: &crate::updater::UpdateInfo) {
+        let url = info.download_url.clone();
+        let sha = info.sha256.clone();
+        self.update_state = crate::updater::UpdateState::Downloading(0.0);
+
+        let ctx_clone = ctx.clone();
+        std::thread::spawn(move || {
+            let (progress_tx, progress_rx) = std::sync::mpsc::channel::<f32>();
+            let ctx2 = ctx_clone.clone();
+
+            // Spawn progress forwarder
+            std::thread::spawn(move || {
+                while let Ok(pct) = progress_rx.recv() {
+                    ctx2.request_repaint();
+                    if pct < 0.0 {
+                        ctx2.memory_mut(|mem| {
+                            mem.data.insert_temp(
+                                egui::Id::new("dl_state"),
+                                crate::updater::UpdateState::Error("下载失败".into()),
+                            );
+                        });
+                        break;
+                    }
+                    ctx2.memory_mut(|mem| {
+                        mem.data.insert_temp(
+                            egui::Id::new("dl_state"),
+                            crate::updater::UpdateState::Downloading(pct),
+                        );
+                    });
+                }
+            });
+
+            match crate::updater::download_and_verify(&url, &sha, &progress_tx) {
+                Ok(path) => {
+                    ctx_clone.memory_mut(|mem| {
+                        mem.data.insert_temp(
+                            egui::Id::new("dl_state"),
+                            crate::updater::UpdateState::Ready(path),
+                        );
+                    });
+                    ctx_clone.request_repaint();
+                }
+                Err(e) => {
+                    ctx_clone.memory_mut(|mem| {
+                        mem.data.insert_temp(
+                            egui::Id::new("dl_state"),
+                            crate::updater::UpdateState::Error(e),
+                        );
+                    });
+                    ctx_clone.request_repaint();
+                }
+            }
+        });
+    }
+
+    fn render_update_window(&mut self, ctx: &egui::Context) {
+        // Poll manual check result
+        if self.update_state == crate::updater::UpdateState::Checking {
+            let result = ctx.memory(|mem| {
+                mem.data
+                    .get_temp::<Option<crate::updater::UpdateState>>(egui::Id::new(
+                        "manual_check_result",
+                    ))
+                    .map(|v| v.clone())
+                    .flatten()
+            });
+            if let Some(state) = result {
+                self.update_state = state;
+            }
+        }
+
+        // Poll download progress from background thread
+        if let crate::updater::UpdateState::Downloading(_) = &self.update_state {
+            let dl_state = ctx.memory(|mem| {
+                mem.data
+                    .get_temp::<Option<crate::updater::UpdateState>>(egui::Id::new("dl_state"))
+                    .map(|v| v.clone())
+                    .flatten()
+            });
+            if let Some(state) = dl_state {
+                match &state {
+                    crate::updater::UpdateState::Ready(_)
+                    | crate::updater::UpdateState::Error(_) => {
+                        self.update_state = state;
+                    }
+                    crate::updater::UpdateState::Downloading(pct) => {
+                        self.update_state = crate::updater::UpdateState::Downloading(*pct);
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        match &self.update_state {
+            crate::updater::UpdateState::Available(info) => {
+                let mut dismiss = false;
+                let mut start_dl = false;
+                let info_clone = info.clone();
+                egui::Window::new("发现新版本")
+                    .resizable(false)
+                    .collapsible(false)
+                    .current_pos(screen_center(ctx))
+                    .pivot(egui::Align2::CENTER_CENTER)
+                    .show(ctx, |ui| {
+                        ui.vertical_centered(|ui| {
+                            ui.add_space(4.0);
+                            ui.heading(format!("v{}", info.version));
+                            ui.add_space(4.0);
+                            ui.label(format!(
+                                "当前版本: v{}\n是否立即更新？",
+                                env!("CARGO_PKG_VERSION")
+                            ));
+                            ui.add_space(10.0);
+                            ui.horizontal(|ui| {
+                                if ui.button("更新").clicked() {
+                                    start_dl = true;
+                                }
+                                if ui.button("稍后").clicked() {
+                                    dismiss = true;
+                                }
+                            });
+                        });
+                    });
+                if dismiss {
+                    self.update_state = crate::updater::UpdateState::Idle;
+                }
+                if start_dl {
+                    self.start_download(ctx, &info_clone);
+                }
+            }
+            crate::updater::UpdateState::Downloading(pct) => {
+                let pct = *pct;
+                egui::Window::new("正在下载更新")
+                    .resizable(false)
+                    .collapsible(false)
+                    .current_pos(screen_center(ctx))
+                    .pivot(egui::Align2::CENTER_CENTER)
+                    .show(ctx, |ui| {
+                        ui.add_space(4.0);
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().slider_width = 200.0;
+                            ui.add(egui::ProgressBar::new(pct).show_percentage());
+                        });
+                    });
+            }
+            crate::updater::UpdateState::Verifying => {
+                egui::Window::new("正在校验")
+                    .resizable(false)
+                    .collapsible(false)
+                    .current_pos(screen_center(ctx))
+                    .pivot(egui::Align2::CENTER_CENTER)
+                    .show(ctx, |ui| {
+                        ui.label("正在校验文件完整性...");
+                    });
+            }
+            crate::updater::UpdateState::Ready(path) => {
+                let path = path.clone();
+                let mut restart = false;
+                egui::Window::new("更新就绪")
+                    .resizable(false)
+                    .collapsible(false)
+                    .current_pos(screen_center(ctx))
+                    .pivot(egui::Align2::CENTER_CENTER)
+                    .show(ctx, |ui| {
+                        ui.vertical_centered(|ui| {
+                            ui.label("更新已准备就绪");
+                            ui.add_space(8.0);
+                            if ui.button("重启应用").clicked() {
+                                restart = true;
+                            }
+                        });
+                    });
+                if restart {
+                    match crate::updater::replace_and_restart(&path) {
+                        Ok(_) => {
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                        }
+                        Err(e) => {
+                            self.update_state = crate::updater::UpdateState::Error(e);
+                        }
+                    }
+                }
+            }
+            crate::updater::UpdateState::Error(msg) => {
+                let msg = msg.clone();
+                let mut dismiss = false;
+                egui::Window::new("更新失败")
+                    .resizable(false)
+                    .collapsible(false)
+                    .current_pos(screen_center(ctx))
+                    .pivot(egui::Align2::CENTER_CENTER)
+                    .show(ctx, |ui| {
+                        ui.label(&msg);
+                        ui.add_space(8.0);
+                        if ui.button("关闭").clicked() {
+                            dismiss = true;
+                        }
+                    });
+                if dismiss {
+                    self.update_state = crate::updater::UpdateState::Idle;
+                }
+            }
+            crate::updater::UpdateState::UpToDate => {
+                let mut dismiss = false;
+                egui::Window::new("检查更新")
+                    .resizable(false)
+                    .collapsible(false)
+                    .current_pos(screen_center(ctx))
+                    .pivot(egui::Align2::CENTER_CENTER)
+                    .show(ctx, |ui| {
+                        ui.label("已是最新版本");
+                        ui.add_space(8.0);
+                        if ui.button("关闭").clicked() {
+                            dismiss = true;
+                        }
+                    });
+                if dismiss {
+                    self.update_state = crate::updater::UpdateState::Idle;
+                }
+            }
+            _ => {}
+        }
     }
 
     fn focus_adjacent_panel(&mut self, direction: i32) {
@@ -2385,6 +2657,10 @@ impl eframe::App for App {
                     ui.label(&self.texts.about.credits);
                     ui.add_space(4.0);
                     ui.vertical_centered(|ui| {
+                        if ui.button("检查更新").clicked() {
+                            self.check_update_manual(ctx);
+                        }
+                        ui.add_space(4.0);
                         if ui.button(&self.texts.about.close).clicked() {
                             clicked_close = true;
                         }
@@ -2431,6 +2707,22 @@ impl eframe::App for App {
                 self.close_confirm_panel = None;
             }
         }
+
+        // Check for update result from background thread
+        if self.update_state == crate::updater::UpdateState::Idle {
+            let info = ctx.memory(|mem| {
+                mem.data
+                    .get_temp::<Option<crate::updater::UpdateInfo>>(egui::Id::new("update_info"))
+                    .map(|v| v.clone())
+                    .flatten()
+            });
+            if let Some(info) = info {
+                self.update_state = crate::updater::UpdateState::Available(info);
+            }
+        }
+
+        // Update window
+        self.render_update_window(ctx);
 
         // Terminal close confirmation
         if let Some(ref tab_id) = self.pending_close_confirm.clone() {

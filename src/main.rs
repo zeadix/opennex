@@ -7,6 +7,7 @@ mod history_db;
 mod i18n;
 mod terminal;
 mod theme;
+mod updater;
 
 fn main() -> Result<()> {
     env_logger::init();
