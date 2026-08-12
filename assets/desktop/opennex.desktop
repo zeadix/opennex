@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=OpenNex
+Comment=AI Terminal Manager
+Exec=/usr/bin/opennex
+Terminal=false
+Type=Application
+Categories=System;TerminalEmulator;
+Icon=utilities-terminal

@@ -1,6 +1,6 @@
 [package]
 name = "opennex"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "AI Terminal Manager"
 license = "MIT"
@@ -35,4 +35,5 @@ maintainer = "zeadix"
 depends = "libc6 (>= 2.31), libgcc-s1"
 assets = [
     ["target/release/opennex", "usr/bin/", "755"],
+    ["assets/desktop/opennex.desktop", "usr/share/applications/", "644"],
 ]
