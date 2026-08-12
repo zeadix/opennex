@@ -32,7 +32,7 @@ zip = "0.6"
 
 [package.metadata.deb]
 maintainer = "zeadix"
-depends = "$auto"
+depends = "libc6 (>= 2.31), libgcc-s1"
 assets = [
     ["target/release/opennex", "usr/bin/", "755"],
 ]
