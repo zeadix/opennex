@@ -54,6 +54,121 @@ pub fn themes_dir(app_data_dir: &Path) -> PathBuf {
     app_data_dir.join("themes")
 }
 
+/// Discover all valid user themes under `dir`, sorted by lowercase display name.
+///
+/// Malformed files are logged and skipped so one bad file cannot break the picker.
+pub fn load_user_themes(dir: &Path) -> Result<Vec<ThemeDefinition>, ThemeError> {
+    let mut themes = Vec::new();
+    let read_dir = match std::fs::read_dir(dir) {
+        Ok(rd) => rd,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(themes),
+        Err(err) => return Err(ThemeError::Io(err.to_string())),
+    };
+    for entry in read_dir.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        match std::fs::read_to_string(&path).and_then(|s| {
+            parse_theme(&s).map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err))
+        }) {
+            Ok(theme) => themes.push(theme),
+            Err(err) => {
+                log::warn!("skipping invalid theme file {}: {err}", path.display());
+            }
+        }
+    }
+    themes.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    Ok(themes)
+}
+
+/// Persist a user theme using a temp file + backup + rename for crash safety.
+///
+/// Writes `<id>.json.tmp`, syncs it, moves the existing target to
+/// `<id>.json.bak`, renames the temp into place, then removes the backup.
+/// On failure the backup is restored.
+pub fn save_user_theme(dir: &Path, theme: &ThemeDefinition) -> Result<(), ThemeError> {
+    std::fs::create_dir_all(dir)?;
+    let target = dir.join(format!("{}.json", theme.id));
+    let tmp = dir.join(format!("{}.json.tmp", theme.id));
+    let backup = dir.join(format!("{}.json.bak", theme.id));
+
+    let json = serde_json::to_string_pretty(theme)?;
+    {
+        let mut file = std::fs::File::create(&tmp)?;
+        use std::io::Write;
+        file.write_all(json.as_bytes())?;
+        file.sync_all()?;
+    }
+
+    let had_existing = target.exists();
+    if had_existing {
+        let _ = std::fs::remove_file(&backup);
+        std::fs::rename(&target, &backup)?;
+    }
+
+    if let Err(err) = std::fs::rename(&tmp, &target) {
+        if had_existing {
+            let _ = std::fs::rename(&backup, &target);
+        }
+        return Err(ThemeError::Io(err.to_string()));
+    }
+
+    let _ = std::fs::remove_file(&backup);
+    Ok(())
+}
+
+/// Read a theme file from disk, validate it, and persist a copy under `dir`.
+///
+/// Validates before creating any files. On ID collision with an existing user
+/// theme or an embedded theme, a free `id-N` variant is chosen.
+pub fn import_theme_file(dir: &Path, source: &Path) -> Result<ThemeDefinition, ThemeError> {
+    let json = std::fs::read_to_string(source)?;
+    import_theme_json(dir, &json)
+}
+
+/// Import a theme from an in-memory JSON document.
+pub fn import_theme_json(dir: &Path, json: &str) -> Result<ThemeDefinition, ThemeError> {
+    let mut theme = parse_theme(json)?;
+    theme.id = find_free_import_id(dir, &theme.id);
+    save_user_theme(dir, &theme)?;
+    Ok(theme)
+}
+
+/// Export a theme to an explicit destination path.
+pub fn export_theme_file(theme: &ThemeDefinition, destination: &Path) -> Result<(), ThemeError> {
+    if let Some(parent) = destination.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let json = serde_json::to_string_pretty(theme)?;
+    std::fs::write(destination, json)?;
+    Ok(())
+}
+
+/// Pick a non-colliding ID for an imported theme by appending `-2`, `-3`, ...
+fn find_free_import_id(dir: &Path, requested: &str) -> String {
+    let taken_ids: std::collections::HashSet<String> = load_user_themes(dir)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|t| t.id)
+        .collect();
+    let embedded_ids: std::collections::HashSet<String> = embedded_themes()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|t| t.id)
+        .collect();
+    if !taken_ids.contains(requested) && !embedded_ids.contains(requested) {
+        return requested.to_string();
+    }
+    for suffix in 2..u32::MAX {
+        let candidate = format!("{requested}-{suffix}");
+        if !taken_ids.contains(&candidate) && !embedded_ids.contains(&candidate) {
+            return candidate;
+        }
+    }
+    format!("{requested}-imported")
+}
+
 fn load_user_theme(dir: &Path, id: &str) -> Result<ThemeDefinition, ThemeError> {
     let path = dir.join(format!("{id}.json"));
     if !path.exists() {
@@ -66,6 +181,29 @@ fn load_user_theme(dir: &Path, id: &str) -> Result<ThemeDefinition, ThemeError> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct TempDir(PathBuf);
+
+    impl TempDir {
+        fn new() -> Self {
+            let dir = std::env::temp_dir().join(format!(
+                "opennex-theme-test-{}",
+                uuid::Uuid::new_v4()
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            TempDir(dir)
+        }
+
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
 
     #[test]
     fn every_embedded_theme_is_valid_and_has_a_unique_id() {
@@ -88,5 +226,90 @@ mod tests {
         theme.format_version = 99;
         let json = serde_json::to_string(&theme).unwrap();
         assert!(parse_theme(&json).is_err());
+    }
+
+    #[test]
+    fn save_user_theme_writes_json_file_atomically() {
+        let dir = TempDir::new();
+        let theme = default_theme().unwrap();
+        save_user_theme(dir.path(), &theme).unwrap();
+        let path = dir.path().join("opennex-dark.json");
+        assert!(path.exists());
+        let reloaded = load_user_theme(dir.path(), "opennex-dark").unwrap();
+        assert_eq!(reloaded, theme);
+        assert!(!dir.path().join("opennex-dark.json.tmp").exists());
+        assert!(!dir.path().join("opennex-dark.json.bak").exists());
+    }
+
+    #[test]
+    fn load_user_themes_ignores_malformed_files_and_sorts_by_name() {
+        let dir = TempDir::new();
+        let mut a = default_theme().unwrap();
+        a.id = "zebra".into();
+        a.name = "Zebra".into();
+        let mut b = default_theme().unwrap();
+        b.id = "alpha".into();
+        b.name = "Alpha".into();
+        save_user_theme(dir.path(), &a).unwrap();
+        save_user_theme(dir.path(), &b).unwrap();
+        std::fs::write(dir.path().join("broken.json"), "{not-json}").unwrap();
+        std::fs::write(dir.path().join("notes.txt"), "ignore me").unwrap();
+
+        let themes = load_user_themes(dir.path()).unwrap();
+        assert_eq!(themes.len(), 2);
+        assert_eq!(themes[0].name, "Alpha");
+        assert_eq!(themes[1].name, "Zebra");
+    }
+
+    #[test]
+    fn import_collision_creates_a_new_id_without_overwriting() {
+        let dir = TempDir::new();
+        let theme = default_theme().unwrap();
+        save_user_theme(dir.path(), &theme).unwrap();
+        let json = serde_json::to_string(&theme).unwrap();
+        let imported = import_theme_json(dir.path(), &json).unwrap();
+        assert_eq!(imported.id, "opennex-dark-2");
+        assert!(dir.path().join("opennex-dark.json").exists());
+        assert!(dir.path().join("opennex-dark-2.json").exists());
+    }
+
+    #[test]
+    fn import_collision_increments_until_free_id_found() {
+        let dir = TempDir::new();
+        let theme = default_theme().unwrap();
+        for id_suffix in &["", "-2", "-3"] {
+            let mut t = theme.clone();
+            t.id = format!("opennex-dark{id_suffix}");
+            save_user_theme(dir.path(), &t).unwrap();
+        }
+        let json = serde_json::to_string(&theme).unwrap();
+        let imported = import_theme_json(dir.path(), &json).unwrap();
+        assert_eq!(imported.id, "opennex-dark-4");
+    }
+
+    #[test]
+    fn failed_import_leaves_existing_files_unchanged() {
+        let dir = TempDir::new();
+        assert!(import_theme_json(dir.path(), "{not-json}").is_err());
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn export_theme_file_round_trips() {
+        let dir = TempDir::new();
+        let theme = default_theme().unwrap();
+        let dest = dir.path().join("exported.json");
+        export_theme_file(&theme, &dest).unwrap();
+        let reloaded = parse_theme(&std::fs::read_to_string(&dest).unwrap()).unwrap();
+        assert_eq!(reloaded, theme);
+    }
+
+    #[test]
+    fn load_theme_falls_back_to_embedded_then_default() {
+        let dir = TempDir::new();
+        let via_embedded = load_theme(dir.path(), "dracula").unwrap();
+        assert_eq!(via_embedded.id, "dracula");
+        let via_default = load_theme(dir.path(), "does-not-exist").unwrap();
+        assert_eq!(via_default.id, "opennex-dark");
     }
 }
