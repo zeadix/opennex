@@ -1079,6 +1079,13 @@ pub struct App {
     skipped_versions: std::collections::HashSet<String>,
     update_toast: Option<(String, std::time::Instant)>,
     startup_frame_count: u32,
+    /// Last sampled CPU usage (0..=100), refreshed every 2 seconds by
+    /// the lightweight poller below.
+    cpu_usage: Option<f32>,
+    /// Last sampled resident memory in bytes.
+    memory_bytes: Option<u64>,
+    /// Wall-clock of the last sampling tick.
+    last_sample: std::time::Instant,
 }
 
 struct TerminalData {
@@ -1316,6 +1323,9 @@ impl App {
             skipped_versions: std::collections::HashSet::new(),
             update_toast: None,
             startup_frame_count: 0,
+            cpu_usage: None,
+            memory_bytes: None,
+            last_sample: std::time::Instant::now(),
         };
 
         let scene_path = scene_path();
@@ -2450,6 +2460,13 @@ impl eframe::App for App {
                 data.instance.poll_cwd();
             }
         }
+
+        // Status-bar sample: every 2 seconds.
+        if self.last_sample.elapsed() >= std::time::Duration::from_secs(2) {
+            self.last_sample = std::time::Instant::now();
+            self.cpu_usage = sample_cpu_percent();
+            self.memory_bytes = sample_memory_bytes();
+        }
         let renaming = self.is_renaming();
         if renaming {
             self.rename_frame_count += 1;
@@ -2683,110 +2700,152 @@ impl eframe::App for App {
             }
         }
 
-        egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
-            egui::menu::bar(ui, |ui| {
-                ui.menu_button(self.texts.menu.file.clone(), |ui| {
-                    if ui.button(self.texts.file_menu.save.clone()).clicked() {
-                        self.save_scene();
-                        ui.close_menu();
-                    }
-                    if ui.button(self.texts.file_menu.load.clone()).clicked() {
-                        self.pending_load_scene = true;
-                        ui.close_menu();
-                    }
-                    if ui.button(self.texts.file_menu.save_as.clone()).clicked() {
-                        self.pending_save_scene_as = true;
-                        ui.close_menu();
-                    }
-                    if ui.button(self.texts.file_menu.exit.clone()).clicked() {
-                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                    }
-                });
-                ui.menu_button(self.texts.menu.view.clone(), |ui| {
-                    if let Some(tree) = self.dock_states.get_mut(&self.active_panel) {
-                        let active_tab = tree.find_active_focused().map(|(_, t)| t.clone());
-                        if let Some(ref tab) = active_tab {
-                            if ui
-                                .button(self.texts.view_menu.split_right.clone())
-                                .clicked()
-                            {
-                                self.pending_split_after = Some(tab.clone());
-                                self.pending_split_vertical = false;
-                                if let Some((surface, node, _)) = tree.find_tab(tab) {
-                                    self.pending_new_terminal =
-                                        Some((self.active_panel, surface, node));
-                                }
-                                ui.close_menu();
-                            }
-                            if ui.button(self.texts.view_menu.split_down.clone()).clicked() {
-                                self.pending_split_after = Some(tab.clone());
-                                self.pending_split_vertical = true;
-                                if let Some((surface, node, _)) = tree.find_tab(tab) {
-                                    self.pending_new_terminal =
-                                        Some((self.active_panel, surface, node));
-                                }
-                                ui.close_menu();
-                            }
-                        }
-                    }
-                    let visible = self.workspace_sidebar_visible;
-                    if ui
-                        .selectable_label(visible, &self.texts.view_menu.workspace_toggle)
-                        .clicked()
-                    {
-                        self.workspace_sidebar_visible = !self.workspace_sidebar_visible;
-                        ui.close_menu();
-                    }
-                });
-                ui.menu_button(self.texts.menu.language.clone(), |ui| {
-                    let current_code = self.settings.language.clone();
-                    let languages = self.available_languages.clone();
-                    // Auto-fit: size submenu to the longest language label.
-                    let longest = languages
-                        .iter()
-                        .map(|(_, n)| n.chars().count())
-                        .max()
-                        .unwrap_or(8);
-                    let char_w = ui.fonts(|f| f.row_height(&egui::FontId::proportional(13.0)));
-                    ui.set_min_width((longest as f32) * char_w * 0.55 + 32.0);
-                    for (code, display_name) in &languages {
-                        let selected = *code == current_code;
-                        if ui.selectable_label(selected, display_name).clicked() {
-                            self.switch_language(code);
+        egui::TopBottomPanel::top("menu_bar")
+            .frame(
+                egui::Frame::none()
+                    .fill(self.active_theme.app.menu_bg.to_egui())
+                    .stroke(egui::Stroke::NONE)
+                    .inner_margin(egui::Margin {
+                        left: 8,
+                        right: 8,
+                        top: 2,
+                        bottom: 2,
+                    }),
+            )
+            .show(ctx, |ui| {
+                egui::menu::bar(ui, |ui| {
+                    ui.menu_button(self.texts.menu.file.clone(), |ui| {
+                        if ui.button(self.texts.file_menu.save.clone()).clicked() {
+                            self.save_scene();
                             ui.close_menu();
                         }
-                    }
-                });
-                ui.menu_button(self.texts.menu.theme.clone(), |ui| {
-                    ui.set_min_width(120.0);
-                    ui.set_max_width(180.0);
-                    let current = self.settings.theme_id.clone();
-                    let themes = self.available_themes.clone();
-                    egui::ScrollArea::vertical()
-                        .max_height(280.0)
-                        .auto_shrink([false; 2])
-                        .show(ui, |ui| {
-                            for theme in &themes {
-                                let selected = theme.id == current;
-                                if ui.selectable_label(selected, &theme.name).clicked() {
-                                    self.try_switch_theme(ctx, theme.id.clone());
+                        if ui.button(self.texts.file_menu.load.clone()).clicked() {
+                            self.pending_load_scene = true;
+                            ui.close_menu();
+                        }
+                        if ui.button(self.texts.file_menu.save_as.clone()).clicked() {
+                            self.pending_save_scene_as = true;
+                            ui.close_menu();
+                        }
+                        if ui.button(self.texts.file_menu.exit.clone()).clicked() {
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                        }
+                    });
+                    ui.menu_button(self.texts.menu.view.clone(), |ui| {
+                        if let Some(tree) = self.dock_states.get_mut(&self.active_panel) {
+                            let active_tab = tree.find_active_focused().map(|(_, t)| t.clone());
+                            if let Some(ref tab) = active_tab {
+                                if ui
+                                    .button(self.texts.view_menu.split_right.clone())
+                                    .clicked()
+                                {
+                                    self.pending_split_after = Some(tab.clone());
+                                    self.pending_split_vertical = false;
+                                    if let Some((surface, node, _)) = tree.find_tab(tab) {
+                                        self.pending_new_terminal =
+                                            Some((self.active_panel, surface, node));
+                                    }
+                                    ui.close_menu();
+                                }
+                                if ui.button(self.texts.view_menu.split_down.clone()).clicked() {
+                                    self.pending_split_after = Some(tab.clone());
+                                    self.pending_split_vertical = true;
+                                    if let Some((surface, node, _)) = tree.find_tab(tab) {
+                                        self.pending_new_terminal =
+                                            Some((self.active_panel, surface, node));
+                                    }
                                     ui.close_menu();
                                 }
                             }
-                        });
+                        }
+                        let visible = self.workspace_sidebar_visible;
+                        if ui
+                            .selectable_label(visible, &self.texts.view_menu.workspace_toggle)
+                            .clicked()
+                        {
+                            self.workspace_sidebar_visible = !self.workspace_sidebar_visible;
+                            ui.close_menu();
+                        }
+                    });
+                    ui.menu_button(self.texts.menu.language.clone(), |ui| {
+                        let current_code = self.settings.language.clone();
+                        let languages = self.available_languages.clone();
+                        // Auto-fit: size submenu to the longest language label.
+                        let longest = languages
+                            .iter()
+                            .map(|(_, n)| n.chars().count())
+                            .max()
+                            .unwrap_or(8);
+                        let char_w = ui.fonts(|f| f.row_height(&egui::FontId::proportional(13.0)));
+                        ui.set_min_width((longest as f32) * char_w * 0.55 + 32.0);
+                        for (code, display_name) in &languages {
+                            let selected = *code == current_code;
+                            if ui.selectable_label(selected, display_name).clicked() {
+                                self.switch_language(code);
+                                ui.close_menu();
+                            }
+                        }
+                    });
+                    ui.menu_button(self.texts.menu.theme.clone(), |ui| {
+                        ui.set_min_width(120.0);
+                        ui.set_max_width(180.0);
+                        let current = self.settings.theme_id.clone();
+                        let themes = self.available_themes.clone();
+                        egui::ScrollArea::vertical()
+                            .max_height(280.0)
+                            .auto_shrink([false; 2])
+                            .show(ui, |ui| {
+                                for theme in &themes {
+                                    let selected = theme.id == current;
+                                    if ui.selectable_label(selected, &theme.name).clicked() {
+                                        self.try_switch_theme(ctx, theme.id.clone());
+                                        ui.close_menu();
+                                    }
+                                }
+                            });
+                    });
+
+                    // Right-aligned extras: active theme name + about + settings.
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let weak = self.active_theme.app.weak_text.to_egui();
+                        let fg = self.active_theme.app.menu_fg.to_egui();
+                        if ui
+                            .add(
+                                egui::Button::new(
+                                    egui::RichText::new(self.texts.about.menu_label.as_str())
+                                        .color(fg)
+                                        .size(12.0),
+                                )
+                                .fill(egui::Color32::TRANSPARENT)
+                                .stroke(egui::Stroke::NONE),
+                            )
+                            .clicked()
+                        {
+                            self.show_about = true;
+                        }
+                        if ui
+                            .add(
+                                egui::Button::new(egui::RichText::new("⚙").color(fg).size(13.0))
+                                    .fill(egui::Color32::TRANSPARENT)
+                                    .stroke(egui::Stroke::NONE),
+                            )
+                            .clicked()
+                        {
+                            self.show_settings = true;
+                            self.settings_edit = self.settings.clone();
+                            self.theme_edit = self.active_theme.clone();
+                            self.theme_message = None;
+                            self.theme_dirty = false;
+                        }
+                        ui.add_space(8.0);
+                        ui.label(
+                            egui::RichText::new(self.active_theme.name.as_str())
+                                .color(weak)
+                                .size(11.0),
+                        );
+                    });
                 });
-                if ui.button(self.texts.view_menu.settings.clone()).clicked() {
-                    self.show_settings = true;
-                    self.settings_edit = self.settings.clone();
-                    self.theme_edit = self.active_theme.clone();
-                    self.theme_message = None;
-                    self.theme_dirty = false;
-                }
-                if ui.button(self.texts.about.menu_label.clone()).clicked() {
-                    self.show_about = true;
-                }
             });
-        });
 
         if self.show_settings {
             let mut open = self.show_settings;
@@ -3604,37 +3663,72 @@ impl eframe::App for App {
 
         if self.workspace_sidebar_visible {
             egui::SidePanel::left("navigation")
+                .resizable(true)
                 .default_width(WORKSPACE_SIDEBAR_DEFAULT_WIDTH)
+                .width_range(120.0..=300.0)
+                .frame(
+                    egui::Frame::none()
+                        .fill(self.active_theme.app.sidebar.to_egui())
+                        .stroke(egui::Stroke::new(
+                            1.0,
+                            self.active_theme.app.sidebar_border.to_egui(),
+                        ))
+                        .inner_margin(egui::Margin {
+                            left: 8,
+                            right: 8,
+                            top: 8,
+                            bottom: 8,
+                        }),
+                )
                 .show(ctx, |ui| {
-                    // New workspace + templates buttons in one row above the list
+                    // Top row: + and templates dropdown
                     ui.horizontal(|ui| {
-                        if ui.button(&self.texts.workspace.new).clicked() {
+                        let bg = self.active_theme.app.button_bg.to_egui();
+                        let fg = self.active_theme.app.button_fg.to_egui();
+                        if ui
+                            .add(
+                                egui::Button::new(
+                                    egui::RichText::new(egui_phosphor::regular::PLUS)
+                                        .color(fg)
+                                        .size(14.0),
+                                )
+                                .fill(bg)
+                                .frame(false),
+                            )
+                            .clicked()
+                        {
                             self.add_panel(ui.ctx());
                         }
                         if self.cached_template_files.is_empty() {
                             self.refresh_template_files();
                         }
                         let template_files = self.cached_template_files.clone();
-                        ui.menu_button(&self.texts.workspace.templates, |ui| {
-                            if template_files.is_empty() {
-                                ui.label(&self.texts.workspace.templates_empty);
-                            } else {
-                                for (display_name, path) in &template_files {
-                                    let path = path.clone();
-                                    let display_name = display_name.clone();
-                                    ui.horizontal(|ui| {
-                                        if ui.button(display_name.as_str()).clicked() {
-                                            self.pending_load_from_template = Some(path.clone());
-                                            ui.close_menu();
-                                        }
-                                        if ui.small_button("×").clicked() {
-                                            self.pending_delete_template = Some(path);
-                                            ui.close_menu();
-                                        }
-                                    });
+                        ui.menu_button(
+                            egui::RichText::new(egui_phosphor::regular::CARET_DOWN)
+                                .color(fg)
+                                .size(11.0),
+                            |ui| {
+                                if template_files.is_empty() {
+                                    ui.label(&self.texts.workspace.templates_empty);
+                                } else {
+                                    for (display_name, path) in &template_files {
+                                        let path = path.clone();
+                                        let display_name = display_name.clone();
+                                        ui.horizontal(|ui| {
+                                            if ui.button(display_name.as_str()).clicked() {
+                                                self.pending_load_from_template =
+                                                    Some(path.clone());
+                                                ui.close_menu();
+                                            }
+                                            if ui.small_button("×").clicked() {
+                                                self.pending_delete_template = Some(path);
+                                                ui.close_menu();
+                                            }
+                                        });
+                                    }
                                 }
-                            }
-                        });
+                            },
+                        );
                     });
                     ui.add_space(4.0);
                     let mut to_select = None;
@@ -4157,7 +4251,163 @@ impl eframe::App for App {
                 });
             }
         });
+
+        // Minimalist status bar (24px, themed by active theme). Always
+        // visible at the bottom of the window.
+        egui::TopBottomPanel::bottom("status_bar")
+            .resizable(false)
+            .exact_height(24.0)
+            .frame(
+                egui::Frame::none()
+                    .fill(self.active_theme.app.menu_bg.to_egui())
+                    .stroke(egui::Stroke::new(
+                        1.0,
+                        self.active_theme.app.sidebar_border.to_egui(),
+                    ))
+                    .inner_margin(egui::Margin {
+                        left: 10,
+                        right: 10,
+                        top: 4,
+                        bottom: 4,
+                    }),
+            )
+            .show(ctx, |ui| {
+                let fg = self.active_theme.app.menu_fg.to_egui();
+                let weak = self.active_theme.app.weak_text.to_egui();
+                ui.horizontal(|ui| {
+                    // Section 1: terminal count across all workspaces.
+                    let panel_terminals: usize = self
+                        .dock_states
+                        .values()
+                        .map(|tree| tree.iter_all_tabs().count())
+                        .sum();
+                    ui.label(
+                        egui::RichText::new(format!("{} 终端", panel_terminals))
+                            .color(weak)
+                            .size(11.0),
+                    );
+                    ui.label(
+                        egui::RichText::new("│")
+                            .color(self.active_theme.app.sidebar_border.to_egui())
+                            .size(11.0),
+                    );
+                    // Section 2: CPU usage (cross-platform: tries sysinfo,
+                    // falls back to "—%"). Sampled every 2s via a poller in App.
+                    ui.label(
+                        egui::RichText::new(format_cpu(self.cpu_usage))
+                            .color(weak)
+                            .size(11.0),
+                    );
+                    ui.label(
+                        egui::RichText::new("│")
+                            .color(self.active_theme.app.sidebar_border.to_egui())
+                            .size(11.0),
+                    );
+                    // Section 3: memory usage (cross-platform).
+                    ui.label(
+                        egui::RichText::new(format_memory(self.memory_bytes))
+                            .color(weak)
+                            .size(11.0),
+                    );
+                });
+            });
     }
+}
+
+/// Format CPU usage percentage. `None` falls back to a dash so the bar
+/// still renders cleanly on platforms where sampling isn't available.
+fn format_cpu(cpu: Option<f32>) -> String {
+    match cpu {
+        Some(v) if v.is_finite() => format!("{:.0}% CPU", v.clamp(0.0, 100.0)),
+        _ => "—% CPU".to_string(),
+    }
+}
+
+/// Format memory usage, e.g. "8.2 GB". Uses binary units (1 GB = 2^30
+/// bytes) to match how the macOS Activity Monitor reports it.
+fn format_memory(bytes: Option<u64>) -> String {
+    let b = match bytes {
+        Some(v) => v as f64,
+        None => return "— GB".to_string(),
+    };
+    const GB: f64 = 1024.0 * 1024.0 * 1024.0;
+    const MB: f64 = 1024.0 * 1024.0;
+    if b >= GB {
+        format!("{:.1} GB", b / GB)
+    } else {
+        format!("{:.0} MB", b / MB)
+    }
+}
+
+/// Sample our own process's CPU usage as a percentage. The value is
+/// averaged across the interval since the last call.
+fn sample_cpu_percent() -> Option<f32> {
+    use std::sync::Mutex;
+    use std::sync::OnceLock;
+    use std::time::Instant;
+    static LAST: OnceLock<Mutex<(Instant, u64)>> = OnceLock::new();
+    let cell = LAST.get_or_init(|| Mutex::new((Instant::now(), 0)));
+    let now = Instant::now();
+    let (total, prev_total) = {
+        let (total, _) = read_proc_self_stat()?;
+        let mut guard = cell.lock().ok()?;
+        let (last_t, prev) = *guard;
+        *guard = (now, total as u64);
+        (total as u64, prev)
+    };
+    let (last_t, _) = { *cell.lock().ok()? };
+    if now <= last_t {
+        return None;
+    }
+    let secs = now.duration_since(last_t).as_secs_f32().max(0.001);
+    let cpus = std::thread::available_parallelism()
+        .map(|n| n.get() as f32)
+        .unwrap_or(1.0)
+        .max(1.0);
+    let jiffies = total as f32 - prev_total as f32;
+    let percent = (jiffies / (secs * clk_tck() as f32)) * 100.0 / cpus;
+    Some(percent.clamp(0.0, 100.0 * cpus))
+}
+
+/// Sample our own process's resident memory in bytes (RSS).
+fn sample_memory_bytes() -> Option<u64> {
+    let body = std::fs::read_to_string("/proc/self/statm").ok()?;
+    let mut iter = body.split_whitespace();
+    let _size = iter.next()?.parse::<u64>().ok()?;
+    let rss_pages = iter.next()?.parse::<u64>().ok()?;
+    Some(rss_pages * 4096)
+}
+
+#[cfg(target_os = "linux")]
+fn read_proc_self_stat() -> Option<(u64, ())> {
+    let body = std::fs::read_to_string("/proc/self/stat").ok()?;
+    let close = body.rfind(')')?;
+    let after = body.get(close + 1..)?;
+    let mut fields = after.split_whitespace();
+    let mut collected: Vec<u64> = Vec::with_capacity(40);
+    for _ in 0..40 {
+        match fields.next().and_then(|s| s.parse::<u64>().ok()) {
+            Some(v) => collected.push(v),
+            None => break,
+        }
+    }
+    if collected.len() < 15 {
+        return None;
+    }
+    let utime = collected[12];
+    let stime = collected[13];
+    Some((utime + stime, ()))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn read_proc_self_stat() -> Option<(u64, ())> {
+    None
+}
+
+fn clk_tck() -> usize {
+    // Linux HZ is typically 100; we use 100 as a safe default. Using
+    // posixconf(_SC_CLK_TCK) would be more accurate but needs libc.
+    100
 }
 
 #[cfg(test)]
