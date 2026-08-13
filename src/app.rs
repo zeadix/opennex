@@ -1850,7 +1850,10 @@ impl App {
                         egui::TextEdit::singleline(&mut self.theme_dialog.name_input)
                             .id_salt("theme_copy_name_input"),
                     );
-                    response.request_focus();
+                    if !self.theme_dialog.focus_requested {
+                        response.request_focus();
+                        self.theme_dialog.focus_requested = true;
+                    }
                     ui.horizontal(|ui| {
                         if ui.button(crate::theme::confirm_text()).clicked()
                             || ui.input(|i| i.key_pressed(egui::Key::Enter))
@@ -1872,16 +1875,19 @@ impl App {
                                 }
                                 self.theme_dialog.show_copy_dialog = false;
                                 self.theme_dialog.name_input.clear();
+                                self.theme_dialog.focus_requested = false;
                             }
                         }
                         if ui.button(crate::theme::cancel_text()).clicked() {
                             self.theme_dialog.show_copy_dialog = false;
                             self.theme_dialog.name_input.clear();
+                            self.theme_dialog.focus_requested = false;
                         }
                     });
                 });
             if !open {
                 self.theme_dialog.show_copy_dialog = false;
+                self.theme_dialog.focus_requested = false;
             }
         }
 
@@ -1900,7 +1906,10 @@ impl App {
                         egui::TextEdit::singleline(&mut self.theme_dialog.name_input)
                             .id_salt("theme_new_name_input"),
                     );
-                    response.request_focus();
+                    if !self.theme_dialog.focus_requested {
+                        response.request_focus();
+                        self.theme_dialog.focus_requested = true;
+                    }
                     ui.horizontal(|ui| {
                         if ui.button(crate::theme::confirm_text()).clicked()
                             || ui.input(|i| i.key_pressed(egui::Key::Enter))
@@ -1923,16 +1932,19 @@ impl App {
                                 }
                                 self.theme_dialog.show_new_dialog = false;
                                 self.theme_dialog.name_input.clear();
+                                self.theme_dialog.focus_requested = false;
                             }
                         }
                         if ui.button(crate::theme::cancel_text()).clicked() {
                             self.theme_dialog.show_new_dialog = false;
                             self.theme_dialog.name_input.clear();
+                            self.theme_dialog.focus_requested = false;
                         }
                     });
                 });
             if !open {
                 self.theme_dialog.show_new_dialog = false;
+                self.theme_dialog.focus_requested = false;
             }
         }
 
@@ -1954,7 +1966,10 @@ impl App {
                         egui::TextEdit::singleline(&mut self.theme_dialog.name_input)
                             .id_salt("theme_rename_name_input"),
                     );
-                    response.request_focus();
+                    if !self.theme_dialog.focus_requested {
+                        response.request_focus();
+                        self.theme_dialog.focus_requested = true;
+                    }
                     ui.horizontal(|ui| {
                         if ui.button(crate::theme::confirm_text()).clicked()
                             || ui.input(|i| i.key_pressed(egui::Key::Enter))
@@ -1977,16 +1992,19 @@ impl App {
                                 }
                                 self.theme_dialog.show_rename_dialog = false;
                                 self.theme_dialog.name_input.clear();
+                                self.theme_dialog.focus_requested = false;
                             }
                         }
                         if ui.button(crate::theme::cancel_text()).clicked() {
                             self.theme_dialog.show_rename_dialog = false;
                             self.theme_dialog.name_input.clear();
+                            self.theme_dialog.focus_requested = false;
                         }
                     });
                 });
             if !open {
                 self.theme_dialog.show_rename_dialog = false;
+                self.theme_dialog.focus_requested = false;
             }
         }
 
@@ -2799,18 +2817,27 @@ impl eframe::App for App {
                                 );
                                 ui.add_space(4.0);
                             }
+                            let any_dialog_open = self.theme_dialog.show_copy_dialog
+                                || self.theme_dialog.show_new_dialog
+                                || self.theme_dialog.show_rename_dialog
+                                || self.theme_dialog.show_delete_confirm
+                                || self.theme_dialog.show_switch_confirm;
                             egui::ScrollArea::vertical()
                                 .id_salt("appearance_scroll")
                                 .show(ui, |ui| {
                                     let mut draft = self.theme_edit.clone();
-                                    let actions = crate::theme::ui::show_theme_section(
-                                        ui,
-                                        &mut draft,
-                                        &self.available_themes,
-                                        is_builtin,
-                                        self.theme_dirty,
-                                        &mut self.theme_dialog,
-                                    );
+                                    let actions = if any_dialog_open {
+                                        Vec::new()
+                                    } else {
+                                        crate::theme::ui::show_theme_section(
+                                            ui,
+                                            &mut draft,
+                                            &self.available_themes,
+                                            is_builtin,
+                                            self.theme_dirty,
+                                            &mut self.theme_dialog,
+                                        )
+                                    };
                                     for action in actions {
                                         self.handle_theme_action(ctx, action, draft.clone());
                                     }

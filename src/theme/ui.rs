@@ -35,6 +35,9 @@ pub struct ThemeDialogState {
     pub show_switch_confirm: bool,
     pub name_input: String,
     pub pending_switch_target: String,
+    /// Tracks whether we already requested focus for the current dialog.
+    /// Reset to false when all dialogs are closed.
+    pub focus_requested: bool,
 }
 
 /// Render the full theme management section.
