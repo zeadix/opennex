@@ -2116,6 +2116,9 @@ impl App {
 
     /// Kick off a download for the available update info.
     fn kick_download(&mut self, ctx: &egui::Context, info: &crate::updater::UpdateInfo) {
+        // Open the about window so the user can watch progress; the
+        // status line + progress bar live in-place inside it.
+        self.show_about = true;
         self.start_download(ctx, info);
     }
 
@@ -3346,12 +3349,20 @@ impl eframe::App for App {
                 mem.data
                     .remove_temp::<bool>(egui::Id::new("restart_popup_choice"))
             });
-            if let Some(true) = choice {
-                let path = path.clone();
-                self.apply_update_and_restart(ctx, path);
+            match choice {
+                Some(true) => {
+                    let path = path.clone();
+                    self.apply_update_and_restart(ctx, path);
+                }
+                Some(false) => {
+                    // User chose cancel: dismiss the popup. Set the
+                    // state back to Idle so the popup stops appearing; they
+                    // can re-check later from the about window's button
+                    // to re-trigger an install.
+                    self.update_state = crate::updater::UpdateState::Idle;
+                }
+                None => {}
             }
-            // `false` (cancel) — keep Ready state so user can still
-            // restart from the about window's "重启应用" button.
         }
 
         // Close workspace confirmation
@@ -3731,6 +3742,9 @@ impl eframe::App for App {
                         );
                     });
                     ui.add_space(4.0);
+                    // Remove the default vertical spacing between workspace
+                    // items so the list reads as one continuous block.
+                    ui.style_mut().spacing.item_spacing.y = 0.0;
                     let mut to_select = None;
                     let panel_count = self.panels.len();
                     let mut reorder = None;
@@ -3775,138 +3789,171 @@ impl eframe::App for App {
                                 cancel_workspace_rename(&mut self.renaming_panel, true);
                             }
                         } else {
-                            let row = ui.horizontal(|ui| {
-                                let panel_name = self.panels[i].name.clone();
-                                let handle_size = egui::vec2(
-                                    WORKSPACE_DRAG_HANDLE_WIDTH,
-                                    ui.spacing().interact_size.y,
+                            let panel_name = self.panels[i].name.clone();
+                            let has_close = self.panels.len() > 1;
+                            let has_lock = has_close || self.locked_panels.contains(&i);
+                            let is_locked = self.locked_panels.contains(&i);
+                            let row_h = ui.spacing().interact_size.y;
+                            // Reserve the full row width up front so we can
+                            // detect hover across the whole row, not just on
+                            // the selectable label.
+                            let (row_rect, row_resp) = ui.allocate_exact_size(
+                                egui::vec2(ui.available_width(), row_h),
+                                egui::Sense::click_and_drag(),
+                            );
+                            // `on_hover_text` consumes the Response; bind
+                            // back to the original so we can still use it
+                            // below.
+                            let is_row_hovered = row_resp.hovered();
+                            let _row_resp =
+                                row_resp.on_hover_text(&self.texts.workspace.drag_handle_hint);
+                            // Background: only paint when active or hovered.
+                            if is_active {
+                                ui.painter().rect_filled(
+                                    row_rect,
+                                    0.0,
+                                    self.active_theme.app.active.to_egui(),
                                 );
-                                let (handle_rect, handle) =
-                                    ui.allocate_exact_size(handle_size, egui::Sense::drag());
-                                let handle_color = if handle.hovered() {
-                                    ui.visuals().text_color()
-                                } else {
-                                    ui.visuals().weak_text_color()
-                                };
-                                ui.painter().text(
+                            } else if is_row_hovered {
+                                ui.painter().rect_filled(
+                                    row_rect,
+                                    0.0,
+                                    self.active_theme.app.hover.to_egui(),
+                                );
+                            }
+                            self.panel_rects[i] = row_rect;
+
+                            // Layout: [≡ drag icon] [name (flex)] [actions if hover]
+                            // Use a child Ui inside row_rect so we can place
+                            // items by their own rect, not via add_sized.
+                            let mut child = ui.new_child(
+                                egui::UiBuilder::new()
+                                    .max_rect(row_rect)
+                                    .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                            );
+                            // Drag handle on the left — only visible on hover.
+                            if is_row_hovered {
+                                let drag_w = 14.0;
+                                let (handle_rect, handle_resp) = child.allocate_exact_size(
+                                    egui::vec2(drag_w, row_h - 4.0),
+                                    egui::Sense::drag(),
+                                );
+                                let handle_color = self.active_theme.app.weak_text.to_egui();
+                                child.painter().text(
                                     handle_rect.center(),
                                     egui::Align2::CENTER_CENTER,
                                     egui_phosphor::regular::DOTS_SIX_VERTICAL,
-                                    egui::FontId::proportional(14.0),
+                                    egui::FontId::proportional(12.0),
                                     handle_color,
                                 );
-                                let handle =
-                                    handle.on_hover_text(&self.texts.workspace.drag_handle_hint);
-                                if handle.drag_started() {
+                                // Tooltip via the whole row (set on row_resp
+                                // above), so the handle itself doesn't need
+                                // a hover_text call.
+                                if handle_resp.drag_started() {
                                     self.drag_src_panel = Some(i);
                                     self.drag_dst_panel = None;
                                 }
-                                let has_close = self.panels.len() > 1;
-                                let has_lock = has_close || self.locked_panels.contains(&i);
-                                let action_width = workspace_action_column_width(
-                                    has_close,
-                                    has_lock,
-                                    ui.spacing().item_spacing.x,
+                                let _ = handle_rect;
+                            } else {
+                                // Reserve a blank slot so the name doesn't shift.
+                                child.allocate_exact_size(
+                                    egui::vec2(14.0, row_h - 4.0),
+                                    egui::Sense::hover(),
                                 );
-                                let name_width = (ui.available_width()
-                                    - action_width
-                                    - ui.spacing().item_spacing.x)
-                                    .max(0.0);
-                                let response = ui.add_sized(
-                                    egui::vec2(name_width, ui.spacing().interact_size.y),
-                                    egui::SelectableLabel::new(is_active, &panel_name),
-                                );
-                                self.panel_rects[i] = response.rect;
+                            }
 
-                                // Click to select
-                                if response.double_clicked() && !renaming {
-                                    self.renaming_panel = Some(i);
-                                    self.rename_buffer = panel_name;
-                                    self.rename_frame_count = 0;
-                                    to_select = None;
-                                } else if response.clicked() && !renaming {
-                                    to_select = Some(i);
-                                }
-
-                                // Context menu
-                                response.context_menu(|ui| {
-                                    if ui.button(&self.texts.workspace.rename).clicked() {
-                                        self.renaming_panel = Some(i);
-                                        self.rename_buffer = self.panels[i].name.clone();
-                                        self.rename_frame_count = 0;
-                                        ui.close_menu();
-                                    }
-                                    if ui.button(&self.texts.workspace.save_as_template).clicked() {
-                                        self.save_as_template(i);
-                                        ui.close_menu();
-                                    }
-                                    if ui.button(&self.texts.settings.buttons.close).clicked() {
-                                        self.close_confirm_panel = Some(i);
-                                        ui.close_menu();
-                                    }
-                                });
-
-                                // Lock and close buttons
-                                if has_lock {
-                                    ui.allocate_ui_with_layout(
-                                        egui::vec2(action_width, ui.spacing().interact_size.y),
-                                        egui::Layout::right_to_left(egui::Align::Center),
-                                        |ui| {
-                                            let action_rect = ui.max_rect();
-                                            ui.painter().rect_filled(
-                                                action_rect,
-                                                0.0,
-                                                ui.visuals().faint_bg_color,
-                                            );
-                                            if has_close {
-                                                if ui
-                                                    .add_sized(
-                                                        WORKSPACE_ACTION_BUTTON_SIZE,
-                                                        egui::Button::new(
-                                                            egui_phosphor::regular::X,
-                                                        ),
-                                                    )
-                                                    .on_hover_text(
-                                                        &self.texts.workspace.close_ws_hint,
-                                                    )
-                                                    .clicked()
-                                                {
-                                                    self.close_confirm_panel = Some(i);
-                                                    return;
-                                                }
-                                            }
-                                            let is_locked = self.locked_panels.contains(&i);
-                                            if ui
-                                                .add_sized(
-                                                    WORKSPACE_ACTION_BUTTON_SIZE,
-                                                    egui::Button::new(workspace_lock_icon(
-                                                        is_locked,
-                                                    )),
-                                                )
-                                                .on_hover_text(if is_locked {
-                                                    &self.texts.workspace.locked_hint
-                                                } else {
-                                                    &self.texts.workspace.unlocked_hint
-                                                })
-                                                .clicked()
-                                            {
-                                                if is_locked {
-                                                    // Switch to the locked panel; the overlay
-                                                    // has its own password input.
-                                                    self.active_panel = i;
-                                                    self.lock_password_input.clear();
-                                                    self.pw_message.clear();
-                                                } else {
-                                                    self.locked_panels.insert(i);
-                                                    self.lock_password_input.clear();
-                                                    self.pw_message.clear();
-                                                }
-                                            }
+                            // Name (clickable, fills middle). On double-click
+                            // enter inline rename mode.
+                            let response = child.add_sized(
+                                egui::vec2(
+                                    child.available_width()
+                                        - if is_row_hovered && has_lock {
+                                            56.0
+                                        } else {
+                                            0.0
                                         },
-                                    );
+                                    row_h,
+                                ),
+                                egui::SelectableLabel::new(is_active, &panel_name),
+                            );
+                            if response.double_clicked() && !renaming {
+                                self.renaming_panel = Some(i);
+                                self.rename_buffer = panel_name;
+                                self.rename_frame_count = 0;
+                                to_select = None;
+                            } else if response.clicked() && !renaming {
+                                to_select = Some(i);
+                            }
+                            response.context_menu(|ui| {
+                                if ui.button(&self.texts.workspace.rename).clicked() {
+                                    self.renaming_panel = Some(i);
+                                    self.rename_buffer = self.panels[i].name.clone();
+                                    self.rename_frame_count = 0;
+                                    ui.close_menu();
+                                }
+                                if ui.button(&self.texts.workspace.save_as_template).clicked() {
+                                    self.save_as_template(i);
+                                    ui.close_menu();
+                                }
+                                if ui.button(&self.texts.settings.buttons.close).clicked() {
+                                    self.close_confirm_panel = Some(i);
+                                    ui.close_menu();
                                 }
                             });
-                            self.panel_rects[i] = row.response.rect;
+
+                            // Right-side action buttons, only on hover.
+                            if is_row_hovered && has_lock {
+                                let action_w = 24.0;
+                                if has_close {
+                                    let (close_rect, _) = child.allocate_exact_size(
+                                        egui::vec2(action_w, row_h - 4.0),
+                                        egui::Sense::click(),
+                                    );
+                                    let close_btn = egui::Button::new(
+                                        egui::RichText::new(egui_phosphor::regular::X)
+                                            .size(13.0)
+                                            .color(self.active_theme.app.button_fg.to_egui()),
+                                    )
+                                    .frame(false)
+                                    .fill(egui::Color32::TRANSPARENT);
+                                    if child
+                                        .add_sized(egui::vec2(action_w, row_h - 4.0), close_btn)
+                                        .on_hover_text(&self.texts.workspace.close_ws_hint)
+                                        .clicked()
+                                    {
+                                        self.close_confirm_panel = Some(i);
+                                    }
+                                    let _ = close_rect;
+                                }
+                                // Lock / unlock button
+                                let lock_btn = egui::Button::new(
+                                    egui::RichText::new(workspace_lock_icon(is_locked))
+                                        .size(13.0)
+                                        .color(self.active_theme.app.button_fg.to_egui()),
+                                )
+                                .frame(false)
+                                .fill(egui::Color32::TRANSPARENT);
+                                if child
+                                    .add_sized(egui::vec2(action_w, row_h - 4.0), lock_btn)
+                                    .on_hover_text(if is_locked {
+                                        &self.texts.workspace.locked_hint
+                                    } else {
+                                        &self.texts.workspace.unlocked_hint
+                                    })
+                                    .clicked()
+                                {
+                                    if is_locked {
+                                        self.active_panel = i;
+                                        self.lock_password_input.clear();
+                                        self.pw_message.clear();
+                                    } else {
+                                        self.locked_panels.insert(i);
+                                        self.lock_password_input.clear();
+                                        self.pw_message.clear();
+                                    }
+                                }
+                            }
+                            let _ = row_resp;
                         }
                     }
 
