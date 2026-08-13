@@ -1932,6 +1932,8 @@ impl App {
                             .id(input_id)
                             .desired_width(340.0),
                     );
+                    eprintln!("FOCUS_DEBUG: modal={:?} input_id={:?} has_focus={} value='{}'",
+                        modal_id, input_id, _resp.has_focus(), self.theme_dialog.name_input);
                 }
                 DialogKind::Delete => {
                     ui.label(format!(
