@@ -11,3 +11,4 @@ templates/*.json
 Cargo.toml.orig
 AGENTS.md
 project.md
+.worktrees/
