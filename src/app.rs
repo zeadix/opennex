@@ -304,14 +304,12 @@ fn binding_matches_key(
     binding_to_key(binding) == Some(key) && binding_to_modifiers(binding) == modifiers
 }
 
-fn workspace_action_column_width(has_close: bool, has_lock: bool, item_spacing: f32) -> f32 {
-    let count = usize::from(has_close) + usize::from(has_lock);
-    if count == 0 {
-        0.0
-    } else {
-        count as f32 * WORKSPACE_ACTION_BUTTON_SIZE.x
-            + (count.saturating_sub(1) as f32 * item_spacing)
-    }
+/// Fixed right-side column width: lock button (24) + 1px divider +
+/// three-dot button (24) + 1px divider = 50px. The lock/close toggle
+/// (only one of the two is shown depending on hover) and the three-dot
+/// menu (always) take the same horizontal space.
+fn workspace_action_column_width(_has_close: bool, _has_lock: bool, _item_spacing: f32) -> f32 {
+    50.0
 }
 
 fn screen_center(ctx: &egui::Context) -> egui::Pos2 {
@@ -2280,58 +2278,6 @@ impl App {
 
     /// Render the update-notification dialog (started from background check
     /// or after the user clicks the update button on the about window).
-    fn show_update_dialog_window(&mut self, ctx: &egui::Context) {
-        let info = match &self.update_dialog_info {
-            Some(i) => i.clone(),
-            None => return,
-        };
-        if !self.show_update_dialog {
-            return;
-        }
-        let mut open = true;
-        egui::Window::new(format!("OpenNex v{} 已发布", info.version))
-            .open(&mut open)
-            .resizable(true)
-            .default_size([520.0, 400.0])
-            .min_width(400.0)
-            .min_height(240.0)
-            .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.strong(format!("v{}", info.version));
-                    ui.weak("(自动检测)");
-                });
-                ui.add_space(6.0);
-                ui.separator();
-                egui::ScrollArea::vertical()
-                    .max_height(260.0)
-                    .auto_shrink([false; 2])
-                    .show(ui, |ui| {
-                        if info.changelog.trim().is_empty() {
-                            ui.weak("(无更新说明)");
-                        } else {
-                            for line in info.changelog.lines() {
-                                ui.label(line);
-                            }
-                        }
-                    });
-                ui.add_space(6.0);
-                ui.separator();
-                ui.horizontal(|ui| {
-                    if ui.button("跳过此版本").clicked() {
-                        self.skipped_versions.insert(info.version.clone());
-                        self.show_update_dialog = false;
-                    }
-                    if ui.button("立即更新").clicked() {
-                        self.start_download(ctx, &info);
-                        self.show_update_dialog = false;
-                    }
-                });
-            });
-        if !open {
-            self.show_update_dialog = false;
-        }
-    }
-
     /// Render a transient bottom-center toast (e.g. "current is up to date").
     fn show_update_toast(&mut self, ctx: &egui::Context) {
         let (msg, expires) = match &self.update_toast {
@@ -3417,8 +3363,12 @@ impl eframe::App for App {
                 match r {
                     StartCheckResult::Available(info) => {
                         if !self.skipped_versions.contains(&info.version) {
-                            self.show_update_dialog = true;
-                            self.update_dialog_info = Some(info);
+                            // Surface the new version through About's
+                            // in-place status panel and auto-open About so
+                            // the user actually sees the offer. No
+                            // standalone update popup anymore.
+                            self.update_state = crate::updater::UpdateState::Available(info);
+                            self.show_about = true;
                         }
                     }
                     StartCheckResult::UpToDate => {
@@ -3439,7 +3389,6 @@ impl eframe::App for App {
 
         // Update window + dialog + toast
         self.render_update_window(ctx);
-        self.show_update_dialog_window(ctx);
         self.show_update_toast(ctx);
 
         // Terminal close confirmation
@@ -3823,7 +3772,7 @@ impl eframe::App for App {
                             }
                             self.panel_rects[i] = row_rect;
 
-                            // Layout: [≡ drag icon] [name (flex)] [actions if hover]
+                            // Layout: [≡ drag icon] [name (flex)] [lock btn | three-dot]
                             // Use a child Ui inside row_rect so we can place
                             // items by their own rect, not via add_sized.
                             let mut child = ui.new_child(
@@ -3831,49 +3780,37 @@ impl eframe::App for App {
                                     .max_rect(row_rect)
                                     .layout(egui::Layout::left_to_right(egui::Align::Center)),
                             );
-                            // Drag handle on the left — only visible on hover.
-                            if is_row_hovered {
-                                let drag_w = 14.0;
-                                let (handle_rect, handle_resp) = child.allocate_exact_size(
-                                    egui::vec2(drag_w, row_h - 4.0),
-                                    egui::Sense::drag(),
-                                );
-                                let handle_color = self.active_theme.app.weak_text.to_egui();
-                                child.painter().text(
-                                    handle_rect.center(),
-                                    egui::Align2::CENTER_CENTER,
-                                    egui_phosphor::regular::DOTS_SIX_VERTICAL,
-                                    egui::FontId::proportional(12.0),
-                                    handle_color,
-                                );
-                                // Tooltip via the whole row (set on row_resp
-                                // above), so the handle itself doesn't need
-                                // a hover_text call.
-                                if handle_resp.drag_started() {
-                                    self.drag_src_panel = Some(i);
-                                    self.drag_dst_panel = None;
-                                }
-                                let _ = handle_rect;
+                            // Drag handle on the left — always visible
+                            // (brighter when hovered).
+                            let drag_w = 14.0;
+                            let (handle_rect, handle_resp) = child.allocate_exact_size(
+                                egui::vec2(drag_w, row_h - 4.0),
+                                egui::Sense::drag(),
+                            );
+                            let handle_color = if handle_resp.hovered() {
+                                self.active_theme.app.text.to_egui()
                             } else {
-                                // Reserve a blank slot so the name doesn't shift.
-                                child.allocate_exact_size(
-                                    egui::vec2(14.0, row_h - 4.0),
-                                    egui::Sense::hover(),
-                                );
+                                self.active_theme.app.weak_text.to_egui()
+                            };
+                            child.painter().text(
+                                handle_rect.center(),
+                                egui::Align2::CENTER_CENTER,
+                                egui_phosphor::regular::DOTS_SIX_VERTICAL,
+                                egui::FontId::proportional(12.0),
+                                handle_color,
+                            );
+                            if handle_resp.drag_started() {
+                                self.drag_src_panel = Some(i);
+                                self.drag_dst_panel = None;
                             }
+                            let _ = handle_rect;
 
                             // Name (clickable, fills middle). On double-click
-                            // enter inline rename mode.
+                            // enter inline rename mode. Always reserves 50px
+                            // for the right-side action cluster
+                            // (lock button + 1px divider + three-dot + 1px).
                             let response = child.add_sized(
-                                egui::vec2(
-                                    child.available_width()
-                                        - if is_row_hovered && has_lock {
-                                            56.0
-                                        } else {
-                                            0.0
-                                        },
-                                    row_h,
-                                ),
+                                egui::vec2(child.available_width() - 50.0, row_h),
                                 egui::SelectableLabel::new(is_active, &panel_name),
                             );
                             if response.double_clicked() && !renaming {
@@ -3895,46 +3832,59 @@ impl eframe::App for App {
                                     self.save_as_template(i);
                                     ui.close_menu();
                                 }
+                                ui.separator();
+                                if ui.button(if is_locked { "解锁" } else { "锁定" }).clicked()
+                                {
+                                    if is_locked {
+                                        self.active_panel = i;
+                                        self.lock_password_input.clear();
+                                        self.pw_message.clear();
+                                    } else {
+                                        self.locked_panels.insert(i);
+                                        self.lock_password_input.clear();
+                                        self.pw_message.clear();
+                                    }
+                                    ui.close_menu();
+                                }
+                                ui.separator();
                                 if ui.button(&self.texts.settings.buttons.close).clicked() {
                                     self.close_confirm_panel = Some(i);
                                     ui.close_menu();
                                 }
                             });
 
-                            // Right-side action buttons, only on hover.
-                            if is_row_hovered && has_lock {
-                                let action_w = 24.0;
-                                if has_close {
-                                    let (close_rect, _) = child.allocate_exact_size(
-                                        egui::vec2(action_w, row_h - 4.0),
-                                        egui::Sense::click(),
-                                    );
-                                    let close_btn = egui::Button::new(
-                                        egui::RichText::new(egui_phosphor::regular::X)
-                                            .size(13.0)
-                                            .color(self.active_theme.app.button_fg.to_egui()),
-                                    )
-                                    .frame(false)
-                                    .fill(egui::Color32::TRANSPARENT);
-                                    if child
-                                        .add_sized(egui::vec2(action_w, row_h - 4.0), close_btn)
-                                        .on_hover_text(&self.texts.workspace.close_ws_hint)
-                                        .clicked()
-                                    {
-                                        self.close_confirm_panel = Some(i);
-                                    }
-                                    let _ = close_rect;
-                                }
-                                // Lock / unlock button
+                            // Right-side action cluster (always visible):
+                            // [1px | lock btn | 1px | three-dot]
+                            // Buttons are flat: no rounding, no stroke,
+                            // shared button_bg, separated by 1px lines.
+                            let btn_w = 24.0;
+                            let btn_h = row_h - 4.0;
+                            let button_bg = self.active_theme.app.button_bg.to_egui();
+                            let button_fg = self.active_theme.app.button_fg.to_egui();
+                            let divider_color = self.active_theme.app.border.to_egui();
+                            let stroke = egui::Stroke::new(1.0, divider_color);
+
+                            // 1px vertical line before lock.
+                            let (_, line1) = child.allocate_space(egui::vec2(0.0, btn_h));
+                            child.painter().line_segment(
+                                [
+                                    egui::pos2(line1.max.x, line1.min.y),
+                                    egui::pos2(line1.max.x, line1.max.y),
+                                ],
+                                stroke,
+                            );
+
+                            // Lock / unlock button (no rounding, themed bg).
+                            if has_lock {
                                 let lock_btn = egui::Button::new(
                                     egui::RichText::new(workspace_lock_icon(is_locked))
                                         .size(13.0)
-                                        .color(self.active_theme.app.button_fg.to_egui()),
+                                        .color(button_fg),
                                 )
-                                .frame(false)
-                                .fill(egui::Color32::TRANSPARENT);
+                                .corner_radius(egui::CornerRadius::ZERO)
+                                .fill(button_bg);
                                 if child
-                                    .add_sized(egui::vec2(action_w, row_h - 4.0), lock_btn)
+                                    .add_sized(egui::vec2(btn_w, btn_h), lock_btn)
                                     .on_hover_text(if is_locked {
                                         &self.texts.workspace.locked_hint
                                     } else {
@@ -3952,7 +3902,67 @@ impl eframe::App for App {
                                         self.pw_message.clear();
                                     }
                                 }
+                            } else {
+                                // Reserve the slot so the divider lines up
+                                // with the three-dot button.
+                                child.allocate_exact_size(
+                                    egui::vec2(btn_w, btn_h),
+                                    egui::Sense::hover(),
+                                );
                             }
+
+                            // 1px vertical line between lock and three-dot.
+                            let (_, line2) = child.allocate_space(egui::vec2(0.0, btn_h));
+                            child.painter().line_segment(
+                                [
+                                    egui::pos2(line2.max.x, line2.min.y),
+                                    egui::pos2(line2.max.x, line2.max.y),
+                                ],
+                                stroke,
+                            );
+
+                            // Three-dot menu (replaces the close button;
+                            // delete is reachable from inside).
+                            let three_dot = egui::Button::new(
+                                egui::RichText::new(egui_phosphor::regular::DOTS_THREE_VERTICAL)
+                                    .size(13.0)
+                                    .color(button_fg),
+                            )
+                            .corner_radius(egui::CornerRadius::ZERO)
+                            .fill(button_bg);
+                            let three_dot_resp =
+                                child.add_sized(egui::vec2(btn_w, btn_h), three_dot);
+                            three_dot_resp.context_menu(|ui| {
+                                if ui.button(&self.texts.workspace.rename).clicked() {
+                                    self.renaming_panel = Some(i);
+                                    self.rename_buffer = self.panels[i].name.clone();
+                                    self.rename_frame_count = 0;
+                                    ui.close_menu();
+                                }
+                                if ui.button(&self.texts.workspace.save_as_template).clicked() {
+                                    self.save_as_template(i);
+                                    ui.close_menu();
+                                }
+                                ui.separator();
+                                if ui.button(if is_locked { "解锁" } else { "锁定" }).clicked()
+                                {
+                                    if is_locked {
+                                        self.active_panel = i;
+                                        self.lock_password_input.clear();
+                                        self.pw_message.clear();
+                                    } else {
+                                        self.locked_panels.insert(i);
+                                        self.lock_password_input.clear();
+                                        self.pw_message.clear();
+                                    }
+                                    ui.close_menu();
+                                }
+                                ui.separator();
+                                if ui.button(&self.texts.settings.buttons.close).clicked() {
+                                    self.close_confirm_panel = Some(i);
+                                    ui.close_menu();
+                                }
+                            });
                             let _ = row_resp;
                         }
                     }
@@ -4695,9 +4705,15 @@ mod tests {
 
     #[test]
     fn workspace_action_column_width_covers_buttons() {
-        assert_eq!(super::workspace_action_column_width(false, false, 4.0), 0.0);
-        assert_eq!(super::workspace_action_column_width(false, true, 4.0), 24.0);
-        assert_eq!(super::workspace_action_column_width(true, true, 4.0), 52.0);
+        // The right side always reserves 50px for the lock button,
+        // its 1px divider, the three-dot button, and its 1px divider,
+        // regardless of how many action buttons are actually shown.
+        assert_eq!(
+            super::workspace_action_column_width(false, false, 4.0),
+            50.0
+        );
+        assert_eq!(super::workspace_action_column_width(false, true, 4.0), 50.0);
+        assert_eq!(super::workspace_action_column_width(true, true, 4.0), 50.0);
     }
 
     #[test]
