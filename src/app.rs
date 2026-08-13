@@ -707,8 +707,8 @@ impl Default for SettingsWindowState {
         SettingsWindowState {
             x: 200.0,
             y: 150.0,
-            width: 640.0,
-            height: 460.0,
+            width: 760.0,
+            height: 540.0,
         }
     }
 }
@@ -2734,13 +2734,14 @@ impl eframe::App for App {
                 .resizable(true)
                 .default_pos(screen_center(ctx))
                 .pivot(egui::Align2::CENTER_CENTER)
-                .default_size([ws.width.max(640.0), ws.height.max(460.0)])
-                .min_width(560.0)
-                .min_height(360.0)
+                .default_size([ws.width.max(760.0), ws.height.max(540.0)])
+                .min_width(680.0)
+                .min_height(420.0)
+                .frame(egui::Frame::window(&ctx.style()).inner_margin(egui::Margin::same(8)))
                 .show(ctx, |ui| {
                     // Allocate two columns. allocate_ui_with_layout reserves
                     // the rect so subsequent content cannot overlap.
-                    let nav_width: f32 = 120.0;
+                    let nav_width: f32 = 140.0;
                     let nav_size = egui::vec2(nav_width, ui.available_height());
                     ui.allocate_ui_with_layout(
                         nav_size,
@@ -2755,11 +2756,13 @@ impl eframe::App for App {
                             ];
                             for (i, label) in nav_items.iter().enumerate() {
                                 let selected = self.settings_tab == i;
-                                let text = format!("  {}", label);
+                                let text = format!("  {}  ", label);
                                 if ui.selectable_label(selected, &text).clicked() {
                                     self.settings_tab = i;
                                 }
                             }
+                            ui.add_space(8.0);
+                            ui.separator();
                         },
                     );
 
@@ -2798,7 +2801,13 @@ impl eframe::App for App {
                                 let is_builtin =
                                     crate::theme::store::is_embedded_id(&self.theme_edit.id);
                                 if is_builtin {
-                                    ui.weak(crate::theme::builtin_readonly_text());
+                                    ui.weak(
+                                        egui::RichText::new(format!(
+                                            "{}（保存时将自动创建副本）",
+                                            crate::theme::builtin_readonly_text()
+                                        ))
+                                        .small(),
+                                    );
                                     ui.add_space(4.0);
                                 }
                                 let any_dialog_open = self.theme_dialog.show_copy_dialog

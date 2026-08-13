@@ -229,14 +229,12 @@ fn show_ui_appearance_editor(
                     "system-ui",
                 );
             });
-        ui.add_enabled_ui(!is_builtin, |ui| {
-            ui.add(
-                egui::DragValue::new(&mut draft.app.ui_font_size)
-                    .range(8.0..=32.0)
-                    .prefix("UI 字号: "),
-            )
-            .on_hover_text(crate::theme::ui_font_size_label());
-        });
+        ui.add(
+            egui::DragValue::new(&mut draft.app.ui_font_size)
+                .range(8.0..=32.0)
+                .prefix("UI 字号: "),
+        )
+        .on_hover_text(crate::theme::ui_font_size_label());
     });
 
     ui.add_space(6.0);
@@ -263,8 +261,8 @@ fn show_ui_appearance_editor(
     ];
     for chunk in pairs.chunks_mut(3) {
         ui.horizontal(|ui| {
-            for (color, _label) in chunk {
-                let _ = compact_color_cell(ui, color, !is_builtin, actions);
+            for (color, label) in chunk {
+                let _ = compact_color_cell(ui, color, label, true, actions);
             }
         });
     }
@@ -279,21 +277,17 @@ fn show_terminal_section_editor(
 ) {
     // Row 1: font size + cell spacing (inline)
     ui.horizontal(|ui| {
-        ui.add_enabled_ui(!is_builtin, |ui| {
-            ui.add(
-                egui::DragValue::new(&mut draft.typography.terminal_font_size)
-                    .range(8.0..=32.0)
-                    .prefix("终端字号: "),
-            );
-        });
+        ui.add(
+            egui::DragValue::new(&mut draft.typography.terminal_font_size)
+                .range(8.0..=32.0)
+                .prefix("终端字号: "),
+        );
         ui.add_space(8.0);
-        ui.add_enabled_ui(!is_builtin, |ui| {
-            ui.add(
-                egui::DragValue::new(&mut draft.typography.cell_spacing)
-                    .range(0.5..=2.0)
-                    .prefix("间距: "),
-            );
-        });
+        ui.add(
+            egui::DragValue::new(&mut draft.typography.cell_spacing)
+                .range(0.5..=2.0)
+                .prefix("间距: "),
+        );
     });
 
     ui.add_space(6.0);
@@ -314,8 +308,8 @@ fn show_terminal_section_editor(
     ];
     for chunk in pairs.chunks_mut(3) {
         ui.horizontal(|ui| {
-            for (color, _label) in chunk {
-                let _ = compact_color_cell(ui, color, !is_builtin, actions);
+            for (color, label) in chunk {
+                let _ = compact_color_cell(ui, color, label, true, actions);
             }
         });
     }
@@ -356,8 +350,8 @@ fn show_ansi_palette_editor(
                 (cyan, "青"),
                 (white, "白"),
             ];
-            for (color, _name) in slots.iter_mut() {
-                let _ = compact_color_cell(ui, color, !is_builtin, actions);
+            for (color, name) in slots.iter_mut() {
+                let _ = compact_color_cell(ui, color, name, true, actions);
             }
         });
         ui.add_space(4.0);
@@ -434,11 +428,11 @@ fn color_swatch(
     }
 }
 
-/// Compact color cell: small swatch with hex label.
-/// Used in the dense 3-column color grid.
+/// Compact color cell: shows label + color swatch + hex value.
 fn compact_color_cell(
     ui: &mut egui::Ui,
     color: &mut ThemeColor,
+    label: &str,
     enabled: bool,
     actions: &mut Vec<ThemeAction>,
 ) {
@@ -448,10 +442,13 @@ fn compact_color_cell(
         color.to_array()[2],
     ];
     let prev = srgb;
+    let label_width = 64.0;
     ui.add_enabled_ui(enabled, |ui| {
+        ui.label(label);
         egui::widgets::color_picker::color_edit_button_srgb(ui, &mut srgb);
+        ui.weak(egui::RichText::new(color.as_hex()).small());
+        let _ = label_width;
     });
-    ui.weak(egui::RichText::new(color.as_hex()).small());
     if srgb != prev {
         *color = ThemeColor::from_rgb_for_test(srgb[0], srgb[1], srgb[2]);
         actions.push(ThemeAction::DraftModified);
