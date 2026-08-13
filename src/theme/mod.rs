@@ -1,3 +1,10 @@
+pub mod model;
+
+pub use model::{
+    AnsiColors, AppTheme, TerminalThemeConfig, ThemeColor, ThemeDefinition, ThemeError,
+    TypographyTheme, THEME_FORMAT_VERSION,
+};
+
 use egui::{Color32, Stroke};
 use serde::{de::Deserializer, Deserialize, Serialize, Serializer};
 
