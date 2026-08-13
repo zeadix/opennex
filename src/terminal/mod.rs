@@ -14,31 +14,27 @@ pub struct TerminalInstance {
 
 fn shell_integration_sequence(shell: &str) -> Vec<u8> {
     if shell.contains("bash") || shell.ends_with("/sh") {
-        // Append to PROMPT_COMMAND instead of overwriting, preserving the
-        // shell's original color/layout prompt configuration.
-        format!(
-            r#"__opennex_osc() {{ printf '\033]9;$PWD\007'; }}
-if [ -n "${{PROMPT_COMMAND}}" ]; then
-  PROMPT_COMMAND="__opennex_osc;${{PROMPT_COMMAND}}"
-else
-  PROMPT_COMMAND="__opennex_osc"
-fi
-"#,
-        )
-        .into_bytes()
+        // Single-line, semicolon-joined so the PTY only echoes one line
+        // instead of dumping the whole multi-line script into the terminal.
+        // We prepend ` __OPENNEX_INT=1;` to make the line start with a
+        // space; bash treats that as a "do not save to history" hint so
+        // the integration doesn't pollute the user's history.
+        let body = "__opennex_osc() { printf '\\033]9;$PWD\\007'; }";
+        let cond = "if [ -n \"${PROMPT_COMMAND}\" ]; then PROMPT_COMMAND=\"__opennex_osc;${PROMPT_COMMAND}\"; else PROMPT_COMMAND=\"__opennex_osc\"; fi";
+        format!(" __OPENNEX_INT=1; {body}; {cond}\n").into_bytes()
     } else if shell.contains("zsh") {
-        format!(
-            r#"__opennex_osc() {{ printf '\033]9;$PWD\007'; }}
-precmd_functions+=(__opennex_osc)
-"#,
-        )
-        .into_bytes()
+        // Same single-line trick for zsh; the `;` separates statements.
+        let body = "__opennex_osc() { printf '\\033]9;$PWD\\007'; }";
+        let cond = "precmd_functions+=(__opennex_osc)";
+        format!(" {body}; {cond}\n").into_bytes()
     } else if shell.contains("powershell") || shell.contains("pwsh") {
+        // PowerShell: one statement per line is fine; use a single semicolon-
+        // joined expression. Each statement is still on its own line
+        // because the outer PTY echo concatenates them, but PowerShell
+        // parses the joined string as separate statements.
         format!(
-            r#"function __opennex_osc {{ Write-Host -NoNewline "`e]9;$(Get-Location)`e\"; }}
-$Global:prompt = $function:prompt
-function prompt {{ __opennex_osc; & $Global:prompt }}
-"#,
+            r#"function __opennex_osc {{ Write-Host -NoNewline "`e]9;$(Get-Location)`e\"; }}; if ($Global:prompt) {{ $Global:prompt = $function:prompt; function prompt {{ __opennex_osc; & $Global:prompt }} }} else {{ function prompt {{ __opennex_osc; "`e]9;$(Get-Location)`e` " }} }}
+"#
         )
         .into_bytes()
     } else {

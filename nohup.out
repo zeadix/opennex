@@ -1,0 +1,10 @@
+Failed to parse language file "locales/zh.yaml": settings.tabs: missing field `appearance` at line 24 column 5
+Failed to parse language file "locales/hi.yaml": settings.tabs: missing field `appearance` at line 25 column 5
+Failed to parse language file "locales/fr.yaml": settings.tabs: missing field `appearance` at line 24 column 5
+Failed to parse language file "locales/ko.yaml": settings.tabs: missing field `appearance` at line 24 column 5
+Failed to parse language file "locales/zh-TW.yaml": settings.tabs: missing field `appearance` at line 24 column 5
+Failed to parse language file "locales/it.yaml": settings.tabs: missing field `appearance` at line 24 column 5
+Failed to parse language file "locales/ja.yaml": settings.tabs: missing field `appearance` at line 24 column 5
+Failed to parse language file "locales/de.yaml": settings.tabs: missing field `appearance` at line 24 column 5
+Failed to parse language file "locales/en.yaml": settings.tabs: missing field `appearance` at line 24 column 5
+Failed to parse language file "locales/zh.yaml": settings.tabs: missing field `appearance` at line 24 column 5
