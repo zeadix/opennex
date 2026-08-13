@@ -39,6 +39,7 @@ settings:
     max_history: "最大エントリ数:"
     scrollback: "スクロールバック:"
     clear_all_history: "全履歴を消去"
+    auto_copy: "選択したテキストを自動コピー"
   appearance:
     heading: "外観"
     terminal_section: "ターミナル外観"

@@ -30,6 +30,8 @@ struct AppSettings {
     theme_id: String,
     #[serde(default = "default_true")]
     apply_theme_typography: bool,
+    #[serde(default = "default_true")]
+    auto_copy_selection: bool,
 }
 
 fn default_theme_id() -> String {
@@ -694,6 +696,19 @@ fn find_system_font(filenames: &[&str]) -> Option<PathBuf> {
     None
 }
 
+#[derive(Debug, Clone)]
+enum StartCheckResult {
+    Available(crate::updater::UpdateInfo),
+    UpToDate,
+    Error(String),
+}
+
+impl Default for StartCheckResult {
+    fn default() -> Self {
+        StartCheckResult::UpToDate
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct SettingsWindowState {
     x: f32,
@@ -882,6 +897,7 @@ impl Default for AppSettings {
             language: default_language(),
             theme_id: default_theme_id(),
             apply_theme_typography: true,
+            auto_copy_selection: true,
         }
     }
 }
@@ -1057,6 +1073,12 @@ pub struct App {
     theme_dialog: crate::theme::ui::ThemeDialogState,
     theme_dirty: bool,
     theme_editor_subtab: crate::theme::ui::ThemeEditorSubtab,
+    auto_copy_selection: bool,
+    show_update_dialog: bool,
+    update_dialog_info: Option<crate::updater::UpdateInfo>,
+    skipped_versions: std::collections::HashSet<String>,
+    update_toast: Option<(String, std::time::Instant)>,
+    startup_frame_count: u32,
 }
 
 struct TerminalData {
@@ -1288,6 +1310,12 @@ impl App {
             theme_dialog: Default::default(),
             theme_dirty: false,
             theme_editor_subtab: Default::default(),
+            auto_copy_selection: true,
+            show_update_dialog: false,
+            update_dialog_info: None,
+            skipped_versions: std::collections::HashSet::new(),
+            update_toast: None,
+            startup_frame_count: 0,
         };
 
         let scene_path = scene_path();
@@ -1340,26 +1368,18 @@ impl App {
         {
             let ctx_clone = ctx.clone();
             std::thread::spawn(move || {
-                match crate::updater::check_for_update() {
-                    Ok(Some(info)) => {
-                        ctx_clone.request_repaint();
-                        // Store result via a channel or shared state
-                        // For simplicity, we use egui's memory
-                        ctx_clone.memory_mut(|mem| {
-                            mem.data
-                                .insert_temp(egui::Id::new("update_info"), Some(info));
-                        });
-                    }
-                    Ok(None) => {
-                        ctx_clone.memory_mut(|mem| {
-                            mem.data.insert_temp(
-                                egui::Id::new("update_info"),
-                                None::<crate::updater::UpdateInfo>,
-                            );
-                        });
-                    }
-                    Err(_) => {}
-                }
+                let result = crate::updater::check_for_update();
+                // Store result as an enum for the UI to handle.
+                let stored = match &result {
+                    Ok(Some(info)) => StartCheckResult::Available(info.clone()),
+                    Ok(None) => StartCheckResult::UpToDate,
+                    Err(e) => StartCheckResult::Error(e.clone()),
+                };
+                ctx_clone.memory_mut(|mem| {
+                    mem.data
+                        .insert_temp(egui::Id::new("start_check_result"), stored);
+                });
+                ctx_clone.request_repaint();
             });
         }
 
@@ -2149,7 +2169,7 @@ impl App {
     }
 
     fn render_update_window(&mut self, ctx: &egui::Context) {
-        // Poll manual check result
+        // Manual check result handling.
         if self.update_state == crate::updater::UpdateState::Checking {
             let result = ctx.memory(|mem| {
                 mem.data
@@ -2355,6 +2375,116 @@ impl App {
         let path = scene_path();
         save_scene(&path, self);
     }
+
+    /// Render the update-notification dialog (started from background check
+    /// or after the user clicks the update button on the about window).
+    fn show_update_dialog_window(&mut self, ctx: &egui::Context) {
+        let info = match &self.update_dialog_info {
+            Some(i) => i.clone(),
+            None => return,
+        };
+        if !self.show_update_dialog {
+            return;
+        }
+        let mut open = true;
+        egui::Window::new(format!("OpenNex v{} 已发布", info.version))
+            .open(&mut open)
+            .resizable(true)
+            .default_size([520.0, 400.0])
+            .min_width(400.0)
+            .min_height(240.0)
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.strong(format!("v{}", info.version));
+                    ui.weak("(自动检测)");
+                });
+                ui.add_space(6.0);
+                ui.separator();
+                egui::ScrollArea::vertical()
+                    .max_height(260.0)
+                    .auto_shrink([false; 2])
+                    .show(ui, |ui| {
+                        if info.changelog.trim().is_empty() {
+                            ui.weak("(无更新说明)");
+                        } else {
+                            for line in info.changelog.lines() {
+                                ui.label(line);
+                            }
+                        }
+                    });
+                ui.add_space(6.0);
+                ui.separator();
+                ui.horizontal(|ui| {
+                    if ui.button("跳过此版本").clicked() {
+                        self.skipped_versions.insert(info.version.clone());
+                        self.show_update_dialog = false;
+                    }
+                    if ui.button("立即更新").clicked() {
+                        self.start_download(ctx, &info);
+                        self.show_update_dialog = false;
+                    }
+                });
+            });
+        if !open {
+            self.show_update_dialog = false;
+        }
+    }
+
+    /// Render a transient bottom-center toast (e.g. "current is up to date").
+    fn show_update_toast(&mut self, ctx: &egui::Context) {
+        let (msg, expires) = match &self.update_toast {
+            Some(t) => t.clone(),
+            None => return,
+        };
+        if std::time::Instant::now() >= expires {
+            self.update_toast = None;
+            return;
+        }
+        egui::Area::new(egui::Id::new("update_toast"))
+            .order(egui::Order::Tooltip)
+            .anchor(egui::Align2::CENTER_BOTTOM, [0.0, -24.0])
+            .interactable(false)
+            .show(ctx, |ui| {
+                egui::Frame::popup(&ctx.style()).show(ui, |ui| {
+                    ui.label(msg);
+                });
+            });
+    }
+
+    /// If auto-copy is enabled and the user just released the primary
+    /// mouse button over a terminal, copy the current selection to
+    /// the system clipboard.
+    fn handle_selection_auto_copy(&mut self, ctx: &egui::Context) {
+        if !self.auto_copy_selection {
+            return;
+        }
+        let mut released = false;
+        ctx.input(|input| {
+            for event in &input.events {
+                if let egui::Event::PointerButton {
+                    pressed: false,
+                    button: egui::PointerButton::Primary,
+                    ..
+                } = event
+                {
+                    released = true;
+                }
+            }
+        });
+        if !released {
+            return;
+        }
+        let Some(tab) = self.focused_terminal.clone() else {
+            return;
+        };
+        let Some(td) = self.terminals.get_mut(&tab) else {
+            return;
+        };
+        let text = td.instance.backend.selectable_content();
+        if !text.is_empty() {
+            ctx.copy_text(text);
+        }
+    }
 }
 
 impl eframe::App for App {
@@ -2382,6 +2512,8 @@ impl eframe::App for App {
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Auto-copy selected text on mouse release.
+        self.handle_selection_auto_copy(ctx);
         self.process_pending(ctx);
         self.cwd_poll_frame = self.cwd_poll_frame.wrapping_add(1);
         if self.cwd_poll_frame >= 15 {
@@ -2698,6 +2830,8 @@ impl eframe::App for App {
                     }
                 });
                 ui.menu_button(self.texts.menu.theme.clone(), |ui| {
+                    ui.set_min_width(120.0);
+                    ui.set_max_width(180.0);
                     let current = self.settings.theme_id.clone();
                     let themes = self.available_themes.clone();
                     egui::ScrollArea::vertical()
@@ -2771,6 +2905,11 @@ impl eframe::App for App {
                         ui.add_space(4.0);
                         match self.settings_tab {
                             0 => {
+                                ui.checkbox(
+                                    &mut self.settings_edit.auto_copy_selection,
+                                    &self.texts.settings.general.auto_copy,
+                                );
+                                ui.add_space(8.0);
                                 ui.weak(self.texts.settings.general.scene_info.as_str());
                                 ui.weak(self.texts.settings.general.scene_path.as_str());
                                 ui.weak(self.texts.settings.general.templates_path.as_str());
@@ -3095,21 +3234,45 @@ impl eframe::App for App {
             }
         }
 
-        // Check for update result from background thread
-        if self.update_state == crate::updater::UpdateState::Idle {
-            let info = ctx.memory(|mem| {
+        // Check for update result from background thread.
+        // After ~3 seconds (180 frames @ 60fps) we show the update dialog
+        // for any available update, or display a toast for up-to-date / error.
+        if self.startup_frame_count < 180 {
+            self.startup_frame_count += 1;
+        }
+        if self.startup_frame_count == 180 {
+            let result = ctx.memory_mut(|mem| {
                 mem.data
-                    .get_temp::<Option<crate::updater::UpdateInfo>>(egui::Id::new("update_info"))
-                    .map(|v| v.clone())
-                    .flatten()
+                    .remove_temp::<StartCheckResult>(egui::Id::new("start_check_result"))
             });
-            if let Some(info) = info {
-                self.update_state = crate::updater::UpdateState::Available(info);
+            if let Some(r) = result {
+                match r {
+                    StartCheckResult::Available(info) => {
+                        if !self.skipped_versions.contains(&info.version) {
+                            self.show_update_dialog = true;
+                            self.update_dialog_info = Some(info);
+                        }
+                    }
+                    StartCheckResult::UpToDate => {
+                        self.update_toast = Some((
+                            "当前已是最新版本".to_string(),
+                            std::time::Instant::now() + std::time::Duration::from_secs(3),
+                        ));
+                    }
+                    StartCheckResult::Error(_) => {
+                        self.update_toast = Some((
+                            "无法连接到更新服务器".to_string(),
+                            std::time::Instant::now() + std::time::Duration::from_secs(3),
+                        ));
+                    }
+                }
             }
         }
 
-        // Update window
+        // Update window + dialog + toast
         self.render_update_window(ctx);
+        self.show_update_dialog_window(ctx);
+        self.show_update_toast(ctx);
 
         // Terminal close confirmation
         if let Some(ref tab_id) = self.pending_close_confirm.clone() {

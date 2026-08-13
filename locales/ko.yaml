@@ -39,6 +39,7 @@ settings:
     max_history: "최대 항목 수:"
     scrollback: "스크롤백:"
     clear_all_history: "모든 기록 삭제"
+    auto_copy: "선택한 텍스트 자동 복사"
   appearance:
     heading: "외관"
     terminal_section: "터미널 외관"

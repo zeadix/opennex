@@ -39,6 +39,7 @@ settings:
     max_history: "最大筆數:"
     scrollback: "回溯行數:"
     clear_all_history: "清除所有歷史"
+    auto_copy: "選中字元自動複製"
   appearance:
     heading: "外觀"
     terminal_section: "終端機外觀"

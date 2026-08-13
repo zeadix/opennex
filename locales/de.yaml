@@ -39,6 +39,7 @@ settings:
     max_history: "Max. Einträge:"
     scrollback: "Scrollback:"
     clear_all_history: "Gesamten Verlauf löschen"
+    auto_copy: "Ausgewählten Text automatisch kopieren"
   appearance:
     heading: "Darstellung"
     terminal_section: "Terminal-Darstellung"

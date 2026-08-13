@@ -9,6 +9,8 @@ const UPDATE_URL: &str = "https://opennex.download.zeadix.com/latest.json";
 #[derive(Debug, Clone, Deserialize)]
 pub struct ReleaseInfo {
     pub version: String,
+    #[serde(default)]
+    pub changelog: Option<String>,
     pub files: ReleaseFiles,
 }
 
@@ -30,6 +32,7 @@ pub struct UpdateInfo {
     pub version: String,
     pub download_url: String,
     pub sha256: String,
+    pub changelog: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -103,6 +106,7 @@ pub fn check_for_update() -> Result<Option<UpdateInfo>, String> {
             version: resp.version,
             download_url: file.portable.clone(),
             sha256: file.sha256.clone(),
+            changelog: resp.changelog.unwrap_or_default(),
         }))
     } else {
         Ok(None)

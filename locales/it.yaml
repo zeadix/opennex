@@ -39,6 +39,7 @@ settings:
     max_history: "Voci max:"
     scrollback: "Scrollback:"
     clear_all_history: "Cancella tutta la cronologia"
+    auto_copy: "Copia automatica del testo selezionato"
   appearance:
     heading: "Aspetto"
     terminal_section: "Aspetto terminale"

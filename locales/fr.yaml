@@ -39,6 +39,7 @@ settings:
     max_history: "Entrées max :"
     scrollback: "Défilement :"
     clear_all_history: "Effacer tout l'historique"
+    auto_copy: "Copier automatiquement le texte sélectionné"
   appearance:
     heading: "Apparence"
     terminal_section: "Apparence du terminal"
