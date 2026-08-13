@@ -4,48 +4,76 @@
   "name": "OpenNex Noir",
   "author": "OpenNex",
   "app": {
-    "app_bg":       "#0a0a0a",
-    "sidebar":      "#1a1a1d",
-    "panel":        "#141417",
-    "input_bg":     "#1a1a1d",
-    "text":         "#f5f5f5",
-    "weak_text":    "#a0a0a0",
-    "accent":       "#22d3ee",
-    "warning":      "#facc15",
-    "danger":       "#ef4444",
-    "hover":        "#26262a",
-    "active":       "#33333a",
-    "border":       "#26262a",
-    "lock":         "#00000080",
+    "app_bg": "#0a0a0a",
+    "sidebar": "#1a1a1d",
+    "panel": "#141417",
+    "input_bg": "#1a1a1d",
+    "text": "#f5f5f5",
+    "weak_text": "#a0a0a0",
+    "accent": "#22d3ee",
+    "warning": "#facc15",
+    "danger": "#ef4444",
+    "hover": "#26262a",
+    "active": "#33333a",
+    "border": "#26262a",
+    "lock": "#00000080",
     "selection_bg": "#33333a",
-    "selection_text":"#f5f5f5",
-    "window_shadow":"#00000040",
-    "ui_font_families": ["system-ui"],
-    "ui_font_size":  14.0
+    "selection_text": "#f5f5f5",
+    "window_shadow": "#00000040",
+    "ui_font_families": [
+      "system-ui"
+    ],
+    "ui_font_size": 14.0,
+    "menu_bg": "#141417",
+    "menu_fg": "#f5f5f5",
+    "button_bg": "#1a1a1d",
+    "button_fg": "#f5f5f5",
+    "button_hover_bg": "#26262a",
+    "sidebar_border": "#26262a"
   },
   "terminal": {
-    "foreground":   "#f5f5f5",
-    "background":   "#0a0a0a",
-    "dim_foreground":"#666666",
-    "cursor":       "#22d3ee",
+    "foreground": "#f5f5f5",
+    "background": "#0a0a0a",
+    "dim_foreground": "#666666",
+    "cursor": "#22d3ee",
     "selection_bg": "#33333a",
-    "selection_text":"#f5f5f5",
-    "link":         "#22d3ee",
+    "selection_text": "#f5f5f5",
+    "link": "#22d3ee",
     "normal": {
-      "black":"#0a0a0a","red":"#ef4444","green":"#10b981","yellow":"#facc15",
-      "blue":"#3b82f6","magenta":"#a855f7","cyan":"#06b6d4","white":"#f5f5f5"
+      "black": "#0a0a0a",
+      "red": "#ef4444",
+      "green": "#10b981",
+      "yellow": "#facc15",
+      "blue": "#3b82f6",
+      "magenta": "#a855f7",
+      "cyan": "#06b6d4",
+      "white": "#f5f5f5"
     },
     "bright": {
-      "black":"#26262a","red":"#f87171","green":"#34d399","yellow":"#fde047",
-      "blue":"#60a5fa","magenta":"#c084fc","cyan":"#67e8f9","white":"#ffffff"
+      "black": "#26262a",
+      "red": "#f87171",
+      "green": "#34d399",
+      "yellow": "#fde047",
+      "blue": "#60a5fa",
+      "magenta": "#c084fc",
+      "cyan": "#67e8f9",
+      "white": "#ffffff"
     },
     "dim": {
-      "black":"#050505","red":"#7f1d1d","green":"#064e3b","yellow":"#713f12",
-      "blue":"#1e3a8a","magenta":"#581c87","cyan":"#155e75","white":"#737373"
+      "black": "#050505",
+      "red": "#7f1d1d",
+      "green": "#064e3b",
+      "yellow": "#713f12",
+      "blue": "#1e3a8a",
+      "magenta": "#581c87",
+      "cyan": "#155e75",
+      "white": "#737373"
     }
   },
   "typography": {
-    "terminal_font_families": ["monospace"],
+    "terminal_font_families": [
+      "monospace"
+    ],
     "terminal_font_size": 13.0,
     "cell_spacing": 1.0,
     "menu_font_size": 14.0

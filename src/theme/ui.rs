@@ -423,7 +423,7 @@ fn color_swatch(
         egui::widgets::color_picker::color_edit_button_srgb(ui, &mut srgb);
     });
     if srgb != prev {
-        *color = ThemeColor::from_rgb_for_test(srgb[0], srgb[1], srgb[2]);
+        *color = ThemeColor::from_rgb_opaque(srgb[0], srgb[1], srgb[2]);
         actions.push(ThemeAction::DraftModified);
     }
 }
@@ -450,7 +450,7 @@ fn compact_color_cell(
         let _ = label_width;
     });
     if srgb != prev {
-        *color = ThemeColor::from_rgb_for_test(srgb[0], srgb[1], srgb[2]);
+        *color = ThemeColor::from_rgb_opaque(srgb[0], srgb[1], srgb[2]);
         actions.push(ThemeAction::DraftModified);
     }
 }
@@ -474,7 +474,7 @@ fn color_row(
             egui::widgets::color_picker::color_edit_button_srgb(ui, &mut srgb);
         });
         if srgb != prev {
-            *color = ThemeColor::from_rgb_for_test(srgb[0], srgb[1], srgb[2]);
+            *color = ThemeColor::from_rgb_opaque(srgb[0], srgb[1], srgb[2]);
             actions.push(ThemeAction::DraftModified);
         }
     });

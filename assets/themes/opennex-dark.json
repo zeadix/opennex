@@ -19,7 +19,13 @@
     "input_bg": "#1a1d21",
     "selection_bg": "#333840",
     "selection_text": "#e6e9ed",
-    "window_shadow": "#00000078"
+    "window_shadow": "#00000078",
+    "menu_bg": "#24272c",
+    "menu_fg": "#e6e9ed",
+    "button_bg": "#1a1d21",
+    "button_fg": "#e6e9ed",
+    "button_hover_bg": "#2e333a",
+    "sidebar_border": "#343a40"
   },
   "terminal": {
     "foreground": "#abb2bf",
@@ -61,7 +67,9 @@
     "link": "#61afef"
   },
   "typography": {
-    "terminal_font_families": ["monospace"],
+    "terminal_font_families": [
+      "monospace"
+    ],
     "terminal_font_size": 14.0,
     "cell_spacing": 1.0,
     "menu_font_size": 14.0

@@ -38,8 +38,9 @@ impl ThemeColor {
         ThemeColor([r, g, b, 255])
     }
 
-    /// Construct from RGB for non-test code.
-    pub fn from_rgb_for_test(r: u8, g: u8, b: u8) -> Self {
+    /// Construct an opaque RGB color. Used by theme default-value helpers
+    /// and theme editors; `from_rgb` is reserved for unit tests.
+    pub fn from_rgb_opaque(r: u8, g: u8, b: u8) -> Self {
         ThemeColor([r, g, b, 255])
     }
 
@@ -156,6 +157,25 @@ pub struct AppTheme {
     pub ui_font_families: Vec<String>,
     #[serde(default = "default_ui_font_size")]
     pub ui_font_size: f32,
+    // === Minimalist UI chrome fields (all optional for backward compat) ===
+    /// Background of the top menu bar and the bottom status bar.
+    #[serde(default = "default_menu_bg")]
+    pub menu_bg: ThemeColor,
+    /// Foreground (text) of the top menu bar and bottom status bar.
+    #[serde(default = "default_menu_fg")]
+    pub menu_fg: ThemeColor,
+    /// Background of inline buttons (e.g. "[+ 新建]", 模板 ▼).
+    #[serde(default = "default_button_bg")]
+    pub button_bg: ThemeColor,
+    /// Foreground (text) of inline buttons.
+    #[serde(default = "default_button_fg")]
+    pub button_fg: ThemeColor,
+    /// Background of inline buttons on hover.
+    #[serde(default = "default_button_hover_bg")]
+    pub button_hover_bg: ThemeColor,
+    /// Right border of the workspace sidebar (1px line).
+    #[serde(default = "default_sidebar_border")]
+    pub sidebar_border: ThemeColor,
 }
 
 fn default_ui_font_families() -> Vec<String> {
@@ -164,6 +184,26 @@ fn default_ui_font_families() -> Vec<String> {
 
 fn default_ui_font_size() -> f32 {
     14.0
+}
+
+fn default_menu_bg() -> ThemeColor {
+    // Default matches `panel` (filled in by apply when missing from JSON).
+    ThemeColor::from_rgb_opaque(0x14, 0x14, 0x17)
+}
+fn default_menu_fg() -> ThemeColor {
+    ThemeColor::from_rgb_opaque(0xe6, 0xe9, 0xed)
+}
+fn default_button_bg() -> ThemeColor {
+    ThemeColor::from_rgb_opaque(0x1a, 0x1a, 0x1d)
+}
+fn default_button_fg() -> ThemeColor {
+    ThemeColor::from_rgb_opaque(0xe6, 0xe9, 0xed)
+}
+fn default_button_hover_bg() -> ThemeColor {
+    ThemeColor::from_rgb_opaque(0x26, 0x26, 0x2a)
+}
+fn default_sidebar_border() -> ThemeColor {
+    ThemeColor::from_rgb_opaque(0x26, 0x26, 0x2a)
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -304,63 +344,69 @@ mod tests {
                 name: "OpenNex Dark".into(),
                 author: String::new(),
                 app: AppTheme {
-                    app_bg: ThemeColor::from_rgb(0x17, 0x19, 0x1c),
-                    sidebar: ThemeColor::from_rgb(0x1d, 0x20, 0x24),
-                    panel: ThemeColor::from_rgb(0x24, 0x27, 0x2c),
-                    hover: ThemeColor::from_rgb(0x2e, 0x33, 0x3a),
-                    active: ThemeColor::from_rgb(0x33, 0x38, 0x40),
-                    border: ThemeColor::from_rgb(0x34, 0x3a, 0x40),
-                    text: ThemeColor::from_rgb(0xe6, 0xe9, 0xed),
-                    weak_text: ThemeColor::from_rgb(0x8c, 0x95, 0x9f),
-                    accent: ThemeColor::from_rgb(0x2c, 0xbf, 0xae),
-                    warning: ThemeColor::from_rgb(0xd9, 0xa4, 0x41),
-                    danger: ThemeColor::from_rgb(0xe0, 0x5a, 0x65),
-                    lock: ThemeColor::from_rgb(0xd9, 0xa4, 0x41),
-                    input_bg: ThemeColor::from_rgb(0x1a, 0x1d, 0x21),
-                    selection_bg: ThemeColor::from_rgb(0x33, 0x38, 0x40),
-                    selection_text: ThemeColor::from_rgb(0xe6, 0xe9, 0xed),
-                    window_shadow: ThemeColor::from_rgb(0x00, 0x00, 0x00),
+                    app_bg: ThemeColor::from_rgb_opaque(0x17, 0x19, 0x1c),
+                    sidebar: ThemeColor::from_rgb_opaque(0x1d, 0x20, 0x24),
+                    panel: ThemeColor::from_rgb_opaque(0x24, 0x27, 0x2c),
+                    hover: ThemeColor::from_rgb_opaque(0x2e, 0x33, 0x3a),
+                    active: ThemeColor::from_rgb_opaque(0x33, 0x38, 0x40),
+                    border: ThemeColor::from_rgb_opaque(0x34, 0x3a, 0x40),
+                    text: ThemeColor::from_rgb_opaque(0xe6, 0xe9, 0xed),
+                    weak_text: ThemeColor::from_rgb_opaque(0x8c, 0x95, 0x9f),
+                    accent: ThemeColor::from_rgb_opaque(0x2c, 0xbf, 0xae),
+                    warning: ThemeColor::from_rgb_opaque(0xd9, 0xa4, 0x41),
+                    danger: ThemeColor::from_rgb_opaque(0xe0, 0x5a, 0x65),
+                    lock: ThemeColor::from_rgb_opaque(0xd9, 0xa4, 0x41),
+                    input_bg: ThemeColor::from_rgb_opaque(0x1a, 0x1d, 0x21),
+                    selection_bg: ThemeColor::from_rgb_opaque(0x33, 0x38, 0x40),
+                    selection_text: ThemeColor::from_rgb_opaque(0xe6, 0xe9, 0xed),
+                    window_shadow: ThemeColor::from_rgb_opaque(0x00, 0x00, 0x00),
                     ui_font_families: vec!["system-ui".into()],
                     ui_font_size: 14.0,
+                    menu_bg: ThemeColor::from_rgb_opaque(0x14, 0x14, 0x17),
+                    menu_fg: ThemeColor::from_rgb_opaque(0xe6, 0xe9, 0xed),
+                    button_bg: ThemeColor::from_rgb_opaque(0x1a, 0x1a, 0x1d),
+                    button_fg: ThemeColor::from_rgb_opaque(0xe6, 0xe9, 0xed),
+                    button_hover_bg: ThemeColor::from_rgb_opaque(0x26, 0x26, 0x2a),
+                    sidebar_border: ThemeColor::from_rgb_opaque(0x26, 0x26, 0x2a),
                 },
                 terminal: TerminalThemeConfig {
-                    foreground: ThemeColor::from_rgb(0xab, 0xb2, 0xbf),
-                    background: ThemeColor::from_rgb(0x28, 0x2c, 0x34),
+                    foreground: ThemeColor::from_rgb_opaque(0xab, 0xb2, 0xbf),
+                    background: ThemeColor::from_rgb_opaque(0x28, 0x2c, 0x34),
                     normal: AnsiColors {
-                        black: ThemeColor::from_rgb(0x28, 0x2c, 0x34),
-                        red: ThemeColor::from_rgb(0xe0, 0x6c, 0x75),
-                        green: ThemeColor::from_rgb(0x98, 0xc3, 0x79),
-                        yellow: ThemeColor::from_rgb(0xe5, 0xc0, 0x7b),
-                        blue: ThemeColor::from_rgb(0x61, 0xaf, 0xef),
-                        magenta: ThemeColor::from_rgb(0xc6, 0x78, 0xdd),
-                        cyan: ThemeColor::from_rgb(0x56, 0xb6, 0xc2),
-                        white: ThemeColor::from_rgb(0xab, 0xb2, 0xbf),
+                        black: ThemeColor::from_rgb_opaque(0x28, 0x2c, 0x34),
+                        red: ThemeColor::from_rgb_opaque(0xe0, 0x6c, 0x75),
+                        green: ThemeColor::from_rgb_opaque(0x98, 0xc3, 0x79),
+                        yellow: ThemeColor::from_rgb_opaque(0xe5, 0xc0, 0x7b),
+                        blue: ThemeColor::from_rgb_opaque(0x61, 0xaf, 0xef),
+                        magenta: ThemeColor::from_rgb_opaque(0xc6, 0x78, 0xdd),
+                        cyan: ThemeColor::from_rgb_opaque(0x56, 0xb6, 0xc2),
+                        white: ThemeColor::from_rgb_opaque(0xab, 0xb2, 0xbf),
                     },
                     bright: AnsiColors {
-                        black: ThemeColor::from_rgb(0x5c, 0x63, 0x70),
-                        red: ThemeColor::from_rgb(0xe0, 0x6c, 0x75),
-                        green: ThemeColor::from_rgb(0x98, 0xc3, 0x79),
-                        yellow: ThemeColor::from_rgb(0xe5, 0xc0, 0x7b),
-                        blue: ThemeColor::from_rgb(0x61, 0xaf, 0xef),
-                        magenta: ThemeColor::from_rgb(0xc6, 0x78, 0xdd),
-                        cyan: ThemeColor::from_rgb(0x56, 0xb6, 0xc2),
-                        white: ThemeColor::from_rgb(0xff, 0xff, 0xff),
+                        black: ThemeColor::from_rgb_opaque(0x5c, 0x63, 0x70),
+                        red: ThemeColor::from_rgb_opaque(0xe0, 0x6c, 0x75),
+                        green: ThemeColor::from_rgb_opaque(0x98, 0xc3, 0x79),
+                        yellow: ThemeColor::from_rgb_opaque(0xe5, 0xc0, 0x7b),
+                        blue: ThemeColor::from_rgb_opaque(0x61, 0xaf, 0xef),
+                        magenta: ThemeColor::from_rgb_opaque(0xc6, 0x78, 0xdd),
+                        cyan: ThemeColor::from_rgb_opaque(0x56, 0xb6, 0xc2),
+                        white: ThemeColor::from_rgb_opaque(0xff, 0xff, 0xff),
                     },
                     dim: AnsiColors {
-                        black: ThemeColor::from_rgb(0x1c, 0x20, 0x26),
-                        red: ThemeColor::from_rgb(0x9c, 0x4f, 0x56),
-                        green: ThemeColor::from_rgb(0x6c, 0x8f, 0x57),
-                        yellow: ThemeColor::from_rgb(0xa6, 0x89, 0x5a),
-                        blue: ThemeColor::from_rgb(0x47, 0x7c, 0xab),
-                        magenta: ThemeColor::from_rgb(0x8d, 0x55, 0x9d),
-                        cyan: ThemeColor::from_rgb(0x3d, 0x82, 0x8a),
-                        white: ThemeColor::from_rgb(0x75, 0x7b, 0x85),
+                        black: ThemeColor::from_rgb_opaque(0x1c, 0x20, 0x26),
+                        red: ThemeColor::from_rgb_opaque(0x9c, 0x4f, 0x56),
+                        green: ThemeColor::from_rgb_opaque(0x6c, 0x8f, 0x57),
+                        yellow: ThemeColor::from_rgb_opaque(0xa6, 0x89, 0x5a),
+                        blue: ThemeColor::from_rgb_opaque(0x47, 0x7c, 0xab),
+                        magenta: ThemeColor::from_rgb_opaque(0x8d, 0x55, 0x9d),
+                        cyan: ThemeColor::from_rgb_opaque(0x3d, 0x82, 0x8a),
+                        white: ThemeColor::from_rgb_opaque(0x75, 0x7b, 0x85),
                     },
-                    dim_foreground: ThemeColor::from_rgb(0x6b, 0x72, 0x80),
-                    cursor: ThemeColor::from_rgb(0x2c, 0xbf, 0xae),
-                    selection_bg: ThemeColor::from_rgb(0x33, 0x38, 0x40),
-                    selection_text: ThemeColor::from_rgb(0xe6, 0xe9, 0xed),
-                    link: ThemeColor::from_rgb(0x61, 0xaf, 0xef),
+                    dim_foreground: ThemeColor::from_rgb_opaque(0x6b, 0x72, 0x80),
+                    cursor: ThemeColor::from_rgb_opaque(0x2c, 0xbf, 0xae),
+                    selection_bg: ThemeColor::from_rgb_opaque(0x33, 0x38, 0x40),
+                    selection_text: ThemeColor::from_rgb_opaque(0xe6, 0xe9, 0xed),
+                    link: ThemeColor::from_rgb_opaque(0x61, 0xaf, 0xef),
                 },
                 typography: TypographyTheme {
                     terminal_font_families: vec!["monospace".into()],
