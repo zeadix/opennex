@@ -33,6 +33,13 @@ pub fn default_theme() -> Result<ThemeDefinition, ThemeError> {
         .ok_or(ThemeError::MissingDefault)
 }
 
+/// Whether `id` matches an embedded (read-only) theme.
+pub fn is_embedded_id(id: &str) -> bool {
+    embedded_themes()
+        .map(|themes| themes.iter().any(|theme| theme.id == id))
+        .unwrap_or(false)
+}
+
 /// Resolve a theme by ID, preferring user themes, then embedded, then default.
 pub fn load_theme(user_dir: &Path, id: &str) -> Result<ThemeDefinition, ThemeError> {
     if let Ok(user) = load_user_theme(user_dir, id) {
@@ -139,6 +146,42 @@ pub fn export_theme_file(theme: &ThemeDefinition, destination: &Path) -> Result<
     let json = serde_json::to_string_pretty(theme)?;
     std::fs::write(destination, json)?;
     Ok(())
+}
+
+/// Delete a user theme file by ID. Embedded themes cannot be deleted.
+pub fn delete_user_theme(dir: &Path, id: &str) -> Result<(), ThemeError> {
+    if is_embedded_id(id) {
+        return Err(ThemeError::InvalidField {
+            field: "id".into(),
+            reason: "embedded themes cannot be deleted".into(),
+        });
+    }
+    let path = dir.join(format!("{id}.json"));
+    if path.exists() {
+        std::fs::remove_file(&path)?;
+    } else {
+        return Err(ThemeError::Io(format!("theme file not found: {}", path.display())));
+    }
+    Ok(())
+}
+
+/// Rename a user theme by updating its display name. ID and filename stay stable.
+pub fn rename_user_theme(dir: &Path, id: &str, new_name: &str) -> Result<ThemeDefinition, ThemeError> {
+    let mut theme = load_theme(dir, id)?;
+    theme.name = new_name.to_string();
+    theme.validate()?;
+    save_user_theme(dir, &theme)?;
+    Ok(theme)
+}
+
+/// Create a copy of a theme with a new auto-generated ID and display name.
+pub fn copy_theme(dir: &Path, source_id: &str, display_name: &str) -> Result<ThemeDefinition, ThemeError> {
+    let mut theme = load_theme(dir, source_id)?;
+    let new_id = find_free_import_id(dir, &theme.id);
+    theme.id = new_id;
+    theme.name = display_name.to_string();
+    save_user_theme(dir, &theme)?;
+    Ok(theme)
 }
 
 /// Pick a non-colliding ID for an imported theme by appending `-2`, `-3`, ...

@@ -1,4 +1,5 @@
 pub mod model;
+pub mod palettes;
 pub mod store;
 
 pub use model::{ThemeColor, ThemeDefinition, ThemeError};

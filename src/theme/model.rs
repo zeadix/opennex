@@ -143,6 +143,18 @@ pub struct AppTheme {
     pub selection_bg: ThemeColor,
     pub selection_text: ThemeColor,
     pub window_shadow: ThemeColor,
+    #[serde(default = "default_ui_font_families")]
+    pub ui_font_families: Vec<String>,
+    #[serde(default = "default_ui_font_size")]
+    pub ui_font_size: f32,
+}
+
+fn default_ui_font_families() -> Vec<String> {
+    vec!["system-ui".into()]
+}
+
+fn default_ui_font_size() -> f32 {
+    14.0
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -228,6 +240,14 @@ impl ThemeDefinition {
         validate_range(self.typography.cell_spacing, "cell_spacing", 0.5, 2.0)?;
         validate_range(self.typography.menu_font_size, "menu_font_size", 8.0, 32.0)?;
 
+        if self.app.ui_font_families.is_empty() {
+            return Err(ThemeError::InvalidField {
+                field: "ui_font_families".into(),
+                reason: "must contain at least one font family".into(),
+            });
+        }
+        validate_range(self.app.ui_font_size, "ui_font_size", 8.0, 32.0)?;
+
         Ok(())
     }
 }
@@ -291,6 +311,8 @@ mod tests {
                     selection_bg: ThemeColor::from_rgb(0x33, 0x38, 0x40),
                     selection_text: ThemeColor::from_rgb(0xe6, 0xe9, 0xed),
                     window_shadow: ThemeColor::from_rgb(0x00, 0x00, 0x00),
+                    ui_font_families: vec!["system-ui".into()],
+                    ui_font_size: 14.0,
                 },
                 terminal: TerminalThemeConfig {
                     foreground: ThemeColor::from_rgb(0xab, 0xb2, 0xbf),
