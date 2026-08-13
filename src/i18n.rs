@@ -47,6 +47,7 @@ pub struct ViewMenuTexts {
 pub struct SettingsTexts {
     pub title: String,
     pub tabs: SettingsTabsTexts,
+    pub nav: SettingsNavTexts,
     pub general: SettingsGeneralTexts,
     pub appearance: SettingsAppearanceTexts,
     pub shortcuts: SettingsShortcutsTexts,
@@ -57,7 +58,15 @@ pub struct SettingsTexts {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SettingsTabsTexts {
     pub general: String,
-    pub appearance: String,
+    pub themes: String,
+    pub shortcuts: String,
+    pub lock: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SettingsNavTexts {
+    pub general: String,
+    pub themes: String,
     pub shortcuts: String,
     pub lock: String,
 }
@@ -112,8 +121,16 @@ pub struct SettingsAppearanceTexts {
     pub export_success: String,
     #[serde(default)]
     pub invalid_theme: String,
+    #[serde(default)]
     pub unsupported_version: String,
+    #[serde(default)]
     pub save_failure: String,
+    #[serde(default)]
+    pub subtab_ui: String,
+    #[serde(default)]
+    pub subtab_terminal: String,
+    #[serde(default)]
+    pub subtab_ansi: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -274,7 +291,13 @@ impl Texts {
                 title: "设置".into(),
                 tabs: SettingsTabsTexts {
                     general: "通用".into(),
-                    appearance: "外观".into(),
+                    themes: "主题".into(),
+                    shortcuts: "快捷键".into(),
+                    lock: "锁定".into(),
+                },
+                nav: SettingsNavTexts {
+                    general: "通用".into(),
+                    themes: "主题".into(),
                     shortcuts: "快捷键".into(),
                     lock: "锁定".into(),
                 },
@@ -309,6 +332,9 @@ impl Texts {
                     invalid_theme: "无效的主题文件".into(),
                     unsupported_version: "不支持的主题格式版本".into(),
                     save_failure: "保存主题失败".into(),
+                    subtab_ui: "UI 外观".into(),
+                    subtab_terminal: "终端".into(),
+                    subtab_ansi: "ANSI 调色板".into(),
                 },
                 shortcuts: SettingsShortcutsTexts {
                     heading: "快捷键".into(),

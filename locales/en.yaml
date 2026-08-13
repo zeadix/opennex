@@ -25,6 +25,11 @@ settings:
     appearance: "Appearance"
     shortcuts: "Shortcuts"
     lock: "Lock"
+  nav:
+    general: "General"
+    themes: "Themes"
+    shortcuts: "Shortcuts"
+    lock: "Lock"
   general:
     heading: "General"
     scene_info: "Scene and templates use fixed paths:"
@@ -54,6 +59,9 @@ settings:
     invalid_theme: "Invalid theme file"
     unsupported_version: "Unsupported theme format version"
     save_failure: "Failed to save theme"
+    subtab_ui: "UI Appearance"
+    subtab_terminal: "Terminal"
+    subtab_ansi: "ANSI Palette"
   shortcuts:
     heading: "Shortcuts"
     hint: "Click a shortcut name then press a new key to change it"

@@ -143,14 +143,14 @@ mod tests {
 
 // Text accessors that delegate to `ui::texts`, used by app.rs.
 // These are kept here so app.rs doesn't need to know the internal module layout.
-pub fn heading_text() -> String {
-    ui::texts::heading()
-}
 pub fn ui_appearance_text() -> String {
     ui::texts::ui_appearance()
 }
 pub fn terminal_appearance_text() -> String {
     ui::texts::terminal_appearance()
+}
+pub fn ansi_palette_text() -> String {
+    "ANSI 调色板".into()
 }
 pub fn theme_label_text() -> String {
     ui::texts::theme_label()

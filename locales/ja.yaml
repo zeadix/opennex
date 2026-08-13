@@ -25,6 +25,11 @@ settings:
     appearance: "外観"
     shortcuts: "ショートカット"
     lock: "ロック"
+  nav:
+    general: "一般"
+    themes: "テーマ"
+    shortcuts: "ショートカット"
+    lock: "ロック"
   general:
     heading: "一般"
     scene_info: "シーンとテンプレートは固定パスを使用します:"
@@ -54,6 +59,9 @@ settings:
     invalid_theme: "無効なテーマファイル"
     unsupported_version: "サポートされていないテーマ形式のバージョン"
     save_failure: "テーマの保存に失敗しました"
+    subtab_ui: "UI 外観"
+    subtab_terminal: "ターミナル"
+    subtab_ansi: "ANSI パレット"
   shortcuts:
     heading: "ショートカット"
     hint: "ショートカット名をクリックして新しいキーを押す"

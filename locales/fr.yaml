@@ -25,6 +25,11 @@ settings:
     appearance: "Apparence"
     shortcuts: "Raccourcis"
     lock: "Verrouillage"
+  nav:
+    general: "Général"
+    themes: "Thèmes"
+    shortcuts: "Raccourcis"
+    lock: "Verrouiller"
   general:
     heading: "Général"
     scene_info: "Scène et modèles utilisent des chemins fixes :"
@@ -54,6 +59,9 @@ settings:
     invalid_theme: "Fichier de thème invalide"
     unsupported_version: "Version de format de thème non prise en charge"
     save_failure: "Échec de l'enregistrement du thème"
+    subtab_ui: "Apparence UI"
+    subtab_terminal: "Terminal"
+    subtab_ansi: "Palette ANSI"
   shortcuts:
     heading: "Raccourcis"
     hint: "Cliquez sur un raccourci puis appuyez sur une nouvelle touche"

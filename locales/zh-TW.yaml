@@ -25,6 +25,11 @@ settings:
     appearance: "外觀"
     shortcuts: "捷徑"
     lock: "鎖定"
+  nav:
+    general: "一般"
+    themes: "主題"
+    shortcuts: "快速鍵"
+    lock: "鎖定"
   general:
     heading: "一般"
     scene_info: "場景和範本使用固定路徑:"
@@ -54,6 +59,9 @@ settings:
     invalid_theme: "無效的主題檔案"
     unsupported_version: "不支援的主題格式版本"
     save_failure: "儲存主題失敗"
+    subtab_ui: "UI 外觀"
+    subtab_terminal: "終端"
+    subtab_ansi: "ANSI 調色盤"
   shortcuts:
     heading: "捷徑"
     hint: "點擊捷徑名稱後按下新按鍵即可修改"

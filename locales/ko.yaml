@@ -25,6 +25,11 @@ settings:
     appearance: "외관"
     shortcuts: "단축키"
     lock: "잠금"
+  nav:
+    general: "일반"
+    themes: "테마"
+    shortcuts: "단축키"
+    lock: "잠금"
   general:
     heading: "일반"
     scene_info: "장면과 템플릿은 고정 경로를 사용합니다:"
@@ -54,6 +59,9 @@ settings:
     invalid_theme: "잘못된 테마 파일"
     unsupported_version: "지원되지 않는 테마 형식 버전"
     save_failure: "테마 저장 실패"
+    subtab_ui: "UI 외관"
+    subtab_terminal: "터미널"
+    subtab_ansi: "ANSI 팔레트"
   shortcuts:
     heading: "단축키"
     hint: "단축키 이름을 클릭하고 새 키를 누르세요"

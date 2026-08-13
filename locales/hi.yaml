@@ -26,6 +26,11 @@ settings:
     appearance: "रूप"
     shortcuts: "शॉर्टकट"
     lock: "लॉक"
+  nav:
+    general: "सामान्य"
+    themes: "थीम"
+    shortcuts: "शॉर्टकट"
+    lock: "लॉक"
   general:
     heading: "सामान्य"
     scene_info: "दृश्य और टेम्पलेट निश्चित पथ का उपयोग करते हैं:"
@@ -55,6 +60,9 @@ settings:
     invalid_theme: "अमान्य थीम फ़ाइल"
     unsupported_version: "असमर्थित थीम प्रारूप संस्करण"
     save_failure: "थीम सहेजने में विफल"
+    subtab_ui: "UI स्वरूप"
+    subtab_terminal: "टर्मिनल"
+    subtab_ansi: "ANSI पैलेट"
   shortcuts:
     heading: "शॉर्टकट"
     hint: "एक शॉर्टकट पर क्लिक करें और नई कुंजी दबाएँ"

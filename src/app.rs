@@ -1056,6 +1056,7 @@ pub struct App {
     pending_export_theme: bool,
     theme_dialog: crate::theme::ui::ThemeDialogState,
     theme_dirty: bool,
+    theme_editor_subtab: crate::theme::ui::ThemeEditorSubtab,
 }
 
 struct TerminalData {
@@ -1286,6 +1287,7 @@ impl App {
             pending_export_theme: false,
             theme_dialog: Default::default(),
             theme_dirty: false,
+            theme_editor_subtab: Default::default(),
         };
 
         let scene_path = scene_path();
@@ -1803,6 +1805,9 @@ impl App {
             ThemeAction::SelectTheme(id) => {
                 self.try_switch_theme(ctx, id);
             }
+            ThemeAction::SelectSubtab(subtab) => {
+                self.theme_editor_subtab = subtab;
+            }
             ThemeAction::NewTheme => {
                 self.theme_dialog.show_new_dialog = true;
             }
@@ -1932,8 +1937,13 @@ impl App {
                             .id(input_id)
                             .desired_width(340.0),
                     );
-                    eprintln!("FOCUS_DEBUG: modal={:?} input_id={:?} has_focus={} value='{}'",
-                        modal_id, input_id, _resp.has_focus(), self.theme_dialog.name_input);
+                    eprintln!(
+                        "FOCUS_DEBUG: modal={:?} input_id={:?} has_focus={} value='{}'",
+                        modal_id,
+                        input_id,
+                        _resp.has_focus(),
+                        self.theme_dialog.name_input
+                    );
                 }
                 DialogKind::Delete => {
                     ui.label(format!(
@@ -2736,7 +2746,7 @@ impl eframe::App for App {
                     ui.horizontal(|ui| {
                         let tabs = [
                             &self.texts.settings.tabs.general,
-                            &self.texts.settings.tabs.appearance,
+                            &self.texts.settings.tabs.themes,
                             &self.texts.settings.tabs.shortcuts,
                             &self.texts.settings.tabs.lock,
                         ];
@@ -2813,6 +2823,7 @@ impl eframe::App for App {
                                             &self.available_themes,
                                             is_builtin,
                                             self.theme_dirty,
+                                            self.theme_editor_subtab,
                                             &mut self.theme_dialog,
                                         );
                                         for action in actions {

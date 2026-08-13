@@ -25,6 +25,11 @@ settings:
     appearance: "外观"
     shortcuts: "快捷键"
     lock: "锁定"
+  nav:
+    general: "通用"
+    themes: "主题"
+    shortcuts: "快捷键"
+    lock: "锁定"
   general:
     heading: "通用"
     scene_info: "场景和模板使用固定路径:"
@@ -54,6 +59,9 @@ settings:
     invalid_theme: "无效的主题文件"
     unsupported_version: "不支持的主题格式版本"
     save_failure: "保存主题失败"
+    subtab_ui: "UI 外观"
+    subtab_terminal: "终端"
+    subtab_ansi: "ANSI 调色板"
   shortcuts:
     heading: "快捷键"
     hint: "点击快捷键名称后按下新按键即可修改"

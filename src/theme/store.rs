@@ -2,9 +2,10 @@ use std::path::{Path, PathBuf};
 
 use crate::theme::model::{ThemeDefinition, ThemeError};
 
-const EMBEDDED_THEME_JSON: [&str; 5] = [
+const EMBEDDED_THEME_JSON: [&str; 6] = [
     include_str!("../../assets/themes/opennex-dark.json"),
     include_str!("../../assets/themes/opennex-light.json"),
+    include_str!("../../assets/themes/opennex-noir.json"),
     include_str!("../../assets/themes/solarized-dark.json"),
     include_str!("../../assets/themes/gruvbox-dark.json"),
     include_str!("../../assets/themes/dracula.json"),
@@ -264,7 +265,7 @@ mod tests {
     #[test]
     fn every_embedded_theme_is_valid_and_has_a_unique_id() {
         let themes = embedded_themes().unwrap();
-        assert_eq!(themes.len(), 5);
+        assert_eq!(themes.len(), 6);
         let ids: std::collections::HashSet<_> = themes.iter().map(|t| &t.id).collect();
         assert_eq!(ids.len(), themes.len());
         assert!(themes.iter().all(|theme| theme.validate().is_ok()));
