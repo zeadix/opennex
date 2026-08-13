@@ -2171,14 +2171,8 @@ impl App {
     fn render_update_window(&mut self, ctx: &egui::Context) {
         // Manual check result handling.
         if self.update_state == crate::updater::UpdateState::Checking {
-            let result = ctx.memory(|mem| {
-                mem.data
-                    .get_temp::<Option<crate::updater::UpdateState>>(egui::Id::new(
-                        "manual_check_result",
-                    ))
-                    .map(|v| v.clone())
-                    .flatten()
-            });
+            let result: Option<crate::updater::UpdateState> =
+                ctx.memory(|mem| mem.data.get_temp(egui::Id::new("manual_check_result")));
             if let Some(state) = result {
                 self.update_state = state;
             }
@@ -2186,12 +2180,8 @@ impl App {
 
         // Poll download progress from background thread
         if let crate::updater::UpdateState::Downloading(_) = &self.update_state {
-            let dl_state = ctx.memory(|mem| {
-                mem.data
-                    .get_temp::<Option<crate::updater::UpdateState>>(egui::Id::new("dl_state"))
-                    .map(|v| v.clone())
-                    .flatten()
-            });
+            let dl_state: Option<crate::updater::UpdateState> =
+                ctx.memory(|mem| mem.data.get_temp(egui::Id::new("dl_state")));
             if let Some(state) = dl_state {
                 match &state {
                     crate::updater::UpdateState::Ready(_)
@@ -2207,19 +2197,6 @@ impl App {
         }
 
         match &self.update_state {
-            crate::updater::UpdateState::Checking => {
-                egui::Window::new("检查更新")
-                    .resizable(false)
-                    .collapsible(false)
-                    .default_pos(screen_center(ctx))
-                    .pivot(egui::Align2::CENTER_CENTER)
-                    .show(ctx, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.spinner();
-                            ui.label("正在检查更新...");
-                        });
-                    });
-            }
             crate::updater::UpdateState::Available(info) => {
                 let mut dismiss = false;
                 let mut start_dl = false;
@@ -3197,12 +3174,22 @@ impl eframe::App for App {
                     ui.weak(self.texts.about.credits.as_str());
                     ui.add_space(6.0);
                     ui.vertical_centered(|ui| {
-                        if ui.button("检查更新").clicked() {
-                            self.check_update_manual(ctx);
-                        }
-                        if ui.button(&self.texts.about.close).clicked() {
-                            clicked_close = true;
-                        }
+                        ui.horizontal(|ui| {
+                            let is_checking =
+                                matches!(self.update_state, crate::updater::UpdateState::Checking);
+                            if is_checking {
+                                ui.spinner();
+                            }
+                            if ui
+                                .add_enabled(!is_checking, egui::Button::new("检查更新"))
+                                .clicked()
+                            {
+                                self.check_update_manual(ctx);
+                            }
+                            if ui.button(&self.texts.about.close).clicked() {
+                                clicked_close = true;
+                            }
+                        });
                     });
                 });
             if !open || clicked_close {
