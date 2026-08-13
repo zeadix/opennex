@@ -1,0 +1,69 @@
+{
+  "format_version": 1,
+  "id": "dracula",
+  "name": "Dracula",
+  "author": "OpenNex",
+  "app": {
+    "app_bg": "#1e1f29",
+    "sidebar": "#282a36",
+    "panel": "#2e303e",
+    "hover": "#343746",
+    "active": "#44475a",
+    "border": "#44475a",
+    "text": "#f8f8f2",
+    "weak_text": "#6272a4",
+    "accent": "#bd93f9",
+    "warning": "#f1fa8c",
+    "danger": "#ff5555",
+    "lock": "#ffb86c",
+    "input_bg": "#21222c",
+    "selection_bg": "#44475a",
+    "selection_text": "#f8f8f2",
+    "window_shadow": "#00000078"
+  },
+  "terminal": {
+    "foreground": "#f8f8f2",
+    "background": "#282a36",
+    "normal": {
+      "black": "#21222c",
+      "red": "#ff5555",
+      "green": "#50fa7b",
+      "yellow": "#f1fa8c",
+      "blue": "#bd93f9",
+      "magenta": "#ff79c6",
+      "cyan": "#8be9fd",
+      "white": "#f8f8f2"
+    },
+    "bright": {
+      "black": "#6272a4",
+      "red": "#ff6e6e",
+      "green": "#69ff94",
+      "yellow": "#ffffa5",
+      "blue": "#d6acff",
+      "magenta": "#ff92df",
+      "cyan": "#a4ffff",
+      "white": "#ffffff"
+    },
+    "dim": {
+      "black": "#1a1c24",
+      "red": "#bf4040",
+      "green": "#3cbb5d",
+      "yellow": "#b4bc69",
+      "blue": "#8d6ebb",
+      "magenta": "#bf5a95",
+      "cyan": "#68aebe",
+      "white": "#bbbbbb"
+    },
+    "dim_foreground": "#9a9a9a",
+    "cursor": "#bd93f9",
+    "selection_bg": "#44475a",
+    "selection_text": "#f8f8f2",
+    "link": "#8be9fd"
+  },
+  "typography": {
+    "terminal_font_families": ["monospace"],
+    "terminal_font_size": 14.0,
+    "cell_spacing": 1.0,
+    "menu_font_size": 14.0
+  }
+}

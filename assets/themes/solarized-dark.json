@@ -1,0 +1,69 @@
+{
+  "format_version": 1,
+  "id": "solarized-dark",
+  "name": "Solarized Dark",
+  "author": "OpenNex",
+  "app": {
+    "app_bg": "#073642",
+    "sidebar": "#0a4050",
+    "panel": "#0e4a5a",
+    "hover": "#125263",
+    "active": "#185d6f",
+    "border": "#1d6a7d",
+    "text": "#eee8d5",
+    "weak_text": "#839496",
+    "accent": "#268bd2",
+    "warning": "#b58900",
+    "danger": "#dc322f",
+    "lock": "#b58900",
+    "input_bg": "#05323d",
+    "selection_bg": "#185d6f",
+    "selection_text": "#eee8d5",
+    "window_shadow": "#00000078"
+  },
+  "terminal": {
+    "foreground": "#839496",
+    "background": "#002b36",
+    "normal": {
+      "black": "#073642",
+      "red": "#dc322f",
+      "green": "#859900",
+      "yellow": "#b58900",
+      "blue": "#268bd2",
+      "magenta": "#d33682",
+      "cyan": "#2aa198",
+      "white": "#eee8d5"
+    },
+    "bright": {
+      "black": "#586e75",
+      "red": "#cb4b16",
+      "green": "#859900",
+      "yellow": "#b58900",
+      "blue": "#268bd2",
+      "magenta": "#d33682",
+      "cyan": "#2aa198",
+      "white": "#fdf6e3"
+    },
+    "dim": {
+      "black": "#053440",
+      "red": "#a22824",
+      "green": "#667600",
+      "yellow": "#886800",
+      "blue": "#1d6a9c",
+      "magenta": "#a02963",
+      "cyan": "#207a72",
+      "white": "#b6b3a6"
+    },
+    "dim_foreground": "#657b83",
+    "cursor": "#268bd2",
+    "selection_bg": "#185d6f",
+    "selection_text": "#eee8d5",
+    "link": "#2aa198"
+  },
+  "typography": {
+    "terminal_font_families": ["monospace"],
+    "terminal_font_size": 14.0,
+    "cell_spacing": 1.0,
+    "menu_font_size": 14.0
+  }
+}

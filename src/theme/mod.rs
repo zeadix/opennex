@@ -1,4 +1,5 @@
 pub mod model;
+pub mod store;
 
 pub use model::{
     AnsiColors, AppTheme, TerminalThemeConfig, ThemeColor, ThemeDefinition, ThemeError,
