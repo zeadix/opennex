@@ -1869,52 +1869,29 @@ impl App {
             };
         }
 
-        // Dim background scrim (consumes clicks so the settings window is blocked).
-        let screen = ctx.screen_rect();
-        egui::Area::new(egui::Id::new("theme_dialog_scrim"))
-            .order(egui::Order::Foreground)
-            .fixed_pos(screen.min)
-            .movable(false)
-            .interactable(true)
-            .show(ctx, |ui| {
-                let rect = ui.max_rect();
-                ui.painter()
-                    .rect_filled(rect, 0.0, egui::Color32::from_black_alpha(160));
-            });
-
-        // Dialog box geometry.
-        let box_w = 360.0_f32;
-        let box_h = match kind {
-            DialogKind::New | DialogKind::Copy | DialogKind::Rename => 150.0,
-            DialogKind::Delete => 120.0,
-            DialogKind::Switch => 160.0,
-        };
-        let center = screen.center();
-        let box_pos = egui::pos2(center.x - box_w * 0.5, center.y - box_h * 0.5);
-
-        let (area_id, input_id_salt, title) = match kind {
+        let (modal_id, input_id_salt, title) = match kind {
             DialogKind::New => (
-                "theme_new_dialog",
+                "theme_new_modal",
                 "theme_new_name_input",
                 crate::theme::new_dialog_title(),
             ),
             DialogKind::Copy => (
-                "theme_copy_dialog",
+                "theme_copy_modal",
                 "theme_copy_name_input",
                 crate::theme::copy_dialog_title(),
             ),
             DialogKind::Rename => (
-                "theme_rename_dialog",
+                "theme_rename_modal",
                 "theme_rename_name_input",
                 crate::theme::rename_dialog_title(),
             ),
             DialogKind::Delete => (
-                "theme_delete_dialog",
+                "theme_delete_modal",
                 "",
                 crate::theme::delete_confirm_text(),
             ),
             DialogKind::Switch => (
-                "theme_switch_dialog",
+                "theme_switch_modal",
                 "",
                 crate::theme::switch_confirm_text(),
             ),
@@ -1924,74 +1901,83 @@ impl App {
         let mut close_after = false;
         let mut do_action = false;
 
-        egui::Area::new(egui::Id::new(area_id))
-            .order(egui::Order::Foreground)
-            .fixed_pos(box_pos)
-            .movable(false)
-            .interactable(true)
+        // Use egui::Modal — this is the documented way to build a true
+        // modal dialog in egui 0.31. Modal sets the topmost modal layer
+        // and uses UiKind::Modal which interacts with egui's focus system
+        // correctly. The previous Area + manual request_focus did not
+        // reliably capture focus because the TextEdit lived inside a
+        // Foreground Area which does not set the topmost modal layer.
+        let modal_response = egui::Modal::new(egui::Id::new(modal_id))
+            .backdrop_color(egui::Color32::from_black_alpha(160))
+            .frame(egui::Frame::window(&ctx.style()))
             .show(ctx, |ui| {
-                let frame = egui::Frame::window(&ctx.style());
-                frame.show(ui, |ui| {
-                    ui.set_min_size(egui::vec2(box_w, box_h));
-                    ui.set_max_size(egui::vec2(box_w, box_h));
-                    ui.vertical(|ui| {
-                        ui.add_space(6.0);
-                        ui.strong(title.clone());
-                        ui.add_space(6.0);
+                ui.set_min_size(egui::vec2(
+                    360.0,
+                    match kind {
+                        DialogKind::New | DialogKind::Copy | DialogKind::Rename => 130.0,
+                        DialogKind::Delete => 110.0,
+                        DialogKind::Switch => 150.0,
+                    },
+                ));
 
-                        match kind {
-                            DialogKind::New | DialogKind::Copy | DialogKind::Rename => {
-                                ui.label(if matches!(kind, DialogKind::Copy) {
-                                    crate::theme::copy_dialog_hint()
-                                } else {
-                                    crate::theme::new_dialog_hint()
-                                });
-                                let response = ui.add(
-                                    egui::TextEdit::singleline(&mut self.theme_dialog.name_input)
-                                        .id(input_id)
-                                        .desired_width(box_w - 24.0),
-                                );
-                                // Match the working workspace-rename pattern: call
-                                // request_focus every frame. egui will remember the
-                                // focus state across frames.
-                                response.request_focus();
-                            }
-                            DialogKind::Delete => {
-                                ui.label(format!(
-                                    "{}: {}",
-                                    crate::theme::delete_confirm_text(),
-                                    self.theme_edit.name
-                                ));
-                            }
-                            DialogKind::Switch => {
-                                ui.label(crate::theme::switch_confirm_text());
-                            }
-                        }
+                ui.vertical(|ui| {
+                    ui.add_space(6.0);
+                    ui.strong(title.clone());
+                    ui.add_space(6.0);
 
-                        ui.add_space(8.0);
-                        ui.horizontal(|ui| {
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    if ui.button(crate::theme::confirm_text()).clicked() {
-                                        do_action = true;
-                                    }
-                                    if matches!(
-                                        kind,
-                                        DialogKind::New | DialogKind::Copy | DialogKind::Rename
-                                    ) && ui.input(|i| i.key_pressed(egui::Key::Enter))
-                                    {
-                                        do_action = true;
-                                    }
-                                    if ui.button(crate::theme::cancel_text()).clicked() {
-                                        close_after = true;
-                                    }
-                                },
+                    match kind {
+                        DialogKind::New | DialogKind::Copy | DialogKind::Rename => {
+                            let response = ui.add(
+                                egui::TextEdit::singleline(&mut self.theme_dialog.name_input)
+                                    .id(input_id)
+                                    .hint_text(if matches!(kind, DialogKind::Copy) {
+                                        crate::theme::copy_dialog_hint()
+                                    } else {
+                                        crate::theme::new_dialog_hint()
+                                    })
+                                    .desired_width(330.0),
                             );
+                            // Modal already sets the topmost modal layer, so
+                            // request_focus on the input id is sufficient.
+                            response.request_focus();
+                        }
+                        DialogKind::Delete => {
+                            ui.label(format!(
+                                "{}: {}",
+                                crate::theme::delete_confirm_text(),
+                                self.theme_edit.name
+                            ));
+                        }
+                        DialogKind::Switch => {
+                            ui.label(crate::theme::switch_confirm_text());
+                        }
+                    }
+
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button(crate::theme::confirm_text()).clicked() {
+                                do_action = true;
+                            }
+                            if matches!(
+                                kind,
+                                DialogKind::New | DialogKind::Copy | DialogKind::Rename
+                            ) && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                            {
+                                do_action = true;
+                            }
+                            if ui.button(crate::theme::cancel_text()).clicked() {
+                                close_after = true;
+                            }
                         });
                     });
                 });
             });
+
+        // If the user clicked outside (backdrop), treat as cancel.
+        if modal_response.backdrop_response.clicked() {
+            close_after = true;
+        }
 
         if do_action {
             match kind {
@@ -2058,9 +2044,7 @@ impl App {
                     }
                     close_after = true;
                 }
-                DialogKind::Switch => {
-                    // Switch is handled via separate buttons; not used here.
-                }
+                DialogKind::Switch => {}
             }
         }
 
