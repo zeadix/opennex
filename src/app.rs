@@ -2638,7 +2638,6 @@ impl eframe::App for App {
                         self.pending_save_scene_as = true;
                         ui.close_menu();
                     }
-                    ui.separator();
                     if ui.button(self.texts.file_menu.exit.clone()).clicked() {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                     }
@@ -2670,55 +2669,41 @@ impl eframe::App for App {
                             }
                         }
                     }
-                    ui.separator();
-                    let check_width = check_column_width(ui);
                     let visible = self.workspace_sidebar_visible;
-                    let eye_icon = if visible {
-                        egui_phosphor::regular::EYE
-                    } else {
-                        egui_phosphor::regular::EYE_SLASH
-                    };
-                    ui.horizontal(|ui| {
-                        check_indicator(ui, visible, check_width);
-                        if ui.button(eye_icon).clicked() {
-                            self.workspace_sidebar_visible = !self.workspace_sidebar_visible;
-                            ui.close_menu();
-                        }
-                        if ui.button(&self.texts.view_menu.workspace_toggle).clicked() {
-                            self.workspace_sidebar_visible = !self.workspace_sidebar_visible;
-                            ui.close_menu();
-                        }
-                    });
+                    if ui
+                        .selectable_label(visible, &self.texts.view_menu.workspace_toggle)
+                        .clicked()
+                    {
+                        self.workspace_sidebar_visible = !self.workspace_sidebar_visible;
+                        ui.close_menu();
+                    }
                 });
                 ui.menu_button(self.texts.menu.language.clone(), |ui| {
                     let current_code = self.settings.language.clone();
                     let languages = self.available_languages.clone();
-                    let check_width = check_column_width(ui);
                     for (code, display_name) in &languages {
                         let selected = *code == current_code;
-                        ui.horizontal(|ui| {
-                            check_indicator(ui, selected, check_width);
-                            if ui.button(display_name).clicked() {
-                                self.switch_language(code);
-                                ui.close_menu();
-                            }
-                        });
+                        if ui.selectable_label(selected, display_name).clicked() {
+                            self.switch_language(code);
+                            ui.close_menu();
+                        }
                     }
                 });
                 ui.menu_button(self.texts.menu.theme.clone(), |ui| {
                     let current = self.settings.theme_id.clone();
                     let themes = self.available_themes.clone();
-                    let check_width = check_column_width(ui);
-                    for theme in &themes {
-                        let selected = theme.id == current;
-                        ui.horizontal(|ui| {
-                            check_indicator(ui, selected, check_width);
-                            if ui.button(&theme.name).clicked() {
-                                self.try_switch_theme(ctx, theme.id.clone());
-                                ui.close_menu();
+                    egui::ScrollArea::vertical()
+                        .max_height(280.0)
+                        .auto_shrink([false; 2])
+                        .show(ui, |ui| {
+                            for theme in &themes {
+                                let selected = theme.id == current;
+                                if ui.selectable_label(selected, &theme.name).clicked() {
+                                    self.try_switch_theme(ctx, theme.id.clone());
+                                    ui.close_menu();
+                                }
                             }
                         });
-                    }
                 });
                 if ui.button(self.texts.view_menu.settings.clone()).clicked() {
                     self.show_settings = true;
@@ -2743,121 +2728,143 @@ impl eframe::App for App {
                 .pivot(egui::Align2::CENTER_CENTER)
                 .default_size([ws.width, ws.height])
                 .show(ctx, |ui| {
-                    ui.horizontal(|ui| {
-                        let tabs = [
-                            &self.texts.settings.tabs.general,
-                            &self.texts.settings.tabs.themes,
-                            &self.texts.settings.tabs.shortcuts,
-                            &self.texts.settings.tabs.lock,
-                        ];
-                        for (i, label) in tabs.iter().enumerate() {
-                            let selected = self.settings_tab == i;
-                            if ui.selectable_label(selected, label.as_str()).clicked() {
-                                self.settings_tab = i;
-                            }
-                        }
-                    });
-                    ui.separator();
-
-                    match self.settings_tab {
-                        0 => {
-                            ui.label(&self.texts.settings.general.scene_info);
-                            ui.label(&self.texts.settings.general.scene_path);
-                            ui.label(&self.texts.settings.general.templates_path);
-                            ui.separator();
-                            ui.label(&self.texts.settings.general.history_section);
-                            ui.horizontal(|ui| {
-                                ui.label(&self.texts.settings.general.max_history);
-                                ui.add(
-                                    egui::DragValue::new(&mut self.settings_edit.max_history)
-                                        .range(10..=10000),
-                                );
+                    // Left navigation
+                    let nav_width = 140.0;
+                    egui::SidePanel::left("settings_nav")
+                        .resizable(false)
+                        .exact_width(nav_width)
+                        .show_inside(ui, |ui| {
+                            ui.vertical(|ui| {
+                                let nav_items = [
+                                    &self.texts.settings.nav.general,
+                                    &self.texts.settings.nav.themes,
+                                    &self.texts.settings.nav.shortcuts,
+                                    &self.texts.settings.nav.lock,
+                                ];
+                                for (i, label) in nav_items.iter().enumerate() {
+                                    let selected = self.settings_tab == i;
+                                    if ui.selectable_label(selected, label.as_str()).clicked() {
+                                        self.settings_tab = i;
+                                    }
+                                }
                             });
-                            ui.horizontal(|ui| {
-                                ui.label(&self.texts.settings.general.scrollback);
-                                ui.add(
-                                    egui::DragValue::new(&mut self.settings_edit.scrollback)
-                                        .range(100..=50000),
-                                );
-                            });
-                            if ui
-                                .button(&self.texts.settings.general.clear_all_history)
-                                .clicked()
-                            {
-                                self.pending_clear_history = true;
-                            }
-                        }
-                        1 => {
-                            let is_builtin =
-                                crate::theme::store::is_embedded_id(&self.theme_edit.id);
-                            if is_builtin {
-                                ui.colored_label(
-                                    egui::Color32::from_rgb(0xd9, 0xa4, 0x41),
-                                    crate::theme::builtin_readonly_text(),
-                                );
-                                ui.add_space(4.0);
-                            }
-                            let any_dialog_open = self.theme_dialog.show_copy_dialog
-                                || self.theme_dialog.show_new_dialog
-                                || self.theme_dialog.show_rename_dialog
-                                || self.theme_dialog.show_delete_confirm
-                                || self.theme_dialog.show_switch_confirm;
-
-                            if any_dialog_open {
-                                // Don't render the editor at all while a dialog is open.
-                                // This prevents any focus competition.
-                                if let Some(Err(msg)) = &self.theme_message {
-                                    ui.colored_label(egui::Color32::from_rgb(230, 120, 120), msg);
-                                }
-                                if let Some(Ok(msg)) = &self.theme_message {
-                                    ui.colored_label(egui::Color32::from_rgb(120, 200, 130), msg);
-                                }
-                            } else {
-                                egui::ScrollArea::vertical()
-                                    .id_salt("appearance_scroll")
-                                    .show(ui, |ui| {
-                                        let mut draft = self.theme_edit.clone();
-                                        let actions = crate::theme::ui::show_theme_section(
-                                            ui,
-                                            &mut draft,
-                                            &self.available_themes,
-                                            is_builtin,
-                                            self.theme_dirty,
-                                            self.theme_editor_subtab,
-                                            &mut self.theme_dialog,
-                                        );
-                                        for action in actions {
-                                            self.handle_theme_action(ctx, action, draft.clone());
-                                        }
-                                        if draft != self.theme_edit {
-                                            self.theme_edit = draft;
-                                            self.theme_dirty = true;
-                                            crate::theme::apply_theme_definition(
-                                                ctx,
-                                                &self.theme_edit,
-                                            );
-                                        }
-                                    });
-                                if let Some(Err(msg)) = &self.theme_message {
-                                    ui.colored_label(egui::Color32::from_rgb(230, 120, 120), msg);
-                                }
-                                if let Some(Ok(msg)) = &self.theme_message {
-                                    ui.colored_label(egui::Color32::from_rgb(120, 200, 130), msg);
-                                }
-                            }
-                        }
-                        2 => {
-                            ui.label(&self.texts.settings.shortcuts.hint);
-                            ui.separator();
-                            for id in shortcut_hint_ids() {
-                                let label = shortcut_label_for(&self.texts, id).to_string();
+                        });
+                    egui::CentralPanel::default().show_inside(ui, |ui| {
+                        match self.settings_tab {
+                            0 => {
+                                ui.weak(self.texts.settings.general.scene_info.as_str());
+                                ui.weak(self.texts.settings.general.scene_path.as_str());
+                                ui.weak(self.texts.settings.general.templates_path.as_str());
+                                ui.add_space(8.0);
+                                ui.weak(self.texts.settings.general.history_section.as_str());
                                 ui.horizontal(|ui| {
-                                    ui.label(&label);
-                                    ui.with_layout(
-                                        egui::Layout::right_to_left(egui::Align::Center),
-                                        |ui| {
-                                            let text =
-                                                if self.binding_recording.as_deref() == Some(id) {
+                                    ui.label(&self.texts.settings.general.max_history);
+                                    ui.add(
+                                        egui::DragValue::new(&mut self.settings_edit.max_history)
+                                            .range(10..=10000),
+                                    );
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label(&self.texts.settings.general.scrollback);
+                                    ui.add(
+                                        egui::DragValue::new(&mut self.settings_edit.scrollback)
+                                            .range(100..=50000),
+                                    );
+                                });
+                                if ui
+                                    .button(&self.texts.settings.general.clear_all_history)
+                                    .clicked()
+                                {
+                                    self.pending_clear_history = true;
+                                }
+                            }
+                            1 => {
+                                let is_builtin =
+                                    crate::theme::store::is_embedded_id(&self.theme_edit.id);
+                                if is_builtin {
+                                    ui.colored_label(
+                                        egui::Color32::from_rgb(0xd9, 0xa4, 0x41),
+                                        crate::theme::builtin_readonly_text(),
+                                    );
+                                    ui.add_space(4.0);
+                                }
+                                let any_dialog_open = self.theme_dialog.show_copy_dialog
+                                    || self.theme_dialog.show_new_dialog
+                                    || self.theme_dialog.show_rename_dialog
+                                    || self.theme_dialog.show_delete_confirm
+                                    || self.theme_dialog.show_switch_confirm;
+
+                                if any_dialog_open {
+                                    // Don't render the editor at all while a dialog is open.
+                                    // This prevents any focus competition.
+                                    if let Some(Err(msg)) = &self.theme_message {
+                                        ui.colored_label(
+                                            egui::Color32::from_rgb(230, 120, 120),
+                                            msg,
+                                        );
+                                    }
+                                    if let Some(Ok(msg)) = &self.theme_message {
+                                        ui.colored_label(
+                                            egui::Color32::from_rgb(120, 200, 130),
+                                            msg,
+                                        );
+                                    }
+                                } else {
+                                    egui::ScrollArea::vertical()
+                                        .id_salt("appearance_scroll")
+                                        .show(ui, |ui| {
+                                            let mut draft = self.theme_edit.clone();
+                                            let actions = crate::theme::ui::show_theme_section(
+                                                ui,
+                                                &mut draft,
+                                                &self.available_themes,
+                                                is_builtin,
+                                                self.theme_dirty,
+                                                self.theme_editor_subtab,
+                                                &mut self.theme_dialog,
+                                            );
+                                            for action in actions {
+                                                self.handle_theme_action(
+                                                    ctx,
+                                                    action,
+                                                    draft.clone(),
+                                                );
+                                            }
+                                            if draft != self.theme_edit {
+                                                self.theme_edit = draft;
+                                                self.theme_dirty = true;
+                                                crate::theme::apply_theme_definition(
+                                                    ctx,
+                                                    &self.theme_edit,
+                                                );
+                                            }
+                                        });
+                                    if let Some(Err(msg)) = &self.theme_message {
+                                        ui.colored_label(
+                                            egui::Color32::from_rgb(230, 120, 120),
+                                            msg,
+                                        );
+                                    }
+                                    if let Some(Ok(msg)) = &self.theme_message {
+                                        ui.colored_label(
+                                            egui::Color32::from_rgb(120, 200, 130),
+                                            msg,
+                                        );
+                                    }
+                                }
+                            }
+                            2 => {
+                                ui.weak(self.texts.settings.shortcuts.hint.as_str());
+                                for id in shortcut_hint_ids() {
+                                    let label = shortcut_label_for(&self.texts, id).to_string();
+                                    ui.horizontal(|ui| {
+                                        ui.label(&label);
+                                        ui.with_layout(
+                                            egui::Layout::right_to_left(egui::Align::Center),
+                                            |ui| {
+                                                let text = if self.binding_recording.as_deref()
+                                                    == Some(id)
+                                                {
                                                     "按下按键...".to_string()
                                                 } else if let Some(b) =
                                                     self.settings_edit.key_binds.get(id)
@@ -2866,96 +2873,95 @@ impl eframe::App for App {
                                                 } else {
                                                     self.texts.settings.shortcuts.not_set.clone()
                                                 };
-                                            if ui.button(text).clicked() {
-                                                self.binding_recording = Some(id.to_string());
-                                            }
-                                        },
-                                    );
-                                });
-                            }
-                            ui.separator();
-                            if ui
-                                .button(&self.texts.settings.shortcuts.reset_defaults)
-                                .clicked()
-                            {
-                                self.settings_edit.key_binds = default_key_binds();
-                                self.binding_recording = None;
-                            }
-                        }
-                        3 => {
-                            ui.label(&self.texts.settings.lock.password_section);
-                            ui.separator();
-                            if self.settings.lock_password.is_empty() {
-                                if ui.button(&self.texts.settings.lock.set_password).clicked() {
-                                    self.pw_popup = Some("set");
-                                    self.pw_set1.clear();
-                                    self.pw_set2.clear();
-                                    self.pw_message.clear();
+                                                if ui.button(text).clicked() {
+                                                    self.binding_recording = Some(id.to_string());
+                                                }
+                                            },
+                                        );
+                                    });
                                 }
-                            } else {
                                 if ui
-                                    .button(&self.texts.settings.lock.change_password)
+                                    .button(&self.texts.settings.shortcuts.reset_defaults)
                                     .clicked()
                                 {
-                                    self.pw_popup = Some("change");
-                                    self.pw_old.clear();
-                                    self.pw_new1.clear();
-                                    self.pw_new2.clear();
-                                    self.pw_message.clear();
-                                }
-                                ui.add_space(10.0);
-                                if ui
-                                    .button(&self.texts.settings.lock.clear_password)
-                                    .clicked()
-                                {
-                                    self.pw_popup = Some("clear");
-                                    self.pw_clear.clear();
-                                    self.pw_message.clear();
+                                    self.settings_edit.key_binds = default_key_binds();
+                                    self.binding_recording = None;
                                 }
                             }
-                        }
-                        _ => {}
-                    }
-
-                    ui.separator();
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button(&self.texts.workspace.close).clicked() {
-                            self.settings_edit = self.settings.clone();
-                            self.theme_edit = self.active_theme.clone();
-                            self.theme_message = None;
-                            self.theme_dirty = false;
-                            self.binding_recording = None;
-                            crate::theme::apply_theme_definition(ctx, &self.active_theme);
-                            self.show_settings = false;
-                        }
-                        if ui.button(&self.texts.settings.buttons.apply).clicked() {
-                            self.settings = self.settings_edit.clone();
-                            self.history_db.set_max_entries(self.settings.max_history);
-                            let _ = save_settings(&self.settings);
-                            if self.theme_dirty {
-                                let themes_root = crate::theme::store::themes_dir(&app_data_dir());
-                                if !crate::theme::store::is_embedded_id(&self.theme_edit.id) {
-                                    let _ = std::fs::create_dir_all(&themes_root);
-                                    if let Err(err) = crate::theme::store::save_user_theme(
-                                        &themes_root,
-                                        &self.theme_edit,
-                                    ) {
-                                        log::error!("failed to save theme: {err}");
+                            3 => {
+                                ui.weak(self.texts.settings.lock.password_section.as_str());
+                                if self.settings.lock_password.is_empty() {
+                                    if ui.button(&self.texts.settings.lock.set_password).clicked() {
+                                        self.pw_popup = Some("set");
+                                        self.pw_set1.clear();
+                                        self.pw_set2.clear();
+                                        self.pw_message.clear();
+                                    }
+                                } else {
+                                    if ui
+                                        .button(&self.texts.settings.lock.change_password)
+                                        .clicked()
+                                    {
+                                        self.pw_popup = Some("change");
+                                        self.pw_old.clear();
+                                        self.pw_new1.clear();
+                                        self.pw_new2.clear();
+                                        self.pw_message.clear();
+                                    }
+                                    ui.add_space(10.0);
+                                    if ui
+                                        .button(&self.texts.settings.lock.clear_password)
+                                        .clicked()
+                                    {
+                                        self.pw_popup = Some("clear");
+                                        self.pw_clear.clear();
+                                        self.pw_message.clear();
                                     }
                                 }
                             }
-                            self.active_theme = self.theme_edit.clone();
-                            self.settings.theme_id = self.active_theme.id.clone();
-                            crate::theme::apply_theme_definition(ctx, &self.active_theme);
-                            if self.settings.apply_theme_typography {
-                                let new_size = self.active_theme.typography.terminal_font_size;
-                                for td in self.terminals.values_mut() {
-                                    td.font_size = new_size;
-                                }
-                            }
-                            self.theme_dirty = false;
+                            _ => {}
                         }
-                    });
+
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button(&self.texts.workspace.close).clicked() {
+                                self.settings_edit = self.settings.clone();
+                                self.theme_edit = self.active_theme.clone();
+                                self.theme_message = None;
+                                self.theme_dirty = false;
+                                self.binding_recording = None;
+                                crate::theme::apply_theme_definition(ctx, &self.active_theme);
+                                self.show_settings = false;
+                            }
+                            if ui.button(&self.texts.settings.buttons.apply).clicked() {
+                                self.settings = self.settings_edit.clone();
+                                self.history_db.set_max_entries(self.settings.max_history);
+                                let _ = save_settings(&self.settings);
+                                if self.theme_dirty {
+                                    let themes_root =
+                                        crate::theme::store::themes_dir(&app_data_dir());
+                                    if !crate::theme::store::is_embedded_id(&self.theme_edit.id) {
+                                        let _ = std::fs::create_dir_all(&themes_root);
+                                        if let Err(err) = crate::theme::store::save_user_theme(
+                                            &themes_root,
+                                            &self.theme_edit,
+                                        ) {
+                                            log::error!("failed to save theme: {err}");
+                                        }
+                                    }
+                                }
+                                self.active_theme = self.theme_edit.clone();
+                                self.settings.theme_id = self.active_theme.id.clone();
+                                crate::theme::apply_theme_definition(ctx, &self.active_theme);
+                                if self.settings.apply_theme_typography {
+                                    let new_size = self.active_theme.typography.terminal_font_size;
+                                    for td in self.terminals.values_mut() {
+                                        td.font_size = new_size;
+                                    }
+                                }
+                                self.theme_dirty = false;
+                            }
+                        });
+                    }); // CentralPanel close
                 });
             if !open {
                 self.show_settings = false;
@@ -2981,49 +2987,47 @@ impl eframe::App for App {
                 .show(ctx, |ui| {
                     ui.vertical_centered(|ui| {
                         ui.add_space(4.0);
-                        ui.heading(
+                        ui.label(
                             egui::RichText::new(env!("CARGO_PKG_NAME"))
-                                .size(22.0)
+                                .size(20.0)
                                 .strong(),
                         );
-                        ui.add_space(2.0);
-                        ui.label(format!(
+                        ui.weak(format!(
                             "{}: v{}",
                             self.texts.about.version_label,
                             env!("CARGO_PKG_VERSION")
                         ));
                     });
-                    ui.separator();
-                    ui.label(&self.texts.about.description);
-                    ui.separator();
+                    ui.add_space(6.0);
+                    ui.weak(self.texts.about.description.as_str());
+                    ui.add_space(6.0);
                     ui.horizontal(|ui| {
-                        ui.label(&self.texts.about.homepage_label);
+                        ui.weak(self.texts.about.homepage_label.as_str());
                         ui.hyperlink_to(
                             "https://opennex.zeadix.com/",
                             "https://opennex.zeadix.com/",
                         );
                     });
                     ui.horizontal(|ui| {
-                        ui.label(&self.texts.about.source_label);
+                        ui.weak(self.texts.about.source_label.as_str());
                         ui.hyperlink_to(
                             "https://github.com/zeadix/opennex",
                             "https://github.com/zeadix/opennex",
                         );
                     });
                     ui.horizontal(|ui| {
-                        ui.label(&self.texts.about.license_label);
+                        ui.weak(self.texts.about.license_label.as_str());
                         ui.label(env!("CARGO_PKG_LICENSE"));
                     });
-                    ui.separator();
-                    ui.label("Author: KunPeng.Wang <msr.rsm@qq.com>");
-                    ui.label(&self.texts.about.credits_label);
-                    ui.label(&self.texts.about.credits);
-                    ui.add_space(4.0);
+                    ui.add_space(6.0);
+                    ui.weak("Author: KunPeng.Wang <msr.rsm@qq.com>");
+                    ui.weak(self.texts.about.credits_label.as_str());
+                    ui.weak(self.texts.about.credits.as_str());
+                    ui.add_space(6.0);
                     ui.vertical_centered(|ui| {
                         if ui.button("检查更新").clicked() {
                             self.check_update_manual(ctx);
                         }
-                        ui.add_space(4.0);
                         if ui.button(&self.texts.about.close).clicked() {
                             clicked_close = true;
                         }
@@ -3321,8 +3325,6 @@ impl eframe::App for App {
             egui::SidePanel::left("navigation")
                 .default_width(WORKSPACE_SIDEBAR_DEFAULT_WIDTH)
                 .show(ctx, |ui| {
-                    ui.heading(&self.texts.workspace.heading);
-                    ui.separator();
                     // New workspace + templates buttons in one row above the list
                     ui.horizontal(|ui| {
                         if ui.button(&self.texts.workspace.new).clicked() {
@@ -3353,7 +3355,7 @@ impl eframe::App for App {
                             }
                         });
                     });
-                    ui.separator();
+                    ui.add_space(4.0);
                     let mut to_select = None;
                     let panel_count = self.panels.len();
                     let mut reorder = None;
@@ -3463,7 +3465,6 @@ impl eframe::App for App {
                                         self.save_as_template(i);
                                         ui.close_menu();
                                     }
-                                    ui.separator();
                                     if ui.button(&self.texts.settings.buttons.close).clicked() {
                                         self.close_confirm_panel = Some(i);
                                         ui.close_menu();
