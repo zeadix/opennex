@@ -1597,6 +1597,71 @@ impl App {
             self.pending_clear_history = false;
             self.history_db.clear_all();
         }
+        if self.pending_import_theme {
+            self.pending_import_theme = false;
+            let texts = self.texts.settings.appearance.clone();
+            if let Some(path) = rfd::FileDialog::new()
+                .add_filter("OpenNex Theme", &["json"])
+                .pick_file()
+            {
+                let themes_root = crate::theme::store::themes_dir(&app_data_dir());
+                match crate::theme::store::import_theme_file(&themes_root, &path) {
+                    Ok(imported) => {
+                        self.available_themes =
+                            crate::theme::store::load_user_themes(&themes_root)
+                                .unwrap_or_default();
+                        for embedded in crate::theme::store::embedded_themes().unwrap_or_default()
+                        {
+                            if !self.available_themes.iter().any(|t| t.id == embedded.id) {
+                                self.available_themes.push(embedded);
+                            }
+                        }
+                        self.available_themes
+                            .sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+                        let imported_id = imported.id.clone();
+                        self.settings.theme_id = imported_id.clone();
+                        self.settings_edit.theme_id = imported_id;
+                        self.active_theme = imported.clone();
+                        self.theme_edit = imported;
+                        crate::theme::apply_theme_definition(ctx, &self.active_theme);
+                        let _ = save_settings(&self.settings);
+                        self.theme_message = Some(Ok(texts.import_success));
+                    }
+                    Err(err) => {
+                        let msg = if matches!(
+                            err,
+                            crate::theme::ThemeError::UnsupportedVersion(_)
+                        ) {
+                            texts.unsupported_version
+                        } else {
+                            texts.invalid_theme
+                        };
+                        log::warn!("theme import failed: {err}");
+                        self.theme_message = Some(Err(msg));
+                    }
+                }
+            }
+        }
+        if self.pending_export_theme {
+            self.pending_export_theme = false;
+            let texts = self.texts.settings.appearance.clone();
+            let file_name = format!("{}.opennex-theme.json", self.theme_edit.id);
+            if let Some(path) = rfd::FileDialog::new()
+                .add_filter("OpenNex Theme", &["json"])
+                .set_file_name(&file_name)
+                .save_file()
+            {
+                match crate::theme::store::export_theme_file(&self.theme_edit, &path) {
+                    Ok(()) => {
+                        self.theme_message = Some(Ok(texts.export_success));
+                    }
+                    Err(err) => {
+                        log::warn!("theme export failed: {err}");
+                        self.theme_message = Some(Err(texts.save_failure));
+                    }
+                }
+            }
+        }
     }
 
     fn add_panel(&mut self, ctx: &egui::Context) {
@@ -2359,6 +2424,8 @@ impl eframe::App for App {
                 if ui.button(self.texts.view_menu.settings.clone()).clicked() {
                     self.show_settings = true;
                     self.settings_edit = self.settings.clone();
+                    self.theme_edit = self.active_theme.clone();
+                    self.theme_message = None;
                 }
                 if ui.button(self.texts.about.menu_label.clone()).clicked() {
                     self.show_about = true;
