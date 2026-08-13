@@ -150,8 +150,13 @@ impl TerminalInstance {
         // We look for the pattern "9;" followed by a path ending with BEL (0x07) or ESC
         self.osc_buffer.push_str(&screen_text);
 
-        // Try to extract cwd from OSC 9; sequences
-        while let Some(start) = self.osc_buffer.find("9;") {
+        // Try to extract cwd from OSC 9; sequences.
+        // OSC sequences are pure ASCII, but the buffer may contain multi-byte
+        // UTF-8 from terminal output. We must only slice at char boundaries.
+        loop {
+            let Some(start) = self.osc_buffer.find("9;") else {
+                break;
+            };
             let after_start = start + 2;
             if after_start >= self.osc_buffer.len() {
                 break;
@@ -171,19 +176,23 @@ impl TerminalInstance {
                     }
                 }
                 // Consume up to and including the terminator
-                let consume_to = after_start + end_pos + 1;
-                self.osc_buffer =
-                    self.osc_buffer[consume_to.min(self.osc_buffer.len())..].to_string();
+                let consume_to = (after_start + end_pos + 1).min(self.osc_buffer.len());
+                let consumed: String = self.osc_buffer.drain(..consume_to).collect();
+                let _ = consumed;
             } else {
-                // Incomplete sequence, keep buffer and wait for more
-                self.osc_buffer = self.osc_buffer[start..].to_string();
+                // Incomplete sequence, keep from start and wait for more
+                let drained: String = self.osc_buffer.drain(..start).collect();
+                let _ = drained;
                 break;
             }
         }
 
-        // Keep buffer bounded
+        // Keep buffer bounded — truncate at a char boundary
         if self.osc_buffer.len() > 8192 {
-            self.osc_buffer = self.osc_buffer[self.osc_buffer.len() - 4096..].to_string();
+            let truncate_at = self.osc_buffer.len() - 4096;
+            // Floor to nearest char boundary to avoid splitting a multibyte char
+            let boundary = self.osc_buffer.ceil_char_boundary(truncate_at);
+            self.osc_buffer.drain(..boundary);
         }
 
         // Fallback: also try /proc on Linux if OSC didn't work
