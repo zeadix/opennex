@@ -3807,10 +3807,12 @@ impl eframe::App for App {
 
                             // Name (clickable, fills middle). On double-click
                             // enter inline rename mode. Always reserves 50px
-                            // for the right-side action cluster
-                            // (lock button + 1px divider + three-dot + 1px).
+                            // Name fills the rest of the row width. The
+                            // action cluster is a separate child Ui anchored
+                            // to the right edge, so it does not consume any
+                            // of the name's available width.
                             let response = child.add_sized(
-                                egui::vec2(child.available_width() - 50.0, row_h),
+                                egui::vec2(child.available_width(), row_h),
                                 egui::SelectableLabel::new(is_active, &panel_name),
                             );
                             if response.double_clicked() && !renaming {
@@ -3853,85 +3855,45 @@ impl eframe::App for App {
                                 }
                             });
 
-                            // Right-side action cluster (always visible):
-                            // [1px | lock btn | 1px | three-dot]
-                            // Buttons are flat: no rounding, no stroke,
-                            // shared button_bg, separated by 1px lines.
+                            // Right-side action cluster, anchored to the
+                            // right edge with right-to-left layout so the
+                            // lock + three-dot buttons can never be clipped
+                            // by the name's selectable label taking too much
+                            // width.
                             let btn_w = 24.0;
                             let btn_h = row_h - 4.0;
+                            let action_cluster_w = if has_lock {
+                                btn_w + 1.0 + btn_w
+                            } else {
+                                1.0 + btn_w
+                            };
+                            let mut actions_ui = ui.new_child(
+                                egui::UiBuilder::new()
+                                    .max_rect(egui::Rect::from_min_size(
+                                        egui::pos2(
+                                            row_rect.max.x - action_cluster_w,
+                                            row_rect.min.y,
+                                        ),
+                                        egui::vec2(action_cluster_w, row_rect.height()),
+                                    ))
+                                    .layout(egui::Layout::right_to_left(egui::Align::Center)),
+                            );
                             let button_bg = self.active_theme.app.button_bg.to_egui();
                             let button_fg = self.active_theme.app.button_fg.to_egui();
                             let divider_color = self.active_theme.app.border.to_egui();
                             let stroke = egui::Stroke::new(1.0, divider_color);
 
-                            // 1px vertical line before lock.
-                            let (_, line1) = child.allocate_space(egui::vec2(0.0, btn_h));
-                            child.painter().line_segment(
-                                [
-                                    egui::pos2(line1.max.x, line1.min.y),
-                                    egui::pos2(line1.max.x, line1.max.y),
-                                ],
-                                stroke,
-                            );
-
-                            // Lock / unlock button (no rounding, themed bg).
-                            if has_lock {
-                                let lock_btn = egui::Button::new(
-                                    egui::RichText::new(workspace_lock_icon(is_locked))
-                                        .size(13.0)
-                                        .color(button_fg),
-                                )
-                                .corner_radius(egui::CornerRadius::ZERO)
-                                .fill(button_bg);
-                                if child
-                                    .add_sized(egui::vec2(btn_w, btn_h), lock_btn)
-                                    .on_hover_text(if is_locked {
-                                        &self.texts.workspace.locked_hint
-                                    } else {
-                                        &self.texts.workspace.unlocked_hint
-                                    })
-                                    .clicked()
-                                {
-                                    if is_locked {
-                                        self.active_panel = i;
-                                        self.lock_password_input.clear();
-                                        self.pw_message.clear();
-                                    } else {
-                                        self.locked_panels.insert(i);
-                                        self.lock_password_input.clear();
-                                        self.pw_message.clear();
-                                    }
-                                }
-                            } else {
-                                // Reserve the slot so the divider lines up
-                                // with the three-dot button.
-                                child.allocate_exact_size(
-                                    egui::vec2(btn_w, btn_h),
-                                    egui::Sense::hover(),
-                                );
-                            }
-
-                            // 1px vertical line between lock and three-dot.
-                            let (_, line2) = child.allocate_space(egui::vec2(0.0, btn_h));
-                            child.painter().line_segment(
-                                [
-                                    egui::pos2(line2.max.x, line2.min.y),
-                                    egui::pos2(line2.max.x, line2.max.y),
-                                ],
-                                stroke,
-                            );
-
-                            // Three-dot menu (replaces the close button;
-                            // delete is reachable from inside).
+                            // Three-dot button (rightmost in the cluster).
                             let three_dot = egui::Button::new(
                                 egui::RichText::new(egui_phosphor::regular::DOTS_THREE_VERTICAL)
                                     .size(13.0)
                                     .color(button_fg),
                             )
                             .corner_radius(egui::CornerRadius::ZERO)
-                            .fill(button_bg);
+                            .fill(button_bg)
+                            .stroke(egui::Stroke::NONE);
                             let three_dot_resp =
-                                child.add_sized(egui::vec2(btn_w, btn_h), three_dot);
+                                actions_ui.add_sized(egui::vec2(btn_w, btn_h), three_dot);
                             three_dot_resp.context_menu(|ui| {
                                 if ui.button(&self.texts.workspace.rename).clicked() {
                                     self.renaming_panel = Some(i);
@@ -3963,7 +3925,53 @@ impl eframe::App for App {
                                     ui.close_menu();
                                 }
                             });
-                            let _ = row_resp;
+
+                            // 1px vertical line between lock and three-dot.
+                            let (_, line2) = actions_ui.allocate_space(egui::vec2(0.0, btn_h));
+                            actions_ui.painter().line_segment(
+                                [
+                                    egui::pos2(line2.max.x, line2.min.y),
+                                    egui::pos2(line2.max.x, line2.max.y),
+                                ],
+                                stroke,
+                            );
+
+                            // Lock / unlock button (no rounding, no stroke,
+                            // shared button_bg).
+                            if has_lock {
+                                let lock_btn = egui::Button::new(
+                                    egui::RichText::new(workspace_lock_icon(is_locked))
+                                        .size(13.0)
+                                        .color(button_fg),
+                                )
+                                .corner_radius(egui::CornerRadius::ZERO)
+                                .fill(button_bg)
+                                .stroke(egui::Stroke::NONE);
+                                if actions_ui
+                                    .add_sized(egui::vec2(btn_w, btn_h), lock_btn)
+                                    .on_hover_text(if is_locked {
+                                        &self.texts.workspace.locked_hint
+                                    } else {
+                                        &self.texts.workspace.unlocked_hint
+                                    })
+                                    .clicked()
+                                {
+                                    if is_locked {
+                                        self.active_panel = i;
+                                        self.lock_password_input.clear();
+                                        self.pw_message.clear();
+                                    } else {
+                                        self.locked_panels.insert(i);
+                                        self.lock_password_input.clear();
+                                        self.pw_message.clear();
+                                    }
+                                }
+                            } else {
+                                actions_ui.allocate_exact_size(
+                                    egui::vec2(btn_w, btn_h),
+                                    egui::Sense::hover(),
+                                );
+                            }
                         }
                     }
 
