@@ -2207,6 +2207,19 @@ impl App {
         }
 
         match &self.update_state {
+            crate::updater::UpdateState::Checking => {
+                egui::Window::new("检查更新")
+                    .resizable(false)
+                    .collapsible(false)
+                    .default_pos(screen_center(ctx))
+                    .pivot(egui::Align2::CENTER_CENTER)
+                    .show(ctx, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.label("正在检查更新...");
+                        });
+                    });
+            }
             crate::updater::UpdateState::Available(info) => {
                 let mut dismiss = false;
                 let mut start_dl = false;
