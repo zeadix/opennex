@@ -22,7 +22,7 @@ settings:
   title: "Impostazioni"
   tabs:
     general: "Generale"
-    appearance: "Aspetto"
+    themes: "Temi"
     shortcuts: "Scorciatoie"
     lock: "Blocco"
   nav:

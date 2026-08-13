@@ -22,7 +22,7 @@ settings:
   title: "Einstellungen"
   tabs:
     general: "Allgemein"
-    appearance: "Darstellung"
+    themes: "Designs"
     shortcuts: "Tastenkürzel"
     lock: "Sperre"
   nav:

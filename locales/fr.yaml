@@ -22,7 +22,7 @@ settings:
   title: "Paramètres"
   tabs:
     general: "Général"
-    appearance: "Apparence"
+    themes: "Thèmes"
     shortcuts: "Raccourcis"
     lock: "Verrouillage"
   nav:

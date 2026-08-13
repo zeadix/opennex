@@ -22,7 +22,7 @@ settings:
   title: "Settings"
   tabs:
     general: "General"
-    appearance: "Appearance"
+    themes: "Themes"
     shortcuts: "Shortcuts"
     lock: "Lock"
   nav:

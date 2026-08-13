@@ -22,7 +22,7 @@ settings:
   title: "設定"
   tabs:
     general: "一般"
-    appearance: "外觀"
+    themes: "主題"
     shortcuts: "捷徑"
     lock: "鎖定"
   nav:

@@ -707,8 +707,8 @@ impl Default for SettingsWindowState {
         SettingsWindowState {
             x: 200.0,
             y: 150.0,
-            width: 500.0,
-            height: 350.0,
+            width: 640.0,
+            height: 460.0,
         }
     }
 }
@@ -2734,50 +2734,37 @@ impl eframe::App for App {
                 .resizable(true)
                 .default_pos(screen_center(ctx))
                 .pivot(egui::Align2::CENTER_CENTER)
-                .default_size([ws.width, ws.height])
+                .default_size([ws.width.max(640.0), ws.height.max(460.0)])
+                .min_width(560.0)
+                .min_height(360.0)
                 .show(ctx, |ui| {
-                    // Manual two-column layout: left nav + right content.
-                    // Uses fixed child UIs to avoid SidePanel ambiguity inside
-                    // a Window closure.
-                    let full = ui.available_rect_before_wrap();
-                    let nav_width = 120.0;
-                    let nav_rect =
-                        egui::Rect::from_min_size(full.min, egui::vec2(nav_width, full.height()));
-                    let content_rect = egui::Rect::from_min_size(
-                        egui::pos2(full.min.x + nav_width, full.min.y),
-                        egui::vec2(full.width() - nav_width, full.height()),
-                    );
-
-                    // Left nav
-                    let mut nav_ui = ui.new_child(
-                        egui::UiBuilder::new()
-                            .max_rect(nav_rect)
-                            .layout(egui::Layout::top_down(egui::Align::LEFT)),
-                    );
-                    nav_ui.vertical(|ui| {
-                        ui.add_space(4.0);
-                        let nav_items = [
-                            &self.texts.settings.nav.general,
-                            &self.texts.settings.nav.themes,
-                            &self.texts.settings.nav.shortcuts,
-                            &self.texts.settings.nav.lock,
-                        ];
-                        for (i, label) in nav_items.iter().enumerate() {
-                            let selected = self.settings_tab == i;
-                            let text = format!("  {}", label);
-                            if ui.selectable_label(selected, &text).clicked() {
-                                self.settings_tab = i;
+                    // Allocate two columns. allocate_ui_with_layout reserves
+                    // the rect so subsequent content cannot overlap.
+                    let nav_width: f32 = 120.0;
+                    let nav_size = egui::vec2(nav_width, ui.available_height());
+                    ui.allocate_ui_with_layout(
+                        nav_size,
+                        egui::Layout::top_down(egui::Align::LEFT),
+                        |ui| {
+                            ui.add_space(4.0);
+                            let nav_items = [
+                                &self.texts.settings.nav.general,
+                                &self.texts.settings.nav.themes,
+                                &self.texts.settings.nav.shortcuts,
+                                &self.texts.settings.nav.lock,
+                            ];
+                            for (i, label) in nav_items.iter().enumerate() {
+                                let selected = self.settings_tab == i;
+                                let text = format!("  {}", label);
+                                if ui.selectable_label(selected, &text).clicked() {
+                                    self.settings_tab = i;
+                                }
                             }
-                        }
-                    });
-
-                    // Right content
-                    let mut content_ui = ui.new_child(
-                        egui::UiBuilder::new()
-                            .max_rect(content_rect)
-                            .layout(egui::Layout::top_down(egui::Align::LEFT)),
+                        },
                     );
-                    content_ui.vertical(|ui| {
+
+                    // Right content fills the rest of the window.
+                    ui.vertical(|ui| {
                         ui.add_space(4.0);
                         match self.settings_tab {
                             0 => {

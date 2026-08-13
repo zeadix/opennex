@@ -23,7 +23,7 @@ settings:
   title: "सेटिंग्स"
   tabs:
     general: "सामान्य"
-    appearance: "रूप"
+    themes: "थीम"
     shortcuts: "शॉर्टकट"
     lock: "लॉक"
   nav:
