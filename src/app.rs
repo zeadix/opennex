@@ -1859,7 +1859,7 @@ impl App {
             return;
         };
 
-        // Pre-populate the name input based on dialog kind.
+        // Pre-populate name input.
         if self.theme_dialog.name_input.is_empty() {
             self.theme_dialog.name_input = match kind {
                 DialogKind::New => String::new(),
@@ -1901,83 +1901,70 @@ impl App {
         let mut close_after = false;
         let mut do_action = false;
 
-        // Use egui::Modal — this is the documented way to build a true
-        // modal dialog in egui 0.31. Modal sets the topmost modal layer
-        // and uses UiKind::Modal which interacts with egui's focus system
-        // correctly. The previous Area + manual request_focus did not
-        // reliably capture focus because the TextEdit lived inside a
-        // Foreground Area which does not set the topmost modal layer.
-        let modal_response = egui::Modal::new(egui::Id::new(modal_id))
+        // Render the dialog as a Modal. The Modal sets the topmost
+        // modal layer so the TextEdit can reliably capture focus.
+        let modal = egui::Modal::new(egui::Id::new(modal_id))
             .backdrop_color(egui::Color32::from_black_alpha(160))
-            .frame(egui::Frame::window(&ctx.style()))
-            .show(ctx, |ui| {
-                ui.set_min_size(egui::vec2(
-                    360.0,
-                    match kind {
-                        DialogKind::New | DialogKind::Copy | DialogKind::Rename => 130.0,
-                        DialogKind::Delete => 110.0,
-                        DialogKind::Switch => 150.0,
-                    },
-                ));
+            .frame(egui::Frame::window(&ctx.style()));
 
-                ui.vertical(|ui| {
-                    ui.add_space(6.0);
-                    ui.strong(title.clone());
-                    ui.add_space(6.0);
+        // Force focus on the text input BEFORE showing the modal,
+        // matching the lock-overlay pattern of calling request_focus
+        // on a stable id at the top of the update path.
+        if matches!(
+            kind,
+            DialogKind::New | DialogKind::Copy | DialogKind::Rename
+        ) {
+            ctx.memory_mut(|m| m.request_focus(input_id));
+        }
 
-                    match kind {
-                        DialogKind::New | DialogKind::Copy | DialogKind::Rename => {
-                            let response = ui.add(
-                                egui::TextEdit::singleline(&mut self.theme_dialog.name_input)
-                                    .id(input_id)
-                                    .hint_text(if matches!(kind, DialogKind::Copy) {
-                                        crate::theme::copy_dialog_hint()
-                                    } else {
-                                        crate::theme::new_dialog_hint()
-                                    })
-                                    .desired_width(330.0),
-                            );
-                            // Modal already sets the topmost modal layer, so
-                            // request_focus on the input id is sufficient.
-                            response.request_focus();
-                        }
-                        DialogKind::Delete => {
-                            ui.label(format!(
-                                "{}: {}",
-                                crate::theme::delete_confirm_text(),
-                                self.theme_edit.name
-                            ));
-                        }
-                        DialogKind::Switch => {
-                            ui.label(crate::theme::switch_confirm_text());
-                        }
+        modal.show(ctx, |ui| {
+            ui.set_min_size(egui::vec2(360.0, 120.0));
+
+            // Title
+            ui.strong(title.clone());
+            ui.add_space(4.0);
+
+            // Body
+            match kind {
+                DialogKind::New | DialogKind::Copy | DialogKind::Rename => {
+                    let _resp = ui.add(
+                        egui::TextEdit::singleline(&mut self.theme_dialog.name_input)
+                            .id(input_id)
+                            .desired_width(340.0),
+                    );
+                }
+                DialogKind::Delete => {
+                    ui.label(format!(
+                        "{}: {}",
+                        crate::theme::delete_confirm_text(),
+                        self.theme_edit.name
+                    ));
+                }
+                DialogKind::Switch => {
+                    ui.label(crate::theme::switch_confirm_text());
+                }
+            }
+
+            // Buttons
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button(crate::theme::confirm_text()).clicked() {
+                        do_action = true;
                     }
-
-                    ui.add_space(8.0);
-                    ui.horizontal(|ui| {
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button(crate::theme::confirm_text()).clicked() {
-                                do_action = true;
-                            }
-                            if matches!(
-                                kind,
-                                DialogKind::New | DialogKind::Copy | DialogKind::Rename
-                            ) && ui.input(|i| i.key_pressed(egui::Key::Enter))
-                            {
-                                do_action = true;
-                            }
-                            if ui.button(crate::theme::cancel_text()).clicked() {
-                                close_after = true;
-                            }
-                        });
-                    });
+                    if matches!(
+                        kind,
+                        DialogKind::New | DialogKind::Copy | DialogKind::Rename
+                    ) && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                    {
+                        do_action = true;
+                    }
+                    if ui.button(crate::theme::cancel_text()).clicked() {
+                        close_after = true;
+                    }
                 });
             });
-
-        // If the user clicked outside (backdrop), treat as cancel.
-        if modal_response.backdrop_response.clicked() {
-            close_after = true;
-        }
+        });
 
         if do_action {
             match kind {
