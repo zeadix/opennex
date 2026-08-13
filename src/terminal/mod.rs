@@ -12,34 +12,81 @@ pub struct TerminalInstance {
     osc_buffer: String,
 }
 
-fn shell_integration_sequence(shell: &str) -> Vec<u8> {
-    if shell.contains("bash") || shell.ends_with("/sh") {
-        // Single-line, semicolon-joined so the PTY only echoes one line
-        // instead of dumping the whole multi-line script into the terminal.
-        // We prepend ` __OPENNEX_INT=1;` to make the line start with a
-        // space; bash treats that as a "do not save to history" hint so
-        // the integration doesn't pollute the user's history.
-        let body = "__opennex_osc() { printf '\\033]9;$PWD\\007'; }";
-        let cond = "if [ -n \"${PROMPT_COMMAND}\" ]; then PROMPT_COMMAND=\"__opennex_osc;${PROMPT_COMMAND}\"; else PROMPT_COMMAND=\"__opennex_osc\"; fi";
-        format!(" __OPENNEX_INT=1; {body}; {cond}\n").into_bytes()
+/// Marker used to detect whether a shell init file already contains our
+/// integration snippet, so we don't append it twice.
+const SHELL_INTEGRATION_MARKER: &str = "# __opennex_integration__";
+
+/// Build (or reuse) the per-shell init file that installs the OSC 9
+/// hook, and return the path the user shell should be told to source.
+///
+/// Writing the integration to a file (and pointing the shell at it via
+/// `--rcfile` / `ZDOTDIR`) avoids dumping the multi-line snippet into
+/// the PTY on every terminal open, which would otherwise pollute the
+/// scrollback with echoed shell input.
+fn ensure_shell_init_file(shell: &str) -> Option<std::path::PathBuf> {
+    let home = dirs::config_dir()?.join("opennex").join("shell-init");
+    std::fs::create_dir_all(&home).ok()?;
+    let (filename, body) = if shell.contains("bash") {
+        ("bash.sh", BASH_INIT_BODY)
+    } else if shell.ends_with("/sh") {
+        // /bin/sh is often dash. The OSC integration is bash-only,
+        // but we still create a minimal init file so the test path
+        // (which uses /bin/sh) doesn't crash on a missing file.
+        ("sh.sh", SH_INIT_BODY)
     } else if shell.contains("zsh") {
-        // Same single-line trick for zsh; the `;` separates statements.
-        let body = "__opennex_osc() { printf '\\033]9;$PWD\\007'; }";
-        let cond = "precmd_functions+=(__opennex_osc)";
-        format!(" {body}; {cond}\n").into_bytes()
+        ("zsh.sh", ZSH_INIT_BODY)
     } else if shell.contains("powershell") || shell.contains("pwsh") {
-        // PowerShell: one statement per line is fine; use a single semicolon-
-        // joined expression. Each statement is still on its own line
-        // because the outer PTY echo concatenates them, but PowerShell
-        // parses the joined string as separate statements.
-        format!(
-            r#"function __opennex_osc {{ Write-Host -NoNewline "`e]9;$(Get-Location)`e\"; }}; if ($Global:prompt) {{ $Global:prompt = $function:prompt; function prompt {{ __opennex_osc; & $Global:prompt }} }} else {{ function prompt {{ __opennex_osc; "`e]9;$(Get-Location)`e` " }} }}
-"#
-        )
-        .into_bytes()
+        // PowerShell is harder to inject silently; fall back to a no-op
+        // marker so we know we considered it. The user can paste the
+        // snippet into their $PROFILE manually if they want OSC 9
+        // support on Windows.
+        ("powershell.ps1", POWERSHELL_INIT_BODY)
     } else {
-        Vec::new()
+        return None;
+    };
+    let path = home.join(filename);
+    let existing = std::fs::read_to_string(&path).unwrap_or_default();
+    if !existing.contains(SHELL_INTEGRATION_MARKER) {
+        let _ = std::fs::write(&path, format!("{SHELL_INTEGRATION_MARKER}\n{body}\n"));
     }
+    Some(path)
+}
+
+const BASH_INIT_BODY: &str = r#"
+__opennex_osc() { printf '\033]9;%s\007' "$PWD"; }
+if [ -n "${PROMPT_COMMAND}" ]; then
+  PROMPT_COMMAND="__opennex_osc;${PROMPT_COMMAND}"
+else
+  PROMPT_COMMAND="__opennex_osc"
+fi
+"#;
+
+const ZSH_INIT_BODY: &str = r#"
+__opennex_osc() { printf '\033]9;%s\007' "$PWD"; }
+precmd_functions+=(__opennex_osc)
+"#;
+
+/// Minimal init for /bin/sh (dash). The OSC integration isn't
+/// available in dash, so this just provides an empty but valid
+/// rc file so the shell starts cleanly.
+const SH_INIT_BODY: &str = r#"
+# /bin/sh (dash) does not support --rcfile or OSC 9. Placeholder.
+"#;
+
+const POWERSHELL_INIT_BODY: &str = r#"
+# Add the following to your PowerShell $PROFILE for OSC 9 support:
+# function prompt { Write-Host -NoNewline ([char]27 + "]9;$($PWD.Path)" + [char]7) -NoNewline; return "$PWD> " }
+"#;
+
+/// Build a `BASH_ENV` value (or equivalent) to inject the integration
+/// into a newly-spawned bash without echoing the script into the
+/// scrollback. We currently rely on bash's `-l` flag plus the
+/// integration file existing on disk; the actual wiring happens in
+/// `BackendSettings::args`.
+fn shell_integration_sequence(_shell: &str) -> Vec<u8> {
+    // No longer used: the integration lives in a file pointed to by
+    // `--rcfile` / `ZDOTDIR` so the PTY never sees the source.
+    Vec::new()
 }
 
 impl TerminalInstance {
@@ -51,11 +98,38 @@ impl TerminalInstance {
         _cols: u16,
         _rows: u16,
     ) -> Option<Self> {
-        let settings = BackendSettings {
+        // Make sure the per-shell init file exists, then point the shell
+        // at it. For bash we pass `--rcfile`; for zsh we override
+        // `ZDOTDIR` so the init file is sourced. PowerShell and cmd
+        // currently have no silent integration path.
+        let init_file = ensure_shell_init_file(shell);
+        let mut args: Vec<String> = vec!["-l".into(), "-i".into()];
+        let mut zdotdir: Option<std::path::PathBuf> = None;
+        if let Some(path) = &init_file {
+            if shell.contains("bash") {
+                // Only bash supports --rcfile. dash/sh don't, and passing
+                // it makes them refuse to start (which silently breaks the
+                // terminal test for /bin/sh).
+                args.push("--rcfile".to_string());
+                args.push(path.to_string_lossy().to_string());
+            } else if shell.contains("zsh") {
+                if let Some(parent) = path.parent() {
+                    zdotdir = Some(parent.to_path_buf());
+                }
+            }
+        }
+
+        let mut settings = BackendSettings {
             shell: shell.to_string(),
-            args: vec!["-l".into(), "-i".into()],
+            args,
             working_directory: Some(std::path::PathBuf::from(cwd)),
+            env: vec![],
         };
+        if let Some(dir) = zdotdir {
+            settings
+                .env
+                .push(("ZDOTDIR".to_string(), dir.to_string_lossy().to_string()));
+        }
 
         let backend = TerminalBackend::new(id, ctx.clone(), settings).ok()?;
 
@@ -72,11 +146,9 @@ impl TerminalInstance {
             osc_buffer: String::new(),
         };
 
-        // Inject shell integration
-        let integration = shell_integration_sequence(shell);
-        if !integration.is_empty() {
-            instance.write(&integration);
-        }
+        // No PTY write here: the integration is sourced from the file
+        // pointed to by --rcfile / ZDOTDIR above.
+        let _ = shell_integration_sequence(shell);
 
         Some(instance)
     }

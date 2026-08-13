@@ -149,9 +149,15 @@ impl TerminalBackend {
         app_context: egui::Context,
         settings: BackendSettings,
     ) -> Result<Self> {
+        let mut env_map: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        for (k, v) in &settings.env {
+            env_map.insert(k.clone(), v.clone());
+        }
         let pty_config = tty::Options {
             shell: Some(tty::Shell::new(settings.shell, settings.args)),
             working_directory: settings.working_directory,
+            env: env_map,
             ..tty::Options::default()
         };
         let config = term::Config::default();

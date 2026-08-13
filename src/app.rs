@@ -3127,8 +3127,8 @@ impl eframe::App for App {
                             UpdateState::Idle | UpdateState::Checking => {
                                 ("".to_string(), egui::Color32::WHITE)
                             }
-                            UpdateState::Downloading(p) => (
-                                format!("正在下载更新... {}%", (*p * 100.0) as i32),
+                            UpdateState::Downloading(_) => (
+                                "正在下载更新...".to_string(),
                                 egui::Color32::from_rgb(0x3b, 0x82, 0xf6),
                             ),
                             UpdateState::Verifying => (
@@ -3156,12 +3156,41 @@ impl eframe::App for App {
                             ui.colored_label(color, text);
                         }
                         if let Some(p) = pct {
-                            ui.add(
-                                egui::ProgressBar::new(p)
-                                    .show_percentage()
-                                    .desired_width(ui.available_width())
-                                    .corner_radius(egui::CornerRadius::ZERO),
+                            // Draw a custom square-cornered progress bar so we
+                            // can position the percentage label exactly in the
+                            // center (ProgressBar's built-in percent text is
+                            // hard-coded to the left edge).
+                            let height = 18.0;
+                            let (rect, _) = ui.allocate_exact_size(
+                                egui::vec2(ui.available_width(), height),
+                                egui::Sense::hover(),
                             );
+                            let painter = ui.painter_at(rect);
+                            let visuals = ui.style().visuals.clone();
+                            painter.rect_filled(
+                                rect,
+                                egui::CornerRadius::ZERO,
+                                visuals.extreme_bg_color,
+                            );
+                            let filled = egui::Rect::from_min_size(
+                                rect.min,
+                                egui::vec2(rect.width() * p, rect.height()),
+                            );
+                            let filled_color = egui::Color32::from_rgb(0x3b, 0x82, 0xf6);
+                            painter.rect_filled(filled, egui::CornerRadius::ZERO, filled_color);
+                            let pct_text = format!("{}%", (p * 100.0) as i32);
+                            let galley = ui.fonts(|f| {
+                                f.layout_no_wrap(
+                                    pct_text,
+                                    egui::FontId::proportional(12.0),
+                                    visuals.override_text_color.unwrap_or(visuals.text_color()),
+                                )
+                            });
+                            let text_pos = egui::pos2(
+                                rect.center().x - galley.size().x / 2.0,
+                                rect.center().y - galley.size().y / 2.0,
+                            );
+                            painter.galley(text_pos, galley, visuals.text_color());
                         }
                     }
 
