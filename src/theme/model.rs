@@ -33,6 +33,7 @@ impl ThemeColor {
         Ok(ThemeColor([r, g, b, a]))
     }
 
+    #[cfg(test)]
     pub fn from_rgb(r: u8, g: u8, b: u8) -> Self {
         ThemeColor([r, g, b, 255])
     }
@@ -47,7 +48,10 @@ impl ThemeColor {
     }
 
     pub fn as_hex(&self) -> String {
-        format!("#{:02x}{:02x}{:02x}{:02x}", self.0[0], self.0[1], self.0[2], self.0[3])
+        format!(
+            "#{:02x}{:02x}{:02x}{:02x}",
+            self.0[0], self.0[1], self.0[2], self.0[3]
+        )
     }
 }
 
@@ -222,18 +226,18 @@ impl ThemeDefinition {
             32.0,
         )?;
         validate_range(self.typography.cell_spacing, "cell_spacing", 0.5, 2.0)?;
-        validate_range(
-            self.typography.menu_font_size,
-            "menu_font_size",
-            8.0,
-            32.0,
-        )?;
+        validate_range(self.typography.menu_font_size, "menu_font_size", 8.0, 32.0)?;
 
         Ok(())
     }
 }
 
-fn validate_str_len(value: &str, field: &str, max: usize, non_empty: bool) -> Result<(), ThemeError> {
+fn validate_str_len(
+    value: &str,
+    field: &str,
+    max: usize,
+    non_empty: bool,
+) -> Result<(), ThemeError> {
     let count = value.chars().count();
     if (non_empty && count == 0) || count > max {
         return Err(ThemeError::InvalidField {
@@ -361,8 +365,8 @@ mod tests {
     fn theme_color_round_trips_as_lowercase_hex() {
         let color = ThemeColor::parse("#ABCDEF12").unwrap();
         assert_eq!(color.as_hex(), "#abcdef12");
-        let parsed = serde_json::from_str::<ThemeColor>(&serde_json::to_string(&color).unwrap())
-            .unwrap();
+        let parsed =
+            serde_json::from_str::<ThemeColor>(&serde_json::to_string(&color).unwrap()).unwrap();
         assert_eq!(parsed, color);
     }
 

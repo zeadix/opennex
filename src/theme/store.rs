@@ -19,7 +19,10 @@ pub fn parse_theme(json: &str) -> Result<ThemeDefinition, ThemeError> {
 
 /// Every theme shipped with the application binary.
 pub fn embedded_themes() -> Result<Vec<ThemeDefinition>, ThemeError> {
-    EMBEDDED_THEME_JSON.iter().map(|json| parse_theme(json)).collect()
+    EMBEDDED_THEME_JSON
+        .iter()
+        .map(|json| parse_theme(json))
+        .collect()
 }
 
 /// The canonical default theme used on first launch and on missing IDs.
@@ -28,13 +31,6 @@ pub fn default_theme() -> Result<ThemeDefinition, ThemeError> {
         .into_iter()
         .find(|theme| theme.id == "opennex-dark")
         .ok_or(ThemeError::MissingDefault)
-}
-
-/// Whether `id` matches an embedded (read-only) theme.
-pub fn is_embedded_id(id: &str) -> bool {
-    embedded_themes()
-        .map(|themes| themes.iter().any(|theme| theme.id == id))
-        .unwrap_or(false)
 }
 
 /// Resolve a theme by ID, preferring user themes, then embedded, then default.
@@ -69,16 +65,16 @@ pub fn load_user_themes(dir: &Path) -> Result<Vec<ThemeDefinition>, ThemeError> 
         if path.extension().and_then(|e| e.to_str()) != Some("json") {
             continue;
         }
-        match std::fs::read_to_string(&path).and_then(|s| {
-            parse_theme(&s).map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err))
-        }) {
+        match std::fs::read_to_string(&path)
+            .and_then(|s| parse_theme(&s).map_err(std::io::Error::other))
+        {
             Ok(theme) => themes.push(theme),
             Err(err) => {
                 log::warn!("skipping invalid theme file {}: {err}", path.display());
             }
         }
     }
-    themes.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    themes.sort_by_key(|t| t.name.to_lowercase());
     Ok(themes)
 }
 
@@ -172,7 +168,10 @@ fn find_free_import_id(dir: &Path, requested: &str) -> String {
 fn load_user_theme(dir: &Path, id: &str) -> Result<ThemeDefinition, ThemeError> {
     let path = dir.join(format!("{id}.json"));
     if !path.exists() {
-        return Err(ThemeError::Io(format!("theme file not found: {}", path.display())));
+        return Err(ThemeError::Io(format!(
+            "theme file not found: {}",
+            path.display()
+        )));
     }
     let json = std::fs::read_to_string(&path)?;
     parse_theme(&json)
@@ -186,10 +185,8 @@ mod tests {
 
     impl TempDir {
         fn new() -> Self {
-            let dir = std::env::temp_dir().join(format!(
-                "opennex-theme-test-{}",
-                uuid::Uuid::new_v4()
-            ));
+            let dir =
+                std::env::temp_dir().join(format!("opennex-theme-test-{}", uuid::Uuid::new_v4()));
             std::fs::create_dir_all(&dir).unwrap();
             TempDir(dir)
         }

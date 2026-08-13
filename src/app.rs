@@ -766,7 +766,7 @@ fn load_settings() -> AppSettings {
 }
 
 /// Deserialize settings, migrating legacy visual fields into the theme ID.
-pub(crate) fn deserialize_settings(json: &str) -> Result<AppSettings, serde_json::Error> {
+fn deserialize_settings(json: &str) -> Result<AppSettings, serde_json::Error> {
     #[derive(serde::Deserialize)]
     struct LegacySettings {
         #[serde(flatten)]
@@ -1164,8 +1164,8 @@ impl App {
 
         let themes_root = crate::theme::store::themes_dir(&app_data_dir());
         let _ = std::fs::create_dir_all(&themes_root);
-        let mut available_themes = crate::theme::store::load_user_themes(&themes_root)
-            .unwrap_or_default();
+        let mut available_themes =
+            crate::theme::store::load_user_themes(&themes_root).unwrap_or_default();
         for embedded in crate::theme::store::embedded_themes().unwrap_or_default() {
             if !available_themes.iter().any(|t| t.id == embedded.id) {
                 available_themes.push(embedded);
@@ -1608,10 +1608,8 @@ impl App {
                 match crate::theme::store::import_theme_file(&themes_root, &path) {
                     Ok(imported) => {
                         self.available_themes =
-                            crate::theme::store::load_user_themes(&themes_root)
-                                .unwrap_or_default();
-                        for embedded in crate::theme::store::embedded_themes().unwrap_or_default()
-                        {
+                            crate::theme::store::load_user_themes(&themes_root).unwrap_or_default();
+                        for embedded in crate::theme::store::embedded_themes().unwrap_or_default() {
                             if !self.available_themes.iter().any(|t| t.id == embedded.id) {
                                 self.available_themes.push(embedded);
                             }
@@ -1628,10 +1626,8 @@ impl App {
                         self.theme_message = Some(Ok(texts.import_success));
                     }
                     Err(err) => {
-                        let msg = if matches!(
-                            err,
-                            crate::theme::ThemeError::UnsupportedVersion(_)
-                        ) {
+                        let msg = if matches!(err, crate::theme::ThemeError::UnsupportedVersion(_))
+                        {
                             texts.unsupported_version
                         } else {
                             texts.invalid_theme
@@ -1763,12 +1759,7 @@ impl App {
     }
 
     fn switch_theme_by_id(&mut self, ctx: &egui::Context, id: &str) {
-        let theme = match self
-            .available_themes
-            .iter()
-            .find(|t| t.id == id)
-            .cloned()
-        {
+        let theme = match self.available_themes.iter().find(|t| t.id == id).cloned() {
             Some(theme) => theme,
             None => crate::theme::store::default_theme().unwrap_or_else(|err| {
                 log::error!("default theme unavailable: {err}");
@@ -2545,16 +2536,10 @@ impl eframe::App for App {
                                 }
                             });
                             if let Some(Err(msg)) = &self.theme_message {
-                                ui.colored_label(
-                                    egui::Color32::from_rgb(230, 120, 120),
-                                    msg,
-                                );
+                                ui.colored_label(egui::Color32::from_rgb(230, 120, 120), msg);
                             }
                             if let Some(Ok(msg)) = &self.theme_message {
-                                ui.colored_label(
-                                    egui::Color32::from_rgb(120, 200, 130),
-                                    msg,
-                                );
+                                ui.colored_label(egui::Color32::from_rgb(120, 200, 130), msg);
                             }
                         }
                         2 => {

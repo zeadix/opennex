@@ -394,7 +394,13 @@ impl<'a> TerminalView<'a> {
                 fg = fg.linear_multiply(0.7);
             }
 
-            let (fg, bg) = resolved_cell_colors(&self.theme, fg, bg, is_inverse, is_selected);
+            let (fg, bg) = resolved_cell_colors(
+                &self.theme,
+                fg,
+                bg,
+                is_inverse,
+                is_selected,
+            );
 
             if global_bg != bg {
                 shapes.push(Shape::Rect(RectShape::filled(
@@ -414,7 +420,11 @@ impl<'a> TerminalView<'a> {
                         Pos2::new(x, underline_height),
                         Pos2::new(x + draw_w, underline_height),
                     ],
-                    stroke: Stroke::new(cell_height * 0.15, self.theme.link_color()).into(),
+                    stroke: Stroke::new(
+                        cell_height * 0.15,
+                        self.theme.link_color(),
+                    )
+                    .into(),
                 });
             }
 

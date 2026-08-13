@@ -84,8 +84,10 @@ impl Default for TerminalVisualColors {
             cursor: hex_to_color(&palette.foreground).unwrap_or(Color32::WHITE),
             selection_bg: hex_to_color(&palette.bright_black)
                 .unwrap_or(Color32::from_rgb(0x33, 0x38, 0x40)),
-            selection_text: hex_to_color(&palette.foreground).unwrap_or(Color32::WHITE),
-            link: hex_to_color(&palette.blue).unwrap_or(Color32::from_rgb(0x61, 0xaf, 0xef)),
+            selection_text: hex_to_color(&palette.foreground)
+                .unwrap_or(Color32::WHITE),
+            link: hex_to_color(&palette.blue)
+                .unwrap_or(Color32::from_rgb(0x61, 0xaf, 0xef)),
         }
     }
 }
@@ -108,7 +110,10 @@ impl Default for TerminalTheme {
 }
 
 impl TerminalTheme {
-    pub fn new(palette: Box<ColorPalette>, visual: TerminalVisualColors) -> Self {
+    pub fn new(
+        palette: Box<ColorPalette>,
+        visual: TerminalVisualColors,
+    ) -> Self {
         Self {
             palette,
             visual,
@@ -122,8 +127,10 @@ impl TerminalTheme {
             cursor: hex_to_color(&palette.foreground).unwrap_or(Color32::WHITE),
             selection_bg: hex_to_color(&palette.bright_black)
                 .unwrap_or(Color32::from_rgb(0x33, 0x38, 0x40)),
-            selection_text: hex_to_color(&palette.foreground).unwrap_or(Color32::WHITE),
-            link: hex_to_color(&palette.blue).unwrap_or(Color32::from_rgb(0x61, 0xaf, 0xef)),
+            selection_text: hex_to_color(&palette.foreground)
+                .unwrap_or(Color32::WHITE),
+            link: hex_to_color(&palette.blue)
+                .unwrap_or(Color32::from_rgb(0x61, 0xaf, 0xef)),
         };
         Self::new(palette, visual)
     }
