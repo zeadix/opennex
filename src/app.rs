@@ -2084,7 +2084,33 @@ impl App {
         }
     }
 
+    /// Restart the application to apply the downloaded update.
+    /// Used by both the in-place About button and the standalone popup.
+    fn apply_update_and_restart(&mut self, ctx: &egui::Context, path: std::path::PathBuf) {
+        match crate::updater::replace_and_restart(&path) {
+            Ok(_) => {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+            Err(e) => {
+                self.update_state = crate::updater::UpdateState::Error(e);
+            }
+        }
+    }
+
+    /// User clicked the manual "check update" button. Set Checking and
+    /// clear any prior Available/UpToDate/Error so the about window
+    /// does not display stale information.
+    fn start_manual_check(&mut self) {
+        self.update_state = crate::updater::UpdateState::Checking;
+    }
+
+    /// Kick off a download for the available update info.
+    fn kick_download(&mut self, ctx: &egui::Context, info: &crate::updater::UpdateInfo) {
+        self.start_download(ctx, info);
+    }
+
     fn refresh_themes(&mut self, themes_root: &std::path::Path) {
+        let mut themes = crate::theme::store::load_user_themes(themes_root).unwrap_or_default();
         let mut themes = crate::theme::store::load_user_themes(themes_root).unwrap_or_default();
         for embedded in crate::theme::store::embedded_themes().unwrap_or_default() {
             if !themes.iter().any(|t| t.id == embedded.id) {
@@ -2169,7 +2195,7 @@ impl App {
     }
 
     fn render_update_window(&mut self, ctx: &egui::Context) {
-        // Manual check result handling.
+        // Manual check: pick up the background thread result when it lands.
         if self.update_state == crate::updater::UpdateState::Checking {
             let result: Option<crate::updater::UpdateState> =
                 ctx.memory(|mem| mem.data.get_temp(egui::Id::new("manual_check_result")));
@@ -2178,7 +2204,8 @@ impl App {
             }
         }
 
-        // Poll download progress from background thread
+        // Download progress: pick up intermediate percentages and terminal
+        // states (Ready / Error) from the background download thread.
         if let crate::updater::UpdateState::Downloading(_) = &self.update_state {
             let dl_state: Option<crate::updater::UpdateState> =
                 ctx.memory(|mem| mem.data.get_temp(egui::Id::new("dl_state")));
@@ -2195,136 +2222,8 @@ impl App {
                 }
             }
         }
-
-        match &self.update_state {
-            crate::updater::UpdateState::Available(info) => {
-                let mut dismiss = false;
-                let mut start_dl = false;
-                let info_clone = info.clone();
-                egui::Window::new("发现新版本")
-                    .resizable(false)
-                    .collapsible(false)
-                    .default_pos(screen_center(ctx))
-                    .pivot(egui::Align2::CENTER_CENTER)
-                    .show(ctx, |ui| {
-                        ui.vertical_centered(|ui| {
-                            ui.add_space(4.0);
-                            ui.heading(format!("v{}", info.version));
-                            ui.add_space(4.0);
-                            ui.label(format!(
-                                "当前版本: v{}\n是否立即更新？",
-                                env!("CARGO_PKG_VERSION")
-                            ));
-                            ui.add_space(10.0);
-                            ui.horizontal(|ui| {
-                                if ui.button("更新").clicked() {
-                                    start_dl = true;
-                                }
-                                if ui.button("稍后").clicked() {
-                                    dismiss = true;
-                                }
-                            });
-                        });
-                    });
-                if dismiss {
-                    self.update_state = crate::updater::UpdateState::Idle;
-                }
-                if start_dl {
-                    self.start_download(ctx, &info_clone);
-                }
-            }
-            crate::updater::UpdateState::Downloading(pct) => {
-                let pct = *pct;
-                egui::Window::new("正在下载更新")
-                    .resizable(false)
-                    .collapsible(false)
-                    .default_pos(screen_center(ctx))
-                    .pivot(egui::Align2::CENTER_CENTER)
-                    .show(ctx, |ui| {
-                        ui.add_space(4.0);
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().slider_width = 200.0;
-                            ui.add(egui::ProgressBar::new(pct).show_percentage());
-                        });
-                    });
-            }
-            crate::updater::UpdateState::Verifying => {
-                egui::Window::new("正在校验")
-                    .resizable(false)
-                    .collapsible(false)
-                    .default_pos(screen_center(ctx))
-                    .pivot(egui::Align2::CENTER_CENTER)
-                    .show(ctx, |ui| {
-                        ui.label("正在校验文件完整性...");
-                    });
-            }
-            crate::updater::UpdateState::Ready(path) => {
-                let path = path.clone();
-                let mut restart = false;
-                egui::Window::new("更新就绪")
-                    .resizable(false)
-                    .collapsible(false)
-                    .default_pos(screen_center(ctx))
-                    .pivot(egui::Align2::CENTER_CENTER)
-                    .show(ctx, |ui| {
-                        ui.vertical_centered(|ui| {
-                            ui.label("更新已准备就绪");
-                            ui.add_space(8.0);
-                            if ui.button("重启应用").clicked() {
-                                restart = true;
-                            }
-                        });
-                    });
-                if restart {
-                    match crate::updater::replace_and_restart(&path) {
-                        Ok(_) => {
-                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                        }
-                        Err(e) => {
-                            self.update_state = crate::updater::UpdateState::Error(e);
-                        }
-                    }
-                }
-            }
-            crate::updater::UpdateState::Error(msg) => {
-                let msg = msg.clone();
-                let mut dismiss = false;
-                egui::Window::new("更新失败")
-                    .resizable(false)
-                    .collapsible(false)
-                    .default_pos(screen_center(ctx))
-                    .pivot(egui::Align2::CENTER_CENTER)
-                    .show(ctx, |ui| {
-                        ui.label(&msg);
-                        ui.add_space(8.0);
-                        if ui.button("关闭").clicked() {
-                            dismiss = true;
-                        }
-                    });
-                if dismiss {
-                    self.update_state = crate::updater::UpdateState::Idle;
-                }
-            }
-            crate::updater::UpdateState::UpToDate => {
-                let mut dismiss = false;
-                egui::Window::new("检查更新")
-                    .resizable(false)
-                    .collapsible(false)
-                    .default_pos(screen_center(ctx))
-                    .pivot(egui::Align2::CENTER_CENTER)
-                    .show(ctx, |ui| {
-                        ui.label("已是最新版本");
-                        ui.add_space(8.0);
-                        if ui.button("关闭").clicked() {
-                            dismiss = true;
-                        }
-                    });
-                if dismiss {
-                    self.update_state = crate::updater::UpdateState::Idle;
-                }
-            }
-            _ => {}
-        }
+        // Note: no UI is rendered here. The in-place About-window status
+        // line + the restart popup cover all states.
     }
 
     fn focus_adjacent_panel(&mut self, direction: i32) {
@@ -2474,6 +2373,45 @@ impl App {
         if !text.is_empty() {
             ctx.copy_text(text);
         }
+    }
+}
+
+/// Show a "重启" / "取消" confirmation popup when an update is ready and
+/// the about window has been closed. The button click is recorded in egui
+/// memory under the "restart_popup_choice" id so the App update loop can
+/// read and clear it without borrowing self.
+fn render_restart_popup(ctx: &egui::Context) {
+    let mut open = true;
+    let mut restart = false;
+    let mut cancel = false;
+    egui::Window::new("更新已准备就绪")
+        .open(&mut open)
+        .resizable(false)
+        .collapsible(false)
+        .default_pos(crate::app::screen_center(ctx))
+        .pivot(egui::Align2::CENTER_CENTER)
+        .show(ctx, |ui| {
+            ui.vertical_centered(|ui| {
+                ui.label("新版本已下载，是否立即重启应用？");
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui.button("重启").clicked() {
+                        restart = true;
+                    }
+                    if ui.button("取消").clicked() {
+                        cancel = true;
+                    }
+                });
+            });
+        });
+    if !open {
+        cancel = true;
+    }
+    if restart || cancel {
+        ctx.memory_mut(|mem| {
+            mem.data
+                .insert_temp(egui::Id::new("restart_popup_choice"), restart);
+        });
     }
 }
 
@@ -3173,18 +3111,120 @@ impl eframe::App for App {
                     ui.weak(self.texts.about.credits_label.as_str());
                     ui.weak(self.texts.about.credits.as_str());
                     ui.add_space(6.0);
+
+                    // In-place update status + progress bar. No popups
+                    // open during this flow; the bar and status line sit
+                    // above the action row.
+                    {
+                        use crate::updater::UpdateState;
+                        let pct: Option<f32> =
+                            if let UpdateState::Downloading(p) = self.update_state {
+                                Some(p)
+                            } else {
+                                None
+                            };
+                        let (text, color) = match &self.update_state {
+                            UpdateState::Idle | UpdateState::Checking => {
+                                ("".to_string(), egui::Color32::WHITE)
+                            }
+                            UpdateState::Downloading(p) => (
+                                format!("正在下载更新... {}%", (*p * 100.0) as i32),
+                                egui::Color32::from_rgb(0x3b, 0x82, 0xf6),
+                            ),
+                            UpdateState::Verifying => (
+                                "正在校验文件完整性...".to_string(),
+                                egui::Color32::from_rgb(0xa8, 0x55, 0xf7),
+                            ),
+                            UpdateState::Ready(_) => (
+                                "更新已准备就绪".to_string(),
+                                egui::Color32::from_rgb(0x22, 0xc5, 0x5e),
+                            ),
+                            UpdateState::Error(msg) => (
+                                format!("更新失败: {}", msg),
+                                egui::Color32::from_rgb(0xef, 0x44, 0x44),
+                            ),
+                            UpdateState::Available(info) => (
+                                format!("发现新版本 v{} — 准备下载", info.version),
+                                egui::Color32::from_rgb(0x22, 0xc5, 0x5e),
+                            ),
+                            UpdateState::UpToDate => (
+                                "当前已是最新版本".to_string(),
+                                egui::Color32::from_rgb(0x6b, 0x72, 0x80),
+                            ),
+                        };
+                        if !text.is_empty() {
+                            ui.colored_label(color, text);
+                        }
+                        if let Some(p) = pct {
+                            ui.add(
+                                egui::ProgressBar::new(p)
+                                    .show_percentage()
+                                    .desired_width(ui.available_width()),
+                            );
+                        }
+                    }
+
                     ui.vertical_centered(|ui| {
                         ui.horizontal(|ui| {
-                            let is_checking =
-                                matches!(self.update_state, crate::updater::UpdateState::Checking);
-                            if is_checking {
+                            let is_busy = matches!(
+                                self.update_state,
+                                crate::updater::UpdateState::Checking
+                                    | crate::updater::UpdateState::Downloading(_)
+                                    | crate::updater::UpdateState::Verifying
+                            );
+                            if is_busy {
                                 ui.spinner();
                             }
-                            if ui
-                                .add_enabled(!is_checking, egui::Button::new("检查更新"))
-                                .clicked()
-                            {
-                                self.check_update_manual(ctx);
+                            // The primary action button changes label
+                            // depending on the current state.
+                            enum PrimaryAction {
+                                Check,
+                                StartDownload,
+                                Restart,
+                            }
+                            let primary = match &self.update_state {
+                                crate::updater::UpdateState::Idle
+                                | crate::updater::UpdateState::Checking => PrimaryAction::Check,
+                                crate::updater::UpdateState::Available(_) => {
+                                    PrimaryAction::StartDownload
+                                }
+                                crate::updater::UpdateState::Downloading(_)
+                                | crate::updater::UpdateState::Verifying => {
+                                    // Show "检查更新" disabled while busy
+                                    PrimaryAction::Check
+                                }
+                                crate::updater::UpdateState::Ready(_) => PrimaryAction::Restart,
+                                crate::updater::UpdateState::Error(_)
+                                | crate::updater::UpdateState::UpToDate => PrimaryAction::Check,
+                            };
+                            let label = match primary {
+                                PrimaryAction::Check => "检查更新",
+                                PrimaryAction::StartDownload => "立即更新",
+                                PrimaryAction::Restart => "重启应用",
+                            };
+                            if ui.add_enabled(!is_busy, egui::Button::new(label)).clicked() {
+                                match primary {
+                                    PrimaryAction::Check => {
+                                        self.start_manual_check();
+                                        self.check_update_manual(ctx);
+                                    }
+                                    PrimaryAction::StartDownload => {
+                                        if let crate::updater::UpdateState::Available(info) =
+                                            &self.update_state
+                                        {
+                                            let info_clone = info.clone();
+                                            self.kick_download(ctx, &info_clone);
+                                        }
+                                    }
+                                    PrimaryAction::Restart => {
+                                        if let crate::updater::UpdateState::Ready(path) =
+                                            &self.update_state
+                                        {
+                                            let path = path.clone();
+                                            self.apply_update_and_restart(ctx, path);
+                                        }
+                                    }
+                                }
                             }
                             if ui.button(&self.texts.about.close).clicked() {
                                 clicked_close = true;
@@ -3193,8 +3233,28 @@ impl eframe::App for App {
                     });
                 });
             if !open || clicked_close {
+                // Closing the about window does NOT clear update_state —
+                // re-opening it shows the latest progress, and a completed
+                // download remains installable via the "重启应用" button.
                 self.show_about = false;
             }
+        }
+
+        // Restart confirmation popup (shown when the about window is
+        // closed and the update is ready; user can pick "重启" or "取消").
+        if let crate::updater::UpdateState::Ready(path) = &self.update_state.clone() {
+            render_restart_popup(ctx);
+            // Read the user's choice from egui memory.
+            let choice: Option<bool> = ctx.memory_mut(|mem| {
+                mem.data
+                    .remove_temp::<bool>(egui::Id::new("restart_popup_choice"))
+            });
+            if let Some(true) = choice {
+                let path = path.clone();
+                self.apply_update_and_restart(ctx, path);
+            }
+            // `false` (cancel) — keep Ready state so user can still
+            // restart from the about window's "重启应用" button.
         }
 
         // Close workspace confirmation
