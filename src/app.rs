@@ -1841,13 +1841,20 @@ impl App {
                 .open(&mut open)
                 .resizable(false)
                 .collapsible(false)
-                .current_pos(screen_center(ctx))
+                .default_pos(screen_center(ctx))
                 .pivot(egui::Align2::CENTER_CENTER)
+                .order(egui::Order::Foreground)
                 .show(ctx, |ui| {
                     ui.label(crate::theme::copy_dialog_hint());
-                    ui.text_edit_singleline(&mut self.theme_dialog.name_input);
+                    let response = ui.add(
+                        egui::TextEdit::singleline(&mut self.theme_dialog.name_input)
+                            .id_salt("theme_copy_name_input"),
+                    );
+                    response.request_focus();
                     ui.horizontal(|ui| {
-                        if ui.button(crate::theme::confirm_text()).clicked() {
+                        if ui.button(crate::theme::confirm_text()).clicked()
+                            || ui.input(|i| i.key_pressed(egui::Key::Enter))
+                        {
                             let name = self.theme_dialog.name_input.trim().to_string();
                             if !name.is_empty() {
                                 match crate::theme::store::copy_theme(
@@ -1884,13 +1891,20 @@ impl App {
                 .open(&mut open)
                 .resizable(false)
                 .collapsible(false)
-                .current_pos(screen_center(ctx))
+                .default_pos(screen_center(ctx))
                 .pivot(egui::Align2::CENTER_CENTER)
+                .order(egui::Order::Foreground)
                 .show(ctx, |ui| {
                     ui.label(crate::theme::new_dialog_hint());
-                    ui.text_edit_singleline(&mut self.theme_dialog.name_input);
+                    let response = ui.add(
+                        egui::TextEdit::singleline(&mut self.theme_dialog.name_input)
+                            .id_salt("theme_new_name_input"),
+                    );
+                    response.request_focus();
                     ui.horizontal(|ui| {
-                        if ui.button(crate::theme::confirm_text()).clicked() {
+                        if ui.button(crate::theme::confirm_text()).clicked()
+                            || ui.input(|i| i.key_pressed(egui::Key::Enter))
+                        {
                             let name = self.theme_dialog.name_input.trim().to_string();
                             if !name.is_empty() {
                                 let mut new_theme = self.theme_edit.clone();
@@ -1931,13 +1945,20 @@ impl App {
                 .open(&mut open)
                 .resizable(false)
                 .collapsible(false)
-                .current_pos(screen_center(ctx))
+                .default_pos(screen_center(ctx))
                 .pivot(egui::Align2::CENTER_CENTER)
+                .order(egui::Order::Foreground)
                 .show(ctx, |ui| {
                     ui.label(crate::theme::new_dialog_hint());
-                    ui.text_edit_singleline(&mut self.theme_dialog.name_input);
+                    let response = ui.add(
+                        egui::TextEdit::singleline(&mut self.theme_dialog.name_input)
+                            .id_salt("theme_rename_name_input"),
+                    );
+                    response.request_focus();
                     ui.horizontal(|ui| {
-                        if ui.button(crate::theme::confirm_text()).clicked() {
+                        if ui.button(crate::theme::confirm_text()).clicked()
+                            || ui.input(|i| i.key_pressed(egui::Key::Enter))
+                        {
                             let name = self.theme_dialog.name_input.trim().to_string();
                             if !name.is_empty() {
                                 match crate::theme::store::rename_user_theme(
@@ -1975,7 +1996,7 @@ impl App {
                 .open(&mut open)
                 .resizable(false)
                 .collapsible(false)
-                .current_pos(screen_center(ctx))
+                .default_pos(screen_center(ctx))
                 .pivot(egui::Align2::CENTER_CENTER)
                 .show(ctx, |ui| {
                     ui.label(format!(
@@ -2015,7 +2036,7 @@ impl App {
                 .open(&mut open)
                 .resizable(false)
                 .collapsible(false)
-                .current_pos(screen_center(ctx))
+                .default_pos(screen_center(ctx))
                 .pivot(egui::Align2::CENTER_CENTER)
                 .show(ctx, |ui| {
                     ui.label(crate::theme::switch_confirm_text());
@@ -2182,7 +2203,7 @@ impl App {
                 egui::Window::new("发现新版本")
                     .resizable(false)
                     .collapsible(false)
-                    .current_pos(screen_center(ctx))
+                    .default_pos(screen_center(ctx))
                     .pivot(egui::Align2::CENTER_CENTER)
                     .show(ctx, |ui| {
                         ui.vertical_centered(|ui| {
@@ -2216,7 +2237,7 @@ impl App {
                 egui::Window::new("正在下载更新")
                     .resizable(false)
                     .collapsible(false)
-                    .current_pos(screen_center(ctx))
+                    .default_pos(screen_center(ctx))
                     .pivot(egui::Align2::CENTER_CENTER)
                     .show(ctx, |ui| {
                         ui.add_space(4.0);
@@ -2230,7 +2251,7 @@ impl App {
                 egui::Window::new("正在校验")
                     .resizable(false)
                     .collapsible(false)
-                    .current_pos(screen_center(ctx))
+                    .default_pos(screen_center(ctx))
                     .pivot(egui::Align2::CENTER_CENTER)
                     .show(ctx, |ui| {
                         ui.label("正在校验文件完整性...");
@@ -2242,7 +2263,7 @@ impl App {
                 egui::Window::new("更新就绪")
                     .resizable(false)
                     .collapsible(false)
-                    .current_pos(screen_center(ctx))
+                    .default_pos(screen_center(ctx))
                     .pivot(egui::Align2::CENTER_CENTER)
                     .show(ctx, |ui| {
                         ui.vertical_centered(|ui| {
@@ -2270,7 +2291,7 @@ impl App {
                 egui::Window::new("更新失败")
                     .resizable(false)
                     .collapsible(false)
-                    .current_pos(screen_center(ctx))
+                    .default_pos(screen_center(ctx))
                     .pivot(egui::Align2::CENTER_CENTER)
                     .show(ctx, |ui| {
                         ui.label(&msg);
@@ -2288,7 +2309,7 @@ impl App {
                 egui::Window::new("检查更新")
                     .resizable(false)
                     .collapsible(false)
-                    .current_pos(screen_center(ctx))
+                    .default_pos(screen_center(ctx))
                     .pivot(egui::Align2::CENTER_CENTER)
                     .show(ctx, |ui| {
                         ui.label("已是最新版本");
@@ -2720,7 +2741,7 @@ impl eframe::App for App {
             egui::Window::new(&self.texts.settings.title)
                 .open(&mut open)
                 .resizable(true)
-                .current_pos(screen_center(ctx))
+                .default_pos(screen_center(ctx))
                 .pivot(egui::Align2::CENTER_CENTER)
                 .default_size([ws.width, ws.height])
                 .show(ctx, |ui| {
@@ -2935,7 +2956,7 @@ impl eframe::App for App {
                 .open(&mut open)
                 .resizable(false)
                 .collapsible(false)
-                .current_pos(screen_center(ctx))
+                .default_pos(screen_center(ctx))
                 .pivot(egui::Align2::CENTER_CENTER)
                 .default_width(380.0)
                 .show(ctx, |ui| {
@@ -3006,7 +3027,7 @@ impl eframe::App for App {
                 .open(&mut open)
                 .resizable(false)
                 .collapsible(false)
-                .current_pos(screen_center(ctx))
+                .default_pos(screen_center(ctx))
                 .pivot(egui::Align2::CENTER_CENTER)
                 .show(ctx, |ui| {
                     ui.label(format!(
@@ -3057,7 +3078,7 @@ impl eframe::App for App {
                 .open(&mut open)
                 .resizable(false)
                 .collapsible(false)
-                .current_pos(screen_center(ctx))
+                .default_pos(screen_center(ctx))
                 .pivot(egui::Align2::CENTER_CENTER)
                 .show(ctx, |ui| {
                     ui.label(&self.texts.close_confirm.terminal_message);
@@ -3093,7 +3114,7 @@ impl eframe::App for App {
                 .open(&mut open)
                 .resizable(false)
                 .collapsible(false)
-                .current_pos(screen_center(ctx))
+                .default_pos(screen_center(ctx))
                 .pivot(egui::Align2::CENTER_CENTER)
                 .show(ctx, |ui| match popup {
                     "set" => {
