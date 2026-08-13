@@ -2681,6 +2681,14 @@ impl eframe::App for App {
                 ui.menu_button(self.texts.menu.language.clone(), |ui| {
                     let current_code = self.settings.language.clone();
                     let languages = self.available_languages.clone();
+                    // Auto-fit: size submenu to the longest language label.
+                    let longest = languages
+                        .iter()
+                        .map(|(_, n)| n.chars().count())
+                        .max()
+                        .unwrap_or(8);
+                    let char_w = ui.fonts(|f| f.row_height(&egui::FontId::proportional(13.0)));
+                    ui.set_min_width((longest as f32) * char_w * 0.55 + 32.0);
                     for (code, display_name) in &languages {
                         let selected = *code == current_code;
                         if ui.selectable_label(selected, display_name).clicked() {
@@ -2728,28 +2736,49 @@ impl eframe::App for App {
                 .pivot(egui::Align2::CENTER_CENTER)
                 .default_size([ws.width, ws.height])
                 .show(ctx, |ui| {
-                    // Left navigation
-                    let nav_width = 140.0;
-                    egui::SidePanel::left("settings_nav")
-                        .resizable(false)
-                        .exact_width(nav_width)
-                        .show_inside(ui, |ui| {
-                            ui.vertical(|ui| {
-                                let nav_items = [
-                                    &self.texts.settings.nav.general,
-                                    &self.texts.settings.nav.themes,
-                                    &self.texts.settings.nav.shortcuts,
-                                    &self.texts.settings.nav.lock,
-                                ];
-                                for (i, label) in nav_items.iter().enumerate() {
-                                    let selected = self.settings_tab == i;
-                                    if ui.selectable_label(selected, label.as_str()).clicked() {
-                                        self.settings_tab = i;
-                                    }
-                                }
-                            });
-                        });
-                    egui::CentralPanel::default().show_inside(ui, |ui| {
+                    // Manual two-column layout: left nav + right content.
+                    // Uses fixed child UIs to avoid SidePanel ambiguity inside
+                    // a Window closure.
+                    let full = ui.available_rect_before_wrap();
+                    let nav_width = 120.0;
+                    let nav_rect =
+                        egui::Rect::from_min_size(full.min, egui::vec2(nav_width, full.height()));
+                    let content_rect = egui::Rect::from_min_size(
+                        egui::pos2(full.min.x + nav_width, full.min.y),
+                        egui::vec2(full.width() - nav_width, full.height()),
+                    );
+
+                    // Left nav
+                    let mut nav_ui = ui.new_child(
+                        egui::UiBuilder::new()
+                            .max_rect(nav_rect)
+                            .layout(egui::Layout::top_down(egui::Align::LEFT)),
+                    );
+                    nav_ui.vertical(|ui| {
+                        ui.add_space(4.0);
+                        let nav_items = [
+                            &self.texts.settings.nav.general,
+                            &self.texts.settings.nav.themes,
+                            &self.texts.settings.nav.shortcuts,
+                            &self.texts.settings.nav.lock,
+                        ];
+                        for (i, label) in nav_items.iter().enumerate() {
+                            let selected = self.settings_tab == i;
+                            let text = format!("  {}", label);
+                            if ui.selectable_label(selected, &text).clicked() {
+                                self.settings_tab = i;
+                            }
+                        }
+                    });
+
+                    // Right content
+                    let mut content_ui = ui.new_child(
+                        egui::UiBuilder::new()
+                            .max_rect(content_rect)
+                            .layout(egui::Layout::top_down(egui::Align::LEFT)),
+                    );
+                    content_ui.vertical(|ui| {
+                        ui.add_space(4.0);
                         match self.settings_tab {
                             0 => {
                                 ui.weak(self.texts.settings.general.scene_info.as_str());
@@ -2782,10 +2811,7 @@ impl eframe::App for App {
                                 let is_builtin =
                                     crate::theme::store::is_embedded_id(&self.theme_edit.id);
                                 if is_builtin {
-                                    ui.colored_label(
-                                        egui::Color32::from_rgb(0xd9, 0xa4, 0x41),
-                                        crate::theme::builtin_readonly_text(),
-                                    );
+                                    ui.weak(crate::theme::builtin_readonly_text());
                                     ui.add_space(4.0);
                                 }
                                 let any_dialog_open = self.theme_dialog.show_copy_dialog
@@ -2795,8 +2821,6 @@ impl eframe::App for App {
                                     || self.theme_dialog.show_switch_confirm;
 
                                 if any_dialog_open {
-                                    // Don't render the editor at all while a dialog is open.
-                                    // This prevents any focus competition.
                                     if let Some(Err(msg)) = &self.theme_message {
                                         ui.colored_label(
                                             egui::Color32::from_rgb(230, 120, 120),
@@ -2921,7 +2945,7 @@ impl eframe::App for App {
                             }
                             _ => {}
                         }
-
+                        ui.add_space(8.0);
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if ui.button(&self.texts.workspace.close).clicked() {
                                 self.settings_edit = self.settings.clone();
@@ -2961,7 +2985,7 @@ impl eframe::App for App {
                                 self.theme_dirty = false;
                             }
                         });
-                    }); // CentralPanel close
+                    });
                 });
             if !open {
                 self.show_settings = false;
