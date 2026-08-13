@@ -983,6 +983,15 @@ struct AltKeyState {
     used_with_other_key: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DialogKind {
+    New,
+    Copy,
+    Rename,
+    Delete,
+    Switch,
+}
+
 pub struct App {
     panels: Vec<Panel>,
     active_panel: usize,
@@ -1831,263 +1840,244 @@ impl App {
     fn show_theme_dialogs(&mut self, ctx: &egui::Context) {
         let themes_root = crate::theme::store::themes_dir(&app_data_dir());
 
-        if self.theme_dialog.show_copy_dialog {
-            let mut open = true;
-            let default_name = format!("{} 副本", self.theme_edit.name);
-            if self.theme_dialog.name_input.is_empty() {
-                self.theme_dialog.name_input = default_name.clone();
-            }
-            egui::Window::new(crate::theme::copy_dialog_title())
-                .open(&mut open)
-                .resizable(false)
-                .collapsible(false)
-                .default_pos(screen_center(ctx))
-                .pivot(egui::Align2::CENTER_CENTER)
-                .order(egui::Order::Foreground)
-                .show(ctx, |ui| {
-                    ui.label(crate::theme::copy_dialog_hint());
-                    let response = ui.add(
-                        egui::TextEdit::singleline(&mut self.theme_dialog.name_input)
-                            .id_salt("theme_copy_name_input"),
-                    );
-                    if !self.theme_dialog.focus_requested {
-                        response.request_focus();
-                        self.theme_dialog.focus_requested = true;
-                    }
-                    ui.horizontal(|ui| {
-                        if ui.button(crate::theme::confirm_text()).clicked()
-                            || ui.input(|i| i.key_pressed(egui::Key::Enter))
-                        {
-                            let name = self.theme_dialog.name_input.trim().to_string();
-                            if !name.is_empty() {
-                                match crate::theme::store::copy_theme(
-                                    &themes_root,
-                                    &self.theme_edit.id,
-                                    &name,
-                                ) {
-                                    Ok(new_theme) => {
-                                        self.refresh_themes(&themes_root);
-                                        self.switch_theme_by_id(ctx, &new_theme.id);
-                                    }
-                                    Err(e) => {
-                                        self.theme_message = Some(Err(e.to_string()));
-                                    }
-                                }
-                                self.theme_dialog.show_copy_dialog = false;
-                                self.theme_dialog.name_input.clear();
-                                self.theme_dialog.focus_requested = false;
-                            }
-                        }
-                        if ui.button(crate::theme::cancel_text()).clicked() {
-                            self.theme_dialog.show_copy_dialog = false;
-                            self.theme_dialog.name_input.clear();
-                            self.theme_dialog.focus_requested = false;
-                        }
-                    });
-                });
-            if !open {
-                self.theme_dialog.show_copy_dialog = false;
-                self.theme_dialog.focus_requested = false;
-            }
+        // Determine which dialog (if any) is open.
+        let active = if self.theme_dialog.show_new_dialog {
+            Some(DialogKind::New)
+        } else if self.theme_dialog.show_copy_dialog {
+            Some(DialogKind::Copy)
+        } else if self.theme_dialog.show_rename_dialog {
+            Some(DialogKind::Rename)
+        } else if self.theme_dialog.show_delete_confirm {
+            Some(DialogKind::Delete)
+        } else if self.theme_dialog.show_switch_confirm {
+            Some(DialogKind::Switch)
+        } else {
+            None
+        };
+
+        let Some(kind) = active else {
+            return;
+        };
+
+        // Pre-populate the name input based on dialog kind.
+        if self.theme_dialog.name_input.is_empty() {
+            self.theme_dialog.name_input = match kind {
+                DialogKind::New => String::new(),
+                DialogKind::Copy => format!("{} 副本", self.theme_edit.name),
+                DialogKind::Rename => self.theme_edit.name.clone(),
+                _ => String::new(),
+            };
         }
 
-        if self.theme_dialog.show_new_dialog {
-            let mut open = true;
-            egui::Window::new(crate::theme::new_dialog_title())
-                .open(&mut open)
-                .resizable(false)
-                .collapsible(false)
-                .default_pos(screen_center(ctx))
-                .pivot(egui::Align2::CENTER_CENTER)
-                .order(egui::Order::Foreground)
-                .show(ctx, |ui| {
-                    ui.label(crate::theme::new_dialog_hint());
-                    let response = ui.add(
-                        egui::TextEdit::singleline(&mut self.theme_dialog.name_input)
-                            .id_salt("theme_new_name_input"),
-                    );
-                    if !self.theme_dialog.focus_requested {
-                        response.request_focus();
-                        self.theme_dialog.focus_requested = true;
-                    }
-                    ui.horizontal(|ui| {
-                        if ui.button(crate::theme::confirm_text()).clicked()
-                            || ui.input(|i| i.key_pressed(egui::Key::Enter))
-                        {
-                            let name = self.theme_dialog.name_input.trim().to_string();
-                            if !name.is_empty() {
-                                let mut new_theme = self.theme_edit.clone();
-                                new_theme.name = name;
-                                new_theme.id =
-                                    crate::theme::store::find_free_id(&themes_root, &new_theme.id);
-                                match crate::theme::store::save_user_theme(&themes_root, &new_theme)
-                                {
-                                    Ok(()) => {
-                                        self.refresh_themes(&themes_root);
-                                        self.switch_theme_by_id(ctx, &new_theme.id);
-                                    }
-                                    Err(e) => {
-                                        self.theme_message = Some(Err(e.to_string()));
-                                    }
-                                }
-                                self.theme_dialog.show_new_dialog = false;
-                                self.theme_dialog.name_input.clear();
-                                self.theme_dialog.focus_requested = false;
-                            }
-                        }
-                        if ui.button(crate::theme::cancel_text()).clicked() {
-                            self.theme_dialog.show_new_dialog = false;
-                            self.theme_dialog.name_input.clear();
-                            self.theme_dialog.focus_requested = false;
-                        }
-                    });
-                });
-            if !open {
-                self.theme_dialog.show_new_dialog = false;
-                self.theme_dialog.focus_requested = false;
-            }
-        }
+        // Dim background scrim (consumes clicks so the settings window is blocked).
+        let screen = ctx.screen_rect();
+        egui::Area::new(egui::Id::new("theme_dialog_scrim"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(screen.min)
+            .movable(false)
+            .interactable(true)
+            .show(ctx, |ui| {
+                let rect = ui.max_rect();
+                ui.painter()
+                    .rect_filled(rect, 0.0, egui::Color32::from_black_alpha(160));
+            });
 
-        if self.theme_dialog.show_rename_dialog {
-            let mut open = true;
-            if self.theme_dialog.name_input.is_empty() {
-                self.theme_dialog.name_input = self.theme_edit.name.clone();
-            }
-            egui::Window::new(crate::theme::rename_dialog_title())
-                .open(&mut open)
-                .resizable(false)
-                .collapsible(false)
-                .default_pos(screen_center(ctx))
-                .pivot(egui::Align2::CENTER_CENTER)
-                .order(egui::Order::Foreground)
-                .show(ctx, |ui| {
-                    ui.label(crate::theme::new_dialog_hint());
-                    let response = ui.add(
-                        egui::TextEdit::singleline(&mut self.theme_dialog.name_input)
-                            .id_salt("theme_rename_name_input"),
-                    );
-                    if !self.theme_dialog.focus_requested {
-                        response.request_focus();
-                        self.theme_dialog.focus_requested = true;
-                    }
-                    ui.horizontal(|ui| {
-                        if ui.button(crate::theme::confirm_text()).clicked()
-                            || ui.input(|i| i.key_pressed(egui::Key::Enter))
-                        {
-                            let name = self.theme_dialog.name_input.trim().to_string();
-                            if !name.is_empty() {
-                                match crate::theme::store::rename_user_theme(
-                                    &themes_root,
-                                    &self.theme_edit.id,
-                                    &name,
-                                ) {
-                                    Ok(updated) => {
-                                        self.theme_edit.name = updated.name.clone();
-                                        self.active_theme.name = updated.name.clone();
-                                        self.refresh_themes(&themes_root);
-                                    }
-                                    Err(e) => {
-                                        self.theme_message = Some(Err(e.to_string()));
-                                    }
-                                }
-                                self.theme_dialog.show_rename_dialog = false;
-                                self.theme_dialog.name_input.clear();
-                                self.theme_dialog.focus_requested = false;
-                            }
-                        }
-                        if ui.button(crate::theme::cancel_text()).clicked() {
-                            self.theme_dialog.show_rename_dialog = false;
-                            self.theme_dialog.name_input.clear();
-                            self.theme_dialog.focus_requested = false;
-                        }
-                    });
-                });
-            if !open {
-                self.theme_dialog.show_rename_dialog = false;
-                self.theme_dialog.focus_requested = false;
-            }
-        }
+        // Dialog box geometry.
+        let box_w = 360.0_f32;
+        let box_h = match kind {
+            DialogKind::New | DialogKind::Copy | DialogKind::Rename => 150.0,
+            DialogKind::Delete => 120.0,
+            DialogKind::Switch => 160.0,
+        };
+        let center = screen.center();
+        let box_pos = egui::pos2(center.x - box_w * 0.5, center.y - box_h * 0.5);
 
-        if self.theme_dialog.show_delete_confirm {
-            let mut open = true;
-            egui::Window::new(crate::theme::delete_confirm_text())
-                .open(&mut open)
-                .resizable(false)
-                .collapsible(false)
-                .default_pos(screen_center(ctx))
-                .pivot(egui::Align2::CENTER_CENTER)
-                .show(ctx, |ui| {
-                    ui.label(format!(
-                        "{}: {}",
-                        crate::theme::delete_confirm_text(),
-                        self.theme_edit.name
-                    ));
-                    ui.horizontal(|ui| {
-                        if ui.button(crate::theme::confirm_text()).clicked() {
-                            match crate::theme::store::delete_user_theme(
-                                &themes_root,
-                                &self.theme_edit.id,
-                            ) {
-                                Ok(()) => {
-                                    self.refresh_themes(&themes_root);
-                                    self.switch_theme_by_id(ctx, "opennex-dark");
-                                }
-                                Err(e) => {
-                                    self.theme_message = Some(Err(e.to_string()));
-                                }
-                            }
-                            self.theme_dialog.show_delete_confirm = false;
-                        }
-                        if ui.button(crate::theme::cancel_text()).clicked() {
-                            self.theme_dialog.show_delete_confirm = false;
-                        }
-                    });
-                });
-            if !open {
-                self.theme_dialog.show_delete_confirm = false;
-            }
-        }
+        let (area_id, input_id_salt, title) = match kind {
+            DialogKind::New => (
+                "theme_new_dialog",
+                "theme_new_name_input",
+                crate::theme::new_dialog_title(),
+            ),
+            DialogKind::Copy => (
+                "theme_copy_dialog",
+                "theme_copy_name_input",
+                crate::theme::copy_dialog_title(),
+            ),
+            DialogKind::Rename => (
+                "theme_rename_dialog",
+                "theme_rename_name_input",
+                crate::theme::rename_dialog_title(),
+            ),
+            DialogKind::Delete => (
+                "theme_delete_dialog",
+                "",
+                crate::theme::delete_confirm_text(),
+            ),
+            DialogKind::Switch => (
+                "theme_switch_dialog",
+                "",
+                crate::theme::switch_confirm_text(),
+            ),
+        };
 
-        if self.theme_dialog.show_switch_confirm {
-            let mut open = true;
-            egui::Window::new(crate::theme::switch_confirm_text())
-                .open(&mut open)
-                .resizable(false)
-                .collapsible(false)
-                .default_pos(screen_center(ctx))
-                .pivot(egui::Align2::CENTER_CENTER)
-                .show(ctx, |ui| {
-                    ui.label(crate::theme::switch_confirm_text());
-                    ui.horizontal(|ui| {
-                        if ui.button(crate::theme::save_and_switch_text()).clicked() {
-                            let themes_root_ = themes_root.clone();
-                            if !crate::theme::store::is_embedded_id(&self.theme_edit.id) {
-                                let _ = crate::theme::store::save_user_theme(
-                                    &themes_root_,
-                                    &self.theme_edit,
+        let input_id = egui::Id::new(input_id_salt);
+        let mut close_after = false;
+        let mut do_action = false;
+
+        egui::Area::new(egui::Id::new(area_id))
+            .order(egui::Order::Foreground)
+            .fixed_pos(box_pos)
+            .movable(false)
+            .interactable(true)
+            .show(ctx, |ui| {
+                let frame = egui::Frame::window(&ctx.style());
+                frame.show(ui, |ui| {
+                    ui.set_min_size(egui::vec2(box_w, box_h));
+                    ui.set_max_size(egui::vec2(box_w, box_h));
+                    ui.vertical(|ui| {
+                        ui.add_space(6.0);
+                        ui.strong(title.clone());
+                        ui.add_space(6.0);
+
+                        match kind {
+                            DialogKind::New | DialogKind::Copy | DialogKind::Rename => {
+                                ui.label(if matches!(kind, DialogKind::Copy) {
+                                    crate::theme::copy_dialog_hint()
+                                } else {
+                                    crate::theme::new_dialog_hint()
+                                });
+                                let response = ui.add(
+                                    egui::TextEdit::singleline(&mut self.theme_dialog.name_input)
+                                        .id(input_id)
+                                        .desired_width(box_w - 24.0),
                                 );
+                                // Match the working workspace-rename pattern: call
+                                // request_focus every frame. egui will remember the
+                                // focus state across frames.
+                                response.request_focus();
                             }
-                            self.active_theme = self.theme_edit.clone();
-                            self.theme_dirty = false;
-                            let target = self.theme_dialog.pending_switch_target.clone();
-                            self.theme_dialog.show_switch_confirm = false;
-                            self.switch_theme_by_id(ctx, &target);
+                            DialogKind::Delete => {
+                                ui.label(format!(
+                                    "{}: {}",
+                                    crate::theme::delete_confirm_text(),
+                                    self.theme_edit.name
+                                ));
+                            }
+                            DialogKind::Switch => {
+                                ui.label(crate::theme::switch_confirm_text());
+                            }
                         }
-                        if ui.button(crate::theme::discard_and_switch_text()).clicked() {
-                            self.theme_edit = self.active_theme.clone();
-                            self.theme_dirty = false;
-                            let target = self.theme_dialog.pending_switch_target.clone();
-                            self.theme_dialog.show_switch_confirm = false;
-                            self.switch_theme_by_id(ctx, &target);
-                        }
-                        if ui.button(crate::theme::cancel_text()).clicked() {
-                            self.theme_dialog.show_switch_confirm = false;
-                        }
+
+                        ui.add_space(8.0);
+                        ui.horizontal(|ui| {
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    if ui.button(crate::theme::confirm_text()).clicked() {
+                                        do_action = true;
+                                    }
+                                    if matches!(
+                                        kind,
+                                        DialogKind::New | DialogKind::Copy | DialogKind::Rename
+                                    ) && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                                    {
+                                        do_action = true;
+                                    }
+                                    if ui.button(crate::theme::cancel_text()).clicked() {
+                                        close_after = true;
+                                    }
+                                },
+                            );
+                        });
                     });
                 });
-            if !open {
-                self.theme_dialog.show_switch_confirm = false;
+            });
+
+        if do_action {
+            match kind {
+                DialogKind::Copy => {
+                    let name = self.theme_dialog.name_input.trim().to_string();
+                    if !name.is_empty() {
+                        match crate::theme::store::copy_theme(
+                            &themes_root,
+                            &self.theme_edit.id,
+                            &name,
+                        ) {
+                            Ok(new_theme) => {
+                                self.refresh_themes(&themes_root);
+                                self.switch_theme_by_id(ctx, &new_theme.id);
+                            }
+                            Err(e) => self.theme_message = Some(Err(e.to_string())),
+                        }
+                        close_after = true;
+                    }
+                }
+                DialogKind::New => {
+                    let name = self.theme_dialog.name_input.trim().to_string();
+                    if !name.is_empty() {
+                        let mut new_theme = self.theme_edit.clone();
+                        new_theme.name = name;
+                        new_theme.id =
+                            crate::theme::store::find_free_id(&themes_root, &new_theme.id);
+                        match crate::theme::store::save_user_theme(&themes_root, &new_theme) {
+                            Ok(()) => {
+                                self.refresh_themes(&themes_root);
+                                self.switch_theme_by_id(ctx, &new_theme.id);
+                            }
+                            Err(e) => self.theme_message = Some(Err(e.to_string())),
+                        }
+                        close_after = true;
+                    }
+                }
+                DialogKind::Rename => {
+                    let name = self.theme_dialog.name_input.trim().to_string();
+                    if !name.is_empty() {
+                        match crate::theme::store::rename_user_theme(
+                            &themes_root,
+                            &self.theme_edit.id,
+                            &name,
+                        ) {
+                            Ok(updated) => {
+                                self.theme_edit.name = updated.name.clone();
+                                self.active_theme.name = updated.name.clone();
+                                self.refresh_themes(&themes_root);
+                            }
+                            Err(e) => self.theme_message = Some(Err(e.to_string())),
+                        }
+                        close_after = true;
+                    }
+                }
+                DialogKind::Delete => {
+                    match crate::theme::store::delete_user_theme(&themes_root, &self.theme_edit.id)
+                    {
+                        Ok(()) => {
+                            self.refresh_themes(&themes_root);
+                            self.switch_theme_by_id(ctx, "opennex-dark");
+                        }
+                        Err(e) => self.theme_message = Some(Err(e.to_string())),
+                    }
+                    close_after = true;
+                }
+                DialogKind::Switch => {
+                    // Switch is handled via separate buttons; not used here.
+                }
             }
+        }
+
+        if close_after {
+            self.close_dialog(kind);
+        }
+    }
+
+    fn close_dialog(&mut self, kind: DialogKind) {
+        self.theme_dialog.name_input.clear();
+        self.theme_dialog.focus_requested = false;
+        match kind {
+            DialogKind::New => self.theme_dialog.show_new_dialog = false,
+            DialogKind::Copy => self.theme_dialog.show_copy_dialog = false,
+            DialogKind::Rename => self.theme_dialog.show_rename_dialog = false,
+            DialogKind::Delete => self.theme_dialog.show_delete_confirm = false,
+            DialogKind::Switch => self.theme_dialog.show_switch_confirm = false,
         }
     }
 
