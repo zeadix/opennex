@@ -4,7 +4,6 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::terminal::TerminalInstance;
-use crate::theme::ThemeMode;
 
 const DEFAULT_FONT_SIZE: f32 = 14.0;
 const MIN_FONT_SIZE: f32 = 8.0;
@@ -20,50 +19,29 @@ struct AppSettings {
     #[serde(default = "default_scrollback")]
     scrollback: usize,
     #[serde(default)]
-    font_size: f32,
-    #[serde(default = "default_font_family")]
-    font_family: String,
-    #[serde(default = "default_cell_spacing")]
-    cell_spacing: f32,
-    #[serde(default = "default_bg")]
-    bg_color: [u8; 3],
-    #[serde(default = "default_fg")]
-    fg_color: [u8; 3],
-    #[serde(default = "default_menu_bg")]
-    menu_bg_color: [u8; 3],
-    #[serde(default = "default_menu_fg")]
-    menu_fg_color: [u8; 3],
-    #[serde(default = "default_menu_font_size")]
-    menu_font_size: f32,
-    #[serde(default)]
     lock_password: String,
-    #[serde(default = "default_lock_color")]
-    lock_color: [u8; 3],
     #[serde(default)]
     settings_window: SettingsWindowState,
     #[serde(default = "default_key_binds")]
     key_binds: HashMap<String, ShortcutBinding>,
     #[serde(default = "default_language")]
     language: String,
-    #[serde(default)]
-    theme: ThemeMode,
-    #[serde(default = "default_terminal_theme")]
-    terminal_theme: String,
+    #[serde(default = "default_theme_id")]
+    theme_id: String,
+    #[serde(default = "default_true")]
+    apply_theme_typography: bool,
 }
 
-fn default_terminal_theme() -> String {
-    "one-dark".into()
+fn default_theme_id() -> String {
+    "opennex-dark".into()
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_language() -> String {
     "zh".into()
-}
-
-fn default_font_family() -> String {
-    "monospace".into()
-}
-fn default_cell_spacing() -> f32 {
-    1.0
 }
 
 fn default_max_history() -> usize {
@@ -71,24 +49,6 @@ fn default_max_history() -> usize {
 }
 fn default_scrollback() -> usize {
     10000
-}
-fn default_bg() -> [u8; 3] {
-    [0, 0, 0]
-}
-fn default_fg() -> [u8; 3] {
-    [255, 255, 255]
-}
-fn default_menu_bg() -> [u8; 3] {
-    [30, 30, 30]
-}
-fn default_menu_fg() -> [u8; 3] {
-    [255, 255, 255]
-}
-fn default_menu_font_size() -> f32 {
-    14.0
-}
-fn default_lock_color() -> [u8; 3] {
-    [30, 30, 60]
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct ShortcutBinding {
@@ -793,7 +753,7 @@ fn load_settings() -> AppSettings {
     let path = settings_path();
     if path.exists() {
         if let Ok(content) = std::fs::read_to_string(&path) {
-            if let Ok(settings) = serde_json::from_str(&content) {
+            if let Ok(settings) = deserialize_settings(&content) {
                 let (settings, changed) = normalize_settings(settings);
                 if changed {
                     let _ = save_settings(&settings);
@@ -803,6 +763,44 @@ fn load_settings() -> AppSettings {
         }
     }
     AppSettings::default()
+}
+
+/// Deserialize settings, migrating legacy visual fields into the theme ID.
+fn deserialize_settings(json: &str) -> Result<AppSettings, serde_json::Error> {
+    #[derive(serde::Deserialize)]
+    struct LegacySettings {
+        #[serde(flatten)]
+        current: AppSettings,
+        #[serde(default)]
+        theme: Option<String>,
+        #[serde(default)]
+        terminal_theme: Option<String>,
+    }
+
+    let legacy: LegacySettings = serde_json::from_str(json)?;
+    let mut settings = legacy.current;
+
+    if settings.theme_id == default_theme_id() {
+        if let Some(terminal_theme) = legacy.terminal_theme.as_deref() {
+            settings.theme_id = migrate_legacy_terminal_theme(terminal_theme);
+        } else if let Some(mode) = legacy.theme.as_deref() {
+            settings.theme_id = match mode {
+                "light" => "opennex-light".into(),
+                _ => "opennex-dark".into(),
+            };
+        }
+    }
+
+    Ok(settings)
+}
+
+fn migrate_legacy_terminal_theme(name: &str) -> String {
+    match name {
+        "solarized" => "solarized-dark".into(),
+        "gruvbox" => "gruvbox-dark".into(),
+        "dracula" => "dracula".into(),
+        _ => "opennex-dark".into(),
+    }
 }
 
 fn normalize_settings(mut settings: AppSettings) -> (AppSettings, bool) {
@@ -878,21 +876,12 @@ impl Default for AppSettings {
         AppSettings {
             max_history: default_max_history(),
             scrollback: default_scrollback(),
-            font_size: 14.0,
-            font_family: default_font_family(),
-            cell_spacing: default_cell_spacing(),
-            bg_color: default_bg(),
-            fg_color: default_fg(),
-            menu_bg_color: default_menu_bg(),
-            menu_fg_color: default_menu_fg(),
-            menu_font_size: default_menu_font_size(),
             lock_password: String::new(),
-            lock_color: default_lock_color(),
             settings_window: SettingsWindowState::default(),
             key_binds: default_key_binds(),
             language: default_language(),
-            theme: ThemeMode::default(),
-            terminal_theme: default_terminal_theme(),
+            theme_id: default_theme_id(),
+            apply_theme_typography: true,
         }
     }
 }
@@ -1050,6 +1039,14 @@ pub struct App {
     available_languages: Vec<(String, String)>,
     workspace_sidebar_visible: bool,
     update_state: crate::updater::UpdateState,
+    active_theme: crate::theme::ThemeDefinition,
+    theme_edit: crate::theme::ThemeDefinition,
+    available_themes: Vec<crate::theme::ThemeDefinition>,
+    theme_message: Option<Result<String, String>>,
+    pending_import_theme: bool,
+    pending_export_theme: bool,
+    theme_dialog: crate::theme::ui::ThemeDialogState,
+    theme_dirty: bool,
 }
 
 struct TerminalData {
@@ -1161,6 +1158,30 @@ impl App {
         let settings = load_settings();
         let ctx = &cc.egui_ctx.clone();
 
+        ensure_data_dir();
+        migrate_file("settings.json");
+        migrate_file("scene.json");
+        migrate_file("history.db");
+        migrate_dir("templates");
+
+        let themes_root = crate::theme::store::themes_dir(&app_data_dir());
+        let _ = std::fs::create_dir_all(&themes_root);
+        let mut available_themes =
+            crate::theme::store::load_user_themes(&themes_root).unwrap_or_default();
+        for embedded in crate::theme::store::embedded_themes().unwrap_or_default() {
+            if !available_themes.iter().any(|t| t.id == embedded.id) {
+                available_themes.push(embedded);
+            }
+        }
+        available_themes.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        let active_theme = crate::theme::store::load_theme(&themes_root, &settings.theme_id)
+            .unwrap_or_else(|err| {
+                log::warn!("failed to load theme '{}': {err}", settings.theme_id);
+                crate::theme::store::default_theme().unwrap_or_else(|err| {
+                    panic!("embedded default theme failed to load: {err}");
+                })
+            });
+
         // Scan system monospace fonts
         let system_fonts = scan_system_fonts();
         // Register all found fonts in egui
@@ -1186,14 +1207,9 @@ impl App {
         }
         ctx.set_fonts(fonts);
 
-        crate::theme::apply_egui_theme(ctx, settings.theme);
+        crate::theme::apply_theme_definition(ctx, &active_theme);
 
         let font_names: Vec<String> = registered_names;
-        ensure_data_dir();
-        migrate_file("settings.json");
-        migrate_file("scene.json");
-        migrate_file("history.db");
-        migrate_dir("templates");
         let db_path = app_data_dir().join("history.db");
         let language = settings.language.clone();
         let available_languages = crate::i18n::scan_available_languages();
@@ -1253,6 +1269,14 @@ impl App {
             available_languages,
             workspace_sidebar_visible: true,
             update_state: crate::updater::UpdateState::Idle,
+            active_theme: active_theme.clone(),
+            theme_edit: active_theme,
+            available_themes,
+            theme_message: None,
+            pending_import_theme: false,
+            pending_export_theme: false,
+            theme_dialog: Default::default(),
+            theme_dirty: false,
         };
 
         let scene_path = scene_path();
@@ -1577,6 +1601,60 @@ impl App {
             self.pending_clear_history = false;
             self.history_db.clear_all();
         }
+        if self.pending_import_theme {
+            self.pending_import_theme = false;
+            let texts = self.texts.settings.appearance.clone();
+            if let Some(path) = rfd::FileDialog::new()
+                .add_filter("OpenNex Theme", &["json"])
+                .pick_file()
+            {
+                let themes_root = crate::theme::store::themes_dir(&app_data_dir());
+                match crate::theme::store::import_theme_file(&themes_root, &path) {
+                    Ok(imported) => {
+                        self.refresh_themes(&themes_root);
+                        let imported_id = imported.id.clone();
+                        self.settings.theme_id = imported_id.clone();
+                        self.settings_edit.theme_id = imported_id;
+                        self.active_theme = imported.clone();
+                        self.theme_edit = imported;
+                        self.theme_dirty = false;
+                        crate::theme::apply_theme_definition(ctx, &self.active_theme);
+                        let _ = save_settings(&self.settings);
+                        self.theme_message = Some(Ok(texts.import_success));
+                    }
+                    Err(err) => {
+                        let msg = if matches!(err, crate::theme::ThemeError::UnsupportedVersion(_))
+                        {
+                            texts.unsupported_version
+                        } else {
+                            texts.invalid_theme
+                        };
+                        log::warn!("theme import failed: {err}");
+                        self.theme_message = Some(Err(msg));
+                    }
+                }
+            }
+        }
+        if self.pending_export_theme {
+            self.pending_export_theme = false;
+            let texts = self.texts.settings.appearance.clone();
+            let file_name = format!("{}.opennex-theme.json", self.theme_edit.id);
+            if let Some(path) = rfd::FileDialog::new()
+                .add_filter("OpenNex Theme", &["json"])
+                .set_file_name(&file_name)
+                .save_file()
+            {
+                match crate::theme::store::export_theme_file(&self.theme_edit, &path) {
+                    Ok(()) => {
+                        self.theme_message = Some(Ok(texts.export_success));
+                    }
+                    Err(err) => {
+                        log::warn!("theme export failed: {err}");
+                        self.theme_message = Some(Err(texts.save_failure));
+                    }
+                }
+            }
+        }
     }
 
     fn add_panel(&mut self, ctx: &egui::Context) {
@@ -1677,11 +1755,312 @@ impl App {
         let _ = save_settings(&self.settings);
     }
 
-    fn switch_theme(&mut self, ctx: &egui::Context, mode: ThemeMode) {
-        self.settings.theme = mode;
-        self.settings_edit.theme = mode;
-        crate::theme::apply_egui_theme(ctx, mode);
+    fn switch_theme_by_id(&mut self, ctx: &egui::Context, id: &str) {
+        let theme = match self.available_themes.iter().find(|t| t.id == id).cloned() {
+            Some(theme) => theme,
+            None => crate::theme::store::default_theme().unwrap_or_else(|err| {
+                log::error!("default theme unavailable: {err}");
+                self.active_theme.clone()
+            }),
+        };
+        self.settings.theme_id = theme.id.clone();
+        self.settings_edit.theme_id = theme.id.clone();
+        self.active_theme = theme.clone();
+        self.theme_edit = theme;
+        self.theme_dirty = false;
+        crate::theme::apply_theme_definition(ctx, &self.active_theme);
         let _ = save_settings(&self.settings);
+    }
+
+    /// Try to switch theme, prompting for unsaved changes if needed.
+    fn try_switch_theme(&mut self, ctx: &egui::Context, id: String) {
+        if self.theme_dirty {
+            self.theme_dialog.pending_switch_target = id;
+            self.theme_dialog.show_switch_confirm = true;
+        } else {
+            self.switch_theme_by_id(ctx, &id);
+        }
+    }
+
+    /// Handle a [`ThemeAction`] produced by the theme editor UI.
+    fn handle_theme_action(
+        &mut self,
+        ctx: &egui::Context,
+        action: crate::theme::ui::ThemeAction,
+        draft: crate::theme::ThemeDefinition,
+    ) {
+        use crate::theme::ui::ThemeAction;
+        match action {
+            ThemeAction::SelectTheme(id) => {
+                self.try_switch_theme(ctx, id);
+            }
+            ThemeAction::NewTheme => {
+                self.theme_dialog.show_new_dialog = true;
+            }
+            ThemeAction::CopyTheme => {
+                self.theme_dialog.show_copy_dialog = true;
+            }
+            ThemeAction::RenameTheme(_) => {
+                self.theme_dialog.show_rename_dialog = true;
+            }
+            ThemeAction::DeleteTheme => {
+                self.theme_dialog.show_delete_confirm = true;
+            }
+            ThemeAction::ImportTheme => {
+                self.pending_import_theme = true;
+            }
+            ThemeAction::ExportTheme => {
+                self.pending_export_theme = true;
+            }
+            ThemeAction::ApplyPaletteTemplate(template_id) => {
+                if let Some(colors) = crate::theme::palettes::terminal_colors(&template_id) {
+                    let mut new_draft = draft;
+                    new_draft.terminal = colors;
+                    self.theme_edit = new_draft;
+                    self.theme_dirty = true;
+                    crate::theme::apply_theme_definition(ctx, &self.theme_edit);
+                }
+            }
+            ThemeAction::DraftModified => {
+                self.theme_edit = draft;
+                self.theme_dirty = true;
+            }
+        }
+    }
+
+    fn show_theme_dialogs(&mut self, ctx: &egui::Context) {
+        let themes_root = crate::theme::store::themes_dir(&app_data_dir());
+
+        if self.theme_dialog.show_copy_dialog {
+            let mut open = true;
+            let default_name = format!("{} 副本", self.theme_edit.name);
+            if self.theme_dialog.name_input.is_empty() {
+                self.theme_dialog.name_input = default_name.clone();
+            }
+            egui::Window::new(crate::theme::copy_dialog_title())
+                .open(&mut open)
+                .resizable(false)
+                .collapsible(false)
+                .current_pos(screen_center(ctx))
+                .pivot(egui::Align2::CENTER_CENTER)
+                .show(ctx, |ui| {
+                    ui.label(crate::theme::copy_dialog_hint());
+                    ui.text_edit_singleline(&mut self.theme_dialog.name_input);
+                    ui.horizontal(|ui| {
+                        if ui.button(crate::theme::confirm_text()).clicked() {
+                            let name = self.theme_dialog.name_input.trim().to_string();
+                            if !name.is_empty() {
+                                match crate::theme::store::copy_theme(
+                                    &themes_root,
+                                    &self.theme_edit.id,
+                                    &name,
+                                ) {
+                                    Ok(new_theme) => {
+                                        self.refresh_themes(&themes_root);
+                                        self.switch_theme_by_id(ctx, &new_theme.id);
+                                    }
+                                    Err(e) => {
+                                        self.theme_message = Some(Err(e.to_string()));
+                                    }
+                                }
+                                self.theme_dialog.show_copy_dialog = false;
+                                self.theme_dialog.name_input.clear();
+                            }
+                        }
+                        if ui.button(crate::theme::cancel_text()).clicked() {
+                            self.theme_dialog.show_copy_dialog = false;
+                            self.theme_dialog.name_input.clear();
+                        }
+                    });
+                });
+            if !open {
+                self.theme_dialog.show_copy_dialog = false;
+            }
+        }
+
+        if self.theme_dialog.show_new_dialog {
+            let mut open = true;
+            egui::Window::new(crate::theme::new_dialog_title())
+                .open(&mut open)
+                .resizable(false)
+                .collapsible(false)
+                .current_pos(screen_center(ctx))
+                .pivot(egui::Align2::CENTER_CENTER)
+                .show(ctx, |ui| {
+                    ui.label(crate::theme::new_dialog_hint());
+                    ui.text_edit_singleline(&mut self.theme_dialog.name_input);
+                    ui.horizontal(|ui| {
+                        if ui.button(crate::theme::confirm_text()).clicked() {
+                            let name = self.theme_dialog.name_input.trim().to_string();
+                            if !name.is_empty() {
+                                let mut new_theme = self.theme_edit.clone();
+                                new_theme.name = name;
+                                new_theme.id =
+                                    crate::theme::store::find_free_id(&themes_root, &new_theme.id);
+                                match crate::theme::store::save_user_theme(&themes_root, &new_theme)
+                                {
+                                    Ok(()) => {
+                                        self.refresh_themes(&themes_root);
+                                        self.switch_theme_by_id(ctx, &new_theme.id);
+                                    }
+                                    Err(e) => {
+                                        self.theme_message = Some(Err(e.to_string()));
+                                    }
+                                }
+                                self.theme_dialog.show_new_dialog = false;
+                                self.theme_dialog.name_input.clear();
+                            }
+                        }
+                        if ui.button(crate::theme::cancel_text()).clicked() {
+                            self.theme_dialog.show_new_dialog = false;
+                            self.theme_dialog.name_input.clear();
+                        }
+                    });
+                });
+            if !open {
+                self.theme_dialog.show_new_dialog = false;
+            }
+        }
+
+        if self.theme_dialog.show_rename_dialog {
+            let mut open = true;
+            if self.theme_dialog.name_input.is_empty() {
+                self.theme_dialog.name_input = self.theme_edit.name.clone();
+            }
+            egui::Window::new(crate::theme::rename_dialog_title())
+                .open(&mut open)
+                .resizable(false)
+                .collapsible(false)
+                .current_pos(screen_center(ctx))
+                .pivot(egui::Align2::CENTER_CENTER)
+                .show(ctx, |ui| {
+                    ui.label(crate::theme::new_dialog_hint());
+                    ui.text_edit_singleline(&mut self.theme_dialog.name_input);
+                    ui.horizontal(|ui| {
+                        if ui.button(crate::theme::confirm_text()).clicked() {
+                            let name = self.theme_dialog.name_input.trim().to_string();
+                            if !name.is_empty() {
+                                match crate::theme::store::rename_user_theme(
+                                    &themes_root,
+                                    &self.theme_edit.id,
+                                    &name,
+                                ) {
+                                    Ok(updated) => {
+                                        self.theme_edit.name = updated.name.clone();
+                                        self.active_theme.name = updated.name.clone();
+                                        self.refresh_themes(&themes_root);
+                                    }
+                                    Err(e) => {
+                                        self.theme_message = Some(Err(e.to_string()));
+                                    }
+                                }
+                                self.theme_dialog.show_rename_dialog = false;
+                                self.theme_dialog.name_input.clear();
+                            }
+                        }
+                        if ui.button(crate::theme::cancel_text()).clicked() {
+                            self.theme_dialog.show_rename_dialog = false;
+                            self.theme_dialog.name_input.clear();
+                        }
+                    });
+                });
+            if !open {
+                self.theme_dialog.show_rename_dialog = false;
+            }
+        }
+
+        if self.theme_dialog.show_delete_confirm {
+            let mut open = true;
+            egui::Window::new(crate::theme::delete_confirm_text())
+                .open(&mut open)
+                .resizable(false)
+                .collapsible(false)
+                .current_pos(screen_center(ctx))
+                .pivot(egui::Align2::CENTER_CENTER)
+                .show(ctx, |ui| {
+                    ui.label(format!(
+                        "{}: {}",
+                        crate::theme::delete_confirm_text(),
+                        self.theme_edit.name
+                    ));
+                    ui.horizontal(|ui| {
+                        if ui.button(crate::theme::confirm_text()).clicked() {
+                            match crate::theme::store::delete_user_theme(
+                                &themes_root,
+                                &self.theme_edit.id,
+                            ) {
+                                Ok(()) => {
+                                    self.refresh_themes(&themes_root);
+                                    self.switch_theme_by_id(ctx, "opennex-dark");
+                                }
+                                Err(e) => {
+                                    self.theme_message = Some(Err(e.to_string()));
+                                }
+                            }
+                            self.theme_dialog.show_delete_confirm = false;
+                        }
+                        if ui.button(crate::theme::cancel_text()).clicked() {
+                            self.theme_dialog.show_delete_confirm = false;
+                        }
+                    });
+                });
+            if !open {
+                self.theme_dialog.show_delete_confirm = false;
+            }
+        }
+
+        if self.theme_dialog.show_switch_confirm {
+            let mut open = true;
+            egui::Window::new(crate::theme::switch_confirm_text())
+                .open(&mut open)
+                .resizable(false)
+                .collapsible(false)
+                .current_pos(screen_center(ctx))
+                .pivot(egui::Align2::CENTER_CENTER)
+                .show(ctx, |ui| {
+                    ui.label(crate::theme::switch_confirm_text());
+                    ui.horizontal(|ui| {
+                        if ui.button(crate::theme::save_and_switch_text()).clicked() {
+                            let themes_root_ = themes_root.clone();
+                            if !crate::theme::store::is_embedded_id(&self.theme_edit.id) {
+                                let _ = crate::theme::store::save_user_theme(
+                                    &themes_root_,
+                                    &self.theme_edit,
+                                );
+                            }
+                            self.active_theme = self.theme_edit.clone();
+                            self.theme_dirty = false;
+                            let target = self.theme_dialog.pending_switch_target.clone();
+                            self.theme_dialog.show_switch_confirm = false;
+                            self.switch_theme_by_id(ctx, &target);
+                        }
+                        if ui.button(crate::theme::discard_and_switch_text()).clicked() {
+                            self.theme_edit = self.active_theme.clone();
+                            self.theme_dirty = false;
+                            let target = self.theme_dialog.pending_switch_target.clone();
+                            self.theme_dialog.show_switch_confirm = false;
+                            self.switch_theme_by_id(ctx, &target);
+                        }
+                        if ui.button(crate::theme::cancel_text()).clicked() {
+                            self.theme_dialog.show_switch_confirm = false;
+                        }
+                    });
+                });
+            if !open {
+                self.theme_dialog.show_switch_confirm = false;
+            }
+        }
+    }
+
+    fn refresh_themes(&mut self, themes_root: &std::path::Path) {
+        let mut themes = crate::theme::store::load_user_themes(themes_root).unwrap_or_default();
+        for embedded in crate::theme::store::embedded_themes().unwrap_or_default() {
+            if !themes.iter().any(|t| t.id == embedded.id) {
+                themes.push(embedded);
+            }
+        }
+        themes.sort_by_key(|t| t.name.to_lowercase());
+        self.available_themes = themes;
     }
 
     fn check_update_manual(&mut self, ctx: &egui::Context) {
@@ -2308,17 +2687,15 @@ impl eframe::App for App {
                     }
                 });
                 ui.menu_button(self.texts.menu.theme.clone(), |ui| {
-                    let current = self.settings.theme;
-                    let light = self.texts.theme.light.clone();
-                    let dark = self.texts.theme.dark.clone();
-                    let modes = [(ThemeMode::Light, light), (ThemeMode::Dark, dark)];
+                    let current = self.settings.theme_id.clone();
+                    let themes = self.available_themes.clone();
                     let check_width = check_column_width(ui);
-                    for (mode, label) in &modes {
-                        let selected = *mode == current;
+                    for theme in &themes {
+                        let selected = theme.id == current;
                         ui.horizontal(|ui| {
                             check_indicator(ui, selected, check_width);
-                            if ui.button(label).clicked() {
-                                self.switch_theme(ctx, *mode);
+                            if ui.button(&theme.name).clicked() {
+                                self.try_switch_theme(ctx, theme.id.clone());
                                 ui.close_menu();
                             }
                         });
@@ -2327,6 +2704,9 @@ impl eframe::App for App {
                 if ui.button(self.texts.view_menu.settings.clone()).clicked() {
                     self.show_settings = true;
                     self.settings_edit = self.settings.clone();
+                    self.theme_edit = self.active_theme.clone();
+                    self.theme_message = None;
+                    self.theme_dirty = false;
                 }
                 if ui.button(self.texts.about.menu_label.clone()).clicked() {
                     self.show_about = true;
@@ -2389,125 +2769,42 @@ impl eframe::App for App {
                             }
                         }
                         1 => {
-                            ui.label(&self.texts.settings.appearance.terminal_section);
-                            ui.horizontal(|ui| {
-                                ui.label(&self.texts.settings.appearance.font_size);
-                                ui.add(
-                                    egui::DragValue::new(&mut self.settings_edit.font_size)
-                                        .range(8.0..=32.0),
+                            let is_builtin =
+                                crate::theme::store::is_embedded_id(&self.theme_edit.id);
+                            if is_builtin {
+                                ui.colored_label(
+                                    egui::Color32::from_rgb(0xd9, 0xa4, 0x41),
+                                    crate::theme::builtin_readonly_text(),
                                 );
-                            });
-                            ui.horizontal(|ui| {
-                                ui.label(&self.texts.settings.appearance.cell_spacing);
-                                ui.add(
-                                    egui::Slider::new(
-                                        &mut self.settings_edit.cell_spacing,
-                                        0.5..=2.0,
-                                    )
-                                    .text("x"),
-                                );
-                            });
-                            ui.horizontal(|ui| {
-                                ui.label(&self.texts.settings.appearance.font_family);
-                                let current = &self.settings_edit.font_family;
-                                egui::ComboBox::from_id_salt("font_family_select")
-                                    .selected_text(if current.is_empty() {
-                                        "monospace"
-                                    } else {
-                                        current
-                                    })
-                                    .show_ui(ui, |ui| {
-                                        ui.selectable_value(
-                                            &mut self.settings_edit.font_family,
-                                            String::new(),
-                                            "monospace (默认)",
-                                        );
-                                        for name in &self.system_fonts {
-                                            ui.selectable_value(
-                                                &mut self.settings_edit.font_family,
-                                                name.clone(),
-                                                name,
-                                            );
-                                        }
-                                    });
-                            });
-                            ui.horizontal(|ui| {
-                                ui.label(&self.texts.settings.appearance.bg_color);
-                                egui::widgets::color_picker::color_edit_button_srgb(
-                                    ui,
-                                    &mut self.settings_edit.bg_color,
-                                );
-                            });
-                            ui.horizontal(|ui| {
-                                ui.label(&self.texts.settings.appearance.fg_color);
-                                egui::widgets::color_picker::color_edit_button_srgb(
-                                    ui,
-                                    &mut self.settings_edit.fg_color,
-                                );
-                            });
-                            ui.horizontal(|ui| {
-                                ui.label(&self.texts.settings.appearance.terminal_theme);
-                                let themes = [
-                                    ("one-dark", "One Dark"),
-                                    ("solarized", "Solarized"),
-                                    ("gruvbox", "Gruvbox"),
-                                    ("dracula", "Dracula"),
-                                ];
-                                let current = &self.settings_edit.terminal_theme.clone();
-                                egui::ComboBox::from_id_salt("terminal_theme_select")
-                                    .selected_text(
-                                        themes
-                                            .iter()
-                                            .find(|(k, _)| *k == current)
-                                            .map(|(_, v)| *v)
-                                            .unwrap_or("One Dark"),
-                                    )
-                                    .show_ui(ui, |ui| {
-                                        for (key, label) in themes {
-                                            if ui
-                                                .selectable_value(
-                                                    &mut self.settings_edit.terminal_theme,
-                                                    key.to_string(),
-                                                    label,
-                                                )
-                                                .clicked()
-                                            {
-                                            }
-                                        }
-                                    });
-                            });
-                            ui.separator();
-                            ui.label(&self.texts.settings.appearance.command_menu_section);
-                            ui.horizontal(|ui| {
-                                ui.label(&self.texts.settings.appearance.menu_bg_color);
-                                egui::widgets::color_picker::color_edit_button_srgb(
-                                    ui,
-                                    &mut self.settings_edit.menu_bg_color,
-                                );
-                            });
-                            ui.horizontal(|ui| {
-                                ui.label(&self.texts.settings.appearance.menu_fg_color);
-                                egui::widgets::color_picker::color_edit_button_srgb(
-                                    ui,
-                                    &mut self.settings_edit.menu_fg_color,
-                                );
-                            });
-                            ui.horizontal(|ui| {
-                                ui.label(&self.texts.settings.appearance.menu_font_size);
-                                ui.add(
-                                    egui::DragValue::new(&mut self.settings_edit.menu_font_size)
-                                        .range(8.0..=32.0),
-                                );
-                            });
-                            ui.separator();
-                            ui.label(&self.texts.settings.lock.lock_section);
-                            ui.horizontal(|ui| {
-                                ui.label(&self.texts.settings.lock.lock_overlay_color);
-                                egui::widgets::color_picker::color_edit_button_srgb(
-                                    ui,
-                                    &mut self.settings_edit.lock_color,
-                                );
-                            });
+                                ui.add_space(4.0);
+                            }
+                            egui::ScrollArea::vertical()
+                                .id_salt("appearance_scroll")
+                                .show(ui, |ui| {
+                                    let mut draft = self.theme_edit.clone();
+                                    let actions = crate::theme::ui::show_theme_section(
+                                        ui,
+                                        &mut draft,
+                                        &self.available_themes,
+                                        is_builtin,
+                                        self.theme_dirty,
+                                        &mut self.theme_dialog,
+                                    );
+                                    for action in actions {
+                                        self.handle_theme_action(ctx, action, draft.clone());
+                                    }
+                                    if draft != self.theme_edit {
+                                        self.theme_edit = draft;
+                                        self.theme_dirty = true;
+                                        crate::theme::apply_theme_definition(ctx, &self.theme_edit);
+                                    }
+                                });
+                            if let Some(Err(msg)) = &self.theme_message {
+                                ui.colored_label(egui::Color32::from_rgb(230, 120, 120), msg);
+                            }
+                            if let Some(Ok(msg)) = &self.theme_message {
+                                ui.colored_label(egui::Color32::from_rgb(120, 200, 130), msg);
+                            }
                         }
                         2 => {
                             ui.label(&self.texts.settings.shortcuts.hint);
@@ -2584,54 +2881,39 @@ impl eframe::App for App {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.button(&self.texts.workspace.close).clicked() {
                             self.settings_edit = self.settings.clone();
+                            self.theme_edit = self.active_theme.clone();
+                            self.theme_message = None;
+                            self.theme_dirty = false;
                             self.binding_recording = None;
+                            crate::theme::apply_theme_definition(ctx, &self.active_theme);
                             self.show_settings = false;
                         }
                         if ui.button(&self.texts.settings.buttons.apply).clicked() {
                             self.settings = self.settings_edit.clone();
                             self.history_db.set_max_entries(self.settings.max_history);
                             let _ = save_settings(&self.settings);
-                            // Apply font size to all terminals
-                            let new_size = self.settings.font_size;
-                            for td in self.terminals.values_mut() {
-                                td.font_size = new_size;
+                            if self.theme_dirty {
+                                let themes_root = crate::theme::store::themes_dir(&app_data_dir());
+                                if !crate::theme::store::is_embedded_id(&self.theme_edit.id) {
+                                    let _ = std::fs::create_dir_all(&themes_root);
+                                    if let Err(err) = crate::theme::store::save_user_theme(
+                                        &themes_root,
+                                        &self.theme_edit,
+                                    ) {
+                                        log::error!("failed to save theme: {err}");
+                                    }
+                                }
                             }
-                            // Apply font family: rebuild FontDefinitions with selected font first
-                            let ctx2 = ctx.clone();
-                            let ff = self.settings.font_family.clone();
-                            let sys_fonts = self.system_fonts.clone();
-                            std::thread::spawn(move || {
-                                let mut fonts = egui::FontDefinitions::default();
-                                egui_phosphor::add_to_fonts(
-                                    &mut fonts,
-                                    egui_phosphor::Variant::Regular,
-                                );
-                                // Register all system fonts
-                                for name in &sys_fonts {
-                                    let paths = scan_system_fonts();
-                                    if let Some((_, path)) = paths.iter().find(|(n, _)| n == name) {
-                                        if let Ok(data) = std::fs::read(path) {
-                                            fonts.font_data.insert(
-                                                name.clone(),
-                                                std::sync::Arc::new(egui::FontData::from_owned(
-                                                    data,
-                                                )),
-                                            );
-                                        }
-                                    }
+                            self.active_theme = self.theme_edit.clone();
+                            self.settings.theme_id = self.active_theme.id.clone();
+                            crate::theme::apply_theme_definition(ctx, &self.active_theme);
+                            if self.settings.apply_theme_typography {
+                                let new_size = self.active_theme.typography.terminal_font_size;
+                                for td in self.terminals.values_mut() {
+                                    td.font_size = new_size;
                                 }
-                                // Load multilingual fonts (CJK, Devanagari, etc.)
-                                load_multilingual_fonts(&mut fonts);
-                                // Put selected font first in Monospace
-                                if let Some(mono) =
-                                    fonts.families.get_mut(&egui::FontFamily::Monospace)
-                                {
-                                    if !ff.is_empty() && fonts.font_data.contains_key(&ff) {
-                                        mono.insert(0, ff.clone());
-                                    }
-                                }
-                                ctx2.set_fonts(fonts);
-                            });
+                            }
+                            self.theme_dirty = false;
                         }
                     });
                 });
@@ -2642,6 +2924,9 @@ impl eframe::App for App {
                 let _ = save_settings(&self.settings);
             }
         }
+
+        // Theme dialog popups
+        self.show_theme_dialogs(ctx);
 
         if self.show_about {
             let mut open = self.show_about;
@@ -3398,11 +3683,7 @@ impl eframe::App for App {
         egui::CentralPanel::default().show(ctx, |ui| {
             let is_locked = self.locked_panels.contains(&self.active_panel);
             if is_locked {
-                let lock_color = egui::Color32::from_rgb(
-                    self.settings.lock_color[0],
-                    self.settings.lock_color[1],
-                    self.settings.lock_color[2],
-                );
+                let lock_color = self.active_theme.app.lock.to_egui();
                 let avail = ui.available_size();
                 let (rect, _) = ui.allocate_exact_size(avail, egui::Sense::click());
                 let painter = ui.painter_at(rect);
@@ -3525,12 +3806,6 @@ impl eframe::App for App {
                             completion: &self.completion,
                             history_db: &self.history_db,
                             max_history: self.settings.max_history,
-                            cell_spacing: self.settings.cell_spacing,
-                            bg_color: self.settings.bg_color,
-                            fg_color: self.settings.fg_color,
-                            menu_bg_color: self.settings.menu_bg_color,
-                            menu_fg_color: self.settings.menu_fg_color,
-                            menu_font_size: self.settings.menu_font_size,
                             pending_close: &mut self.pending_close,
                             pending_close_confirm: &mut self.pending_close_confirm,
                             pending_new_terminal: &mut self.pending_new_terminal,
@@ -3546,7 +3821,11 @@ impl eframe::App for App {
                             focused_terminal: &mut self.focused_terminal,
                             terminal_focus_id: &mut self.terminal_focus_id,
                             show_settings: self.show_settings,
-                            terminal_theme: self.settings.terminal_theme.clone(),
+                            theme: if self.show_settings {
+                                &self.theme_edit
+                            } else {
+                                &self.active_theme
+                            },
                             texts: &self.texts,
                         },
                     );
@@ -3906,6 +4185,36 @@ mod tests {
 
         assert_eq!(state.working_directory, "/tmp");
     }
+
+    #[test]
+    fn legacy_visual_settings_migrate_without_touching_behavior_settings() {
+        let json = r#"{
+            "max_history": 777,
+            "language": "de",
+            "theme": "dark",
+            "terminal_theme": "gruvbox",
+            "bg_color": [1, 2, 3],
+            "fg_color": [4, 5, 6]
+        }"#;
+        let settings = super::deserialize_settings(json).unwrap();
+        assert_eq!(settings.max_history, 777);
+        assert_eq!(settings.language, "de");
+        assert_eq!(settings.theme_id, "gruvbox-dark");
+    }
+
+    #[test]
+    fn legacy_theme_mode_maps_when_no_terminal_theme_present() {
+        let json = r#"{ "theme": "light", "language": "en" }"#;
+        let settings = super::deserialize_settings(json).unwrap();
+        assert_eq!(settings.theme_id, "opennex-light");
+        assert_eq!(settings.language, "en");
+    }
+
+    #[test]
+    fn default_settings_select_embedded_default_theme() {
+        assert_eq!(AppSettings::default().theme_id, "opennex-dark");
+        assert!(AppSettings::default().apply_theme_typography);
+    }
 }
 
 struct TerminalTabViewer<'a> {
@@ -3913,12 +4222,6 @@ struct TerminalTabViewer<'a> {
     completion: &'a crate::completion::CompletionEngine,
     history_db: &'a crate::history_db::HistoryDb,
     max_history: usize,
-    cell_spacing: f32,
-    bg_color: [u8; 3],
-    fg_color: [u8; 3],
-    menu_bg_color: [u8; 3],
-    menu_fg_color: [u8; 3],
-    menu_font_size: f32,
     pending_close: &'a mut Option<String>,
     pending_close_confirm: &'a mut Option<String>,
     pending_new_terminal: &'a mut Option<(usize, SurfaceIndex, NodeIndex)>,
@@ -3934,7 +4237,7 @@ struct TerminalTabViewer<'a> {
     focused_terminal: &'a mut Option<String>,
     terminal_focus_id: &'a mut Option<egui::Id>,
     show_settings: bool,
-    terminal_theme: String,
+    theme: &'a crate::theme::ThemeDefinition,
     texts: &'a crate::i18n::Texts,
 }
 
@@ -4027,17 +4330,7 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
 
             let terminal_view = {
                 let mut tv = egui_term::TerminalView::new(ui, &mut td.instance.backend);
-                let mut palette = crate::terminal_theme::get_theme(&self.terminal_theme);
-                // Override foreground/background with user settings
-                palette.foreground = format!(
-                    "#{:02x}{:02x}{:02x}",
-                    self.fg_color[0], self.fg_color[1], self.fg_color[2]
-                );
-                palette.background = format!(
-                    "#{:02x}{:02x}{:02x}",
-                    self.bg_color[0], self.bg_color[1], self.bg_color[2]
-                );
-                tv = tv.set_theme(egui_term::TerminalTheme::new(Box::new(palette)));
+                tv = tv.set_theme(crate::theme::terminal_theme(self.theme));
                 tv = tv.set_font(egui_term::TerminalFont::new(egui_term::FontSettings {
                     font_type: egui::FontId::monospace(td.font_size),
                 }));
@@ -4118,16 +4411,9 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                         egui::pos2(terminal_response.rect.min.x, list_top),
                         egui::vec2(list_width, list_height),
                     );
-                    let menu_bg = egui::Color32::from_rgb(
-                        self.menu_bg_color[0],
-                        self.menu_bg_color[1],
-                        self.menu_bg_color[2],
-                    );
-                    let menu_fg = egui::Color32::from_rgb(
-                        self.menu_fg_color[0],
-                        self.menu_fg_color[1],
-                        self.menu_fg_color[2],
-                    );
+                    let menu_bg = self.theme.app.panel.to_egui();
+                    let menu_fg = self.theme.app.text.to_egui();
+                    let menu_font_size = self.theme.typography.menu_font_size;
                     ui.painter().rect_filled(list_rect, 0.0, menu_bg);
 
                     let start_idx = if nav.selected >= max_visible {
@@ -4143,7 +4429,7 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                         let y = list_top + i as f32 * cell_h;
                         let is_selected = start_idx + i == nav.selected;
                         let item_bg = if is_selected {
-                            egui::Color32::from_rgba_unmultiplied(60, 60, 80, 255)
+                            self.theme.app.active.to_egui()
                         } else {
                             menu_bg
                         };
@@ -4159,7 +4445,7 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                             egui::pos2(terminal_response.rect.min.x + 4.0, y),
                             egui::Align2::LEFT_TOP,
                             entry,
-                            egui::FontId::monospace(self.menu_font_size),
+                            egui::FontId::monospace(menu_font_size),
                             menu_fg,
                         );
                     }

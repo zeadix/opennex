@@ -88,6 +88,14 @@ pub struct SettingsAppearanceTexts {
     pub menu_bg_color: String,
     pub menu_fg_color: String,
     pub menu_font_size: String,
+    pub apply_theme_typography: String,
+    pub import_theme: String,
+    pub export_theme: String,
+    pub import_success: String,
+    pub export_success: String,
+    pub invalid_theme: String,
+    pub unsupported_version: String,
+    pub save_failure: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -275,6 +283,14 @@ impl Texts {
                     menu_bg_color: "背景色:".into(),
                     menu_fg_color: "文字色:".into(),
                     menu_font_size: "字号:".into(),
+                    apply_theme_typography: "应用主题字体和字号".into(),
+                    import_theme: "导入主题".into(),
+                    export_theme: "导出主题".into(),
+                    import_success: "主题已导入".into(),
+                    export_success: "主题已导出".into(),
+                    invalid_theme: "无效的主题文件".into(),
+                    unsupported_version: "不支持的主题格式版本".into(),
+                    save_failure: "保存主题失败".into(),
                 },
                 shortcuts: SettingsShortcutsTexts {
                     heading: "快捷键".into(),

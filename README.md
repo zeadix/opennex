@@ -40,7 +40,7 @@ Password-protect workspaces against unauthorized access. One-click lock/unlock w
 
 - **命令历史**：SQLite 存储，自动去重置顶，按终端会话隔离
 - **多语言支持**：中文、繁体中文、英语、德语、法语、日语、意大利语、韩语、印地语
-- **主题切换**：浅色/深色双主题，运行时即时切换
+- **视觉主题系统**：5 套内嵌主题（OpenNex Dark/Light、Solarized、Gruvbox、Dracula），统一应用界面与终端 ANSI 配色，支持自定义、导入导出 `.opennex-theme.json`，跨平台通用
 - **跨平台 CWD 跟踪**：OSC shell 集成（bash/zsh/powershell），重启后恢复终端工作目录
 - **在线自动更新**：检测新版本 → 一键下载 → SHA256 校验 → 自动替换重启
 
