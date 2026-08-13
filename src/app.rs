@@ -2386,11 +2386,18 @@ impl App {
 
 impl eframe::App for App {
     fn raw_input_hook(&mut self, ctx: &egui::Context, _raw_input: &mut egui::RawInput) {
+        let any_theme_dialog = self.theme_dialog.show_copy_dialog
+            || self.theme_dialog.show_new_dialog
+            || self.theme_dialog.show_rename_dialog
+            || self.theme_dialog.show_delete_confirm
+            || self.theme_dialog.show_switch_confirm;
         if let Some(id) = self.terminal_focus_id {
             if terminal_focus_lock_allowed(
                 self.renaming_panel.is_some(),
                 self.renaming_terminal.is_some(),
-            ) {
+            ) && !any_theme_dialog
+                && !self.show_settings
+            {
                 ctx.memory_mut(|memory| {
                     memory.set_focus_lock_filter(id, egui_term::terminal_focus_event_filter())
                 });
@@ -2822,36 +2829,47 @@ impl eframe::App for App {
                                 || self.theme_dialog.show_rename_dialog
                                 || self.theme_dialog.show_delete_confirm
                                 || self.theme_dialog.show_switch_confirm;
-                            egui::ScrollArea::vertical()
-                                .id_salt("appearance_scroll")
-                                .show(ui, |ui| {
-                                    let mut draft = self.theme_edit.clone();
-                                    let actions = if any_dialog_open {
-                                        Vec::new()
-                                    } else {
-                                        crate::theme::ui::show_theme_section(
+
+                            if any_dialog_open {
+                                // Don't render the editor at all while a dialog is open.
+                                // This prevents any focus competition.
+                                if let Some(Err(msg)) = &self.theme_message {
+                                    ui.colored_label(egui::Color32::from_rgb(230, 120, 120), msg);
+                                }
+                                if let Some(Ok(msg)) = &self.theme_message {
+                                    ui.colored_label(egui::Color32::from_rgb(120, 200, 130), msg);
+                                }
+                            } else {
+                                egui::ScrollArea::vertical()
+                                    .id_salt("appearance_scroll")
+                                    .show(ui, |ui| {
+                                        let mut draft = self.theme_edit.clone();
+                                        let actions = crate::theme::ui::show_theme_section(
                                             ui,
                                             &mut draft,
                                             &self.available_themes,
                                             is_builtin,
                                             self.theme_dirty,
                                             &mut self.theme_dialog,
-                                        )
-                                    };
-                                    for action in actions {
-                                        self.handle_theme_action(ctx, action, draft.clone());
-                                    }
-                                    if draft != self.theme_edit {
-                                        self.theme_edit = draft;
-                                        self.theme_dirty = true;
-                                        crate::theme::apply_theme_definition(ctx, &self.theme_edit);
-                                    }
-                                });
-                            if let Some(Err(msg)) = &self.theme_message {
-                                ui.colored_label(egui::Color32::from_rgb(230, 120, 120), msg);
-                            }
-                            if let Some(Ok(msg)) = &self.theme_message {
-                                ui.colored_label(egui::Color32::from_rgb(120, 200, 130), msg);
+                                        );
+                                        for action in actions {
+                                            self.handle_theme_action(ctx, action, draft.clone());
+                                        }
+                                        if draft != self.theme_edit {
+                                            self.theme_edit = draft;
+                                            self.theme_dirty = true;
+                                            crate::theme::apply_theme_definition(
+                                                ctx,
+                                                &self.theme_edit,
+                                            );
+                                        }
+                                    });
+                                if let Some(Err(msg)) = &self.theme_message {
+                                    ui.colored_label(egui::Color32::from_rgb(230, 120, 120), msg);
+                                }
+                                if let Some(Ok(msg)) = &self.theme_message {
+                                    ui.colored_label(egui::Color32::from_rgb(120, 200, 130), msg);
+                                }
                             }
                         }
                         2 => {
