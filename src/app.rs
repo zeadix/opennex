@@ -3159,22 +3159,31 @@ impl eframe::App for App {
                             ui.add(
                                 egui::ProgressBar::new(p)
                                     .show_percentage()
-                                    .desired_width(ui.available_width()),
+                                    .desired_width(ui.available_width())
+                                    .corner_radius(egui::CornerRadius::ZERO),
                             );
                         }
                     }
 
                     ui.vertical_centered(|ui| {
                         ui.horizontal(|ui| {
+                            let is_checking_only =
+                                matches!(self.update_state, crate::updater::UpdateState::Checking);
+                            // Show the spinner only while waiting for the
+                            // check response, not during the download
+                            // itself (where the progress bar is the cue).
+                            if is_checking_only {
+                                ui.spinner();
+                            }
+                            // The button stays disabled for the entire
+                            // busy window (check + download + verify) so
+                            // the user can't double-trigger.
                             let is_busy = matches!(
                                 self.update_state,
                                 crate::updater::UpdateState::Checking
                                     | crate::updater::UpdateState::Downloading(_)
                                     | crate::updater::UpdateState::Verifying
                             );
-                            if is_busy {
-                                ui.spinner();
-                            }
                             // The primary action button changes label
                             // depending on the current state.
                             enum PrimaryAction {
