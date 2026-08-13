@@ -4037,7 +4037,7 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                     "#{:02x}{:02x}{:02x}",
                     self.bg_color[0], self.bg_color[1], self.bg_color[2]
                 );
-                tv = tv.set_theme(egui_term::TerminalTheme::new(Box::new(palette)));
+                tv = tv.set_theme(egui_term::TerminalTheme::from_palette(Box::new(palette)));
                 tv = tv.set_font(egui_term::TerminalFont::new(egui_term::FontSettings {
                     font_type: egui::FontId::monospace(td.font_size),
                 }));

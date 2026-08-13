@@ -4,6 +4,7 @@ use alacritty_terminal::term::point_to_viewport;
 use alacritty_terminal::term::TermMode;
 use alacritty_terminal::vte::ansi::{Color, NamedColor};
 use egui::epaint::RectShape;
+use egui::Color32;
 use egui::Modifiers;
 use egui::MouseWheelUnit;
 use egui::Shape;
@@ -393,9 +394,7 @@ impl<'a> TerminalView<'a> {
                 fg = fg.linear_multiply(0.7);
             }
 
-            if is_inverse || is_selected {
-                std::mem::swap(&mut fg, &mut bg);
-            }
+            let (fg, bg) = resolved_cell_colors(&self.theme, fg, bg, is_inverse, is_selected);
 
             if global_bg != bg {
                 shapes.push(Shape::Rect(RectShape::filled(
@@ -415,11 +414,13 @@ impl<'a> TerminalView<'a> {
                         Pos2::new(x, underline_height),
                         Pos2::new(x + draw_w, underline_height),
                     ],
-                    stroke: Stroke::new(cell_height * 0.15, fg).into(),
+                    stroke: Stroke::new(cell_height * 0.15, self.theme.link_color()).into(),
                 });
             }
 
             if indexed.c != ' ' && indexed.c != '\t' {
+                let mut fg = fg;
+                let mut bg = bg;
                 if content.grid.cursor.point == indexed.point
                     && is_app_cursor_mode
                 {
@@ -450,20 +451,41 @@ impl<'a> TerminalView<'a> {
                 {
                     let cx = layout_min.x + (cell_width * vp.column.0 as f32);
                     let cy = layout_min.y + (cell_height * vp.line as f32);
-                    let cursor_color = self.theme.get_color(content.cursor.fg);
                     shapes.push(Shape::Rect(RectShape::filled(
                         Rect::from_min_size(
                             Pos2::new(cx, cy),
                             Vec2::new(cell_width, cell_height),
                         ),
                         CornerRadius::default(),
-                        cursor_color,
+                        self.theme.cursor_color(),
                     )));
                 }
             }
         }
 
         painter.extend(shapes);
+    }
+}
+
+/// Resolve foreground/background for a cell given inverse/selection state.
+///
+/// Inverse swaps the cell's own colors (ANSI reverse video). Selection uses
+/// the theme's selection colors rather than swapping, so selected text stays
+/// readable across palettes.
+fn resolved_cell_colors(
+    theme: &TerminalTheme,
+    mut fg: Color32,
+    mut bg: Color32,
+    inverse: bool,
+    selected: bool,
+) -> (Color32, Color32) {
+    if inverse {
+        std::mem::swap(&mut fg, &mut bg);
+    }
+    if selected {
+        (theme.selection_text_color(), theme.selection_bg_color())
+    } else {
+        (fg, bg)
     }
 }
 

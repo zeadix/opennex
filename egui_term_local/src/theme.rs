@@ -70,8 +70,30 @@ impl Default for ColorPalette {
 }
 
 #[derive(Debug, Clone)]
+pub struct TerminalVisualColors {
+    pub cursor: Color32,
+    pub selection_bg: Color32,
+    pub selection_text: Color32,
+    pub link: Color32,
+}
+
+impl Default for TerminalVisualColors {
+    fn default() -> Self {
+        let palette = ColorPalette::default();
+        TerminalVisualColors {
+            cursor: hex_to_color(&palette.foreground).unwrap_or(Color32::WHITE),
+            selection_bg: hex_to_color(&palette.bright_black)
+                .unwrap_or(Color32::from_rgb(0x33, 0x38, 0x40)),
+            selection_text: hex_to_color(&palette.foreground).unwrap_or(Color32::WHITE),
+            link: hex_to_color(&palette.blue).unwrap_or(Color32::from_rgb(0x61, 0xaf, 0xef)),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct TerminalTheme {
     palette: Box<ColorPalette>,
+    visual: TerminalVisualColors,
     ansi256_colors: HashMap<u8, Color32>,
 }
 
@@ -79,17 +101,47 @@ impl Default for TerminalTheme {
     fn default() -> Self {
         Self {
             palette: Box::<ColorPalette>::default(),
+            visual: TerminalVisualColors::default(),
             ansi256_colors: TerminalTheme::get_ansi256_colors(),
         }
     }
 }
 
 impl TerminalTheme {
-    pub fn new(palette: Box<ColorPalette>) -> Self {
+    pub fn new(palette: Box<ColorPalette>, visual: TerminalVisualColors) -> Self {
         Self {
             palette,
+            visual,
             ansi256_colors: TerminalTheme::get_ansi256_colors(),
         }
+    }
+
+    /// Convenience constructor that derives visual colors from the palette.
+    pub fn from_palette(palette: Box<ColorPalette>) -> Self {
+        let visual = TerminalVisualColors {
+            cursor: hex_to_color(&palette.foreground).unwrap_or(Color32::WHITE),
+            selection_bg: hex_to_color(&palette.bright_black)
+                .unwrap_or(Color32::from_rgb(0x33, 0x38, 0x40)),
+            selection_text: hex_to_color(&palette.foreground).unwrap_or(Color32::WHITE),
+            link: hex_to_color(&palette.blue).unwrap_or(Color32::from_rgb(0x61, 0xaf, 0xef)),
+        };
+        Self::new(palette, visual)
+    }
+
+    pub fn cursor_color(&self) -> Color32 {
+        self.visual.cursor
+    }
+
+    pub fn selection_bg_color(&self) -> Color32 {
+        self.visual.selection_bg
+    }
+
+    pub fn selection_text_color(&self) -> Color32 {
+        self.visual.selection_text
+    }
+
+    pub fn link_color(&self) -> Color32 {
+        self.visual.link
     }
 
     fn get_ansi256_colors() -> HashMap<u8, Color32> {
@@ -215,4 +267,36 @@ fn hex_to_color(hex: &str) -> anyhow::Result<Color32> {
     let b = u8::from_str_radix(&hex[5..7], 16)?;
 
     Ok(Color32::from_rgb(r, g, b))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn terminal_theme_exposes_visual_colors() {
+        let theme = TerminalTheme::new(
+            Box::new(ColorPalette::default()),
+            TerminalVisualColors {
+                cursor: Color32::from_rgb(1, 2, 3),
+                selection_bg: Color32::from_rgb(4, 5, 6),
+                selection_text: Color32::from_rgb(7, 8, 9),
+                link: Color32::from_rgb(10, 11, 12),
+            },
+        );
+        assert_eq!(theme.cursor_color(), Color32::from_rgb(1, 2, 3));
+        assert_eq!(theme.selection_bg_color(), Color32::from_rgb(4, 5, 6));
+        assert_eq!(theme.selection_text_color(), Color32::from_rgb(7, 8, 9));
+        assert_eq!(theme.link_color(), Color32::from_rgb(10, 11, 12));
+    }
+
+    #[test]
+    fn from_palette_derives_consistent_visual_colors() {
+        let mut palette = ColorPalette::default();
+        palette.foreground = "#abcdef".into();
+        palette.blue = "#112233".into();
+        let theme = TerminalTheme::from_palette(Box::new(palette));
+        assert_eq!(theme.cursor_color(), Color32::from_rgb(0xab, 0xcd, 0xef));
+        assert_eq!(theme.link_color(), Color32::from_rgb(0x11, 0x22, 0x33));
+    }
 }
