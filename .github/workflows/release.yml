@@ -36,27 +36,24 @@ jobs:
         run: |
           7z a "opennex-${{ steps.version.outputs.VERSION }}-windows-x86_64.zip" "./target/release/opennex.exe"
 
-      - name: Install cargo-wix
-        run: cargo install cargo-wix
-
-      - name: Generate WiX template if missing
-        shell: bash
-        run: |
-          mkdir -p wix
-          if [ ! -f wix/main.wxs ]; then
-            cargo wix init --output wix/main.wxs || echo "WiX init failed, skipping MSI"
-          fi
+      - name: Install WiX Toolset
+        uses: Minionguyjpro/WixToolset-Action@v1
+        with:
+          wix-version: '3.14'
 
       - name: Build MSI installer
-        continue-on-error: true
         id: msi
         shell: bash
         run: |
           if [ ! -f wix/main.wxs ]; then
-            echo "WiX template not found, skipping MSI"
-            exit 0
+            echo "::error::wix/main.wxs missing — MSI cannot be built without the template."
+            exit 1
           fi
-          cargo wix --output "opennex-${{ steps.version.outputs.VERSION }}-windows-x86_64.msi" -p Cargo.toml
+          for f in wix candle light; do command -v $f >/dev/null 2>&1 || { echo "::error::$f not found in PATH"; exit 1; }; done
+          candle -ext WixUIExtension -out "opennex-${GITHUB_REF_NAME}-windows-x86_64.wixobj" wix/main.wxs -dSourcePath="$(pwd)/target/release/opennex.exe"
+          light -ext WixUIExtension -cultures:en-US \
+            -out "opennex-${GITHUB_REF_NAME}-windows-x86_64.msi" \
+            "opennex-${GITHUB_REF_NAME}-windows-x86_64.wixobj"
 
       - name: Compute SHA256
         shell: bash
@@ -69,6 +66,9 @@ jobs:
           fi
           if [ -f "opennex-${{ steps.version.outputs.VERSION }}-windows-x86_64.msi" ]; then
             sha256sum "opennex-${{ steps.version.outputs.VERSION }}-windows-x86_64.msi" | awk '{print $1}' > windows-msi.sha256
+          else
+            echo "::error::msi file not generated — MSI is a required release artifact."
+            exit 1
           fi
 
       - name: Upload artifacts
@@ -233,11 +233,28 @@ jobs:
             done
           done
 
+      - name: Generate changelog from git history
+        id: changelog
+        shell: bash
+        run: |
+          PREV_TAG=$(git tag --sort=-v:refname | grep -v "${GITHUB_REF_NAME}" | head -1)
+          if [ -n "$PREV_TAG" ]; then
+            CHANGELOG=$(git log --no-merges --pretty=format:'%s' "$PREV_TAG..${GITHUB_REF_NAME}" | head -30)
+          else
+            CHANGELOG="首次发布"
+          fi
+          {
+            echo "changelog<<EOF"
+            echo "$CHANGELOG"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Generate latest.json with version history
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           VERSION: ${{ steps.version.outputs.VERSION }}
+          CHANGELOG: ${{ steps.changelog.outputs.changelog }}
           R2_PUBLIC_URL: ${{ env.R2_PUBLIC_URL }}
           R2_BUCKET: ${{ env.R2_BUCKET }}
         run: |
@@ -299,9 +316,10 @@ jobs:
 
           # Build new latest.json with history using Python
           python3 << PYEOF
-          import json
+          import json, os
 
           current = json.loads('''${CURRENT_ENTRY}''')
+          current["changelog"] = os.environ.get("CHANGELOG", "")
           old_history = json.loads('''${OLD_HISTORY}''')
 
           # Build new history: current version first, then old ones, max 3

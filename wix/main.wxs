@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*"
+           Name="OpenNex"
+           Version="!(bind.fileVersion.opennex.exe)"
+           Manufacturer="OpenNex"
+           Language="1033"
+           UpgradeCode="11111111-2222-3333-4444-555555555555">
+    <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" />
+    <MajorUpgrade DowngradeErrorMessage="已安装更新版本。" />
+    <MediaTemplate EmbedCab="yes" />
+    <Feature Id="ProductFeature" Title="OpenNex" Level="1">
+      <ComponentGroupRef Id="ProductComponents" />
+    </Feature>
+  </Product>
+  <Fragment>
+    <Directory Id="INSTALLDIR" Name="OpenNex" />
+    <ComponentGroup Id="ProductComponents" Directory="INSTALLDIR">
+      <Component Id="MainExecutable" Guid="*">
+        <File Id="opennex.exe" Name="opennex.exe" Source="$(var.SourcePath)" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+</Wix>
