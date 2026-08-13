@@ -265,15 +265,23 @@ impl TerminalTheme {
 }
 
 fn hex_to_color(hex: &str) -> anyhow::Result<Color32> {
-    if hex.len() != 7 {
-        return Err(anyhow::format_err!("input string is in non valid format"));
+    let stripped = hex.strip_prefix('#').unwrap_or(hex);
+    match stripped.len() {
+        6 => {
+            let r = u8::from_str_radix(&stripped[0..2], 16)?;
+            let g = u8::from_str_radix(&stripped[2..4], 16)?;
+            let b = u8::from_str_radix(&stripped[4..6], 16)?;
+            Ok(Color32::from_rgb(r, g, b))
+        },
+        8 => {
+            let r = u8::from_str_radix(&stripped[0..2], 16)?;
+            let g = u8::from_str_radix(&stripped[2..4], 16)?;
+            let b = u8::from_str_radix(&stripped[4..6], 16)?;
+            let a = u8::from_str_radix(&stripped[6..8], 16)?;
+            Ok(Color32::from_rgba_unmultiplied(r, g, b, a))
+        },
+        _ => Err(anyhow::format_err!("input string is in non valid format")),
     }
-
-    let r = u8::from_str_radix(&hex[1..3], 16)?;
-    let g = u8::from_str_radix(&hex[3..5], 16)?;
-    let b = u8::from_str_radix(&hex[5..7], 16)?;
-
-    Ok(Color32::from_rgb(r, g, b))
 }
 
 #[cfg(test)]

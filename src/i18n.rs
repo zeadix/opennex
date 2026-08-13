@@ -76,23 +76,41 @@ pub struct SettingsGeneralTexts {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SettingsAppearanceTexts {
+    #[serde(default)]
     pub heading: String,
+    #[serde(default)]
     pub terminal_section: String,
+    #[serde(default)]
     pub font_size: String,
+    #[serde(default)]
     pub cell_spacing: String,
+    #[serde(default)]
     pub font_family: String,
+    #[serde(default)]
     pub bg_color: String,
+    #[serde(default)]
     pub fg_color: String,
+    #[serde(default)]
     pub terminal_theme: String,
+    #[serde(default)]
     pub command_menu_section: String,
+    #[serde(default)]
     pub menu_bg_color: String,
+    #[serde(default)]
     pub menu_fg_color: String,
+    #[serde(default)]
     pub menu_font_size: String,
+    #[serde(default)]
     pub apply_theme_typography: String,
+    #[serde(default)]
     pub import_theme: String,
+    #[serde(default)]
     pub export_theme: String,
+    #[serde(default)]
     pub import_success: String,
+    #[serde(default)]
     pub export_success: String,
+    #[serde(default)]
     pub invalid_theme: String,
     pub unsupported_version: String,
     pub save_failure: String,
