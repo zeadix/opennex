@@ -1045,6 +1045,8 @@ pub struct App {
     theme_message: Option<Result<String, String>>,
     pending_import_theme: bool,
     pending_export_theme: bool,
+    theme_dialog: crate::theme::ui::ThemeDialogState,
+    theme_dirty: bool,
 }
 
 struct TerminalData {
@@ -1273,6 +1275,8 @@ impl App {
             theme_message: None,
             pending_import_theme: false,
             pending_export_theme: false,
+            theme_dialog: Default::default(),
+            theme_dirty: false,
         };
 
         let scene_path = scene_path();
@@ -1607,20 +1611,13 @@ impl App {
                 let themes_root = crate::theme::store::themes_dir(&app_data_dir());
                 match crate::theme::store::import_theme_file(&themes_root, &path) {
                     Ok(imported) => {
-                        self.available_themes =
-                            crate::theme::store::load_user_themes(&themes_root).unwrap_or_default();
-                        for embedded in crate::theme::store::embedded_themes().unwrap_or_default() {
-                            if !self.available_themes.iter().any(|t| t.id == embedded.id) {
-                                self.available_themes.push(embedded);
-                            }
-                        }
-                        self.available_themes
-                            .sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+                        self.refresh_themes(&themes_root);
                         let imported_id = imported.id.clone();
                         self.settings.theme_id = imported_id.clone();
                         self.settings_edit.theme_id = imported_id;
                         self.active_theme = imported.clone();
                         self.theme_edit = imported;
+                        self.theme_dirty = false;
                         crate::theme::apply_theme_definition(ctx, &self.active_theme);
                         let _ = save_settings(&self.settings);
                         self.theme_message = Some(Ok(texts.import_success));
@@ -1770,8 +1767,300 @@ impl App {
         self.settings_edit.theme_id = theme.id.clone();
         self.active_theme = theme.clone();
         self.theme_edit = theme;
+        self.theme_dirty = false;
         crate::theme::apply_theme_definition(ctx, &self.active_theme);
         let _ = save_settings(&self.settings);
+    }
+
+    /// Try to switch theme, prompting for unsaved changes if needed.
+    fn try_switch_theme(&mut self, ctx: &egui::Context, id: String) {
+        if self.theme_dirty {
+            self.theme_dialog.pending_switch_target = id;
+            self.theme_dialog.show_switch_confirm = true;
+        } else {
+            self.switch_theme_by_id(ctx, &id);
+        }
+    }
+
+    /// Handle a [`ThemeAction`] produced by the theme editor UI.
+    fn handle_theme_action(
+        &mut self,
+        ctx: &egui::Context,
+        action: crate::theme::ui::ThemeAction,
+        draft: crate::theme::ThemeDefinition,
+    ) {
+        use crate::theme::ui::ThemeAction;
+        match action {
+            ThemeAction::SelectTheme(id) => {
+                self.try_switch_theme(ctx, id);
+            }
+            ThemeAction::NewTheme => {
+                self.theme_dialog.show_new_dialog = true;
+            }
+            ThemeAction::CopyTheme => {
+                self.theme_dialog.show_copy_dialog = true;
+            }
+            ThemeAction::RenameTheme(_) => {
+                self.theme_dialog.show_rename_dialog = true;
+            }
+            ThemeAction::DeleteTheme => {
+                self.theme_dialog.show_delete_confirm = true;
+            }
+            ThemeAction::ImportTheme => {
+                self.pending_import_theme = true;
+            }
+            ThemeAction::ExportTheme => {
+                self.pending_export_theme = true;
+            }
+            ThemeAction::ApplyPaletteTemplate(template_id) => {
+                if let Some(colors) = crate::theme::palettes::terminal_colors(&template_id) {
+                    let mut new_draft = draft;
+                    new_draft.terminal = colors;
+                    self.theme_edit = new_draft;
+                    self.theme_dirty = true;
+                    crate::theme::apply_theme_definition(ctx, &self.theme_edit);
+                }
+            }
+            ThemeAction::DraftModified => {
+                self.theme_edit = draft;
+                self.theme_dirty = true;
+            }
+        }
+    }
+
+    fn show_theme_dialogs(&mut self, ctx: &egui::Context) {
+        let themes_root = crate::theme::store::themes_dir(&app_data_dir());
+
+        if self.theme_dialog.show_copy_dialog {
+            let mut open = true;
+            let default_name = format!("{} 副本", self.theme_edit.name);
+            if self.theme_dialog.name_input.is_empty() {
+                self.theme_dialog.name_input = default_name.clone();
+            }
+            egui::Window::new(crate::theme::copy_dialog_title())
+                .open(&mut open)
+                .resizable(false)
+                .collapsible(false)
+                .current_pos(screen_center(ctx))
+                .pivot(egui::Align2::CENTER_CENTER)
+                .show(ctx, |ui| {
+                    ui.label(crate::theme::copy_dialog_hint());
+                    ui.text_edit_singleline(&mut self.theme_dialog.name_input);
+                    ui.horizontal(|ui| {
+                        if ui.button(crate::theme::confirm_text()).clicked() {
+                            let name = self.theme_dialog.name_input.trim().to_string();
+                            if !name.is_empty() {
+                                match crate::theme::store::copy_theme(
+                                    &themes_root,
+                                    &self.theme_edit.id,
+                                    &name,
+                                ) {
+                                    Ok(new_theme) => {
+                                        self.refresh_themes(&themes_root);
+                                        self.switch_theme_by_id(ctx, &new_theme.id);
+                                    }
+                                    Err(e) => {
+                                        self.theme_message = Some(Err(e.to_string()));
+                                    }
+                                }
+                                self.theme_dialog.show_copy_dialog = false;
+                                self.theme_dialog.name_input.clear();
+                            }
+                        }
+                        if ui.button(crate::theme::cancel_text()).clicked() {
+                            self.theme_dialog.show_copy_dialog = false;
+                            self.theme_dialog.name_input.clear();
+                        }
+                    });
+                });
+            if !open {
+                self.theme_dialog.show_copy_dialog = false;
+            }
+        }
+
+        if self.theme_dialog.show_new_dialog {
+            let mut open = true;
+            egui::Window::new(crate::theme::new_dialog_title())
+                .open(&mut open)
+                .resizable(false)
+                .collapsible(false)
+                .current_pos(screen_center(ctx))
+                .pivot(egui::Align2::CENTER_CENTER)
+                .show(ctx, |ui| {
+                    ui.label(crate::theme::new_dialog_hint());
+                    ui.text_edit_singleline(&mut self.theme_dialog.name_input);
+                    ui.horizontal(|ui| {
+                        if ui.button(crate::theme::confirm_text()).clicked() {
+                            let name = self.theme_dialog.name_input.trim().to_string();
+                            if !name.is_empty() {
+                                let mut new_theme = self.theme_edit.clone();
+                                new_theme.name = name;
+                                new_theme.id =
+                                    crate::theme::store::find_free_id(&themes_root, &new_theme.id);
+                                match crate::theme::store::save_user_theme(&themes_root, &new_theme)
+                                {
+                                    Ok(()) => {
+                                        self.refresh_themes(&themes_root);
+                                        self.switch_theme_by_id(ctx, &new_theme.id);
+                                    }
+                                    Err(e) => {
+                                        self.theme_message = Some(Err(e.to_string()));
+                                    }
+                                }
+                                self.theme_dialog.show_new_dialog = false;
+                                self.theme_dialog.name_input.clear();
+                            }
+                        }
+                        if ui.button(crate::theme::cancel_text()).clicked() {
+                            self.theme_dialog.show_new_dialog = false;
+                            self.theme_dialog.name_input.clear();
+                        }
+                    });
+                });
+            if !open {
+                self.theme_dialog.show_new_dialog = false;
+            }
+        }
+
+        if self.theme_dialog.show_rename_dialog {
+            let mut open = true;
+            if self.theme_dialog.name_input.is_empty() {
+                self.theme_dialog.name_input = self.theme_edit.name.clone();
+            }
+            egui::Window::new(crate::theme::rename_dialog_title())
+                .open(&mut open)
+                .resizable(false)
+                .collapsible(false)
+                .current_pos(screen_center(ctx))
+                .pivot(egui::Align2::CENTER_CENTER)
+                .show(ctx, |ui| {
+                    ui.label(crate::theme::new_dialog_hint());
+                    ui.text_edit_singleline(&mut self.theme_dialog.name_input);
+                    ui.horizontal(|ui| {
+                        if ui.button(crate::theme::confirm_text()).clicked() {
+                            let name = self.theme_dialog.name_input.trim().to_string();
+                            if !name.is_empty() {
+                                match crate::theme::store::rename_user_theme(
+                                    &themes_root,
+                                    &self.theme_edit.id,
+                                    &name,
+                                ) {
+                                    Ok(updated) => {
+                                        self.theme_edit.name = updated.name.clone();
+                                        self.active_theme.name = updated.name.clone();
+                                        self.refresh_themes(&themes_root);
+                                    }
+                                    Err(e) => {
+                                        self.theme_message = Some(Err(e.to_string()));
+                                    }
+                                }
+                                self.theme_dialog.show_rename_dialog = false;
+                                self.theme_dialog.name_input.clear();
+                            }
+                        }
+                        if ui.button(crate::theme::cancel_text()).clicked() {
+                            self.theme_dialog.show_rename_dialog = false;
+                            self.theme_dialog.name_input.clear();
+                        }
+                    });
+                });
+            if !open {
+                self.theme_dialog.show_rename_dialog = false;
+            }
+        }
+
+        if self.theme_dialog.show_delete_confirm {
+            let mut open = true;
+            egui::Window::new(crate::theme::delete_confirm_text())
+                .open(&mut open)
+                .resizable(false)
+                .collapsible(false)
+                .current_pos(screen_center(ctx))
+                .pivot(egui::Align2::CENTER_CENTER)
+                .show(ctx, |ui| {
+                    ui.label(format!(
+                        "{}: {}",
+                        crate::theme::delete_confirm_text(),
+                        self.theme_edit.name
+                    ));
+                    ui.horizontal(|ui| {
+                        if ui.button(crate::theme::confirm_text()).clicked() {
+                            match crate::theme::store::delete_user_theme(
+                                &themes_root,
+                                &self.theme_edit.id,
+                            ) {
+                                Ok(()) => {
+                                    self.refresh_themes(&themes_root);
+                                    self.switch_theme_by_id(ctx, "opennex-dark");
+                                }
+                                Err(e) => {
+                                    self.theme_message = Some(Err(e.to_string()));
+                                }
+                            }
+                            self.theme_dialog.show_delete_confirm = false;
+                        }
+                        if ui.button(crate::theme::cancel_text()).clicked() {
+                            self.theme_dialog.show_delete_confirm = false;
+                        }
+                    });
+                });
+            if !open {
+                self.theme_dialog.show_delete_confirm = false;
+            }
+        }
+
+        if self.theme_dialog.show_switch_confirm {
+            let mut open = true;
+            egui::Window::new(crate::theme::switch_confirm_text())
+                .open(&mut open)
+                .resizable(false)
+                .collapsible(false)
+                .current_pos(screen_center(ctx))
+                .pivot(egui::Align2::CENTER_CENTER)
+                .show(ctx, |ui| {
+                    ui.label(crate::theme::switch_confirm_text());
+                    ui.horizontal(|ui| {
+                        if ui.button(crate::theme::save_and_switch_text()).clicked() {
+                            let themes_root_ = themes_root.clone();
+                            if !crate::theme::store::is_embedded_id(&self.theme_edit.id) {
+                                let _ = crate::theme::store::save_user_theme(
+                                    &themes_root_,
+                                    &self.theme_edit,
+                                );
+                            }
+                            self.active_theme = self.theme_edit.clone();
+                            self.theme_dirty = false;
+                            let target = self.theme_dialog.pending_switch_target.clone();
+                            self.theme_dialog.show_switch_confirm = false;
+                            self.switch_theme_by_id(ctx, &target);
+                        }
+                        if ui.button(crate::theme::discard_and_switch_text()).clicked() {
+                            self.theme_edit = self.active_theme.clone();
+                            self.theme_dirty = false;
+                            let target = self.theme_dialog.pending_switch_target.clone();
+                            self.theme_dialog.show_switch_confirm = false;
+                            self.switch_theme_by_id(ctx, &target);
+                        }
+                        if ui.button(crate::theme::cancel_text()).clicked() {
+                            self.theme_dialog.show_switch_confirm = false;
+                        }
+                    });
+                });
+            if !open {
+                self.theme_dialog.show_switch_confirm = false;
+            }
+        }
+    }
+
+    fn refresh_themes(&mut self, themes_root: &std::path::Path) {
+        let mut themes = crate::theme::store::load_user_themes(themes_root).unwrap_or_default();
+        for embedded in crate::theme::store::embedded_themes().unwrap_or_default() {
+            if !themes.iter().any(|t| t.id == embedded.id) {
+                themes.push(embedded);
+            }
+        }
+        themes.sort_by_key(|t| t.name.to_lowercase());
+        self.available_themes = themes;
     }
 
     fn check_update_manual(&mut self, ctx: &egui::Context) {
@@ -2406,7 +2695,7 @@ impl eframe::App for App {
                         ui.horizontal(|ui| {
                             check_indicator(ui, selected, check_width);
                             if ui.button(&theme.name).clicked() {
-                                self.switch_theme_by_id(ctx, &theme.id);
+                                self.try_switch_theme(ctx, theme.id.clone());
                                 ui.close_menu();
                             }
                         });
@@ -2417,6 +2706,7 @@ impl eframe::App for App {
                     self.settings_edit = self.settings.clone();
                     self.theme_edit = self.active_theme.clone();
                     self.theme_message = None;
+                    self.theme_dirty = false;
                 }
                 if ui.button(self.texts.about.menu_label.clone()).clicked() {
                     self.show_about = true;
@@ -2479,62 +2769,36 @@ impl eframe::App for App {
                             }
                         }
                         1 => {
-                            let current_id = self.settings_edit.theme_id.clone();
-                            ui.label(&self.texts.settings.appearance.terminal_section);
-                            ui.horizontal(|ui| {
-                                ui.label(&self.texts.settings.appearance.terminal_theme);
-                                egui::ComboBox::from_id_salt("theme_select")
-                                    .selected_text(
-                                        self.available_themes
-                                            .iter()
-                                            .find(|t| t.id == current_id)
-                                            .map(|t| t.name.as_str())
-                                            .unwrap_or("OpenNex Dark"),
-                                    )
-                                    .show_ui(ui, |ui| {
-                                        for theme in &self.available_themes {
-                                            if ui
-                                                .selectable_value(
-                                                    &mut self.settings_edit.theme_id,
-                                                    theme.id.clone(),
-                                                    &theme.name,
-                                                )
-                                                .clicked()
-                                            {
-                                                if let Some(t) = self
-                                                    .available_themes
-                                                    .iter()
-                                                    .find(|t| t.id == theme.id)
-                                                    .cloned()
-                                                {
-                                                    self.theme_edit = t;
-                                                    crate::theme::apply_theme_definition(
-                                                        ctx,
-                                                        &self.theme_edit,
-                                                    );
-                                                }
-                                            }
-                                        }
-                                    });
-                            });
-                            ui.checkbox(
-                                &mut self.settings_edit.apply_theme_typography,
-                                &self.texts.settings.appearance.apply_theme_typography,
-                            );
-                            ui.horizontal(|ui| {
-                                if ui
-                                    .button(&self.texts.settings.appearance.import_theme)
-                                    .clicked()
-                                {
-                                    self.pending_import_theme = true;
-                                }
-                                if ui
-                                    .button(&self.texts.settings.appearance.export_theme)
-                                    .clicked()
-                                {
-                                    self.pending_export_theme = true;
-                                }
-                            });
+                            let is_builtin =
+                                crate::theme::store::is_embedded_id(&self.theme_edit.id);
+                            if is_builtin {
+                                ui.colored_label(
+                                    egui::Color32::from_rgb(0xd9, 0xa4, 0x41),
+                                    crate::theme::builtin_readonly_text(),
+                                );
+                                ui.add_space(4.0);
+                            }
+                            egui::ScrollArea::vertical()
+                                .id_salt("appearance_scroll")
+                                .show(ui, |ui| {
+                                    let mut draft = self.theme_edit.clone();
+                                    let actions = crate::theme::ui::show_theme_section(
+                                        ui,
+                                        &mut draft,
+                                        &self.available_themes,
+                                        is_builtin,
+                                        self.theme_dirty,
+                                        &mut self.theme_dialog,
+                                    );
+                                    for action in actions {
+                                        self.handle_theme_action(ctx, action, draft.clone());
+                                    }
+                                    if draft != self.theme_edit {
+                                        self.theme_edit = draft;
+                                        self.theme_dirty = true;
+                                        crate::theme::apply_theme_definition(ctx, &self.theme_edit);
+                                    }
+                                });
                             if let Some(Err(msg)) = &self.theme_message {
                                 ui.colored_label(egui::Color32::from_rgb(230, 120, 120), msg);
                             }
@@ -2619,6 +2883,7 @@ impl eframe::App for App {
                             self.settings_edit = self.settings.clone();
                             self.theme_edit = self.active_theme.clone();
                             self.theme_message = None;
+                            self.theme_dirty = false;
                             self.binding_recording = None;
                             crate::theme::apply_theme_definition(ctx, &self.active_theme);
                             self.show_settings = false;
@@ -2627,7 +2892,20 @@ impl eframe::App for App {
                             self.settings = self.settings_edit.clone();
                             self.history_db.set_max_entries(self.settings.max_history);
                             let _ = save_settings(&self.settings);
+                            if self.theme_dirty {
+                                let themes_root = crate::theme::store::themes_dir(&app_data_dir());
+                                if !crate::theme::store::is_embedded_id(&self.theme_edit.id) {
+                                    let _ = std::fs::create_dir_all(&themes_root);
+                                    if let Err(err) = crate::theme::store::save_user_theme(
+                                        &themes_root,
+                                        &self.theme_edit,
+                                    ) {
+                                        log::error!("failed to save theme: {err}");
+                                    }
+                                }
+                            }
                             self.active_theme = self.theme_edit.clone();
+                            self.settings.theme_id = self.active_theme.id.clone();
                             crate::theme::apply_theme_definition(ctx, &self.active_theme);
                             if self.settings.apply_theme_typography {
                                 let new_size = self.active_theme.typography.terminal_font_size;
@@ -2635,6 +2913,7 @@ impl eframe::App for App {
                                     td.font_size = new_size;
                                 }
                             }
+                            self.theme_dirty = false;
                         }
                     });
                 });
@@ -2645,6 +2924,9 @@ impl eframe::App for App {
                 let _ = save_settings(&self.settings);
             }
         }
+
+        // Theme dialog popups
+        self.show_theme_dialogs(ctx);
 
         if self.show_about {
             let mut open = self.show_about;

@@ -38,6 +38,11 @@ impl ThemeColor {
         ThemeColor([r, g, b, 255])
     }
 
+    /// Construct from RGB for non-test code.
+    pub fn from_rgb_for_test(r: u8, g: u8, b: u8) -> Self {
+        ThemeColor([r, g, b, 255])
+    }
+
     pub fn to_array(&self) -> [u8; 4] {
         self.0
     }

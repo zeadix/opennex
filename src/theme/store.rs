@@ -160,13 +160,20 @@ pub fn delete_user_theme(dir: &Path, id: &str) -> Result<(), ThemeError> {
     if path.exists() {
         std::fs::remove_file(&path)?;
     } else {
-        return Err(ThemeError::Io(format!("theme file not found: {}", path.display())));
+        return Err(ThemeError::Io(format!(
+            "theme file not found: {}",
+            path.display()
+        )));
     }
     Ok(())
 }
 
 /// Rename a user theme by updating its display name. ID and filename stay stable.
-pub fn rename_user_theme(dir: &Path, id: &str, new_name: &str) -> Result<ThemeDefinition, ThemeError> {
+pub fn rename_user_theme(
+    dir: &Path,
+    id: &str,
+    new_name: &str,
+) -> Result<ThemeDefinition, ThemeError> {
     let mut theme = load_theme(dir, id)?;
     theme.name = new_name.to_string();
     theme.validate()?;
@@ -175,13 +182,22 @@ pub fn rename_user_theme(dir: &Path, id: &str, new_name: &str) -> Result<ThemeDe
 }
 
 /// Create a copy of a theme with a new auto-generated ID and display name.
-pub fn copy_theme(dir: &Path, source_id: &str, display_name: &str) -> Result<ThemeDefinition, ThemeError> {
+pub fn copy_theme(
+    dir: &Path,
+    source_id: &str,
+    display_name: &str,
+) -> Result<ThemeDefinition, ThemeError> {
     let mut theme = load_theme(dir, source_id)?;
     let new_id = find_free_import_id(dir, &theme.id);
     theme.id = new_id;
     theme.name = display_name.to_string();
     save_user_theme(dir, &theme)?;
     Ok(theme)
+}
+
+/// Pick a non-colliding ID for a theme by appending `-2`, `-3`, ...
+pub fn find_free_id(dir: &Path, requested: &str) -> String {
+    find_free_import_id(dir, requested)
 }
 
 /// Pick a non-colliding ID for an imported theme by appending `-2`, `-3`, ...

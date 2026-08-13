@@ -1,6 +1,7 @@
 pub mod model;
 pub mod palettes;
 pub mod store;
+pub mod ui;
 
 pub use model::{ThemeColor, ThemeDefinition, ThemeError};
 
@@ -138,4 +139,202 @@ mod tests {
         assert_eq!(tt.cursor_color(), theme.terminal.cursor.to_egui());
         assert_eq!(tt.link_color(), theme.terminal.link.to_egui());
     }
+}
+
+// Text accessors that delegate to `ui::texts`, used by app.rs.
+// These are kept here so app.rs doesn't need to know the internal module layout.
+pub fn heading_text() -> String {
+    ui::texts::heading()
+}
+pub fn ui_appearance_text() -> String {
+    ui::texts::ui_appearance()
+}
+pub fn terminal_appearance_text() -> String {
+    ui::texts::terminal_appearance()
+}
+pub fn theme_label_text() -> String {
+    ui::texts::theme_label()
+}
+pub fn unsaved_text() -> String {
+    ui::texts::unsaved()
+}
+pub fn new_theme_text() -> String {
+    ui::texts::new_theme()
+}
+pub fn copy_theme_text() -> String {
+    ui::texts::copy_theme()
+}
+pub fn rename_theme_text() -> String {
+    ui::texts::rename_theme()
+}
+pub fn delete_theme_text() -> String {
+    ui::texts::delete_theme()
+}
+pub fn import_theme_text() -> String {
+    ui::texts::import_theme()
+}
+pub fn export_theme_text() -> String {
+    ui::texts::export_theme()
+}
+pub fn ui_font_label() -> String {
+    ui::texts::ui_font()
+}
+pub fn ui_font_size_label() -> String {
+    ui::texts::ui_font_size()
+}
+pub fn base_colors_text() -> String {
+    ui::texts::base_colors()
+}
+pub fn app_bg_label() -> String {
+    ui::texts::app_bg()
+}
+pub fn sidebar_label() -> String {
+    ui::texts::sidebar()
+}
+pub fn panel_label() -> String {
+    ui::texts::panel()
+}
+pub fn input_bg_label() -> String {
+    ui::texts::input_bg()
+}
+pub fn text_colors_text() -> String {
+    ui::texts::text_colors()
+}
+pub fn text_label() -> String {
+    ui::texts::text()
+}
+pub fn weak_text_label() -> String {
+    ui::texts::weak_text()
+}
+pub fn status_colors_text() -> String {
+    ui::texts::status_colors()
+}
+pub fn accent_label() -> String {
+    ui::texts::accent()
+}
+pub fn warning_label() -> String {
+    ui::texts::warning()
+}
+pub fn danger_label() -> String {
+    ui::texts::danger()
+}
+pub fn interaction_colors_text() -> String {
+    ui::texts::interaction_colors()
+}
+pub fn hover_label() -> String {
+    ui::texts::hover()
+}
+pub fn active_label() -> String {
+    ui::texts::active()
+}
+pub fn selection_bg_label() -> String {
+    ui::texts::selection_bg()
+}
+pub fn selection_text_label() -> String {
+    ui::texts::selection_text()
+}
+pub fn border_label() -> String {
+    ui::texts::border()
+}
+pub fn lock_label() -> String {
+    ui::texts::lock()
+}
+pub fn terminal_font_size_label() -> String {
+    ui::texts::terminal_font_size()
+}
+pub fn cell_spacing_label() -> String {
+    ui::texts::cell_spacing()
+}
+pub fn palette_template_label() -> String {
+    ui::texts::palette_template()
+}
+pub fn apply_template_text() -> String {
+    ui::texts::apply_template()
+}
+pub fn terminal_base_colors_text() -> String {
+    ui::texts::terminal_base_colors()
+}
+pub fn fg_label() -> String {
+    ui::texts::fg()
+}
+pub fn bg_label() -> String {
+    ui::texts::bg()
+}
+pub fn cursor_label() -> String {
+    ui::texts::cursor()
+}
+pub fn link_label() -> String {
+    ui::texts::link()
+}
+pub fn normal_label() -> String {
+    ui::texts::normal()
+}
+pub fn bright_label() -> String {
+    ui::texts::bright()
+}
+pub fn dim_label() -> String {
+    ui::texts::dim()
+}
+pub fn black_label() -> &'static str {
+    ui::texts::black()
+}
+pub fn red_label() -> &'static str {
+    ui::texts::red()
+}
+pub fn green_label() -> &'static str {
+    ui::texts::green()
+}
+pub fn yellow_label() -> &'static str {
+    ui::texts::yellow()
+}
+pub fn blue_label() -> &'static str {
+    ui::texts::blue()
+}
+pub fn magenta_label() -> &'static str {
+    ui::texts::magenta()
+}
+pub fn cyan_label() -> &'static str {
+    ui::texts::cyan()
+}
+pub fn white_label() -> &'static str {
+    ui::texts::white()
+}
+pub fn copy_dialog_title() -> String {
+    ui::texts::copy_dialog_title()
+}
+pub fn copy_dialog_hint() -> String {
+    ui::texts::copy_dialog_hint()
+}
+pub fn new_dialog_title() -> String {
+    ui::texts::new_dialog_title()
+}
+pub fn new_dialog_hint() -> String {
+    ui::texts::new_dialog_hint()
+}
+pub fn rename_dialog_title() -> String {
+    ui::texts::rename_dialog_title()
+}
+pub fn delete_confirm_text() -> String {
+    ui::texts::delete_confirm()
+}
+pub fn switch_confirm_text() -> String {
+    ui::texts::switch_confirm()
+}
+pub fn save_and_switch_text() -> String {
+    ui::texts::save_and_switch()
+}
+pub fn discard_and_switch_text() -> String {
+    ui::texts::discard_and_switch()
+}
+pub fn cancel_text() -> String {
+    ui::texts::cancel()
+}
+pub fn confirm_text() -> String {
+    ui::texts::confirm()
+}
+pub fn ok_text() -> String {
+    ui::texts::ok()
+}
+pub fn builtin_readonly_text() -> String {
+    ui::texts::builtin_readonly()
 }
