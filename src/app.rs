@@ -3630,52 +3630,81 @@ impl eframe::App for App {
                         }),
                 )
                 .show(ctx, |ui| {
-                    // Header row: section title on the left, plain-text
-                    // actions on the right (no icons, no frame, no rounding).
+                    // Header row: section title on the left, square icon
+                    // buttons on the right — background fill only, no
+                    // stroke, no rounding, Phosphor regular glyphs.
                     ui.horizontal(|ui| {
                         let fg = self.active_theme.app.button_fg.to_egui();
                         let icon_active = self.active_theme.app.text.to_egui();
+                        let btn_bg = self.active_theme.app.button_bg.to_egui();
                         let heading = format!("{}列表", self.texts.workspace.heading);
                         ui.label(egui::RichText::new(heading).color(fg).size(12.0).strong());
 
+                        let btn_size = 22.0;
+                        let glyph = 14.0;
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.style_mut().spacing.item_spacing.x = 8.0;
-                            // 新建 (rightmost): flat text, paints nothing.
-                            let new_resp = ui.add(
-                                egui::Button::new(egui::RichText::new("新建").color(fg).size(12.0))
-                                    .frame(false),
-                            );
-                            if new_resp.clicked() {
-                                self.add_panel(ui.ctx());
-                            }
+                            ui.style_mut().spacing.item_spacing.x = 4.0;
 
-                            // 模板: flat text driving a left-click menu
-                            // via BarState (same as the row three-dot).
-                            let (tpl_rect, tpl_resp) = ui.allocate_exact_size(
-                                egui::vec2(34.0, ui.spacing().interact_size.y),
+                            // 新建 (rightmost): square bg + PLUS glyph.
+                            let (new_rect, new_resp) = ui.allocate_exact_size(
+                                egui::vec2(btn_size, btn_size),
                                 egui::Sense::click(),
                             );
+                            ui.painter().rect_filled(new_rect, 0.0, btn_bg);
+                            let new_color = if new_resp.hovered() { icon_active } else { fg };
+                            let new_galley = ui.fonts(|f| {
+                                f.layout_no_wrap(
+                                    egui_phosphor::regular::PLUS.to_string(),
+                                    egui::FontId::proportional(glyph),
+                                    new_color,
+                                )
+                            });
+                            ui.painter().galley(
+                                new_rect.center()
+                                    - egui::vec2(
+                                        new_galley.size().x / 2.0,
+                                        new_galley.size().y / 2.0,
+                                    ),
+                                new_galley,
+                                new_color,
+                            );
+                            let new_hovered = new_resp.hovered();
+                            let new_clicked = new_resp.clicked();
+                            let _ = new_resp.on_hover_text(&self.texts.workspace.new);
+                            if new_clicked {
+                                self.add_panel(ui.ctx());
+                            }
+                            let _ = new_hovered;
+
+                            // 模板: square bg + STACK glyph, left-click menu
+                            // via BarState (same as the row three-dot).
+                            let (tpl_rect, tpl_resp) = ui.allocate_exact_size(
+                                egui::vec2(btn_size, btn_size),
+                                egui::Sense::click(),
+                            );
+                            ui.painter().rect_filled(tpl_rect, 0.0, btn_bg);
                             let tpl_color = if tpl_resp.hovered() { icon_active } else { fg };
                             let tpl_galley = ui.fonts(|f| {
                                 f.layout_no_wrap(
-                                    "模板".to_string(),
-                                    egui::FontId::proportional(12.0),
+                                    egui_phosphor::regular::STACK.to_string(),
+                                    egui::FontId::proportional(glyph),
                                     tpl_color,
                                 )
                             });
                             ui.painter().galley(
-                                egui::pos2(
-                                    tpl_rect.min.x,
-                                    tpl_rect.center().y - tpl_galley.size().y / 2.0,
-                                ),
+                                tpl_rect.center()
+                                    - egui::vec2(
+                                        tpl_galley.size().x / 2.0,
+                                        tpl_galley.size().y / 2.0,
+                                    ),
                                 tpl_galley,
                                 tpl_color,
                             );
+                            let bar_id = tpl_resp.id;
                             if self.cached_template_files.is_empty() {
                                 self.refresh_template_files();
                             }
                             let template_files = self.cached_template_files.clone();
-                            let bar_id = tpl_resp.id;
                             let mut bar_state = egui::menu::BarState::load(ui.ctx(), bar_id);
                             bar_state.bar_menu(&tpl_resp, |ui| {
                                 if template_files.is_empty() {
@@ -3699,6 +3728,7 @@ impl eframe::App for App {
                                 }
                             });
                             bar_state.store(ui.ctx(), bar_id);
+                            let _ = tpl_resp.on_hover_text(&self.texts.workspace.templates);
                         });
                     });
                     ui.add_space(4.0);
