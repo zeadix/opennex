@@ -10,7 +10,7 @@ use egui::{Color32, Stroke};
 /// Apply a `ThemeDefinition`'s application colors to egui visuals.
 pub fn apply_theme_definition(ctx: &egui::Context, theme: &ThemeDefinition) {
     let a = &theme.app;
-    let style = (*ctx.style()).clone();
+    let mut style = (*ctx.style()).clone();
     let mut visuals = style.visuals.clone();
 
     let app_bg = a.app_bg.to_egui();
@@ -71,6 +71,19 @@ pub fn apply_theme_definition(ctx: &egui::Context, theme: &ThemeDefinition) {
         color: Color32::from_rgba_unmultiplied(sr, sg, sb, sa),
     };
     visuals.text_cursor.stroke = Stroke::new(2.0, accent);
+
+    // Apply the theme's UI font size by rescaling the default text-style
+    // ladder around the base body size (14pt default).
+    let base = theme.app.ui_font_size.max(8.0);
+    let scale = base / 14.0;
+    let defaults = egui::Style::default().text_styles;
+    style.text_styles = defaults
+        .into_iter()
+        .map(|(kind, mut font_id)| {
+            font_id.size = (font_id.size * scale).max(8.0);
+            (kind, font_id)
+        })
+        .collect();
 
     ctx.set_style(style);
     ctx.set_visuals(visuals);

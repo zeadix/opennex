@@ -14,7 +14,7 @@ pub struct TerminalInstance {
 
 /// Marker used to detect whether a shell init file already contains our
 /// integration snippet, so we don't append it twice.
-const SHELL_INTEGRATION_MARKER: &str = "# __opennex_integration__";
+const SHELL_INTEGRATION_MARKER: &str = "# __opennex_integration__ v2";
 
 /// Build (or reuse) the per-shell init file that installs the OSC 9
 /// hook, and return the path the user shell should be told to source.
@@ -53,6 +53,13 @@ fn ensure_shell_init_file(shell: &str) -> Option<std::path::PathBuf> {
 }
 
 const BASH_INIT_BODY: &str = r#"
+# OpenNex terminal integration. Sourced via bash --rcfile, which
+# replaces the default ~/.bashrc, so chain to the user's files first
+# to preserve their prompt, aliases, and colors.
+for __opennex_rc in "$HOME/.bashrc" "/etc/bash.bashrc"; do
+  [ -r "$__opennex_rc" ] && . "$__opennex_rc"
+done
+unset __opennex_rc
 __opennex_osc() { printf '\033]9;%s\007' "$PWD"; }
 if [ -n "${PROMPT_COMMAND}" ]; then
   PROMPT_COMMAND="__opennex_osc;${PROMPT_COMMAND}"
@@ -62,6 +69,12 @@ fi
 "#;
 
 const ZSH_INIT_BODY: &str = r#"
+# OpenNex terminal integration. ZDOTDIR points at this directory, so
+# chain to the user's original config first (the real HOME is saved
+# in __opennex_home by the backend env).
+if [ -r "$__opennex_home/.zshrc" ]; then
+  . "$__opennex_home/.zshrc"
+fi
 __opennex_osc() { printf '\033]9;%s\007' "$PWD"; }
 precmd_functions+=(__opennex_osc)
 "#;
@@ -103,20 +116,30 @@ impl TerminalInstance {
         // `ZDOTDIR` so the init file is sourced. PowerShell and cmd
         // currently have no silent integration path.
         let init_file = ensure_shell_init_file(shell);
-        let mut args: Vec<String> = vec!["-l".into(), "-i".into()];
+        let mut args: Vec<String> = Vec::new();
         let mut zdotdir: Option<std::path::PathBuf> = None;
         if let Some(path) = &init_file {
             if shell.contains("bash") {
-                // Only bash supports --rcfile. dash/sh don't, and passing
-                // it makes them refuse to start (which silently breaks the
-                // terminal test for /bin/sh).
-                args.push("--rcfile".to_string());
-                args.push(path.to_string_lossy().to_string());
+                // bash: --rcfile must precede -i; with this ordering the
+                // shell starts, shows the user prompt (the rcfile chains
+                // to ~/.bashrc), and stdin works. (-l combined with
+                // --rcfile is a usage error; -i before --rcfile also
+                // trips usage parsing in bash 5.1.)
+                args = vec![
+                    "--rcfile".into(),
+                    path.to_string_lossy().to_string(),
+                    "-i".into(),
+                ];
             } else if shell.contains("zsh") {
+                args = vec!["-i".into()];
                 if let Some(parent) = path.parent() {
                     zdotdir = Some(parent.to_path_buf());
                 }
+            } else {
+                args = vec!["-i".into()];
             }
+        } else {
+            args = vec!["-l".into(), "-i".into()];
         }
 
         let mut settings = BackendSettings {
@@ -129,6 +152,12 @@ impl TerminalInstance {
             settings
                 .env
                 .push(("ZDOTDIR".to_string(), dir.to_string_lossy().to_string()));
+            if let Some(home) = std::env::var_os("HOME") {
+                settings.env.push((
+                    "__opennex_home".to_string(),
+                    home.to_string_lossy().to_string(),
+                ));
+            }
         }
 
         let backend = TerminalBackend::new(id, ctx.clone(), settings).ok()?;
