@@ -1074,6 +1074,9 @@ pub struct App {
     terminal_cpu: Option<f32>,
     /// Aggregated resident memory across terminal process trees.
     terminal_mem: Option<u64>,
+    /// Same aggregates but scoped to the active workspace only.
+    workspace_cpu: Option<f32>,
+    workspace_mem: Option<u64>,
     /// Wall-clock of the last sampling tick.
     last_sample: std::time::Instant,
     /// Delta sampler over per-terminal process trees.
@@ -1296,6 +1299,8 @@ impl App {
             startup_frame_count: 0,
             terminal_cpu: None,
             terminal_mem: None,
+            workspace_cpu: None,
+            workspace_mem: None,
             last_sample: std::time::Instant::now(),
             terminal_sampler: crate::proc_stats::ProcSampler::new(),
         };
@@ -2449,18 +2454,40 @@ impl eframe::App for App {
         }
 
         // Status-bar sample: every 2 seconds, aggregate CPU/memory over
-        // every live terminal's process tree (shell + its children).
+        // terminal process trees — one group for the active workspace,
+        // one for all workspaces — against a single process snapshot.
         if self.last_sample.elapsed() >= std::time::Duration::from_secs(2) {
             self.last_sample = std::time::Instant::now();
-            let roots: Vec<u32> = self
+            let all_roots: Vec<u32> = self
                 .terminals
                 .values()
                 .map(|td| td.instance.backend.child_pid())
                 .filter(|&pid| pid != 0)
                 .collect();
-            self.terminal_sampler.refresh(&roots);
-            self.terminal_cpu = self.terminal_sampler.last_cpu_percent;
-            self.terminal_mem = self.terminal_sampler.last_mem_bytes;
+            let active_tab_ids: Vec<String> = self
+                .dock_states
+                .get(&self.active_panel)
+                .map(|tree| tree.iter_all_tabs().map(|(_, t)| t.clone()).collect())
+                .unwrap_or_default();
+            let ws_roots: Vec<u32> = active_tab_ids
+                .iter()
+                .filter_map(|id| self.terminals.get(id))
+                .map(|td| td.instance.backend.child_pid())
+                .filter(|&pid| pid != 0)
+                .collect();
+            let mut ws_cpu = None;
+            let mut ws_mem = None;
+            let mut all_cpu = None;
+            let mut all_mem = None;
+            self.terminal_sampler.refresh_groups(
+                [&ws_roots, &all_roots],
+                [&mut ws_cpu, &mut all_cpu],
+                [&mut ws_mem, &mut all_mem],
+            );
+            self.workspace_cpu = ws_cpu;
+            self.workspace_mem = ws_mem;
+            self.terminal_cpu = all_cpu;
+            self.terminal_mem = all_mem;
         }
         let renaming = self.is_renaming();
         if renaming {
@@ -4211,7 +4238,7 @@ impl eframe::App for App {
                     ui.allocate_ui_with_layout(
                         egui::vec2(
                             ui.available_width(),
-                            shortcut_hint_available_height(ui.available_height()),
+                            shortcut_hint_available_height(ui.available_height() - 24.0),
                         ),
                         egui::Layout::top_down(egui::Align::Min),
                         |ui| {
@@ -4283,6 +4310,50 @@ impl eframe::App for App {
                                                         }
                                                     });
                                                 },
+                                            );
+
+                                            // Sidebar footer: ALL-workspace terminal aggregates,
+                                            // styled and sized like the bottom status bar (24px,
+                                            // same fill, same 11pt weak text) with a 1px top
+                                            // separator line.
+                                            let footer_h = 24.0;
+                                            let line_color =
+                                                self.active_theme.app.sidebar_border.to_egui();
+                                            let weak = self.active_theme.app.weak_text.to_egui();
+                                            let (footer_rect, _) = ui.allocate_exact_size(
+                                                egui::vec2(ui.available_width(), footer_h),
+                                                egui::Sense::hover(),
+                                            );
+                                            ui.painter().rect_filled(
+                                                footer_rect,
+                                                0.0,
+                                                self.active_theme.app.menu_bg.to_egui(),
+                                            );
+                                            ui.painter().rect_filled(
+                                                egui::Rect::from_min_max(
+                                                    footer_rect.min,
+                                                    egui::pos2(
+                                                        footer_rect.max.x,
+                                                        footer_rect.min.y + 1.0,
+                                                    ),
+                                                ),
+                                                0.0,
+                                                line_color,
+                                            );
+                                            ui.painter().text(
+                                                egui::pos2(
+                                                    footer_rect.min.x + 10.0,
+                                                    footer_rect.center().y,
+                                                ),
+                                                egui::Align2::LEFT_CENTER,
+                                                format!(
+                                                    "{} 终端 │ {} │ {}",
+                                                    format_ws_terminal_count(self),
+                                                    format_cpu(self.terminal_cpu),
+                                                    format_memory(self.terminal_mem)
+                                                ),
+                                                egui::FontId::proportional(11.0),
+                                                weak,
                                             );
                                         });
                                     }
@@ -4465,18 +4536,17 @@ impl eframe::App for App {
             }
         });
 
-        // Minimalist status bar (24px, themed by active theme). Always
-        // visible at the bottom of the window.
+        // Minimalist status bar (24px, themed by active theme). Reports
+        // the ACTIVE workspace's terminals only. No frame stroke; the
+        // single 1px top separator line is painted manually so it spans
+        // edge-to-edge above the bar.
         egui::TopBottomPanel::bottom("status_bar")
             .resizable(false)
             .exact_height(24.0)
             .frame(
                 egui::Frame::none()
                     .fill(self.active_theme.app.menu_bg.to_egui())
-                    .stroke(egui::Stroke::new(
-                        1.0,
-                        self.active_theme.app.sidebar_border.to_egui(),
-                    ))
+                    .stroke(egui::Stroke::NONE)
                     .inner_margin(egui::Margin {
                         left: 10,
                         right: 10,
@@ -4485,46 +4555,61 @@ impl eframe::App for App {
                     }),
             )
             .show(ctx, |ui| {
-                let fg = self.active_theme.app.menu_fg.to_egui();
+                // 1px separator between workspace area and status bar.
+                let line_color = self.active_theme.app.sidebar_border.to_egui();
+                let rect = ui.max_rect();
+                let painter = ui.painter_at(egui::Rect::from_min_max(
+                    egui::pos2(rect.min.x, rect.min.y),
+                    egui::pos2(rect.max.x, rect.min.y + 1.0),
+                ));
+                painter.rect_filled(
+                    egui::Rect::from_min_max(
+                        egui::pos2(rect.min.x, rect.min.y),
+                        egui::pos2(rect.max.x, rect.min.y + 1.0),
+                    ),
+                    0.0,
+                    line_color,
+                );
+
                 let weak = self.active_theme.app.weak_text.to_egui();
                 ui.horizontal(|ui| {
-                    // Section 1: terminal count across all workspaces.
-                    let panel_terminals: usize = self
+                    // Section 1: terminal count in the ACTIVE workspace.
+                    let ws_terminals: usize = self
                         .dock_states
-                        .values()
+                        .get(&self.active_panel)
                         .map(|tree| tree.iter_all_tabs().count())
-                        .sum();
+                        .unwrap_or(0);
                     ui.label(
-                        egui::RichText::new(format!("{} 终端", panel_terminals))
+                        egui::RichText::new(format!("{} 终端", ws_terminals))
                             .color(weak)
                             .size(11.0),
                     );
+                    ui.label(egui::RichText::new("│").color(line_color).size(11.0));
+                    // Section 2: aggregated CPU% over the active
+                    // workspace's terminal process trees.
                     ui.label(
-                        egui::RichText::new("│")
-                            .color(self.active_theme.app.sidebar_border.to_egui())
-                            .size(11.0),
-                    );
-                    // Section 2: aggregated CPU% over all terminal process
-                    // trees (shell + descendants), sampled every 2 s.
-                    ui.label(
-                        egui::RichText::new(format_cpu(self.terminal_cpu))
+                        egui::RichText::new(format_cpu(self.workspace_cpu))
                             .color(weak)
                             .size(11.0),
                     );
-                    ui.label(
-                        egui::RichText::new("│")
-                            .color(self.active_theme.app.sidebar_border.to_egui())
-                            .size(11.0),
-                    );
+                    ui.label(egui::RichText::new("│").color(line_color).size(11.0));
                     // Section 3: aggregated resident memory of the same trees.
                     ui.label(
-                        egui::RichText::new(format_memory(self.terminal_mem))
+                        egui::RichText::new(format_memory(self.workspace_mem))
                             .color(weak)
                             .size(11.0),
                     );
                 });
             });
     }
+}
+
+/// Total terminal count across every workspace (sidebar footer).
+fn format_ws_terminal_count(app: &App) -> usize {
+    app.dock_states
+        .values()
+        .map(|t| t.iter_all_tabs().count())
+        .sum()
 }
 
 /// Format CPU usage percentage. `None` falls back to a dash so the bar

@@ -312,7 +312,7 @@ pub fn read_sample() -> Option<ProcSample> {
 
 /// Cadence-driven sampler keeping the previous sample for CPU deltas.
 pub struct ProcSampler {
-    last: Option<(Instant, ProcSample, u64)>, // (when, sample, aggregated ticks)
+    last: Option<(Instant, ProcSample)>, // (when, sample)
     pub last_cpu_percent: Option<f32>,
     pub last_mem_bytes: Option<u64>,
 }
@@ -342,13 +342,39 @@ impl ProcSampler {
         };
         let (ticks, rss) = aggregate(roots, &sample);
         self.last_mem_bytes = Some(rss);
-        if let Some((when, prev_sample, _prev_ticks)) = &self.last {
+        if let Some((when, prev_sample)) = &self.last {
             let (prev_tree_ticks, _) = aggregate(roots, prev_sample);
             let elapsed = when.elapsed().as_secs_f32();
             let delta = ticks.saturating_sub(prev_tree_ticks);
             self.last_cpu_percent = Some(cpu_percent(delta, elapsed, tps));
         }
-        self.last = Some((Instant::now(), sample, ticks));
+        self.last = Some((Instant::now(), sample));
+    }
+
+    /// Single-table variant: refresh several root groups against one
+    /// snapshot, reporting each group's cpu% and memory through the
+    /// out-params. Saves re-reading the process table per group.
+    pub fn refresh_groups<const N: usize>(
+        &mut self,
+        groups: [&[u32]; N],
+        out_cpu: [&mut Option<f32>; N],
+        out_mem: [&mut Option<u64>; N],
+    ) {
+        let tps = ticks_per_sec();
+        let Some(sample) = read_sample() else {
+            return;
+        };
+        for i in 0..N {
+            let (ticks, rss) = aggregate(groups[i], &sample);
+            *out_mem[i] = Some(rss);
+            if let Some((when, prev_sample)) = &self.last {
+                let (prev_tree_ticks, _) = aggregate(groups[i], prev_sample);
+                let elapsed = when.elapsed().as_secs_f32();
+                let delta = ticks.saturating_sub(prev_tree_ticks);
+                *out_cpu[i] = Some(cpu_percent(delta, elapsed, tps));
+            }
+        }
+        self.last = Some((Instant::now(), sample));
     }
 }
 
@@ -408,6 +434,20 @@ mod tests {
         assert!((cpu_percent(200, 2.0, 100) - 100.0).abs() < 1e-4);
         assert_eq!(cpu_percent(0, 2.0, 100), 0.0);
         assert_eq!(cpu_percent(100, 0.0, 100), 0.0);
+    }
+
+    #[test]
+    fn group_aggregates_are_independent() {
+        // Group A roots {1}, group B roots {1,7}: B includes A plus the
+        // extra root, so B's totals are a superset of A's.
+        let s = sample_from(&[(1, 0, 5, 100), (7, 0, 6, 200), (3, 1, 7, 300)]);
+        let ga = [1u32];
+        let gb = [1u32, 7u32];
+        let (ta, ma) = aggregate(&ga, &s);
+        let (tb, mb) = aggregate(&gb, &s);
+        assert_eq!((ta, ma), (12, 400));
+        assert_eq!((tb, mb), (18, 600));
+        assert!(tb >= ta && mb >= ma);
     }
 
     #[test]
