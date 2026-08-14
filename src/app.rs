@@ -3756,18 +3756,22 @@ impl eframe::App for App {
                             let is_row_hovered = row_resp.hovered();
                             let _row_resp =
                                 row_resp.on_hover_text(&self.texts.workspace.drag_handle_hint);
-                            // Background: only paint when active or hovered.
+                            // Background: whole row uses button_bg so every
+                            // click target inside the row shares one
+                            // continuous surface. The selected row is
+                            // outlined with a 1px accent stroke (inside)
+                            // to indicate which workspace is active.
+                            ui.painter().rect_filled(
+                                row_rect,
+                                0.0,
+                                self.active_theme.app.button_bg.to_egui(),
+                            );
                             if is_active {
-                                ui.painter().rect_filled(
-                                    row_rect,
+                                ui.painter().rect_stroke(
+                                    row_rect.shrink(1.0),
                                     0.0,
-                                    self.active_theme.app.active.to_egui(),
-                                );
-                            } else if is_row_hovered {
-                                ui.painter().rect_filled(
-                                    row_rect,
-                                    0.0,
-                                    self.active_theme.app.hover.to_egui(),
+                                    egui::Stroke::new(1.0, self.active_theme.app.accent.to_egui()),
+                                    egui::StrokeKind::Inside,
                                 );
                             }
                             self.panel_rects[i] = row_rect;
@@ -3880,21 +3884,38 @@ impl eframe::App for App {
                             );
                             let button_bg = self.active_theme.app.button_bg.to_egui();
                             let button_fg = self.active_theme.app.button_fg.to_egui();
+                            let icon_active = self.active_theme.app.text.to_egui();
                             let divider_color = self.active_theme.app.border.to_egui();
                             let stroke = egui::Stroke::new(1.0, divider_color);
 
                             // Three-dot button (rightmost in the cluster).
-                            let three_dot = egui::Button::new(
-                                egui::RichText::new(egui_phosphor::regular::DOTS_THREE_VERTICAL)
-                                    .size(13.0)
-                                    .color(button_fg),
-                            )
-                            .corner_radius(egui::CornerRadius::ZERO)
-                            .fill(button_bg)
-                            .stroke(egui::Stroke::NONE);
-                            let three_dot_resp =
-                                actions_ui.add_sized(egui::vec2(btn_w, btn_h), three_dot);
-                            three_dot_resp.context_menu(|ui| {
+                            // Custom flat icon: no widget chrome, no stroke.
+                            let (three_rect, three_resp) = actions_ui.allocate_exact_size(
+                                egui::vec2(btn_w, btn_h),
+                                egui::Sense::click_and_drag(),
+                            );
+                            let three_color = if three_resp.hovered() {
+                                icon_active
+                            } else {
+                                button_fg
+                            };
+                            let three_galley = actions_ui.fonts(|f| {
+                                f.layout_no_wrap(
+                                    egui_phosphor::regular::DOTS_THREE_VERTICAL.to_string(),
+                                    egui::FontId::proportional(13.0),
+                                    three_color,
+                                )
+                            });
+                            actions_ui.painter().galley(
+                                three_rect.center()
+                                    - egui::vec2(
+                                        three_galley.size().x / 2.0,
+                                        three_galley.size().y / 2.0,
+                                    ),
+                                three_galley,
+                                three_color,
+                            );
+                            three_resp.context_menu(|ui| {
                                 if ui.button(&self.texts.workspace.rename).clicked() {
                                     self.renaming_panel = Some(i);
                                     self.rename_buffer = self.panels[i].name.clone();
@@ -3937,25 +3958,35 @@ impl eframe::App for App {
                             );
 
                             // Lock / unlock button (no rounding, no stroke,
-                            // shared button_bg).
+                            // shared button_bg). Painted icon, click handler
+                            // attached to the allocation's Response.
                             if has_lock {
-                                let lock_btn = egui::Button::new(
-                                    egui::RichText::new(workspace_lock_icon(is_locked))
-                                        .size(13.0)
-                                        .color(button_fg),
-                                )
-                                .corner_radius(egui::CornerRadius::ZERO)
-                                .fill(button_bg)
-                                .stroke(egui::Stroke::NONE);
-                                if actions_ui
-                                    .add_sized(egui::vec2(btn_w, btn_h), lock_btn)
-                                    .on_hover_text(if is_locked {
-                                        &self.texts.workspace.locked_hint
-                                    } else {
-                                        &self.texts.workspace.unlocked_hint
-                                    })
-                                    .clicked()
-                                {
+                                let (lock_rect, lock_resp) = actions_ui.allocate_exact_size(
+                                    egui::vec2(btn_w, btn_h),
+                                    egui::Sense::click_and_drag(),
+                                );
+                                let lock_color = if lock_resp.hovered() {
+                                    icon_active
+                                } else {
+                                    button_fg
+                                };
+                                let lock_galley = actions_ui.fonts(|f| {
+                                    f.layout_no_wrap(
+                                        workspace_lock_icon(is_locked).to_string(),
+                                        egui::FontId::proportional(13.0),
+                                        lock_color,
+                                    )
+                                });
+                                actions_ui.painter().galley(
+                                    lock_rect.center()
+                                        - egui::vec2(
+                                            lock_galley.size().x / 2.0,
+                                            lock_galley.size().y / 2.0,
+                                        ),
+                                    lock_galley,
+                                    lock_color,
+                                );
+                                if lock_resp.clicked() {
                                     if is_locked {
                                         self.active_panel = i;
                                         self.lock_password_input.clear();
@@ -3966,6 +3997,11 @@ impl eframe::App for App {
                                         self.pw_message.clear();
                                     }
                                 }
+                                let _ = lock_resp.on_hover_text(if is_locked {
+                                    &self.texts.workspace.locked_hint
+                                } else {
+                                    &self.texts.workspace.unlocked_hint
+                                });
                             } else {
                                 actions_ui.allocate_exact_size(
                                     egui::vec2(btn_w, btn_h),
