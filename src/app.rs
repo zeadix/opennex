@@ -2753,23 +2753,29 @@ impl eframe::App for App {
                         if ui
                             .add(
                                 egui::Button::new(
-                                    egui::RichText::new(self.texts.about.menu_label.as_str())
+                                    egui::RichText::new(egui_phosphor::regular::INFO)
                                         .color(fg)
-                                        .size(12.0),
+                                        .size(14.0),
                                 )
                                 .fill(egui::Color32::TRANSPARENT)
                                 .stroke(egui::Stroke::NONE),
                             )
+                            .on_hover_text(&self.texts.about.menu_label)
                             .clicked()
                         {
                             self.show_about = true;
                         }
                         if ui
                             .add(
-                                egui::Button::new(egui::RichText::new("⚙").color(fg).size(13.0))
-                                    .fill(egui::Color32::TRANSPARENT)
-                                    .stroke(egui::Stroke::NONE),
+                                egui::Button::new(
+                                    egui::RichText::new(egui_phosphor::regular::GEAR)
+                                        .color(fg)
+                                        .size(14.0),
+                                )
+                                .fill(egui::Color32::TRANSPARENT)
+                                .stroke(egui::Stroke::NONE),
                             )
+                            .on_hover_text(&self.texts.view_menu.settings)
                             .clicked()
                         {
                             self.show_settings = true;
@@ -3719,7 +3725,8 @@ impl eframe::App for App {
                                                     Some(path.clone());
                                                 ui.close_menu();
                                             }
-                                            if ui.small_button("×").clicked() {
+                                            if ui.small_button(egui_phosphor::regular::X).clicked()
+                                            {
                                                 self.pending_delete_template = Some(path);
                                                 ui.close_menu();
                                             }
