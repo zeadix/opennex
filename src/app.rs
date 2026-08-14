@@ -3621,10 +3621,7 @@ impl eframe::App for App {
                 .frame(
                     egui::Frame::none()
                         .fill(self.active_theme.app.sidebar.to_egui())
-                        .stroke(egui::Stroke::new(
-                            1.0,
-                            self.active_theme.app.sidebar_border.to_egui(),
-                        ))
+                        .stroke(egui::Stroke::NONE)
                         .inner_margin(egui::Margin {
                             left: 8,
                             right: 8,
@@ -3873,11 +3870,13 @@ impl eframe::App for App {
                             });
 
                             // Right-side action cluster, anchored to the
-                            // right edge with right-to-left layout. The
-                            // lock and three-dot icons are always rendered
-                            // and sit flush against each other (no divider,
-                            // no item spacing inside the cluster).
-                            let btn_w = 24.0;
+                            // right edge with right-to-left layout. The lock
+                            // and three-dot icons are always rendered and
+                            // sit flush against each other (no divider, no
+                            // item spacing inside the cluster). Lock is the
+                            // rightmost target; the three-dot menu button
+                            // sits to its left.
+                            let btn_w = 17.0;
                             let btn_h = row_h;
                             let action_cluster_w = btn_w + btn_w;
                             let mut actions_ui = ui.new_child(
@@ -3895,7 +3894,50 @@ impl eframe::App for App {
                             let button_fg = self.active_theme.app.button_fg.to_egui();
                             let icon_active = self.active_theme.app.text.to_egui();
 
-                            // Three-dot button (rightmost). Left-click opens
+                            // Lock / unlock button (rightmost). Always painted so the
+                            // cluster keeps a constant width; the icon shows
+                            // the current lock state and hovering brightens it.
+                            let (lock_rect, lock_resp) = actions_ui.allocate_exact_size(
+                                egui::vec2(btn_w, btn_h),
+                                egui::Sense::click(),
+                            );
+                            let lock_color = if lock_resp.hovered() {
+                                icon_active
+                            } else {
+                                button_fg
+                            };
+                            let lock_galley = actions_ui.fonts(|f| {
+                                f.layout_no_wrap(
+                                    workspace_lock_icon(is_locked).to_string(),
+                                    egui::FontId::proportional(13.0),
+                                    lock_color,
+                                )
+                            });
+                            actions_ui.painter().galley(
+                                lock_rect.center()
+                                    - egui::vec2(
+                                        lock_galley.size().x / 2.0,
+                                        lock_galley.size().y / 2.0,
+                                    ),
+                                lock_galley,
+                                lock_color,
+                            );
+                            if lock_resp.clicked() {
+                                if is_locked {
+                                    self.active_panel = i;
+                                } else {
+                                    self.locked_panels.insert(i);
+                                }
+                                self.lock_password_input.clear();
+                                self.pw_message.clear();
+                            }
+                            let _ = lock_resp.on_hover_text(if is_locked {
+                                &self.texts.workspace.locked_hint
+                            } else {
+                                &self.texts.workspace.unlocked_hint
+                            });
+
+                            // Three-dot menu button (to the left of lock). Left-click opens
                             // the same menu as the row's right-click menu.
                             let (three_rect, three_resp) = actions_ui.allocate_exact_size(
                                 egui::vec2(btn_w, btn_h),
@@ -3964,49 +4006,6 @@ impl eframe::App for App {
                                 })
                                 .map(|r| r.inner);
                             bar_state.store(actions_ui.ctx(), bar_id);
-
-                            // Lock / unlock button. Always painted so the
-                            // cluster keeps a constant width; the icon shows
-                            // the current lock state and hovering brightens it.
-                            let (lock_rect, lock_resp) = actions_ui.allocate_exact_size(
-                                egui::vec2(btn_w, btn_h),
-                                egui::Sense::click(),
-                            );
-                            let lock_color = if lock_resp.hovered() {
-                                icon_active
-                            } else {
-                                button_fg
-                            };
-                            let lock_galley = actions_ui.fonts(|f| {
-                                f.layout_no_wrap(
-                                    workspace_lock_icon(is_locked).to_string(),
-                                    egui::FontId::proportional(13.0),
-                                    lock_color,
-                                )
-                            });
-                            actions_ui.painter().galley(
-                                lock_rect.center()
-                                    - egui::vec2(
-                                        lock_galley.size().x / 2.0,
-                                        lock_galley.size().y / 2.0,
-                                    ),
-                                lock_galley,
-                                lock_color,
-                            );
-                            if lock_resp.clicked() {
-                                if is_locked {
-                                    self.active_panel = i;
-                                } else {
-                                    self.locked_panels.insert(i);
-                                }
-                                self.lock_password_input.clear();
-                                self.pw_message.clear();
-                            }
-                            let _ = lock_resp.on_hover_text(if is_locked {
-                                &self.texts.workspace.locked_hint
-                            } else {
-                                &self.texts.workspace.unlocked_hint
-                            });
                         }
                     }
 
