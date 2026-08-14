@@ -3745,22 +3745,18 @@ impl eframe::App for App {
                                 row_resp.on_hover_text(&self.texts.workspace.drag_handle_hint);
                             // Background: whole row uses button_bg so every
                             // click target inside the row shares one
-                            // continuous surface. The selected row is
-                            // outlined with a 1px accent stroke (inside)
-                            // to indicate which workspace is active.
+                            // continuous surface. The selected row fills
+                            // with the theme's active color instead of
+                            // button_bg to indicate the active workspace.
                             ui.painter().rect_filled(
                                 row_rect,
                                 0.0,
-                                self.active_theme.app.button_bg.to_egui(),
+                                if is_active {
+                                    self.active_theme.app.active.to_egui()
+                                } else {
+                                    self.active_theme.app.button_bg.to_egui()
+                                },
                             );
-                            if is_active {
-                                ui.painter().rect_stroke(
-                                    row_rect.shrink(1.0),
-                                    0.0,
-                                    egui::Stroke::new(1.0, self.active_theme.app.accent.to_egui()),
-                                    egui::StrokeKind::Inside,
-                                );
-                            }
                             self.panel_rects[i] = row_rect;
 
                             // Layout: [≡ drag icon] [name (flex)] [lock btn | three-dot]
@@ -3822,7 +3818,7 @@ impl eframe::App for App {
                             });
                             child.painter().galley(
                                 egui::pos2(
-                                    name_rect.min.x + 8.0,
+                                    name_rect.min.x + 2.0,
                                     name_rect.center().y - name_galley.size().y / 2.0,
                                 ),
                                 name_galley,
@@ -3894,50 +3890,7 @@ impl eframe::App for App {
                             let button_fg = self.active_theme.app.button_fg.to_egui();
                             let icon_active = self.active_theme.app.text.to_egui();
 
-                            // Lock / unlock button (rightmost). Always painted so the
-                            // cluster keeps a constant width; the icon shows
-                            // the current lock state and hovering brightens it.
-                            let (lock_rect, lock_resp) = actions_ui.allocate_exact_size(
-                                egui::vec2(btn_w, btn_h),
-                                egui::Sense::click(),
-                            );
-                            let lock_color = if lock_resp.hovered() {
-                                icon_active
-                            } else {
-                                button_fg
-                            };
-                            let lock_galley = actions_ui.fonts(|f| {
-                                f.layout_no_wrap(
-                                    workspace_lock_icon(is_locked).to_string(),
-                                    egui::FontId::proportional(13.0),
-                                    lock_color,
-                                )
-                            });
-                            actions_ui.painter().galley(
-                                lock_rect.center()
-                                    - egui::vec2(
-                                        lock_galley.size().x / 2.0,
-                                        lock_galley.size().y / 2.0,
-                                    ),
-                                lock_galley,
-                                lock_color,
-                            );
-                            if lock_resp.clicked() {
-                                if is_locked {
-                                    self.active_panel = i;
-                                } else {
-                                    self.locked_panels.insert(i);
-                                }
-                                self.lock_password_input.clear();
-                                self.pw_message.clear();
-                            }
-                            let _ = lock_resp.on_hover_text(if is_locked {
-                                &self.texts.workspace.locked_hint
-                            } else {
-                                &self.texts.workspace.unlocked_hint
-                            });
-
-                            // Three-dot menu button (to the left of lock). Left-click opens
+                            // Three-dot menu button (rightmost). Left-click opens
                             // the same menu as the row's right-click menu.
                             let (three_rect, three_resp) = actions_ui.allocate_exact_size(
                                 egui::vec2(btn_w, btn_h),
@@ -4006,6 +3959,49 @@ impl eframe::App for App {
                                 })
                                 .map(|r| r.inner);
                             bar_state.store(actions_ui.ctx(), bar_id);
+
+                            // Lock / unlock button (left of the three-dot). Always painted so the
+                            // cluster keeps a constant width; the icon shows
+                            // the current lock state and hovering brightens it.
+                            let (lock_rect, lock_resp) = actions_ui.allocate_exact_size(
+                                egui::vec2(btn_w, btn_h),
+                                egui::Sense::click(),
+                            );
+                            let lock_color = if lock_resp.hovered() {
+                                icon_active
+                            } else {
+                                button_fg
+                            };
+                            let lock_galley = actions_ui.fonts(|f| {
+                                f.layout_no_wrap(
+                                    workspace_lock_icon(is_locked).to_string(),
+                                    egui::FontId::proportional(13.0),
+                                    lock_color,
+                                )
+                            });
+                            actions_ui.painter().galley(
+                                lock_rect.center()
+                                    - egui::vec2(
+                                        lock_galley.size().x / 2.0,
+                                        lock_galley.size().y / 2.0,
+                                    ),
+                                lock_galley,
+                                lock_color,
+                            );
+                            if lock_resp.clicked() {
+                                if is_locked {
+                                    self.active_panel = i;
+                                } else {
+                                    self.locked_panels.insert(i);
+                                }
+                                self.lock_password_input.clear();
+                                self.pw_message.clear();
+                            }
+                            let _ = lock_resp.on_hover_text(if is_locked {
+                                &self.texts.workspace.locked_hint
+                            } else {
+                                &self.texts.workspace.unlocked_hint
+                            });
                         }
                     }
 
