@@ -304,14 +304,6 @@ fn binding_matches_key(
     binding_to_key(binding) == Some(key) && binding_to_modifiers(binding) == modifiers
 }
 
-/// Fixed right-side column width: lock button (24) + 1px divider +
-/// three-dot button (24) + 1px divider = 50px. The lock/close toggle
-/// (only one of the two is shown depending on hover) and the three-dot
-/// menu (always) take the same horizontal space.
-fn workspace_action_column_width(_has_close: bool, _has_lock: bool, _item_spacing: f32) -> f32 {
-    50.0
-}
-
 fn screen_center(ctx: &egui::Context) -> egui::Pos2 {
     ctx.input(|i| i.screen_rect).center()
 }
@@ -3693,7 +3685,7 @@ impl eframe::App for App {
                     ui.add_space(4.0);
                     // Remove the default vertical spacing between workspace
                     // items so the list reads as one continuous block.
-                    ui.style_mut().spacing.item_spacing.y = 0.0;
+                    ui.style_mut().spacing.item_spacing.y = 2.0;
                     let mut to_select = None;
                     let panel_count = self.panels.len();
                     let mut reorder = None;
@@ -3739,8 +3731,6 @@ impl eframe::App for App {
                             }
                         } else {
                             let panel_name = self.panels[i].name.clone();
-                            let has_close = self.panels.len() > 1;
-                            let has_lock = has_close || self.locked_panels.contains(&i);
                             let is_locked = self.locked_panels.contains(&i);
                             let row_h = ui.spacing().interact_size.y;
                             // Reserve the full row width up front so we can
@@ -3883,16 +3873,13 @@ impl eframe::App for App {
                             });
 
                             // Right-side action cluster, anchored to the
-                            // right edge with right-to-left layout so the
-                            // lock + three-dot buttons can never be clipped
-                            // by the name's selectable label taking too much
-                            // width.
+                            // right edge with right-to-left layout. The
+                            // lock and three-dot icons are always rendered
+                            // and sit flush against each other (no divider,
+                            // no item spacing inside the cluster).
                             let btn_w = 24.0;
-                            let btn_h = row_h - 4.0;
-                            // Lock button + 1px divider + three-dot. The
-                            // lock icon is rendered even when !has_lock so
-                            // the row reads as a single continuous control.
-                            let action_cluster_w = btn_w + 1.0 + btn_w;
+                            let btn_h = row_h;
+                            let action_cluster_w = btn_w + btn_w;
                             let mut actions_ui = ui.new_child(
                                 egui::UiBuilder::new()
                                     .max_rect(egui::Rect::from_min_size(
@@ -3904,17 +3891,15 @@ impl eframe::App for App {
                                     ))
                                     .layout(egui::Layout::right_to_left(egui::Align::Center)),
                             );
-                            let button_bg = self.active_theme.app.button_bg.to_egui();
+                            actions_ui.style_mut().spacing.item_spacing = egui::vec2(0.0, 0.0);
                             let button_fg = self.active_theme.app.button_fg.to_egui();
                             let icon_active = self.active_theme.app.text.to_egui();
-                            let divider_color = self.active_theme.app.border.to_egui();
-                            let stroke = egui::Stroke::new(1.0, divider_color);
 
-                            // Three-dot button (rightmost in the cluster).
-                            // Custom flat icon: no widget chrome, no stroke.
+                            // Three-dot button (rightmost). Left-click opens
+                            // the same menu as the row's right-click menu.
                             let (three_rect, three_resp) = actions_ui.allocate_exact_size(
                                 egui::vec2(btn_w, btn_h),
-                                egui::Sense::click_and_drag(),
+                                egui::Sense::click(),
                             );
                             let three_color = if three_resp.hovered() {
                                 icon_active
@@ -3937,94 +3922,91 @@ impl eframe::App for App {
                                 three_galley,
                                 three_color,
                             );
-                            three_resp.context_menu(|ui| {
-                                if ui.button(&self.texts.workspace.rename).clicked() {
-                                    self.renaming_panel = Some(i);
-                                    self.rename_buffer = self.panels[i].name.clone();
-                                    self.rename_frame_count = 0;
-                                    ui.close_menu();
-                                }
-                                if ui.button(&self.texts.workspace.save_as_template).clicked() {
-                                    self.save_as_template(i);
-                                    ui.close_menu();
-                                }
-                                ui.separator();
-                                if ui.button(if is_locked { "解锁" } else { "锁定" }).clicked()
-                                {
-                                    if is_locked {
-                                        self.active_panel = i;
-                                        self.lock_password_input.clear();
-                                        self.pw_message.clear();
-                                    } else {
-                                        self.locked_panels.insert(i);
-                                        self.lock_password_input.clear();
-                                        self.pw_message.clear();
+                            // bar_menu handles the primary-click open/close
+                            // interaction internally via
+                            // stationary_click_interaction, so the same
+                            // Response drives both the painted icon and the
+                            // popup menu state.
+                            let bar_id = three_resp.id;
+                            let mut bar_state =
+                                egui::menu::BarState::load(actions_ui.ctx(), bar_id);
+                            bar_state
+                                .bar_menu(&three_resp, |ui| {
+                                    if ui.button(&self.texts.workspace.rename).clicked() {
+                                        self.renaming_panel = Some(i);
+                                        self.rename_buffer = self.panels[i].name.clone();
+                                        self.rename_frame_count = 0;
+                                        ui.close_menu();
                                     }
-                                    ui.close_menu();
-                                }
-                                ui.separator();
-                                if ui.button(&self.texts.settings.buttons.close).clicked() {
-                                    self.close_confirm_panel = Some(i);
-                                    ui.close_menu();
-                                }
-                            });
+                                    if ui.button(&self.texts.workspace.save_as_template).clicked() {
+                                        self.save_as_template(i);
+                                        ui.close_menu();
+                                    }
+                                    ui.separator();
+                                    if ui.button(if is_locked { "解锁" } else { "锁定" }).clicked()
+                                    {
+                                        if is_locked {
+                                            self.active_panel = i;
+                                            self.lock_password_input.clear();
+                                            self.pw_message.clear();
+                                        } else {
+                                            self.locked_panels.insert(i);
+                                            self.lock_password_input.clear();
+                                            self.pw_message.clear();
+                                        }
+                                        ui.close_menu();
+                                    }
+                                    ui.separator();
+                                    if ui.button(&self.texts.settings.buttons.close).clicked() {
+                                        self.close_confirm_panel = Some(i);
+                                        ui.close_menu();
+                                    }
+                                })
+                                .map(|r| r.inner);
+                            bar_state.store(actions_ui.ctx(), bar_id);
 
-                            // 1px vertical line between lock and three-dot.
-                            let (_, line2) = actions_ui.allocate_space(egui::vec2(0.0, btn_h));
-                            actions_ui.painter().line_segment(
-                                [
-                                    egui::pos2(line2.max.x, line2.min.y),
-                                    egui::pos2(line2.max.x, line2.max.y),
-                                ],
-                                stroke,
+                            // Lock / unlock button. Always painted so the
+                            // cluster keeps a constant width; the icon shows
+                            // the current lock state and hovering brightens it.
+                            let (lock_rect, lock_resp) = actions_ui.allocate_exact_size(
+                                egui::vec2(btn_w, btn_h),
+                                egui::Sense::click(),
                             );
-
-                            // Lock / unlock button (no rounding, no stroke,
-                            // shared button_bg). Painted icon, click handler
-                            // attached to the allocation's Response.
-                            if has_lock {
-                                let (lock_rect, lock_resp) = actions_ui.allocate_exact_size(
-                                    egui::vec2(btn_w, btn_h),
-                                    egui::Sense::click_and_drag(),
-                                );
-                                let lock_color = if lock_resp.hovered() {
-                                    icon_active
-                                } else {
-                                    button_fg
-                                };
-                                let lock_galley = actions_ui.fonts(|f| {
-                                    f.layout_no_wrap(
-                                        workspace_lock_icon(is_locked).to_string(),
-                                        egui::FontId::proportional(13.0),
-                                        lock_color,
-                                    )
-                                });
-                                actions_ui.painter().galley(
-                                    lock_rect.center()
-                                        - egui::vec2(
-                                            lock_galley.size().x / 2.0,
-                                            lock_galley.size().y / 2.0,
-                                        ),
-                                    lock_galley,
+                            let lock_color = if lock_resp.hovered() {
+                                icon_active
+                            } else {
+                                button_fg
+                            };
+                            let lock_galley = actions_ui.fonts(|f| {
+                                f.layout_no_wrap(
+                                    workspace_lock_icon(is_locked).to_string(),
+                                    egui::FontId::proportional(13.0),
                                     lock_color,
-                                );
-                                if lock_resp.clicked() {
-                                    if is_locked {
-                                        self.active_panel = i;
-                                        self.lock_password_input.clear();
-                                        self.pw_message.clear();
-                                    } else {
-                                        self.locked_panels.insert(i);
-                                        self.lock_password_input.clear();
-                                        self.pw_message.clear();
-                                    }
-                                }
-                                let _ = lock_resp.on_hover_text(if is_locked {
-                                    &self.texts.workspace.locked_hint
+                                )
+                            });
+                            actions_ui.painter().galley(
+                                lock_rect.center()
+                                    - egui::vec2(
+                                        lock_galley.size().x / 2.0,
+                                        lock_galley.size().y / 2.0,
+                                    ),
+                                lock_galley,
+                                lock_color,
+                            );
+                            if lock_resp.clicked() {
+                                if is_locked {
+                                    self.active_panel = i;
                                 } else {
-                                    &self.texts.workspace.unlocked_hint
-                                });
+                                    self.locked_panels.insert(i);
+                                }
+                                self.lock_password_input.clear();
+                                self.pw_message.clear();
                             }
+                            let _ = lock_resp.on_hover_text(if is_locked {
+                                &self.texts.workspace.locked_hint
+                            } else {
+                                &self.texts.workspace.unlocked_hint
+                            });
                         }
                     }
 
@@ -4762,19 +4744,6 @@ mod tests {
             egui::Key::F1,
             egui::Modifiers::CTRL
         ));
-    }
-
-    #[test]
-    fn workspace_action_column_width_covers_buttons() {
-        // The right side always reserves 50px for the lock button,
-        // its 1px divider, the three-dot button, and its 1px divider,
-        // regardless of how many action buttons are actually shown.
-        assert_eq!(
-            super::workspace_action_column_width(false, false, 4.0),
-            50.0
-        );
-        assert_eq!(super::workspace_action_column_width(false, true, 4.0), 50.0);
-        assert_eq!(super::workspace_action_column_width(true, true, 4.0), 50.0);
     }
 
     #[test]
