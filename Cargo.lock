@@ -2855,6 +2855,7 @@ dependencies = [
  "egui_term",
  "env_logger",
  "flate2",
+ "libc",
  "log",
  "rfd",
  "rusqlite",
@@ -2866,6 +2867,7 @@ dependencies = [
  "tar",
  "ureq",
  "uuid",
+ "windows-sys 0.59.0",
  "zip",
 ]
 

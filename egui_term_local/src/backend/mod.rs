@@ -165,7 +165,14 @@ impl TerminalBackend {
         let pty = tty::new(&pty_config, terminal_size.into(), id)?;
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         let child_pid = pty.child().id();
-        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        #[cfg(target_os = "windows")]
+        let child_pid =
+            pty.child_watcher().pid().map(|pid| pid.get()).unwrap_or(0);
+        #[cfg(not(any(
+            target_os = "linux",
+            target_os = "macos",
+            target_os = "windows"
+        )))]
         let child_pid = 0u32;
         let (event_sender, event_receiver) = mpsc::channel();
         let event_proxy = EventProxy(event_sender);

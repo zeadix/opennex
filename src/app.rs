@@ -1069,13 +1069,15 @@ pub struct App {
     skipped_versions: std::collections::HashSet<String>,
     update_toast: Option<(String, std::time::Instant)>,
     startup_frame_count: u32,
-    /// Last sampled CPU usage (0..=100), refreshed every 2 seconds by
-    /// the lightweight poller below.
-    cpu_usage: Option<f32>,
-    /// Last sampled resident memory in bytes.
-    memory_bytes: Option<u64>,
+    /// Aggregated CPU% across every live terminal's process tree,
+    /// refreshed on the 2 s sampling tick.
+    terminal_cpu: Option<f32>,
+    /// Aggregated resident memory across terminal process trees.
+    terminal_mem: Option<u64>,
     /// Wall-clock of the last sampling tick.
     last_sample: std::time::Instant,
+    /// Delta sampler over per-terminal process trees.
+    terminal_sampler: crate::proc_stats::ProcSampler,
 }
 
 struct TerminalData {
@@ -1292,9 +1294,10 @@ impl App {
             skipped_versions: std::collections::HashSet::new(),
             update_toast: None,
             startup_frame_count: 0,
-            cpu_usage: None,
-            memory_bytes: None,
+            terminal_cpu: None,
+            terminal_mem: None,
             last_sample: std::time::Instant::now(),
+            terminal_sampler: crate::proc_stats::ProcSampler::new(),
         };
 
         // Register fonts (system + embedded + theme choices) now that the
@@ -2445,11 +2448,19 @@ impl eframe::App for App {
             }
         }
 
-        // Status-bar sample: every 2 seconds.
+        // Status-bar sample: every 2 seconds, aggregate CPU/memory over
+        // every live terminal's process tree (shell + its children).
         if self.last_sample.elapsed() >= std::time::Duration::from_secs(2) {
             self.last_sample = std::time::Instant::now();
-            self.cpu_usage = sample_cpu_percent();
-            self.memory_bytes = sample_memory_bytes();
+            let roots: Vec<u32> = self
+                .terminals
+                .values()
+                .map(|td| td.instance.backend.child_pid())
+                .filter(|&pid| pid != 0)
+                .collect();
+            self.terminal_sampler.refresh(&roots);
+            self.terminal_cpu = self.terminal_sampler.last_cpu_percent;
+            self.terminal_mem = self.terminal_sampler.last_mem_bytes;
         }
         let renaming = self.is_renaming();
         if renaming {
@@ -4493,10 +4504,10 @@ impl eframe::App for App {
                             .color(self.active_theme.app.sidebar_border.to_egui())
                             .size(11.0),
                     );
-                    // Section 2: CPU usage (cross-platform: tries sysinfo,
-                    // falls back to "—%"). Sampled every 2s via a poller in App.
+                    // Section 2: aggregated CPU% over all terminal process
+                    // trees (shell + descendants), sampled every 2 s.
                     ui.label(
-                        egui::RichText::new(format_cpu(self.cpu_usage))
+                        egui::RichText::new(format_cpu(self.terminal_cpu))
                             .color(weak)
                             .size(11.0),
                     );
@@ -4505,9 +4516,9 @@ impl eframe::App for App {
                             .color(self.active_theme.app.sidebar_border.to_egui())
                             .size(11.0),
                     );
-                    // Section 3: memory usage (cross-platform).
+                    // Section 3: aggregated resident memory of the same trees.
                     ui.label(
-                        egui::RichText::new(format_memory(self.memory_bytes))
+                        egui::RichText::new(format_memory(self.terminal_mem))
                             .color(weak)
                             .size(11.0),
                     );
@@ -4539,77 +4550,6 @@ fn format_memory(bytes: Option<u64>) -> String {
     } else {
         format!("{:.0} MB", b / MB)
     }
-}
-
-/// Sample our own process's CPU usage as a percentage. The value is
-/// averaged across the interval since the last call.
-fn sample_cpu_percent() -> Option<f32> {
-    use std::sync::Mutex;
-    use std::sync::OnceLock;
-    use std::time::Instant;
-    static LAST: OnceLock<Mutex<(Instant, u64)>> = OnceLock::new();
-    let cell = LAST.get_or_init(|| Mutex::new((Instant::now(), 0)));
-    let now = Instant::now();
-    let (total, prev_total) = {
-        let (total, _) = read_proc_self_stat()?;
-        let mut guard = cell.lock().ok()?;
-        let (last_t, prev) = *guard;
-        *guard = (now, total as u64);
-        (total as u64, prev)
-    };
-    let (last_t, _) = { *cell.lock().ok()? };
-    if now <= last_t {
-        return None;
-    }
-    let secs = now.duration_since(last_t).as_secs_f32().max(0.001);
-    let cpus = std::thread::available_parallelism()
-        .map(|n| n.get() as f32)
-        .unwrap_or(1.0)
-        .max(1.0);
-    let jiffies = total as f32 - prev_total as f32;
-    let percent = (jiffies / (secs * clk_tck() as f32)) * 100.0 / cpus;
-    Some(percent.clamp(0.0, 100.0 * cpus))
-}
-
-/// Sample our own process's resident memory in bytes (RSS).
-fn sample_memory_bytes() -> Option<u64> {
-    let body = std::fs::read_to_string("/proc/self/statm").ok()?;
-    let mut iter = body.split_whitespace();
-    let _size = iter.next()?.parse::<u64>().ok()?;
-    let rss_pages = iter.next()?.parse::<u64>().ok()?;
-    Some(rss_pages * 4096)
-}
-
-#[cfg(target_os = "linux")]
-fn read_proc_self_stat() -> Option<(u64, ())> {
-    let body = std::fs::read_to_string("/proc/self/stat").ok()?;
-    let close = body.rfind(')')?;
-    let after = body.get(close + 1..)?;
-    let mut fields = after.split_whitespace();
-    let mut collected: Vec<u64> = Vec::with_capacity(40);
-    for _ in 0..40 {
-        match fields.next().and_then(|s| s.parse::<u64>().ok()) {
-            Some(v) => collected.push(v),
-            None => break,
-        }
-    }
-    if collected.len() < 15 {
-        return None;
-    }
-    let utime = collected[12];
-    let stime = collected[13];
-    Some((utime + stime, ()))
-}
-
-#[cfg(not(target_os = "linux"))]
-fn read_proc_self_stat() -> Option<(u64, ())> {
-    None
-}
-
-fn clk_tck() -> usize {
-    // Linux HZ is typically 100; we use 100 as a safe default. Using
-    // posixconf(_SC_CLK_TCK) would be more accurate but needs libc.
-    100
 }
 
 #[cfg(test)]

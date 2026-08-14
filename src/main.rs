@@ -5,6 +5,7 @@ mod app;
 mod completion;
 mod history_db;
 mod i18n;
+mod proc_stats;
 mod terminal;
 mod theme;
 mod updater;
