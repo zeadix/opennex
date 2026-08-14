@@ -3866,11 +3866,10 @@ impl eframe::App for App {
                             // width.
                             let btn_w = 24.0;
                             let btn_h = row_h - 4.0;
-                            let action_cluster_w = if has_lock {
-                                btn_w + 1.0 + btn_w
-                            } else {
-                                1.0 + btn_w
-                            };
+                            // Lock button + 1px divider + three-dot. The
+                            // lock icon is rendered even when !has_lock so
+                            // the row reads as a single continuous control.
+                            let action_cluster_w = btn_w + 1.0 + btn_w;
                             let mut actions_ui = ui.new_child(
                                 egui::UiBuilder::new()
                                     .max_rect(egui::Rect::from_min_size(
@@ -4002,11 +4001,6 @@ impl eframe::App for App {
                                 } else {
                                     &self.texts.workspace.unlocked_hint
                                 });
-                            } else {
-                                actions_ui.allocate_exact_size(
-                                    egui::vec2(btn_w, btn_h),
-                                    egui::Sense::hover(),
-                                );
                             }
                         }
                     }
