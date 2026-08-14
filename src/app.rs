@@ -3630,33 +3630,54 @@ impl eframe::App for App {
                         }),
                 )
                 .show(ctx, |ui| {
-                    // Top row: + and templates dropdown
+                    // Header row: section title on the left, plain-text
+                    // actions on the right (no icons, no frame, no rounding).
                     ui.horizontal(|ui| {
-                        let bg = self.active_theme.app.button_bg.to_egui();
                         let fg = self.active_theme.app.button_fg.to_egui();
-                        if ui
-                            .add(
-                                egui::Button::new(
-                                    egui::RichText::new(egui_phosphor::regular::PLUS)
-                                        .color(fg)
-                                        .size(14.0),
+                        let icon_active = self.active_theme.app.text.to_egui();
+                        let heading = format!("{}列表", self.texts.workspace.heading);
+                        ui.label(egui::RichText::new(heading).color(fg).size(12.0).strong());
+
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.style_mut().spacing.item_spacing.x = 8.0;
+                            // 新建 (rightmost): flat text, paints nothing.
+                            let new_resp = ui.add(
+                                egui::Button::new(egui::RichText::new("新建").color(fg).size(12.0))
+                                    .frame(false),
+                            );
+                            if new_resp.clicked() {
+                                self.add_panel(ui.ctx());
+                            }
+
+                            // 模板: flat text driving a left-click menu
+                            // via BarState (same as the row three-dot).
+                            let (tpl_rect, tpl_resp) = ui.allocate_exact_size(
+                                egui::vec2(34.0, ui.spacing().interact_size.y),
+                                egui::Sense::click(),
+                            );
+                            let tpl_color = if tpl_resp.hovered() { icon_active } else { fg };
+                            let tpl_galley = ui.fonts(|f| {
+                                f.layout_no_wrap(
+                                    "模板".to_string(),
+                                    egui::FontId::proportional(12.0),
+                                    tpl_color,
                                 )
-                                .fill(bg)
-                                .frame(false),
-                            )
-                            .clicked()
-                        {
-                            self.add_panel(ui.ctx());
-                        }
-                        if self.cached_template_files.is_empty() {
-                            self.refresh_template_files();
-                        }
-                        let template_files = self.cached_template_files.clone();
-                        ui.menu_button(
-                            egui::RichText::new(egui_phosphor::regular::CARET_DOWN)
-                                .color(fg)
-                                .size(11.0),
-                            |ui| {
+                            });
+                            ui.painter().galley(
+                                egui::pos2(
+                                    tpl_rect.min.x,
+                                    tpl_rect.center().y - tpl_galley.size().y / 2.0,
+                                ),
+                                tpl_galley,
+                                tpl_color,
+                            );
+                            if self.cached_template_files.is_empty() {
+                                self.refresh_template_files();
+                            }
+                            let template_files = self.cached_template_files.clone();
+                            let bar_id = tpl_resp.id;
+                            let mut bar_state = egui::menu::BarState::load(ui.ctx(), bar_id);
+                            bar_state.bar_menu(&tpl_resp, |ui| {
                                 if template_files.is_empty() {
                                     ui.label(&self.texts.workspace.templates_empty);
                                 } else {
@@ -3676,8 +3697,9 @@ impl eframe::App for App {
                                         });
                                     }
                                 }
-                            },
-                        );
+                            });
+                            bar_state.store(ui.ctx(), bar_id);
+                        });
                     });
                     ui.add_space(4.0);
                     // Remove the default vertical spacing between workspace
