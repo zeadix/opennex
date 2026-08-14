@@ -3125,7 +3125,7 @@ impl eframe::App for App {
         if self.show_about {
             let mut open = self.show_about;
             let mut clicked_close = false;
-            egui::Window::new(&self.texts.about.title)
+            egui::Window::new("OpenNex")
                 .open(&mut open)
                 .resizable(false)
                 .collapsible(false)
@@ -3135,11 +3135,6 @@ impl eframe::App for App {
                 .show(ctx, |ui| {
                     ui.vertical_centered(|ui| {
                         ui.add_space(4.0);
-                        ui.label(
-                            egui::RichText::new(env!("CARGO_PKG_NAME"))
-                                .size(20.0)
-                                .strong(),
-                        );
                         ui.weak(format!(
                             "{}: v{}",
                             self.texts.about.version_label,
