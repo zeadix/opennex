@@ -3809,16 +3809,39 @@ impl eframe::App for App {
                             }
                             let _ = handle_rect;
 
-                            // Name (clickable, fills middle). On double-click
-                            // enter inline rename mode. Always reserves 50px
-                            // Name fills the rest of the row width. The
-                            // action cluster is a separate child Ui anchored
-                            // to the right edge, so it does not consume any
-                            // of the name's available width.
-                            let response = child.add_sized(
+                            // Name (clickable, fills middle). Flat text drawn
+                            // directly on the row's shared button_bg — no
+                            // SelectableLabel so hover never paints its own
+                            // background over the row surface. Active state
+                            // is shown via the text color; the row's accent
+                            // border already marks the active workspace.
+                            let (name_rect, response) = child.allocate_exact_size(
                                 egui::vec2(child.available_width(), row_h),
-                                egui::SelectableLabel::new(is_active, &panel_name),
+                                egui::Sense::click_and_drag(),
                             );
+                            let name_color = if is_active {
+                                self.active_theme.app.text.to_egui()
+                            } else if response.hovered() {
+                                self.active_theme.app.text.to_egui()
+                            } else {
+                                self.active_theme.app.button_fg.to_egui()
+                            };
+                            let name_galley = child.fonts(|f| {
+                                f.layout_no_wrap(
+                                    panel_name.to_string(),
+                                    egui::FontId::proportional(14.0),
+                                    name_color,
+                                )
+                            });
+                            child.painter().galley(
+                                egui::pos2(
+                                    name_rect.min.x + 8.0,
+                                    name_rect.center().y - name_galley.size().y / 2.0,
+                                ),
+                                name_galley,
+                                name_color,
+                            );
+                            let _ = name_rect;
                             if response.double_clicked() && !renaming {
                                 self.renaming_panel = Some(i);
                                 self.rename_buffer = panel_name;
