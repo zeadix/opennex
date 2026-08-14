@@ -1211,34 +1211,13 @@ impl App {
                 })
             });
 
-        // Scan system monospace fonts
+        // Scan system monospace fonts; registration happens later in
+        // App::rebuild_fonts once the active theme's font choices are known.
         let system_fonts = scan_system_fonts();
-        // Register all found fonts in egui
-        let mut fonts = egui::FontDefinitions::default();
-        egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
-        let mut registered_names: Vec<String> = Vec::new();
-        for (name, path) in &system_fonts {
-            if let Ok(data) = std::fs::read(path) {
-                fonts.font_data.insert(
-                    name.clone(),
-                    std::sync::Arc::new(egui::FontData::from_owned(data)),
-                );
-                registered_names.push(name.clone());
-            }
-        }
-        // Load CJK, Devanagari, and other multilingual fonts
-        load_multilingual_fonts(&mut fonts);
-        // Register found fonts into Monospace family
-        if let Some(mono_family) = fonts.families.get_mut(&egui::FontFamily::Monospace) {
-            for name in &registered_names {
-                mono_family.push(name.clone());
-            }
-        }
-        ctx.set_fonts(fonts);
+        let font_names: Vec<String> = system_fonts.iter().map(|(name, _)| name.clone()).collect();
 
         crate::theme::apply_theme_definition(ctx, &active_theme);
 
-        let font_names: Vec<String> = registered_names;
         let db_path = app_data_dir().join("history.db");
         let language = settings.language.clone();
         let available_languages = crate::i18n::scan_available_languages();
@@ -1317,6 +1296,11 @@ impl App {
             memory_bytes: None,
             last_sample: std::time::Instant::now(),
         };
+
+        // Register fonts (system + embedded + theme choices) now that the
+        // App and its active theme exist. rebuild_fonts reuses the scanned
+        // list captured above for the system_fonts field.
+        app.rebuild_fonts(ctx);
 
         let scene_path = scene_path();
         if scene_path.exists() {
@@ -2112,6 +2096,65 @@ impl App {
         self.start_download(ctx, info);
     }
 
+    /// Rebuild egui FontDefinitions from the scanned system fonts plus the
+    /// embedded multilingual faces, honoring the active theme's UI and
+    /// terminal font choices by inserting them first in their families.
+    fn rebuild_fonts(&self, ctx: &egui::Context) {
+        let system_fonts = scan_system_fonts();
+        let mut fonts = egui::FontDefinitions::default();
+        egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
+        let mut registered_names: Vec<String> = Vec::new();
+        for (name, path) in &system_fonts {
+            if let Ok(data) = std::fs::read(path) {
+                fonts.font_data.insert(
+                    name.clone(),
+                    std::sync::Arc::new(egui::FontData::from_owned(data)),
+                );
+                registered_names.push(name.clone());
+            }
+        }
+        load_multilingual_fonts(&mut fonts);
+        if let Some(mono_family) = fonts.families.get_mut(&egui::FontFamily::Monospace) {
+            for name in &registered_names {
+                mono_family.push(name.clone());
+            }
+        }
+
+        // Theme font choices: UI font goes first in Proportional, terminal
+        // font first in Monospace. Generic families ("system-ui",
+        // "monospace") map to the egui defaults already at the tail of the
+        // family list, so they're skipped here.
+        let ui_font = self
+            .active_theme
+            .app
+            .ui_font_families
+            .first()
+            .cloned()
+            .unwrap_or_default();
+        if !ui_font.is_empty() && ui_font != "system-ui" && fonts.font_data.contains_key(&ui_font) {
+            if let Some(family) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
+                family.insert(0, ui_font);
+            }
+        }
+        let term_font = self
+            .active_theme
+            .typography
+            .terminal_font_families
+            .first()
+            .cloned()
+            .unwrap_or_default();
+        if !term_font.is_empty()
+            && term_font != "monospace"
+            && fonts.font_data.contains_key(&term_font)
+        {
+            if let Some(family) = fonts.families.get_mut(&egui::FontFamily::Monospace) {
+                family.insert(0, term_font);
+            }
+        }
+
+        ctx.set_fonts(fonts);
+    }
+
     fn refresh_themes(&mut self, themes_root: &std::path::Path) {
         let mut themes = crate::theme::store::load_user_themes(themes_root).unwrap_or_default();
         let mut themes = crate::theme::store::load_user_themes(themes_root).unwrap_or_default();
@@ -2655,6 +2698,7 @@ impl eframe::App for App {
             )
             .show(ctx, |ui| {
                 egui::menu::bar(ui, |ui| {
+                    let fg_menu = self.active_theme.app.menu_fg.to_egui();
                     ui.menu_button(self.texts.menu.file.clone(), |ui| {
                         if ui.button(self.texts.file_menu.save.clone()).clicked() {
                             self.save_scene();
@@ -2746,45 +2790,43 @@ impl eframe::App for App {
                             });
                     });
 
-                    // Right-aligned extras: active theme name + about + settings.
+                    // Settings and About as regular menu-bar entries.
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new(&self.texts.about.menu_label)
+                                    .color(fg_menu)
+                                    .size(12.0),
+                            )
+                            .fill(egui::Color32::TRANSPARENT)
+                            .stroke(egui::Stroke::NONE),
+                        )
+                        .clicked()
+                    {
+                        self.show_about = true;
+                    }
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new(&self.texts.view_menu.settings)
+                                    .color(fg_menu)
+                                    .size(12.0),
+                            )
+                            .fill(egui::Color32::TRANSPARENT)
+                            .stroke(egui::Stroke::NONE),
+                        )
+                        .clicked()
+                    {
+                        self.show_settings = true;
+                        self.settings_edit = self.settings.clone();
+                        self.theme_edit = self.active_theme.clone();
+                        self.theme_message = None;
+                        self.theme_dirty = false;
+                    }
+
+                    // Right-aligned extras: active theme name only.
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let weak = self.active_theme.app.weak_text.to_egui();
-                        let fg = self.active_theme.app.menu_fg.to_egui();
-                        if ui
-                            .add(
-                                egui::Button::new(
-                                    egui::RichText::new(egui_phosphor::regular::INFO)
-                                        .color(fg)
-                                        .size(14.0),
-                                )
-                                .fill(egui::Color32::TRANSPARENT)
-                                .stroke(egui::Stroke::NONE),
-                            )
-                            .on_hover_text(&self.texts.about.menu_label)
-                            .clicked()
-                        {
-                            self.show_about = true;
-                        }
-                        if ui
-                            .add(
-                                egui::Button::new(
-                                    egui::RichText::new(egui_phosphor::regular::GEAR)
-                                        .color(fg)
-                                        .size(14.0),
-                                )
-                                .fill(egui::Color32::TRANSPARENT)
-                                .stroke(egui::Stroke::NONE),
-                            )
-                            .on_hover_text(&self.texts.view_menu.settings)
-                            .clicked()
-                        {
-                            self.show_settings = true;
-                            self.settings_edit = self.settings.clone();
-                            self.theme_edit = self.active_theme.clone();
-                            self.theme_message = None;
-                            self.theme_dirty = false;
-                        }
-                        ui.add_space(8.0);
                         ui.label(
                             egui::RichText::new(self.active_theme.name.as_str())
                                 .color(weak)
@@ -2907,10 +2949,20 @@ impl eframe::App for App {
                                         .id_salt("appearance_scroll")
                                         .show(ui, |ui| {
                                             let mut draft = self.theme_edit.clone();
+                                            // Built-in generic families first,
+                                            // then every detected system font.
+                                            let mut font_choices: Vec<String> =
+                                                vec!["system-ui".into(), "monospace".into()];
+                                            for f in &self.system_fonts {
+                                                if !font_choices.contains(f) {
+                                                    font_choices.push(f.clone());
+                                                }
+                                            }
                                             let actions = crate::theme::ui::show_theme_section(
                                                 ui,
                                                 &mut draft,
                                                 &self.available_themes,
+                                                &font_choices,
                                                 is_builtin,
                                                 self.theme_dirty,
                                                 self.theme_editor_subtab,
@@ -3045,6 +3097,9 @@ impl eframe::App for App {
                                 self.active_theme = self.theme_edit.clone();
                                 self.settings.theme_id = self.active_theme.id.clone();
                                 crate::theme::apply_theme_definition(ctx, &self.active_theme);
+                                // Re-register fonts so the theme's UI and
+                                // terminal font choices take effect.
+                                self.rebuild_fonts(ctx);
                                 if self.settings.apply_theme_typography {
                                     let new_size = self.active_theme.typography.terminal_font_size;
                                     for td in self.terminals.values_mut() {

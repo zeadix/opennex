@@ -56,6 +56,7 @@ pub fn show_theme_section(
     ui: &mut egui::Ui,
     draft: &mut ThemeDefinition,
     available: &[ThemeDefinition],
+    available_fonts: &[String],
     is_builtin: bool,
     has_unsaved: bool,
     subtab: ThemeEditorSubtab,
@@ -101,10 +102,10 @@ pub fn show_theme_section(
 
     match subtab {
         ThemeEditorSubtab::UiAppearance => {
-            show_ui_appearance_editor(ui, draft, is_builtin, &mut actions);
+            show_ui_appearance_editor(ui, draft, available_fonts, is_builtin, &mut actions);
         }
         ThemeEditorSubtab::Terminal => {
-            show_terminal_section_editor(ui, draft, is_builtin, &mut actions);
+            show_terminal_section_editor(ui, draft, available_fonts, is_builtin, &mut actions);
         }
         ThemeEditorSubtab::AnsiPalette => {
             show_ansi_palette_editor(ui, draft, is_builtin, &mut actions);
@@ -204,6 +205,7 @@ fn show_import_export(ui: &mut egui::Ui) -> Vec<ThemeAction> {
 fn show_ui_appearance_editor(
     ui: &mut egui::Ui,
     draft: &mut ThemeDefinition,
+    available_fonts: &[String],
     is_builtin: bool,
     actions: &mut Vec<ThemeAction>,
 ) {
@@ -223,11 +225,17 @@ fn show_ui_appearance_editor(
             })
             .width(140.0)
             .show_ui(ui, |ui| {
-                ui.selectable_value(
-                    &mut draft.app.ui_font_families,
-                    vec!["system-ui".into()],
-                    "system-ui",
-                );
+                egui::ScrollArea::vertical()
+                    .max_height(240.0)
+                    .auto_shrink([false; 2])
+                    .show(ui, |ui| {
+                        for font in available_fonts {
+                            if ui.selectable_label(current == *font, font).clicked() {
+                                draft.app.ui_font_families = vec![font.clone()];
+                                actions.push(ThemeAction::DraftModified);
+                            }
+                        }
+                    });
             });
         ui.add(
             egui::DragValue::new(&mut draft.app.ui_font_size)
@@ -272,11 +280,38 @@ fn show_ui_appearance_editor(
 fn show_terminal_section_editor(
     ui: &mut egui::Ui,
     draft: &mut ThemeDefinition,
+    available_fonts: &[String],
     is_builtin: bool,
     actions: &mut Vec<ThemeAction>,
 ) {
-    // Row 1: font size + cell spacing (inline)
+    // Row 1: terminal font + size + cell spacing (inline)
     ui.horizontal(|ui| {
+        let current = draft
+            .typography
+            .terminal_font_families
+            .first()
+            .cloned()
+            .unwrap_or_default();
+        egui::ComboBox::from_id_salt("terminal_font_select")
+            .selected_text(if current.is_empty() {
+                "monospace"
+            } else {
+                &current
+            })
+            .width(140.0)
+            .show_ui(ui, |ui| {
+                egui::ScrollArea::vertical()
+                    .max_height(240.0)
+                    .auto_shrink([false; 2])
+                    .show(ui, |ui| {
+                        for font in available_fonts {
+                            if ui.selectable_label(current == *font, font).clicked() {
+                                draft.typography.terminal_font_families = vec![font.clone()];
+                                actions.push(ThemeAction::DraftModified);
+                            }
+                        }
+                    });
+            });
         ui.add(
             egui::DragValue::new(&mut draft.typography.terminal_font_size)
                 .range(8.0..=32.0)
