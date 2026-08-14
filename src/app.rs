@@ -3698,8 +3698,6 @@ impl eframe::App for App {
                         let fg = self.active_theme.app.button_fg.to_egui();
                         let icon_active = self.active_theme.app.text.to_egui();
                         let btn_bg = self.active_theme.app.button_bg.to_egui();
-                        let heading = format!("{}列表", self.texts.workspace.heading);
-                        ui.label(egui::RichText::new(heading).color(fg).size(12.0).strong());
 
                         let btn_size = 22.0;
                         let glyph = 14.0;

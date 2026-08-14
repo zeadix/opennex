@@ -14,7 +14,7 @@ pub struct TerminalInstance {
 
 /// Marker used to detect whether a shell init file already contains our
 /// integration snippet, so we don't append it twice.
-const SHELL_INTEGRATION_MARKER: &str = "# __opennex_integration__ v2";
+const SHELL_INTEGRATION_MARKER: &str = "# __opennex_integration__ v3";
 
 /// Build (or reuse) the per-shell init file that installs the OSC 9
 /// hook, and return the path the user shell should be told to source.
@@ -54,9 +54,10 @@ fn ensure_shell_init_file(shell: &str) -> Option<std::path::PathBuf> {
 
 const BASH_INIT_BODY: &str = r#"
 # OpenNex terminal integration. Sourced via bash --rcfile, which
-# replaces the default ~/.bashrc, so chain to the user's files first
-# to preserve their prompt, aliases, and colors.
-for __opennex_rc in "$HOME/.bashrc" "/etc/bash.bashrc"; do
+# replaces the default ~/.bashrc. Chain to the system file first,
+# then the user's bashrc (same order bash uses natively) so the
+# user's colored prompt wins over the system default PS1.
+for __opennex_rc in "/etc/bash.bashrc" "$HOME/.bashrc"; do
   [ -r "$__opennex_rc" ] && . "$__opennex_rc"
 done
 unset __opennex_rc
