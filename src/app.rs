@@ -1077,6 +1077,9 @@ pub struct App {
     /// Same aggregates but scoped to the active workspace only.
     workspace_cpu: Option<f32>,
     workspace_mem: Option<u64>,
+    /// Aggregates for the focused terminal's process tree only.
+    focused_cpu: Option<f32>,
+    focused_mem: Option<u64>,
     /// Wall-clock of the last sampling tick.
     last_sample: std::time::Instant,
     /// Delta sampler over per-terminal process trees.
@@ -1301,6 +1304,8 @@ impl App {
             terminal_mem: None,
             workspace_cpu: None,
             workspace_mem: None,
+            focused_cpu: None,
+            focused_mem: None,
             last_sample: std::time::Instant::now(),
             terminal_sampler: crate::proc_stats::ProcSampler::new(),
         };
@@ -2454,8 +2459,8 @@ impl eframe::App for App {
         }
 
         // Status-bar sample: every 2 seconds, aggregate CPU/memory over
-        // terminal process trees — one group for the active workspace,
-        // one for all workspaces — against a single process snapshot.
+        // terminal process trees — focused terminal, active workspace, and
+        // all workspaces — against a single process snapshot.
         if self.last_sample.elapsed() >= std::time::Duration::from_secs(2) {
             self.last_sample = std::time::Instant::now();
             let all_roots: Vec<u32> = self
@@ -2475,15 +2480,27 @@ impl eframe::App for App {
                 .map(|td| td.instance.backend.child_pid())
                 .filter(|&pid| pid != 0)
                 .collect();
+            let focused_roots: Vec<u32> = self
+                .focused_terminal
+                .as_ref()
+                .and_then(|id| self.terminals.get(id))
+                .map(|td| td.instance.backend.child_pid())
+                .filter(|&pid| pid != 0)
+                .into_iter()
+                .collect();
             let mut ws_cpu = None;
             let mut ws_mem = None;
             let mut all_cpu = None;
             let mut all_mem = None;
+            let mut f_cpu = None;
+            let mut f_mem = None;
             self.terminal_sampler.refresh_groups(
-                [&ws_roots, &all_roots],
-                [&mut ws_cpu, &mut all_cpu],
-                [&mut ws_mem, &mut all_mem],
+                [&focused_roots, &ws_roots, &all_roots],
+                [&mut f_cpu, &mut ws_cpu, &mut all_cpu],
+                [&mut f_mem, &mut ws_mem, &mut all_mem],
             );
+            self.focused_cpu = f_cpu;
+            self.focused_mem = f_mem;
             self.workspace_cpu = ws_cpu;
             self.workspace_mem = ws_mem;
             self.terminal_cpu = all_cpu;
@@ -4019,7 +4036,7 @@ impl eframe::App for App {
                             // sits to its left.
                             let btn_w = 17.0;
                             let btn_h = row_h;
-                            let action_cluster_w = btn_w + btn_w;
+                            let action_cluster_w = btn_w;
                             let mut actions_ui = ui.new_child(
                                 egui::UiBuilder::new()
                                     .max_rect(egui::Rect::from_min_size(
@@ -4035,79 +4052,7 @@ impl eframe::App for App {
                             let button_fg = self.active_theme.app.button_fg.to_egui();
                             let icon_active = self.active_theme.app.text.to_egui();
 
-                            // Three-dot menu button (rightmost). Left-click opens
-                            // the same menu as the row's right-click menu.
-                            let (three_rect, three_resp) = actions_ui.allocate_exact_size(
-                                egui::vec2(btn_w, btn_h),
-                                egui::Sense::click(),
-                            );
-                            let three_color = if three_resp.hovered() {
-                                icon_active
-                            } else {
-                                button_fg
-                            };
-                            let three_galley = actions_ui.fonts(|f| {
-                                f.layout_no_wrap(
-                                    egui_phosphor::regular::DOTS_THREE_VERTICAL.to_string(),
-                                    egui::FontId::proportional(13.0),
-                                    three_color,
-                                )
-                            });
-                            actions_ui.painter().galley(
-                                three_rect.center()
-                                    - egui::vec2(
-                                        three_galley.size().x / 2.0,
-                                        three_galley.size().y / 2.0,
-                                    ),
-                                three_galley,
-                                three_color,
-                            );
-                            // bar_menu handles the primary-click open/close
-                            // interaction internally via
-                            // stationary_click_interaction, so the same
-                            // Response drives both the painted icon and the
-                            // popup menu state.
-                            let bar_id = three_resp.id;
-                            let mut bar_state =
-                                egui::menu::BarState::load(actions_ui.ctx(), bar_id);
-                            bar_state
-                                .bar_menu(&three_resp, |ui| {
-                                    if ui.button(&self.texts.workspace.rename).clicked() {
-                                        self.renaming_panel = Some(i);
-                                        self.rename_buffer = self.panels[i].name.clone();
-                                        self.rename_frame_count = 0;
-                                        ui.close_menu();
-                                    }
-                                    if ui.button(&self.texts.workspace.save_as_template).clicked() {
-                                        self.save_as_template(i);
-                                        ui.close_menu();
-                                    }
-                                    ui.separator();
-                                    if ui.button(if is_locked { "解锁" } else { "锁定" }).clicked()
-                                    {
-                                        if is_locked {
-                                            self.active_panel = i;
-                                            self.lock_password_input.clear();
-                                            self.pw_message.clear();
-                                        } else {
-                                            self.locked_panels.insert(i);
-                                            self.lock_password_input.clear();
-                                            self.pw_message.clear();
-                                        }
-                                        ui.close_menu();
-                                    }
-                                    ui.separator();
-                                    if ui.button(&self.texts.settings.buttons.close).clicked() {
-                                        self.close_confirm_panel = Some(i);
-                                        ui.close_menu();
-                                    }
-                                })
-                                .map(|r| r.inner);
-                            bar_state.store(actions_ui.ctx(), bar_id);
-
-                            // Lock / unlock button (left of the three-dot). Always painted so the
-                            // cluster keeps a constant width; the icon shows
-                            // the current lock state and hovering brightens it.
+                            // Lock / unlock button (rightmost, the only action). Always painted so the
                             let (lock_rect, lock_resp) = actions_ui.allocate_exact_size(
                                 egui::vec2(btn_w, btn_h),
                                 egui::Sense::click(),
@@ -4238,7 +4183,7 @@ impl eframe::App for App {
                     ui.allocate_ui_with_layout(
                         egui::vec2(
                             ui.available_width(),
-                            shortcut_hint_available_height(ui.available_height() - 24.0),
+                            shortcut_hint_available_height(ui.available_height() - 64.0),
                         ),
                         egui::Layout::top_down(egui::Align::Min),
                         |ui| {
@@ -4311,54 +4256,68 @@ impl eframe::App for App {
                                                     });
                                                 },
                                             );
-
-                                            // Sidebar footer: ALL-workspace terminal aggregates,
-                                            // styled and sized like the bottom status bar (24px,
-                                            // same fill, same 11pt weak text) with a 1px top
-                                            // separator line.
-                                            let footer_h = 24.0;
-                                            let line_color =
-                                                self.active_theme.app.sidebar_border.to_egui();
-                                            let weak = self.active_theme.app.weak_text.to_egui();
-                                            let (footer_rect, _) = ui.allocate_exact_size(
-                                                egui::vec2(ui.available_width(), footer_h),
-                                                egui::Sense::hover(),
-                                            );
-                                            ui.painter().rect_filled(
-                                                footer_rect,
-                                                0.0,
-                                                self.active_theme.app.menu_bg.to_egui(),
-                                            );
-                                            ui.painter().rect_filled(
-                                                egui::Rect::from_min_max(
-                                                    footer_rect.min,
-                                                    egui::pos2(
-                                                        footer_rect.max.x,
-                                                        footer_rect.min.y + 1.0,
-                                                    ),
-                                                ),
-                                                0.0,
-                                                line_color,
-                                            );
-                                            ui.painter().text(
-                                                egui::pos2(
-                                                    footer_rect.min.x + 10.0,
-                                                    footer_rect.center().y,
-                                                ),
-                                                egui::Align2::LEFT_CENTER,
-                                                format!(
-                                                    "{} 终端 │ {} │ {}",
-                                                    format_ws_terminal_count(self),
-                                                    format_cpu(self.terminal_cpu),
-                                                    format_memory(self.terminal_mem)
-                                                ),
-                                                egui::FontId::proportional(11.0),
-                                                weak,
-                                            );
                                         });
                                     }
                                 });
                         },
+                    );
+
+                    // Sidebar footer: two labeled groups as plain 10-11pt
+                    // weak text — no background, no stroke.
+                    //   当前工作区
+                    //   n 终端 │ x% CPU │ y MB
+                    //   全局
+                    //   m 终端 │ x% CPU │ y MB
+                    let weak = self.active_theme.app.weak_text.to_egui();
+                    let fg = self.active_theme.app.button_fg.to_egui();
+                    let footer_h = 64.0;
+                    let line_h = 16.0;
+                    let (footer_rect, _) = ui.allocate_exact_size(
+                        egui::vec2(ui.available_width(), footer_h),
+                        egui::Sense::hover(),
+                    );
+                    let x = footer_rect.min.x + 10.0;
+                    let title_font = egui::FontId::proportional(10.0);
+                    let data_font = egui::FontId::proportional(11.0);
+                    let line = |i: usize| footer_rect.min.y + line_h * i as f32 + line_h / 2.0;
+
+                    ui.painter().text(
+                        egui::pos2(x, line(0)),
+                        egui::Align2::LEFT_CENTER,
+                        "当前工作区",
+                        title_font.clone(),
+                        fg,
+                    );
+                    ui.painter().text(
+                        egui::pos2(x + 12.0, line(1)),
+                        egui::Align2::LEFT_CENTER,
+                        format!(
+                            "{} 终端 │ {} │ {}",
+                            format_active_ws_terminal_count(self),
+                            format_cpu(self.workspace_cpu),
+                            format_memory(self.workspace_mem)
+                        ),
+                        data_font.clone(),
+                        weak,
+                    );
+                    ui.painter().text(
+                        egui::pos2(x, line(2)),
+                        egui::Align2::LEFT_CENTER,
+                        "全局",
+                        title_font,
+                        fg,
+                    );
+                    ui.painter().text(
+                        egui::pos2(x + 12.0, line(3)),
+                        egui::Align2::LEFT_CENTER,
+                        format!(
+                            "{} 终端 │ {} │ {}",
+                            format_ws_terminal_count(self),
+                            format_cpu(self.terminal_cpu),
+                            format_memory(self.terminal_mem)
+                        ),
+                        data_font,
+                        weak,
                     );
                 });
         }
@@ -4380,166 +4339,184 @@ impl eframe::App for App {
             .dock_states
             .get_mut(&self.active_panel)
             .and_then(|t| t.find_active_focused().map(|(_, t)| t.clone()));
-        egui::CentralPanel::default().show(ctx, |ui| {
-            let is_locked = self.locked_panels.contains(&self.active_panel);
-            if is_locked {
-                let lock_color = self.active_theme.app.lock.to_egui();
-                let avail = ui.available_size();
-                let (rect, _) = ui.allocate_exact_size(avail, egui::Sense::click());
-                let painter = ui.painter_at(rect);
-                painter.rect_filled(rect, 0.0, lock_color);
+        let central_fill = self.active_theme.app.app_bg.to_egui();
+        egui::CentralPanel::default()
+            .frame(egui::Frame::none().fill(central_fill))
+            .show(ctx, |ui| {
+                let is_locked = self.locked_panels.contains(&self.active_panel);
+                if is_locked {
+                    let lock_color = self.active_theme.app.lock.to_egui();
+                    let avail = ui.available_size();
+                    let (rect, _) = ui.allocate_exact_size(avail, egui::Sense::click());
+                    let painter = ui.painter_at(rect);
+                    painter.rect_filled(rect, 0.0, lock_color);
 
-                let pw_id = egui::Id::new("lock_overlay_pw_input");
-                let form_width = 360.0;
-                let form_rect =
-                    egui::Rect::from_center_size(rect.center(), egui::vec2(form_width, 220.0));
-                let ui_content =
-                    ui.allocate_new_ui(egui::UiBuilder::new().max_rect(form_rect), |ui| {
-                        ui.vertical_centered(|ui| {
-                            // Lock icon
-                            ui.label(
-                                egui::RichText::new(egui_phosphor::regular::LOCK_SIMPLE)
-                                    .size(36.0)
-                                    .color(egui::Color32::WHITE),
-                            );
-                            ui.add_space(8.0);
-                            // Title
-                            ui.heading(
-                                egui::RichText::new(&self.texts.lock_overlay.title)
-                                    .size(18.0)
-                                    .color(egui::Color32::WHITE),
-                            );
-                            ui.add_space(20.0);
-                            // Password input row — manually center by measuring content width
-                            let label_galley = ui.fonts(|f| {
-                                f.layout_no_wrap(
-                                    self.texts.lock_overlay.password_label.clone(),
-                                    egui::FontId::proportional(14.0),
-                                    egui::Color32::from_gray(220),
-                                )
-                            });
-                            let input_width = 130.0;
-                            let button_galley = ui.fonts(|f| {
-                                f.layout_no_wrap(
-                                    self.texts.lock_overlay.unlock_button.clone(),
-                                    egui::FontId::proportional(14.0),
-                                    egui::Color32::BLACK,
-                                )
-                            });
-                            let item_spacing = ui.spacing().item_spacing.x;
-                            let row_h = ui.spacing().interact_size.y;
-                            let content_width = label_galley.size().x
-                                + input_width
-                                + button_galley.size().x
-                                + ui.spacing().button_padding.x * 2.0
-                                + item_spacing * 2.0;
-                            let avail_w = ui.available_width();
-                            let _ = avail_w;
-                            ui.allocate_ui_with_layout(
-                                egui::vec2(content_width, row_h),
-                                egui::Layout::left_to_right(egui::Align::Center),
-                                |ui| {
-                                    ui.label(
-                                        egui::RichText::new(
-                                            &self.texts.lock_overlay.password_label,
-                                        )
-                                        .color(egui::Color32::from_gray(220)),
-                                    );
-                                    let resp = ui.add(
-                                        egui::TextEdit::singleline(&mut self.lock_password_input)
+                    let pw_id = egui::Id::new("lock_overlay_pw_input");
+                    let form_width = 360.0;
+                    let form_rect =
+                        egui::Rect::from_center_size(rect.center(), egui::vec2(form_width, 220.0));
+                    let ui_content =
+                        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(form_rect), |ui| {
+                            ui.vertical_centered(|ui| {
+                                // Lock icon
+                                ui.label(
+                                    egui::RichText::new(egui_phosphor::regular::LOCK_SIMPLE)
+                                        .size(36.0)
+                                        .color(egui::Color32::WHITE),
+                                );
+                                ui.add_space(8.0);
+                                // Title
+                                ui.heading(
+                                    egui::RichText::new(&self.texts.lock_overlay.title)
+                                        .size(18.0)
+                                        .color(egui::Color32::WHITE),
+                                );
+                                ui.add_space(20.0);
+                                // Password input row — manually center by measuring content width
+                                let label_galley = ui.fonts(|f| {
+                                    f.layout_no_wrap(
+                                        self.texts.lock_overlay.password_label.clone(),
+                                        egui::FontId::proportional(14.0),
+                                        egui::Color32::from_gray(220),
+                                    )
+                                });
+                                let input_width = 130.0;
+                                let button_galley = ui.fonts(|f| {
+                                    f.layout_no_wrap(
+                                        self.texts.lock_overlay.unlock_button.clone(),
+                                        egui::FontId::proportional(14.0),
+                                        egui::Color32::BLACK,
+                                    )
+                                });
+                                let item_spacing = ui.spacing().item_spacing.x;
+                                let row_h = ui.spacing().interact_size.y;
+                                let content_width = label_galley.size().x
+                                    + input_width
+                                    + button_galley.size().x
+                                    + ui.spacing().button_padding.x * 2.0
+                                    + item_spacing * 2.0;
+                                let avail_w = ui.available_width();
+                                let _ = avail_w;
+                                ui.allocate_ui_with_layout(
+                                    egui::vec2(content_width, row_h),
+                                    egui::Layout::left_to_right(egui::Align::Center),
+                                    |ui| {
+                                        ui.label(
+                                            egui::RichText::new(
+                                                &self.texts.lock_overlay.password_label,
+                                            )
+                                            .color(egui::Color32::from_gray(220)),
+                                        );
+                                        let resp = ui.add(
+                                            egui::TextEdit::singleline(
+                                                &mut self.lock_password_input,
+                                            )
                                             .password(true)
                                             .desired_width(input_width)
                                             .id(pw_id),
-                                    );
-                                    resp.request_focus();
-                                    let enter_pressed =
-                                        ui.input(|i| i.key_pressed(egui::Key::Enter));
-                                    if ui
-                                        .add(
-                                            egui::Button::new(
-                                                egui::RichText::new(
-                                                    &self.texts.lock_overlay.unlock_button,
+                                        );
+                                        resp.request_focus();
+                                        let enter_pressed =
+                                            ui.input(|i| i.key_pressed(egui::Key::Enter));
+                                        if ui
+                                            .add(
+                                                egui::Button::new(
+                                                    egui::RichText::new(
+                                                        &self.texts.lock_overlay.unlock_button,
+                                                    )
+                                                    .color(egui::Color32::BLACK),
                                                 )
-                                                .color(egui::Color32::BLACK),
+                                                .fill(egui::Color32::WHITE)
+                                                .stroke(egui::Stroke::new(
+                                                    1.0,
+                                                    egui::Color32::BLACK,
+                                                )),
                                             )
-                                            .fill(egui::Color32::WHITE)
-                                            .stroke(egui::Stroke::new(1.0, egui::Color32::BLACK)),
-                                        )
-                                        .clicked()
-                                        || (enter_pressed && resp.has_focus())
-                                    {
-                                        if self.settings.lock_password.is_empty()
-                                            || self.lock_password_input
-                                                == self.settings.lock_password
+                                            .clicked()
+                                            || (enter_pressed && resp.has_focus())
                                         {
-                                            self.locked_panels.remove(&self.active_panel);
-                                            self.lock_password_input.clear();
-                                            self.pw_message.clear();
-                                        } else {
-                                            self.pw_message =
-                                                self.texts.lock_overlay.wrong_password.clone();
-                                            self.lock_password_input.clear();
+                                            if self.settings.lock_password.is_empty()
+                                                || self.lock_password_input
+                                                    == self.settings.lock_password
+                                            {
+                                                self.locked_panels.remove(&self.active_panel);
+                                                self.lock_password_input.clear();
+                                                self.pw_message.clear();
+                                            } else {
+                                                self.pw_message =
+                                                    self.texts.lock_overlay.wrong_password.clone();
+                                                self.lock_password_input.clear();
+                                            }
                                         }
-                                    }
-                                },
-                            );
-                            // Error message
-                            if !self.pw_message.is_empty() {
-                                ui.add_space(8.0);
-                                ui.label(
-                                    egui::RichText::new(&self.pw_message)
-                                        .color(egui::Color32::from_rgb(255, 120, 120)),
+                                    },
                                 );
-                            }
+                                // Error message
+                                if !self.pw_message.is_empty() {
+                                    ui.add_space(8.0);
+                                    ui.label(
+                                        egui::RichText::new(&self.pw_message)
+                                            .color(egui::Color32::from_rgb(255, 120, 120)),
+                                    );
+                                }
+                            });
                         });
-                    });
-                let _ = ui_content;
-            } else if let Some(tree) = self.dock_states.get_mut(&self.active_panel) {
-                DockArea::new(tree)
-                    .style(Style::from_egui(ui.style().as_ref()))
-                    .show_add_buttons(true)
-                    .show_add_popup(false)
-                    .show_inside(
-                        ui,
-                        &mut TerminalTabViewer {
-                            terminals: &mut self.terminals,
-                            completion: &self.completion,
-                            history_db: &self.history_db,
-                            max_history: self.settings.max_history,
-                            pending_close: &mut self.pending_close,
-                            pending_close_confirm: &mut self.pending_close_confirm,
-                            pending_new_terminal: &mut self.pending_new_terminal,
-                            pending_split_after: &mut self.pending_split_after,
-                            pending_split_vertical: &mut self.pending_split_vertical,
-                            active_panel: self.active_panel,
-                            terminal_count,
-                            renaming_terminal: &mut self.renaming_terminal,
-                            terminal_rename_buffer: &mut self.terminal_rename_buffer,
-                            renaming,
-                            rename_frame_count: self.rename_frame_count,
-                            active_tab,
-                            focused_terminal: &mut self.focused_terminal,
-                            terminal_focus_id: &mut self.terminal_focus_id,
-                            show_settings: self.show_settings,
-                            theme: if self.show_settings {
-                                &self.theme_edit
-                            } else {
-                                &self.active_theme
+                    let _ = ui_content;
+                } else if let Some(tree) = self.dock_states.get_mut(&self.active_panel) {
+                    // Tab bar layout (via the local egui_dock fork):
+                    // [collapse][+][tabs...] — the + button is pinned left
+                    // of the tabs and right of the collapse button; the
+                    // panel close-all button on the far right is hidden;
+                    // each tab reserves a close slot that only becomes
+                    // visible when the pointer hovers that tab.
+                    let mut dock_style = Style::from_egui(ui.style().as_ref());
+                    dock_style.buttons.add_tab_align = egui_dock::TabAddAlign::Left;
+                    DockArea::new(tree)
+                        .style(dock_style)
+                        .show_add_buttons(true)
+                        .show_add_popup(false)
+                        .show_close_buttons(true)
+                        .show_leaf_close_all_buttons(false)
+                        .show_leaf_collapse_buttons(true)
+                        .show_inside(
+                            ui,
+                            &mut TerminalTabViewer {
+                                terminals: &mut self.terminals,
+                                completion: &self.completion,
+                                history_db: &self.history_db,
+                                max_history: self.settings.max_history,
+                                pending_close: &mut self.pending_close,
+                                pending_close_confirm: &mut self.pending_close_confirm,
+                                pending_new_terminal: &mut self.pending_new_terminal,
+                                pending_split_after: &mut self.pending_split_after,
+                                pending_split_vertical: &mut self.pending_split_vertical,
+                                active_panel: self.active_panel,
+                                terminal_count,
+                                renaming_terminal: &mut self.renaming_terminal,
+                                terminal_rename_buffer: &mut self.terminal_rename_buffer,
+                                renaming,
+                                rename_frame_count: self.rename_frame_count,
+                                active_tab,
+                                focused_terminal: &mut self.focused_terminal,
+                                terminal_focus_id: &mut self.terminal_focus_id,
+                                show_settings: self.show_settings,
+                                theme: if self.show_settings {
+                                    &self.theme_edit
+                                } else {
+                                    &self.active_theme
+                                },
+                                texts: &self.texts,
                             },
-                            texts: &self.texts,
-                        },
-                    );
-            } else {
-                ui.centered_and_justified(|ui| {
-                    ui.label(&self.texts.workspace.empty_hint);
-                });
-            }
-        });
+                        );
+                } else {
+                    ui.centered_and_justified(|ui| {
+                        ui.label(&self.texts.workspace.empty_hint);
+                    });
+                }
+            });
 
-        // Minimalist status bar (24px, themed by active theme). Reports
-        // the ACTIVE workspace's terminals only. No frame stroke; the
-        // single 1px top separator line is painted manually so it spans
-        // edge-to-edge above the bar.
+        // Minimalist status bar (24px). Reports ONLY the focused
+        // terminal's process-tree CPU% and memory. No frame stroke, no
+        // separator line — just the themed fill with plain weak text.
         egui::TopBottomPanel::bottom("status_bar")
             .resizable(false)
             .exact_height(24.0)
@@ -4555,47 +4532,17 @@ impl eframe::App for App {
                     }),
             )
             .show(ctx, |ui| {
-                // 1px separator between workspace area and status bar.
-                let line_color = self.active_theme.app.sidebar_border.to_egui();
-                let rect = ui.max_rect();
-                let painter = ui.painter_at(egui::Rect::from_min_max(
-                    egui::pos2(rect.min.x, rect.min.y),
-                    egui::pos2(rect.max.x, rect.min.y + 1.0),
-                ));
-                painter.rect_filled(
-                    egui::Rect::from_min_max(
-                        egui::pos2(rect.min.x, rect.min.y),
-                        egui::pos2(rect.max.x, rect.min.y + 1.0),
-                    ),
-                    0.0,
-                    line_color,
-                );
-
                 let weak = self.active_theme.app.weak_text.to_egui();
+                let sep = self.active_theme.app.sidebar_border.to_egui();
                 ui.horizontal(|ui| {
-                    // Section 1: terminal count in the ACTIVE workspace.
-                    let ws_terminals: usize = self
-                        .dock_states
-                        .get(&self.active_panel)
-                        .map(|tree| tree.iter_all_tabs().count())
-                        .unwrap_or(0);
                     ui.label(
-                        egui::RichText::new(format!("{} 终端", ws_terminals))
+                        egui::RichText::new(format_cpu(self.focused_cpu))
                             .color(weak)
                             .size(11.0),
                     );
-                    ui.label(egui::RichText::new("│").color(line_color).size(11.0));
-                    // Section 2: aggregated CPU% over the active
-                    // workspace's terminal process trees.
+                    ui.label(egui::RichText::new("│").color(sep).size(11.0));
                     ui.label(
-                        egui::RichText::new(format_cpu(self.workspace_cpu))
-                            .color(weak)
-                            .size(11.0),
-                    );
-                    ui.label(egui::RichText::new("│").color(line_color).size(11.0));
-                    // Section 3: aggregated resident memory of the same trees.
-                    ui.label(
-                        egui::RichText::new(format_memory(self.workspace_mem))
+                        egui::RichText::new(format_memory(self.focused_mem))
                             .color(weak)
                             .size(11.0),
                     );
@@ -4604,12 +4551,20 @@ impl eframe::App for App {
     }
 }
 
-/// Total terminal count across every workspace (sidebar footer).
+/// Terminal count across every workspace (sidebar 全局 group).
 fn format_ws_terminal_count(app: &App) -> usize {
     app.dock_states
         .values()
         .map(|t| t.iter_all_tabs().count())
         .sum()
+}
+
+/// Terminal count in the active workspace (sidebar 当前工作区 group).
+fn format_active_ws_terminal_count(app: &App) -> usize {
+    app.dock_states
+        .get(&app.active_panel)
+        .map(|t| t.iter_all_tabs().count())
+        .unwrap_or(0)
 }
 
 /// Format CPU usage percentage. `None` falls back to a dash so the bar
