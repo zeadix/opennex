@@ -4468,8 +4468,46 @@ impl eframe::App for App {
                     // panel close-all button on the far right is hidden;
                     // each tab reserves a close slot that only becomes
                     // visible when the pointer hovers that tab.
+                    // The dock surface itself carries no border stroke and
+                    // every tab / tab-bar corner is square.
                     let mut dock_style = Style::from_egui(ui.style().as_ref());
                     dock_style.buttons.add_tab_align = egui_dock::TabAddAlign::Left;
+                    // No border around the whole dock surface.
+                    dock_style.main_surface_border_stroke = egui::Stroke::NONE;
+                    // Square corners everywhere.
+                    dock_style.main_surface_border_rounding = egui::CornerRadius::ZERO;
+                    dock_style.tab_bar.corner_radius = egui::CornerRadius::ZERO;
+                    dock_style.tab.active.corner_radius = egui::CornerRadius::ZERO;
+                    dock_style.tab.inactive.corner_radius = egui::CornerRadius::ZERO;
+                    dock_style.tab.hovered.corner_radius = egui::CornerRadius::ZERO;
+                    dock_style.tab.focused.corner_radius = egui::CornerRadius::ZERO;
+                    dock_style.tab.active_with_kb_focus.corner_radius = egui::CornerRadius::ZERO;
+                    dock_style.tab.inactive_with_kb_focus.corner_radius = egui::CornerRadius::ZERO;
+                    dock_style.tab.focused_with_kb_focus.corner_radius = egui::CornerRadius::ZERO;
+                    dock_style.tab.tab_body.corner_radius = egui::CornerRadius::ZERO;
+                    dock_style.tab.tab_body.stroke = egui::Stroke::NONE;
+                    // Inner padding of the terminal frame from the theme
+                    // (default 4px). The body background is set to the
+                    // terminal's own background color so the padding ring
+                    // reads as part of the terminal, not a separate panel.
+                    let term_pad = self.active_theme.typography.terminal_padding;
+                    dock_style.tab.tab_body.inner_margin = egui::Margin {
+                        left: term_pad as i8,
+                        right: term_pad as i8,
+                        top: term_pad as i8,
+                        bottom: term_pad as i8,
+                    };
+                    dock_style.tab.tab_body.bg_fill =
+                        self.active_theme.terminal.background.to_egui();
+                    // Focused-tab highlight from the theme.
+                    let tab_hl = self.active_theme.app.tab_highlight.to_egui();
+                    dock_style.tab.focused.bg_fill = tab_hl;
+                    dock_style.tab.focused_with_kb_focus.bg_fill = tab_hl;
+                    dock_style.tab.focused.outline_color = egui::Color32::TRANSPARENT;
+                    dock_style.tab.focused_with_kb_focus.outline_color = egui::Color32::TRANSPARENT;
+                    dock_style.tab.focused.text_color = self.active_theme.app.text.to_egui();
+                    dock_style.tab.focused_with_kb_focus.text_color =
+                        self.active_theme.app.text.to_egui();
                     DockArea::new(tree)
                         .style(dock_style)
                         .show_add_buttons(true)

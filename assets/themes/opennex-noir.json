@@ -29,7 +29,8 @@
     "button_bg": "#1a1a1d",
     "button_fg": "#f5f5f5",
     "button_hover_bg": "#26262a",
-    "sidebar_border": "#26262a"
+    "sidebar_border": "#26262a",
+    "tab_highlight": "#26262a"
   },
   "terminal": {
     "foreground": "#f5f5f5",
@@ -76,6 +77,7 @@
     ],
     "terminal_font_size": 13.0,
     "cell_spacing": 1.0,
-    "menu_font_size": 14.0
+    "menu_font_size": 14.0,
+    "terminal_padding": 4.0
   }
 }

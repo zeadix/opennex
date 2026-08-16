@@ -25,7 +25,8 @@
     "button_bg": "#1a1d21",
     "button_fg": "#e6e9ed",
     "button_hover_bg": "#2e333a",
-    "sidebar_border": "#343a40"
+    "sidebar_border": "#343a40",
+    "tab_highlight": "#333840"
   },
   "terminal": {
     "foreground": "#abb2bf",
@@ -72,6 +73,7 @@
     ],
     "terminal_font_size": 14.0,
     "cell_spacing": 1.0,
-    "menu_font_size": 14.0
+    "menu_font_size": 14.0,
+    "terminal_padding": 4.0
   }
 }

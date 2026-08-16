@@ -249,7 +249,7 @@ fn show_ui_appearance_editor(
 
     // Color grid: 3 columns × ~6 rows of compact color cells.
     // Each row: 3 swatch+hex combos using minimal vertical space.
-    let mut pairs: [(&mut ThemeColor, &str); 16] = [
+    let mut pairs: [(&mut ThemeColor, &str); 17] = [
         (&mut draft.app.app_bg, "主背景"),
         (&mut draft.app.sidebar, "侧栏"),
         (&mut draft.app.panel, "面板"),
@@ -266,6 +266,7 @@ fn show_ui_appearance_editor(
         (&mut draft.app.border, "边框"),
         (&mut draft.app.lock, "锁定"),
         (&mut draft.app.window_shadow, "阴影"),
+        (&mut draft.app.tab_highlight, "焦点标签"),
     ];
     for chunk in pairs.chunks_mut(3) {
         ui.horizontal(|ui| {
@@ -322,6 +323,12 @@ fn show_terminal_section_editor(
             egui::DragValue::new(&mut draft.typography.cell_spacing)
                 .range(0.5..=2.0)
                 .prefix("间距: "),
+        );
+        ui.add_space(8.0);
+        ui.add(
+            egui::DragValue::new(&mut draft.typography.terminal_padding)
+                .range(0.0..=32.0)
+                .prefix("终端内边距: "),
         );
     });
 

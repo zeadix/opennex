@@ -176,6 +176,9 @@ pub struct AppTheme {
     /// Right border of the workspace sidebar (1px line).
     #[serde(default = "default_sidebar_border")]
     pub sidebar_border: ThemeColor,
+    /// Background of the focused terminal's tab (highlight).
+    #[serde(default = "default_tab_highlight")]
+    pub tab_highlight: ThemeColor,
 }
 
 fn default_ui_font_families() -> Vec<String> {
@@ -205,6 +208,9 @@ fn default_button_hover_bg() -> ThemeColor {
 fn default_sidebar_border() -> ThemeColor {
     ThemeColor::from_rgb_opaque(0x26, 0x26, 0x2a)
 }
+fn default_tab_highlight() -> ThemeColor {
+    ThemeColor::from_rgb_opaque(0x33, 0x38, 0x40)
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TerminalThemeConfig {
@@ -226,6 +232,13 @@ pub struct TypographyTheme {
     pub terminal_font_size: f32,
     pub cell_spacing: f32,
     pub menu_font_size: f32,
+    /// Inner padding of the terminal frame, in px.
+    #[serde(default = "default_terminal_padding")]
+    pub terminal_padding: f32,
+}
+
+fn default_terminal_padding() -> f32 {
+    4.0
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -288,6 +301,12 @@ impl ThemeDefinition {
         )?;
         validate_range(self.typography.cell_spacing, "cell_spacing", 0.5, 2.0)?;
         validate_range(self.typography.menu_font_size, "menu_font_size", 8.0, 32.0)?;
+        validate_range(
+            self.typography.terminal_padding,
+            "terminal_padding",
+            0.0,
+            32.0,
+        )?;
 
         if self.app.ui_font_families.is_empty() {
             return Err(ThemeError::InvalidField {
@@ -368,6 +387,7 @@ mod tests {
                     button_fg: ThemeColor::from_rgb_opaque(0xe6, 0xe9, 0xed),
                     button_hover_bg: ThemeColor::from_rgb_opaque(0x26, 0x26, 0x2a),
                     sidebar_border: ThemeColor::from_rgb_opaque(0x26, 0x26, 0x2a),
+                    tab_highlight: ThemeColor::from_rgb_opaque(0x33, 0x38, 0x40),
                 },
                 terminal: TerminalThemeConfig {
                     foreground: ThemeColor::from_rgb_opaque(0xab, 0xb2, 0xbf),
@@ -413,6 +433,7 @@ mod tests {
                     terminal_font_size: 14.0,
                     cell_spacing: 1.0,
                     menu_font_size: 14.0,
+                    terminal_padding: 4.0,
                 },
             }
         }
