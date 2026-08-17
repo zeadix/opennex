@@ -892,6 +892,14 @@ impl Default for AppSettings {
     }
 }
 
+/// Whether the font file bytes parse as a real font face. Some files in
+/// the system font directories carry a .ttf/.otf/.ttc extension but are
+/// not valid font resources (e.g. Windows mstmc.ttf bitmap fonts);
+/// egui/epaint panics when parsing those at first use, crashing startup.
+fn is_valid_font_data(data: &[u8]) -> bool {
+    ab_glyph::FontRef::try_from_slice(data).is_ok()
+}
+
 fn scan_system_fonts() -> Vec<(String, String)> {
     let mut result = Vec::new();
     let mut seen = std::collections::HashSet::new();
@@ -2119,6 +2127,16 @@ impl App {
         let mut registered_names: Vec<String> = Vec::new();
         for (name, path) in &system_fonts {
             if let Ok(data) = std::fs::read(path) {
+                // Validate the file parses as a real TTF/OTF/TTC face
+                // before registering it. Some files in the system font
+                // directories carry a .ttf extension but are not
+                // TrueType resources (e.g. Windows mstmc.ttf bitmap
+                // fonts); epaint panics on those at first use, which
+                // crashed startup. Skip them with a warning instead.
+                if !is_valid_font_data(&data) {
+                    log::warn!("skipping invalid font file {}: {}", name, path);
+                    continue;
+                }
                 fonts.font_data.insert(
                     name.clone(),
                     std::sync::Arc::new(egui::FontData::from_owned(data)),
@@ -4637,6 +4655,17 @@ mod tests {
         HistoryNav, ShortcutBinding, TerminalStatePersist,
     };
     use egui_dock::DockState;
+
+    #[test]
+    fn valid_font_data_accepts_embedded_font_and_rejects_garbage() {
+        // A real TTF bundled with the binary must pass validation.
+        let real = include_bytes!("../assets/fonts/Lohit-Devanagari.ttf");
+        assert!(super::is_valid_font_data(real));
+        // Random bytes with a .ttf-looking extension must be rejected —
+        // this is the mstmc.ttf-style crash guard.
+        assert!(!super::is_valid_font_data(b"\x00\x01not-a-font"));
+        assert!(!super::is_valid_font_data(b""));
+    }
 
     #[test]
     fn shortcut_hint_labels_cover_all_configurable_actions() {
