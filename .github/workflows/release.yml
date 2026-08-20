@@ -52,6 +52,10 @@ jobs:
           echo "$PWD/wixbin" >> $GITHUB_PATH
           for f in candle light; do command -v $f >/dev/null 2>&1 || { echo "::error::$f not found in PATH"; exit 1; }; done
 
+      - name: Lint WiX sources
+        shell: bash
+        run: python3 scripts/lint_wix.py wix/main.wxs
+
       - name: Build MSI installer
         id: msi
         shell: bash
