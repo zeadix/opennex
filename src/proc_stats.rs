@@ -158,103 +158,45 @@ pub fn ticks_per_sec() -> u64 {
 
 #[cfg(target_os = "macos")]
 pub fn read_sample() -> Option<ProcSample> {
-    use std::mem;
-    // Two-call sysctl pattern for the full kinfo_proc table.
-    let mut size = 0u8;
-    let mut mib = [libc::CTL_KERN, libc::KERN_PROC, libc::KERN_PROC_ALL];
-    let name = mib.as_mut_ptr();
-    unsafe {
-        if libc::sysctl(
-            name,
-            3,
-            std::ptr::null_mut(),
-            &mut size,
-            std::ptr::null(),
-            0,
-        ) != 0
-        {
-            return None;
-        }
-        if size == 0 {
-            return Some(ProcSample::default());
-        }
-        let mut buf: Vec<libc::c_void> = Vec::with_capacity(size);
-        loop {
-            if libc::sysctl(name, 3, buf.as_mut_ptr(), &mut size, std::ptr::null(), 0) != 0 {
-                return None;
-            }
-            if size <= buf.capacity() {
-                break;
-            }
-            buf.reserve_exact(size - buf.capacity());
-        }
-        let count = size / mem::size_of::<libc::kinfo_proc>();
-        let procs = std::slice::from_raw_parts(buf.as_ptr() as *const libc::kinfo_proc, count);
-        let mut sample = ProcSample::default();
-        for kp in procs {
-            let info = &kp.kp_proc;
-            let pid = info.p_pid as u32;
-            let ppid = kp.kp_eproc.e_ppid as u32;
-            // p_rusage is only valid for zombies/exited on some versions;
-            // live procs carry it too on modern macOS.
-            let ru = &info.p_ru;
-            if ru.is_null() {
-                continue;
-            }
-            let user = ru.ru_utime.tv_sec as u64 * ticks_per_sec()
-                + ru.ru_utime.tv_usec as u64 * ticks_per_sec() / 1_000_000;
-            let sys = ru.ru_stime.tv_sec as u64 * ticks_per_sec()
-                + ru.ru_stime.tv_usec as u64 * ticks_per_sec() / 1_000_000;
-            let rss = ru.ru_maxrss; // bytes on macOS
-            sample.insert(pid, ppid, user + sys, rss);
-        }
-        Some(sample)
+    // Parse `ps -axo pid=,ppid=,%cpu=,rss=`. The libc crate does NOT ship
+    // a kinfo_proc type for macOS (only the constants), so a sysctl
+    // KERN_PROC_ALL table walk would need hand-declared ABI structs; the
+    // ps utility gives the same tree data with zero FFI risk.
+    let out = std::process::Command::new("ps")
+        .args(["-axo", "pid=,ppid=,%cpu=,rss="])
+        .output()
+        .ok()?;
+    let mut sample = ProcSample::default();
+    for line in String::from_utf8_lossy(&out.stdout).lines() {
+        let mut it = line.split_whitespace();
+        let (Some(pid), Some(ppid), Some(cpu), Some(rss_kb)) =
+            (it.next(), it.next(), it.next(), it.next())
+        else {
+            continue;
+        };
+        let (Ok(pid), Ok(ppid), Ok(cpu), Ok(rss_kb)) = (
+            pid.parse::<u32>(),
+            ppid.parse::<u32>(),
+            cpu.parse::<f32>(),
+            rss_kb.parse::<u64>(),
+        ) else {
+            continue;
+        };
+        // ps %cpu on macOS is percent of one core; store as
+        // centisecond-ticks-per-second equivalent (x100) so the delta math
+        // stays uniform: ticks = cpu_percent * ticks_per_sec().
+        let ticks = (cpu * ticks_per_sec() as f32) as u64;
+        sample.insert(pid, ppid, ticks, rss_kb * 1024);
     }
-}
-
-#[cfg(target_os = "windows")]
-pub fn ticks_per_sec() -> u64 {
-    100 // GetProcessTimes returns 100ns units; converted at read time.
-}
-
-#[cfg(target_os = "windows")]
-pub fn read_sample() -> Option<ProcSample> {
-    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
-    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
-        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
-        TH32CS_SNAPPROCESS,
-    };
-    use windows_sys::Win32::System::Threading::OpenProcess;
-
-    unsafe {
-        let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-        if snap == INVALID_HANDLE_VALUE {
-            return None;
-        }
-        let mut sample = ProcSample::default();
-        let mut row: PROCESSENTRY32W = std::mem::zeroed();
-        row.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
-        if Process32FirstW(snap, &mut row) != 0 {
-            loop {
-                let pid = row.th32ProcessID;
-                let ppid = row.th32ParentProcessID;
-                if let Some((ticks, rss)) = windows_query_process(pid) {
-                    sample.insert(pid, ppid, ticks, rss);
-                }
-                if Process32NextW(snap, &mut row) == 0 {
-                    break;
-                }
-            }
-        }
-        CloseHandle(snap);
-        Some(sample)
-    }
+    Some(sample)
 }
 
 #[cfg(target_os = "windows")]
 unsafe fn windows_query_process(pid: u32) -> Option<(u64, u64)> {
     use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
-    use windows_sys::Win32::System::Diagnostics::Debug::{
+    // GetProcessMemoryInfo / PROCESS_MEMORY_COUNTERS live in
+    // System::ProcessStatus (not Diagnostics::Debug) in windows-sys 0.59.
+    use windows_sys::Win32::System::ProcessStatus::{
         GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS,
     };
     use windows_sys::Win32::System::Threading::{
@@ -263,7 +205,8 @@ unsafe fn windows_query_process(pid: u32) -> Option<(u64, u64)> {
 
     unsafe {
         let h: HANDLE = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
-        if h == 0 {
+        // HANDLE is *mut c_void in windows-sys 0.59: null-check via is_null.
+        if h.is_null() {
             return None;
         }
         let mut create = std::mem::zeroed();
@@ -274,8 +217,9 @@ unsafe fn windows_query_process(pid: u32) -> Option<(u64, u64)> {
         if GetProcessTimes(h, &mut create, &mut exit, &mut kernel, &mut user) != 0 {
             // FILETIME is 100ns units; report in centiseconds (100/s) so
             // ticks_per_sec() == 100 keeps cpu_percent uniform.
-            let k = ((*kernel.dwHighDateTime as u64) << 32) | *kernel.dwLowDateTime as u64;
-            let u = ((*user.dwHighDateTime as u64) << 32) | *user.dwLowDateTime as u64;
+            // FILETIME fields are plain u32 (no pointer dereference).
+            let k = ((kernel.dwHighDateTime as u64) << 32) | kernel.dwLowDateTime as u64;
+            let u = ((user.dwHighDateTime as u64) << 32) | user.dwLowDateTime as u64;
             ticks = (k + u) / 10_000;
         }
         let mut pmc: PROCESS_MEMORY_COUNTERS = std::mem::zeroed();
