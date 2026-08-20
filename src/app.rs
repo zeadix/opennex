@@ -3657,12 +3657,16 @@ impl eframe::App for App {
                         td.instance.history_nav = None;
                     } else {
                         let line = td.instance.get_current_line();
-                        let prompt_end = line
+                        // Strip the prompt: everything up to and including
+                        // the LAST "$ " / "# " terminator. If no prompt
+                        // marker is found (rare, exotic prompts), record
+                        // nothing rather than the whole line with the
+                        // prompt text mixed in.
+                        let cmd = line
                             .rfind("$ ")
                             .or_else(|| line.rfind("# "))
-                            .map(|p| p + 2)
-                            .unwrap_or(0);
-                        let cmd = line[prompt_end..].trim().to_string();
+                            .map(|p| line[p + 2..].trim().to_string())
+                            .unwrap_or_default();
                         if !cmd.is_empty() {
                             self.history_db.add(tab, &cmd);
                         }

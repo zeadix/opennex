@@ -403,4 +403,23 @@ mod tests {
             "reassembled line must contain the full wrapped command, got: {line:?}"
         );
     }
+
+    #[test]
+    fn prompt_stripping_records_only_the_command() {
+        // The recorder keeps only the text AFTER the last "$ "/"# " prompt
+        // terminator; a line with no prompt marker records nothing.
+        let strip = |line: &str| {
+            line.rfind("$ ")
+                .or_else(|| line.rfind("# "))
+                .map(|p| line[p + 2..].trim().to_string())
+                .unwrap_or_default()
+        };
+        assert_eq!(strip("user@host:~/proj$ ls -la"), "ls -la");
+        assert_eq!(strip("root# reboot"), "reboot");
+        // Wrapped prompt line: prompt appears on the FIRST visual row; the
+        // command tail follows the last terminator.
+        assert_eq!(strip("user@host:~/very/long/path$ echo done"), "echo done");
+        // No prompt marker -> record nothing (never the raw line).
+        assert_eq!(strip("just some output text"), "");
+    }
 }

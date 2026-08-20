@@ -416,3 +416,20 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           wrangler r2 object put "${{ env.R2_BUCKET }}/latest.json" --file=deploy/latest.json --remote --content-type="application/json"
+
+      - name: Trigger website rebuild
+        if: success()
+        # Hook failures (bad URL, secret missing, CF hiccup) must never fail
+        # the release: artifacts and latest.json are already published.
+        continue-on-error: true
+        env:
+          DEPLOY_HOOK_URL: ${{ secrets.CF_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -z "$DEPLOY_HOOK_URL" ]; then
+            echo "CF_DEPLOY_HOOK_URL not configured — skipping website rebuild trigger."
+            exit 0
+          fi
+          # Wait for latest.json to propagate on R2/CDN before the website
+          # build fetches it.
+          sleep 30
+          curl -fsS -X POST "$DEPLOY_HOOK_URL" && echo "Website rebuild triggered."

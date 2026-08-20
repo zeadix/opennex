@@ -1,3 +1,9 @@
+// Windows: build as a GUI-subsystem binary in release builds. Without
+// this the default console subsystem makes Windows spawn an extra cmd.exe
+// window whenever the app is launched from a shortcut/Explorer. Debug
+// builds keep the console so log output stays visible during development.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use anyhow::Result;
 use eframe::egui;
 
