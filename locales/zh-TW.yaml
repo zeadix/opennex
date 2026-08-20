@@ -1,172 +1,246 @@
-display_name: "繁體中文"
-
+display_name: 繁體中文
 menu:
-  file: "檔案"
-  view: "檢視"
-  language: "語言"
-  theme: "佈景主題"
-
+  workspace: 工作區
+  view: 檢視
+  language: 語言
+  theme: 佈景主題
 file_menu:
-  save: "儲存"
-  load: "載入"
-  save_as: "另存新檔..."
-  exit: "結束"
-
+  save: 儲存
+  load: 載入
+  save_as: 另存新檔...
+  exit: 結束
 view_menu:
-  split_right: "向右分割"
-  split_down: "向下分割"
-  settings: "設定"
-  workspace_toggle: "工作區"
-
+  split_right: 向右分割
+  split_down: 向下分割
+  settings: 設定
+  workspace_toggle: 工作區
 settings:
-  title: "設定"
+  title: 設定
   tabs:
-    general: "一般"
-    themes: "主題"
-    shortcuts: "捷徑"
-    lock: "鎖定"
+    general: 一般
+    themes: 主題
+    shortcuts: 捷徑
+    lock: 鎖定
   nav:
-    general: "一般"
-    themes: "主題"
-    shortcuts: "快速鍵"
-    lock: "鎖定"
+    general: 一般
+    themes: 主題
+    shortcuts: 快速鍵
+    lock: 鎖定
+    group_settings: 設定
+    group_theme: 主題
+    theme_select: 選擇與管理
+    theme_ui: UI 外觀
+    theme_terminal: 終端
+    theme_ansi: ANSI 調色盤
   general:
-    heading: "一般"
-    scene_info: "場景和範本使用固定路徑:"
-    scene_path: "  場景: ./scene.json"
-    templates_path: "  範本: ./templates/"
-    history_section: "歷史記錄"
-    max_history: "最大筆數:"
-    scrollback: "回溯行數:"
-    clear_all_history: "清除所有歷史"
-    auto_copy: "選中字元自動複製"
+    heading: 一般
+    scene_info: '場景和範本使用固定路徑:'
+    scene_path: '  場景: ./scene.json'
+    templates_path: '  範本: ./templates/'
+    history_section: 歷史記錄
+    max_history: '最大筆數:'
+    scrollback: '回溯行數:'
+    clear_all_history: 刪除所有指令記錄
+    auto_copy: 選中字元自動複製
   appearance:
-    heading: "外觀"
-    terminal_section: "終端機外觀"
-    font_size: "字型大小:"
-    cell_spacing: "字元間距:"
-    font_family: "字型:"
-    bg_color: "背景色:"
-    fg_color: "前景色:"
-    command_menu_section: "指令選單"
-    menu_bg_color: "背景色:"
-    menu_fg_color: "文字色:"
-    menu_font_size: "字型大小:"
-    apply_theme_typography: "套用主題字體和字號"
-    import_theme: "匯入主題"
-    export_theme: "匯出主題"
-    import_success: "主題已匯入"
-    export_success: "主題已匯出"
-    invalid_theme: "無效的主題檔案"
-    unsupported_version: "不支援的主題格式版本"
-    save_failure: "儲存主題失敗"
-    subtab_ui: "UI 外觀"
-    subtab_terminal: "終端"
-    subtab_ansi: "ANSI 調色盤"
+    heading: 外觀
+    terminal_section: 終端機外觀
+    font_size: '字型大小:'
+    cell_spacing: '字元間距:'
+    font_family: '字型:'
+    bg_color: '背景色:'
+    fg_color: '前景色:'
+    command_menu_section: 指令選單
+    menu_bg_color: '背景色:'
+    menu_fg_color: '文字色:'
+    menu_font_size: '字型大小:'
+    apply_theme_typography: 套用主題字體和字號
+    import_theme: 匯入主題
+    export_theme: 匯出主題
+    import_success: 主題已匯入
+    export_success: 主題已匯出
+    invalid_theme: 無效的主題檔案
+    unsupported_version: 不支援的主題格式版本
+    save_failure: 儲存主題失敗
+    subtab_ui: UI 外觀
+    subtab_terminal: 終端
+    subtab_ansi: ANSI 調色盤
   shortcuts:
-    heading: "捷徑"
-    hint: "點擊捷徑名稱後按下新按鍵即可修改"
-    not_set: "未設定"
-    reset_defaults: "恢復預設按鍵"
+    heading: 捷徑
+    hint: 點擊捷徑名稱後按下新按鍵即可修改
+    not_set: 未設定
+    reset_defaults: 恢復預設按鍵
   lock:
-    heading: "鎖定"
-    password_section: "密碼設定:"
-    set_password: "設定密碼"
-    change_password: "修改密碼"
-    clear_password: "清除密碼"
-    lock_section: "鎖定:"
-    lock_overlay_color: "遮罩色:"
+    heading: 鎖定
+    password_section: '密碼設定:'
+    set_password: 設定密碼
+    change_password: 修改密碼
+    clear_password: 清除密碼
+    lock_section: '鎖定:'
+    lock_overlay_color: '遮罩色:'
   buttons:
-    apply: "套用"
-    close: "關閉"
-
+    apply: 應用
+    close: 關閉
+    revert: 還原
+    applied: 已應用
+    builtin: 內建
+    user_group: 自訂主題
+    builtin_group: 內建主題
+    user: 使用者
+    behavior_section: 選擇
+    data_section: 指令記錄
+    maintenance_section: 維護
+    font_section: 字型
+    color_section: 顏色
+    preview_section: 預覽
+    template_section: 配色範本
+    base_color_section: 基礎顏色
 shortcut_labels:
-  new_terminal: "新增終端機"
-  close_terminal: "關閉終端機"
-  workspace_up: "工作區上移"
-  workspace_down: "工作區下移"
-  panel_left: "面板左移"
-  panel_right: "面板右移"
-  lock_workspace: "鎖定工作區"
-  history_menu: "歷史選單"
-  history_prev: "上一筆歷史"
-  history_next: "下一筆歷史"
-  toggle_workspace_sidebar: "顯示/隱藏工作區列"
-  zoom_in: "整體放大"
-  zoom_out: "整體縮小"
-  shortcuts_heading: "捷徑"
-
+  new_terminal: 新增終端機
+  close_terminal: 關閉終端機
+  workspace_up: 工作區上移
+  workspace_down: 工作區下移
+  panel_left: 面板左移
+  panel_right: 面板右移
+  lock_workspace: 鎖定工作區
+  history_menu: 歷史選單
+  history_prev: 上一筆歷史
+  history_next: 下一筆歷史
+  toggle_workspace_sidebar: 顯示/隱藏工作區列
+  zoom_in: 整體放大
+  zoom_out: 整體縮小
+  shortcuts_heading: 捷徑
 workspace:
-  heading: "工作區"
-  new: "+ 新增工作區"
-  rename: "重新命名"
-  save_as_template: "儲存為範本"
-  close: "關閉"
-  rename_confirm: "確定"
-  rename_cancel: "取消"
-  drag_handle_hint: "拖曳以調整順序"
-  close_ws_hint: "關閉工作區"
-  locked_hint: "已鎖定工作區"
-  unlocked_hint: "未鎖定工作區"
-  empty_hint: "點擊 '+ 新增工作區' 建立一個"
-  templates: "範本"
-  templates_empty: "(空)"
-  name_prefix: "工作區 "
-
+  heading: 工作區
+  new: + 新增工作區
+  rename: 重新命名
+  save_as_template: 儲存為範本
+  close: 關閉
+  rename_confirm: 確定
+  rename_cancel: 取消
+  drag_handle_hint: 拖曳以調整順序
+  close_ws_hint: 關閉工作區
+  locked_hint: 已鎖定工作區
+  unlocked_hint: 未鎖定工作區
+  empty_hint: 點擊 '+ 新增工作區' 建立一個
+  templates: 範本
+  templates_empty: (空)
+  name_prefix: '工作區 '
 close_confirm:
-  message_prefix: "確定要關閉工作區「"
-  message_suffix: "」嗎？"
-  confirm: "確認"
-  cancel: "取消"
-  terminal_title: "關閉終端機"
-  terminal_message: "確定要關閉此終端機嗎？歷史指令將被刪除。"
-
+  message_prefix: 確定要關閉工作區「
+  message_suffix: 」嗎？
+  confirm: 確認
+  cancel: 取消
+  terminal_title: 關閉終端機
+  terminal_message: 確定要關閉此終端機嗎？歷史指令將被刪除。
 password:
-  enter: "輸入密碼:"
-  confirm: "確認密碼:"
-  original: "原密碼:"
-  new: "新密碼:"
-  confirm_new: "確認新密碼:"
-  input_label: "密碼:"
-  mismatch: "不一致"
-  match: "一致"
-  empty_error: "密碼不能為空"
-  mismatch_error: "兩次輸入的新密碼不一致"
-  wrong_error: "原密碼錯誤"
-  wrong_password: "密碼錯誤"
-  confirm_button: "確認"
-  cancel_button: "取消"
-  set_title: "設定密碼"
-  change_title: "修改密碼"
-  clear_title: "清除密碼"
-
+  enter: '輸入密碼:'
+  confirm: '確認密碼:'
+  original: '原密碼:'
+  new: '新密碼:'
+  confirm_new: '確認新密碼:'
+  input_label: '密碼:'
+  mismatch: 不一致
+  match: 一致
+  empty_error: 密碼不能為空
+  mismatch_error: 兩次輸入的新密碼不一致
+  wrong_error: 原密碼錯誤
+  wrong_password: 密碼錯誤
+  confirm_button: 確認
+  cancel_button: 取消
+  set_title: 設定密碼
+  change_title: 修改密碼
+  clear_title: 清除密碼
 lock_overlay:
-  title: "此工作區已鎖定"
-  password_label: "密碼:"
-  unlock_button: "解鎖"
-  wrong_password: "密碼錯誤"
-
+  title: 此工作區已鎖定
+  password_label: '密碼:'
+  unlock_button: 解鎖
+  wrong_password: 密碼錯誤
 terminal:
-  not_found: "找不到終端機"
-  rename: "重新命名"
-  clear_history: "清除指令歷史"
-  new_tab: "+ 新增分頁"
-  add_tab: "+ 分頁"
-  rename_hint: "輸入名稱..."
-  default_name_prefix: "終端機 "
-
+  not_found: 找不到終端機
+  rename: 重新命名
+  clear_history: 清除指令歷史
+  new_tab: + 新增分頁
+  add_tab: + 分頁
+  rename_hint: 輸入名稱...
+  default_name_prefix: '終端機 '
 theme:
-  light: "淺色"
-  dark: "深色"
-
+  light: 淺色
+  dark: 深色
 about:
-  menu_label: "關於"
-  title: "關於 OpenNex"
-  version_label: "版本"
-  description: "多功能堆疊式終端機管理器，整合分頁佈局、工作階段指令記憶、全域介面縮放與加密工作區，高效管控你的終端機環境。"
-  homepage_label: "首頁"
-  source_label: "開源"
-  license_label: "授權條款"
-  credits_label: "鳴謝"
-  credits: "基於 egui、egui_dock、alacritty_terminal、egui_term 等開源專案建構。"
-  close: "關閉"
+  menu_label: 關於
+  title: 關於 OpenNex
+  version_label: 版本
+  description: '一款面向 AI 應用場景與命令列重度使用者的多視窗堆疊式終端管理器。
+
+
+    支援自由排布終端視窗佈局、標籤堆疊管理大量工作階段，佈局可儲存與載入；內建無限工作階段命令記憶、全域介面縮放、自訂主題美化、工作區加密保護、自訂快捷鍵等能力，一站式管控複雜的終端執行環境。
+
+
+    基於 Rust 建構，高效能引擎可穩定支撐 6000+ 活動視窗並行運行，原生跨平台支援 Linux、Windows、macOS，並提供 20+ 國際化語言。
+
+    如在使用中遇到 Bug 或有功能優化建議，歡迎回饋。'
+  homepage_label: 首頁
+  source_label: 開源
+  license_label: 授權條款
+  credits_label: 鳴謝
+  credits: 基於 egui、egui_dock、alacritty_terminal、egui_term 等開源專案建構。
+  close: 關閉
+update:
+  checking: ''
+  downloading: 正在下載更新...
+  verifying: 正在校驗檔案完整性...
+  ready: 更新已準備就緒
+  failed: '更新失敗: {}'
+  available: 發現新版本 v{} — 準備下載
+  up_to_date: 當前已是最新版本
+  check: 檢查更新
+  update_now: 立即更新
+  restart: 重啟應用
+  restart_title: 更新已準備就緒
+  restart_body: 新版本已下載，是否立即重啟應用？
+  restart_confirm: 重啟
+theme_editor:
+  colors:
+    app_bg: 主背景
+    sidebar: 側欄
+    panel: 面板
+    input_bg: 輸入框
+    text: 文字
+    weak_text: 弱化文字
+    accent: 強調
+    warning: 警告
+    danger: 危險
+    hover: 懸停
+    active: 啟用
+    selection_bg: 選取背景
+    selection_text: 選取文字
+    border: 邊框
+    lock: 鎖定
+    window_shadow: 陰影
+    tab_highlight: 焦點標籤
+    fg: 前景
+    bg: 背景
+    cursor: 游標
+    selection_term_bg: 選區背景
+    selection_term_text: 選區文字
+    link: 連結
+  edit_title: 編輯主題
+  name_label: '名稱:'
+  confirm: 儲存
+  cancel: 取消
+  system_ui: System UI
+  terminal: Terminal
+  ui_font_label: 'UI 字體: '
+  ui_font_size: 'UI 字號: '
+  terminal_font_label: '終端字體: '
+  terminal_font_size: '終端字號: '
+  cell_spacing: '間距: '
+  terminal_padding: '終端內邊距: '
+stats:
+  focused: 當前終端
+  workspace: 當前工作區
+  global: 全域
+  terminals: 終端
+  clear_history_title: 刪除所有指令記錄
+  clear_history_body: 確認刪除所有終端的指令記錄？此操作不可恢復。

@@ -22,7 +22,7 @@ use std::borrow::Cow;
 use std::cmp::min;
 use std::io::Result;
 use std::ops::{Index, RangeInclusive};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc};
 
 pub type TerminalMode = TermMode;
@@ -141,6 +141,9 @@ pub struct TerminalBackend {
     notifier: Notifier,
     last_content: RenderableContent,
     dirty: Arc<AtomicBool>,
+    /// Cumulative bytes written TO the pty (keyboard input, pastes, mouse
+    /// reports). Exposed so the app can compute per-terminal uplink rates.
+    pub tx_bytes: std::sync::Arc<AtomicU64>,
 }
 
 impl TerminalBackend {
@@ -208,6 +211,7 @@ impl TerminalBackend {
             notifier,
             last_content: initial_content,
             dirty,
+            tx_bytes: std::sync::Arc::new(AtomicU64::new(0)),
         })
     }
 
@@ -391,6 +395,8 @@ impl TerminalBackend {
             c
         );
 
+        self.tx_bytes
+            .fetch_add(msg.as_bytes().len() as u64, Ordering::Relaxed);
         self.notifier.notify(msg.as_bytes().to_vec());
     }
 
@@ -423,6 +429,7 @@ impl TerminalBackend {
             msg.push(32 + 1 + line.0 as u8);
         }
 
+        self.tx_bytes.fetch_add(msg.len() as u64, Ordering::Relaxed);
         self.notifier.notify(msg);
     }
 
@@ -526,7 +533,9 @@ impl TerminalBackend {
     }
 
     fn write<I: Into<Cow<'static, [u8]>>>(&self, input: I) {
-        self.notifier.notify(input);
+        let cow = input.into();
+        self.tx_bytes.fetch_add(cow.len() as u64, Ordering::Relaxed);
+        self.notifier.notify(cow);
     }
 
     fn scroll(&mut self, terminal: &mut Term<EventProxy>, delta_value: i32) {
@@ -546,6 +555,8 @@ impl TerminalBackend {
                     content.push(line_cmd);
                 }
 
+                self.tx_bytes
+                    .fetch_add(content.len() as u64, Ordering::Relaxed);
                 self.notifier.notify(content);
             } else {
                 terminal.grid_mut().scroll_display(scroll);

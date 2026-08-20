@@ -1,0 +1,79 @@
+{
+  "format_version": 1,
+  "id": "monokai-pro",
+  "name": "Monokai Pro",
+  "author": "OpenNex",
+  "app": {
+    "app_bg": "#2d2a2e",
+    "sidebar": "#221f22",
+    "panel": "#2d2a2e",
+    "hover": "#3a353b",
+    "active": "#403a3f",
+    "border": "#514649",
+    "text": "#fcfcfa",
+    "weak_text": "#939293",
+    "accent": "#ffd866",
+    "warning": "#ffd866",
+    "danger": "#ff6188",
+    "lock": "#fc9867",
+    "input_bg": "#221f22",
+    "selection_bg": "#403a3f",
+    "selection_text": "#fcfcfa",
+    "window_shadow": "#00000078",
+    "menu_bg": "#2d2a2e",
+    "menu_fg": "#fcfcfa",
+    "button_bg": "#221f22",
+    "button_fg": "#fcfcfa",
+    "button_hover_bg": "#3a353b",
+    "sidebar_border": "#514649",
+    "tab_highlight": "#403a3f"
+  },
+  "terminal": {
+    "foreground": "#fcfcfa",
+    "background": "#2d2a2e",
+    "normal": {
+      "black": "#221f22",
+      "red": "#ff6188",
+      "green": "#a9dc76",
+      "yellow": "#ffd866",
+      "blue": "#78dce8",
+      "magenta": "#ab9df2",
+      "cyan": "#78dce8",
+      "white": "#fcfcfa"
+    },
+    "bright": {
+      "black": "#727072",
+      "red": "#ff6188",
+      "green": "#a9dc76",
+      "yellow": "#ffd866",
+      "blue": "#78dce8",
+      "magenta": "#ab9df2",
+      "cyan": "#78dce8",
+      "white": "#fcfcfa"
+    },
+    "dim": {
+      "black": "#272428",
+      "red": "#b85f73",
+      "green": "#769a55",
+      "yellow": "#b39449",
+      "blue": "#589bab",
+      "magenta": "#7a7272",
+      "cyan": "#589bab",
+      "white": "#a5a3a5"
+    },
+    "dim_foreground": "#939293",
+    "cursor": "#fcfcfa",
+    "selection_bg": "#403a3f",
+    "selection_text": "#fcfcfa",
+    "link": "#78dce8"
+  },
+  "typography": {
+    "terminal_font_families": [
+      "monospace"
+    ],
+    "terminal_font_size": 14.0,
+    "cell_spacing": 1.0,
+    "menu_font_size": 14.0,
+    "terminal_padding": 4.0
+  }
+}

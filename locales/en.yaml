@@ -1,172 +1,247 @@
-display_name: "English"
-
+display_name: English
 menu:
-  file: "File"
-  view: "View"
-  language: "Language"
-  theme: "Theme"
-
+  workspace: Workspace
+  view: View
+  language: Language
+  theme: Theme
 file_menu:
-  save: "Save"
-  load: "Load"
-  save_as: "Save As..."
-  exit: "Exit"
-
+  save: Save
+  load: Load
+  save_as: Save As...
+  exit: Exit
 view_menu:
-  split_right: "Split Right"
-  split_down: "Split Down"
-  settings: "Settings"
-  workspace_toggle: "Workspace"
-
+  split_right: Split Right
+  split_down: Split Down
+  settings: Settings
+  workspace_toggle: Workspace
 settings:
-  title: "Settings"
+  title: Settings
   tabs:
-    general: "General"
-    themes: "Themes"
-    shortcuts: "Shortcuts"
-    lock: "Lock"
+    general: General
+    themes: Themes
+    shortcuts: Shortcuts
+    lock: Lock
   nav:
-    general: "General"
-    themes: "Themes"
-    shortcuts: "Shortcuts"
-    lock: "Lock"
+    general: General
+    themes: Themes
+    shortcuts: Shortcuts
+    lock: Lock
+    group_settings: Settings
+    group_theme: Themes
+    theme_select: Manage
+    theme_ui: UI Appearance
+    theme_terminal: Terminal
+    theme_ansi: ANSI Palette
   general:
-    heading: "General"
-    scene_info: "Scene and templates use fixed paths:"
-    scene_path: "  Scene: ./scene.json"
-    templates_path: "  Templates: ./templates/"
-    history_section: "History"
-    max_history: "Max entries:"
-    scrollback: "Scrollback:"
-    clear_all_history: "Clear all history"
-    auto_copy: "Auto-copy selected text"
+    heading: General
+    scene_info: 'Scene and templates use fixed paths:'
+    scene_path: '  Scene: ./scene.json'
+    templates_path: '  Templates: ./templates/'
+    history_section: History
+    max_history: 'Max entries:'
+    scrollback: 'Scrollback:'
+    clear_all_history: Delete All Command History
+    auto_copy: Auto-copy selected text
   appearance:
-    heading: "Appearance"
-    terminal_section: "Terminal Appearance"
-    font_size: "Font Size:"
-    cell_spacing: "Cell Spacing:"
-    font_family: "Font:"
-    bg_color: "Background:"
-    fg_color: "Foreground:"
-    command_menu_section: "Command Menu"
-    menu_bg_color: "Background:"
-    menu_fg_color: "Text Color:"
-    menu_font_size: "Font Size:"
-    apply_theme_typography: "Apply theme fonts and sizes"
-    import_theme: "Import theme"
-    export_theme: "Export theme"
-    import_success: "Theme imported"
-    export_success: "Theme exported"
-    invalid_theme: "Invalid theme file"
-    unsupported_version: "Unsupported theme format version"
-    save_failure: "Failed to save theme"
-    subtab_ui: "UI Appearance"
-    subtab_terminal: "Terminal"
-    subtab_ansi: "ANSI Palette"
+    heading: Appearance
+    terminal_section: Terminal Appearance
+    font_size: 'Font Size:'
+    cell_spacing: 'Cell Spacing:'
+    font_family: 'Font:'
+    bg_color: 'Background:'
+    fg_color: 'Foreground:'
+    command_menu_section: Command Menu
+    menu_bg_color: 'Background:'
+    menu_fg_color: 'Text Color:'
+    menu_font_size: 'Font Size:'
+    apply_theme_typography: Apply theme fonts and sizes
+    import_theme: Import theme
+    export_theme: Export theme
+    import_success: Theme imported
+    export_success: Theme exported
+    invalid_theme: Invalid theme file
+    unsupported_version: Unsupported theme format version
+    save_failure: Failed to save theme
+    subtab_ui: UI Appearance
+    subtab_terminal: Terminal
+    subtab_ansi: ANSI Palette
   shortcuts:
-    heading: "Shortcuts"
-    hint: "Click a shortcut name then press a new key to change it"
-    not_set: "Not set"
-    reset_defaults: "Reset to Defaults"
+    heading: Shortcuts
+    hint: Click a shortcut name then press a new key to change it
+    not_set: Not set
+    reset_defaults: Reset to Defaults
   lock:
-    heading: "Lock"
-    password_section: "Password Configuration:"
-    set_password: "Set Password"
-    change_password: "Change Password"
-    clear_password: "Clear Password"
-    lock_section: "Lock:"
-    lock_overlay_color: "Overlay Color:"
+    heading: Lock
+    password_section: 'Password Configuration:'
+    set_password: Set Password
+    change_password: Change Password
+    clear_password: Clear Password
+    lock_section: 'Lock:'
+    lock_overlay_color: 'Overlay Color:'
   buttons:
-    apply: "Apply"
-    close: "Close"
-
+    apply: Apply
+    close: Close
+    revert: Revert
+    applied: Applied
+    builtin: Built-in
+    user_group: Custom Themes
+    builtin_group: Built-in Themes
+    user: User
+    behavior_section: Selection
+    data_section: Command History
+    maintenance_section: Maintenance
+    font_section: Fonts
+    color_section: Colors
+    preview_section: Preview
+    template_section: Palette Templates
+    base_color_section: Base Colors
 shortcut_labels:
-  new_terminal: "New Terminal"
-  close_terminal: "Close Terminal"
-  workspace_up: "Workspace Up"
-  workspace_down: "Workspace Down"
-  panel_left: "Panel Left"
-  panel_right: "Panel Right"
-  lock_workspace: "Lock Workspace"
-  history_menu: "History Menu"
-  history_prev: "History Previous"
-  history_next: "History Next"
-  toggle_workspace_sidebar: "Show/Hide Workspace Sidebar"
-  zoom_in: "Zoom In"
-  zoom_out: "Zoom Out"
-  shortcuts_heading: "Shortcuts"
-
+  new_terminal: New Terminal
+  close_terminal: Close Terminal
+  workspace_up: Workspace Up
+  workspace_down: Workspace Down
+  panel_left: Panel Left
+  panel_right: Panel Right
+  lock_workspace: Lock Workspace
+  history_menu: History Menu
+  history_prev: History Previous
+  history_next: History Next
+  toggle_workspace_sidebar: Show/Hide Workspace Sidebar
+  zoom_in: Zoom In
+  zoom_out: Zoom Out
+  shortcuts_heading: Shortcuts
 workspace:
-  heading: "Workspaces"
-  new: "+ New Workspace"
-  rename: "Rename"
-  save_as_template: "Save as Template"
-  close: "Close"
-  rename_confirm: "OK"
-  rename_cancel: "Cancel"
-  drag_handle_hint: "Drag to reorder Workspace"
-  close_ws_hint: "Close Workspace"
-  locked_hint: "Locked Workspace"
-  unlocked_hint: "Unlocked Workspace"
-  empty_hint: "Click '+ New Workspace' to create one"
-  templates: "Templates"
-  templates_empty: "(empty)"
-  name_prefix: "Workspace "
-
+  heading: Workspaces
+  new: + New Workspace
+  rename: Rename
+  save_as_template: Save as Template
+  close: Close
+  rename_confirm: OK
+  rename_cancel: Cancel
+  drag_handle_hint: Drag to reorder Workspace
+  close_ws_hint: Close Workspace
+  locked_hint: Locked Workspace
+  unlocked_hint: Unlocked Workspace
+  empty_hint: Click '+ New Workspace' to create one
+  templates: Templates
+  templates_empty: (empty)
+  name_prefix: 'Workspace '
 close_confirm:
-  message_prefix: "Are you sure you want to close workspace \""
-  message_suffix: "\"?"
-  confirm: "Confirm"
-  cancel: "Cancel"
-  terminal_title: "Close Terminal"
-  terminal_message: "Are you sure you want to close this terminal? Command history will be deleted."
-
+  message_prefix: Are you sure you want to close workspace "
+  message_suffix: '"?'
+  confirm: Confirm
+  cancel: Cancel
+  terminal_title: Close Terminal
+  terminal_message: Are you sure you want to close this terminal? Command history will be deleted.
 password:
-  enter: "Enter Password:"
-  confirm: "Confirm Password:"
-  original: "Current Password:"
-  new: "New Password:"
-  confirm_new: "Confirm New Password:"
-  input_label: "Password:"
-  mismatch: "Mismatch"
-  match: "Match"
-  empty_error: "Password cannot be empty"
-  mismatch_error: "Passwords do not match"
-  wrong_error: "Current password is incorrect"
-  wrong_password: "Wrong password"
-  confirm_button: "Confirm"
-  cancel_button: "Cancel"
-  set_title: "Set Password"
-  change_title: "Change Password"
-  clear_title: "Clear Password"
-
+  enter: 'Enter Password:'
+  confirm: 'Confirm Password:'
+  original: 'Current Password:'
+  new: 'New Password:'
+  confirm_new: 'Confirm New Password:'
+  input_label: 'Password:'
+  mismatch: Mismatch
+  match: Match
+  empty_error: Password cannot be empty
+  mismatch_error: Passwords do not match
+  wrong_error: Current password is incorrect
+  wrong_password: Wrong password
+  confirm_button: Confirm
+  cancel_button: Cancel
+  set_title: Set Password
+  change_title: Change Password
+  clear_title: Clear Password
 lock_overlay:
-  title: "This workspace is locked"
-  password_label: "Password:"
-  unlock_button: "Unlock"
-  wrong_password: "Wrong password"
-
+  title: This workspace is locked
+  password_label: 'Password:'
+  unlock_button: Unlock
+  wrong_password: Wrong password
 terminal:
-  not_found: "Terminal not found"
-  rename: "Rename"
-  clear_history: "Clear Command History"
-  new_tab: "+ New Tab"
-  add_tab: "+ Tab"
-  rename_hint: "Enter name..."
-  default_name_prefix: "Terminal "
-
+  not_found: Terminal not found
+  rename: Rename
+  clear_history: Clear Command History
+  new_tab: + New Tab
+  add_tab: + Tab
+  rename_hint: Enter name...
+  default_name_prefix: 'Terminal '
 theme:
-  light: "Light"
-  dark: "Dark"
-
+  light: Light
+  dark: Dark
 about:
-  menu_label: "About"
-  title: "About OpenNex"
-  version_label: "Version"
-  description: "Multi-functional stacked terminal manager with tabbed layouts, session command history, global interface scaling, and encrypted workspaces for efficient terminal management."
-  homepage_label: "Homepage"
-  source_label: "Source"
-  license_label: "License"
-  credits_label: "Credits"
-  credits: "Built on open-source projects including egui, egui_dock, alacritty_terminal, and egui_term."
-  close: "Close"
+  menu_label: About
+  title: About OpenNex
+  version_label: Version
+  description: 'A multi-window stacked terminal manager built for AI workflows and heavy command-line users.
+
+
+    Freely arrange terminal window layouts and stack tabs to manage many sessions; layouts can be saved and loaded. Ships with unlimited session command history, global interface scaling, custom themes,
+    encrypted workspaces, and configurable shortcuts — everything you need to tame a complex terminal environment.
+
+
+    Built in Rust: the high-performance engine comfortably runs 6000+ active windows in parallel, with native cross-platform support for Linux, Windows, and macOS, plus 20+ localized languages.
+
+    Found a bug or have a suggestion? Feedback is welcome.'
+  homepage_label: Homepage
+  source_label: Source
+  license_label: License
+  credits_label: Credits
+  credits: Built on open-source projects including egui, egui_dock, alacritty_terminal, and egui_term.
+  close: Close
+update:
+  checking: ''
+  downloading: Downloading update...
+  verifying: Verifying integrity...
+  ready: Update ready to install
+  failed: 'Update failed: {}'
+  available: New version v{} found — ready to download
+  up_to_date: You are up to date
+  check: Check for Updates
+  update_now: Update Now
+  restart: Restart App
+  restart_title: Update Ready
+  restart_body: A new version has been downloaded. Restart now?
+  restart_confirm: Restart
+theme_editor:
+  colors:
+    app_bg: App background
+    sidebar: Sidebar
+    panel: Panel
+    input_bg: Input field
+    text: Text
+    weak_text: Dim text
+    accent: Accent
+    warning: Warning
+    danger: Danger
+    hover: Hover
+    active: Active
+    selection_bg: Selection bg
+    selection_text: Selection text
+    border: Border
+    lock: Lock
+    window_shadow: Shadow
+    tab_highlight: Focused tab
+    fg: Foreground
+    bg: Background
+    cursor: Cursor
+    selection_term_bg: Selection bg
+    selection_term_text: Selection text
+    link: Link
+  edit_title: Edit Theme
+  name_label: 'Name:'
+  confirm: Save
+  cancel: Cancel
+  system_ui: System UI
+  terminal: Terminal
+  ui_font_label: 'UI font: '
+  ui_font_size: 'UI size: '
+  terminal_font_label: 'Terminal font: '
+  terminal_font_size: 'Terminal size: '
+  cell_spacing: 'Spacing: '
+  terminal_padding: 'Terminal padding: '
+stats:
+  focused: Current Terminal
+  workspace: Current Workspace
+  global: Global
+  terminals: terminals
+  clear_history_title: Delete All Command History
+  clear_history_body: Delete command history of all terminals? This cannot be undone.

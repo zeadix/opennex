@@ -1,172 +1,247 @@
-display_name: "Italiano"
-
+display_name: Italiano
 menu:
-  file: "File"
-  view: "Visualizza"
-  language: "Lingua"
-  theme: "Tema"
-
+  workspace: Area di lavoro
+  view: Visualizza
+  language: Lingua
+  theme: Tema
 file_menu:
-  save: "Salva"
-  load: "Carica"
-  save_as: "Salva con nome..."
-  exit: "Esci"
-
+  save: Salva
+  load: Carica
+  save_as: Salva con nome...
+  exit: Esci
 view_menu:
-  split_right: "Dividi a destra"
-  split_down: "Dividi in basso"
-  settings: "Impostazioni"
-  workspace_toggle: "Area di lavoro"
-
+  split_right: Dividi a destra
+  split_down: Dividi in basso
+  settings: Impostazioni
+  workspace_toggle: Area di lavoro
 settings:
-  title: "Impostazioni"
+  title: Impostazioni
   tabs:
-    general: "Generale"
-    themes: "Temi"
-    shortcuts: "Scorciatoie"
-    lock: "Blocco"
+    general: Generale
+    themes: Temi
+    shortcuts: Scorciatoie
+    lock: Blocco
   nav:
-    general: "Generale"
-    themes: "Temi"
-    shortcuts: "Scorciatoie"
-    lock: "Blocco"
+    general: Generale
+    themes: Temi
+    shortcuts: Scorciatoie
+    lock: Blocco
+    group_settings: Impostazioni
+    group_theme: Temi
+    theme_select: Gestisci
+    theme_ui: Aspetto UI
+    theme_terminal: Terminale
+    theme_ansi: Tavolozza ANSI
   general:
-    heading: "Generale"
-    scene_info: "Scena e modelli usano percorsi fissi:"
-    scene_path: "  Scena: ./scene.json"
-    templates_path: "  Modelli: ./templates/"
-    history_section: "Cronologia"
-    max_history: "Voci max:"
-    scrollback: "Scrollback:"
-    clear_all_history: "Cancella tutta la cronologia"
-    auto_copy: "Copia automatica del testo selezionato"
+    heading: Generale
+    scene_info: 'Scena e modelli usano percorsi fissi:'
+    scene_path: '  Scena: ./scene.json'
+    templates_path: '  Modelli: ./templates/'
+    history_section: Cronologia
+    max_history: 'Voci max:'
+    scrollback: 'Scrollback:'
+    clear_all_history: Elimina tutta la cronologia
+    auto_copy: Copia automatica del testo selezionato
   appearance:
-    heading: "Aspetto"
-    terminal_section: "Aspetto terminale"
-    font_size: "Dimensione font:"
-    cell_spacing: "Spaziatura:"
-    font_family: "Font:"
-    bg_color: "Sfondo:"
-    fg_color: "Primo piano:"
-    command_menu_section: "Menu comandi"
-    menu_bg_color: "Sfondo:"
-    menu_fg_color: "Colore testo:"
-    menu_font_size: "Dimensione font:"
-    apply_theme_typography: "Applica caratteri e dimensioni del tema"
-    import_theme: "Importa tema"
-    export_theme: "Esporta tema"
-    import_success: "Tema importato"
-    export_success: "Tema esportato"
-    invalid_theme: "File tema non valido"
-    unsupported_version: "Versione formato tema non supportata"
-    save_failure: "Salvataggio tema fallito"
-    subtab_ui: "Aspetto UI"
-    subtab_terminal: "Terminale"
-    subtab_ansi: "Tavolozza ANSI"
+    heading: Aspetto
+    terminal_section: Aspetto terminale
+    font_size: 'Dimensione font:'
+    cell_spacing: 'Spaziatura:'
+    font_family: 'Font:'
+    bg_color: 'Sfondo:'
+    fg_color: 'Primo piano:'
+    command_menu_section: Menu comandi
+    menu_bg_color: 'Sfondo:'
+    menu_fg_color: 'Colore testo:'
+    menu_font_size: 'Dimensione font:'
+    apply_theme_typography: Applica caratteri e dimensioni del tema
+    import_theme: Importa tema
+    export_theme: Esporta tema
+    import_success: Tema importato
+    export_success: Tema esportato
+    invalid_theme: File tema non valido
+    unsupported_version: Versione formato tema non supportata
+    save_failure: Salvataggio tema fallito
+    subtab_ui: Aspetto UI
+    subtab_terminal: Terminale
+    subtab_ansi: Tavolozza ANSI
   shortcuts:
-    heading: "Scorciatoie"
-    hint: "Clicca su uno scorciatoia e premi un nuovo tasto"
-    not_set: "Non impostato"
-    reset_defaults: "Ripristina predefiniti"
+    heading: Scorciatoie
+    hint: Clicca su uno scorciatoia e premi un nuovo tasto
+    not_set: Non impostato
+    reset_defaults: Ripristina predefiniti
   lock:
-    heading: "Blocco"
-    password_section: "Configurazione password:"
-    set_password: "Imposta password"
-    change_password: "Cambia password"
-    clear_password: "Cancella password"
-    lock_section: "Blocco:"
-    lock_overlay_color: "Colore sovrapposizione:"
+    heading: Blocco
+    password_section: 'Configurazione password:'
+    set_password: Imposta password
+    change_password: Cambia password
+    clear_password: Cancella password
+    lock_section: 'Blocco:'
+    lock_overlay_color: 'Colore sovrapposizione:'
   buttons:
-    apply: "Applica"
-    close: "Chiudi"
-
+    apply: Applica
+    close: Chiudi
+    revert: Ripristina
+    applied: Applicato
+    builtin: Integrato
+    user_group: Temi personalizzati
+    builtin_group: Temi integrati
+    user: Utente
+    behavior_section: Selezione
+    data_section: Cronologia comandi
+    maintenance_section: Manutenzione
+    font_section: Caratteri
+    color_section: Colori
+    preview_section: Anteprima
+    template_section: Modelli di palette
+    base_color_section: Colori base
 shortcut_labels:
-  new_terminal: "Nuovo terminale"
-  close_terminal: "Chiudi terminale"
-  workspace_up: "Area di lavoro su"
-  workspace_down: "Area di lavoro giù"
-  panel_left: "Pannello sinistra"
-  panel_right: "Pannello destra"
-  lock_workspace: "Blocca area di lavoro"
-  history_menu: "Menu cronologia"
-  history_prev: "Cronologia precedente"
-  history_next: "Cronologia successiva"
-  toggle_workspace_sidebar: "Mostra/Nascondi barra laterale"
-  zoom_in: "Ingrandisci"
-  zoom_out: "Riduci"
-  shortcuts_heading: "Scorciatoie"
-
+  new_terminal: Nuovo terminale
+  close_terminal: Chiudi terminale
+  workspace_up: Area di lavoro su
+  workspace_down: Area di lavoro giù
+  panel_left: Pannello sinistra
+  panel_right: Pannello destra
+  lock_workspace: Blocca area di lavoro
+  history_menu: Menu cronologia
+  history_prev: Cronologia precedente
+  history_next: Cronologia successiva
+  toggle_workspace_sidebar: Mostra/Nascondi barra laterale
+  zoom_in: Ingrandisci
+  zoom_out: Riduci
+  shortcuts_heading: Scorciatoie
 workspace:
-  heading: "Aree di lavoro"
-  new: "+ Nuova area"
-  rename: "Rinomina"
-  save_as_template: "Salva come modello"
-  close: "Chiudi"
-  rename_confirm: "OK"
-  rename_cancel: "Annulla"
-  drag_handle_hint: "Trascina per riordinare"
-  close_ws_hint: "Chiudi area di lavoro"
-  locked_hint: "Area bloccata"
-  unlocked_hint: "Area sbloccata"
-  empty_hint: "Clicca '+ Nuova area' per crearne una"
-  templates: "Modelli"
-  templates_empty: "(vuoto)"
-  name_prefix: "Area "
-
+  heading: Aree di lavoro
+  new: + Nuova area
+  rename: Rinomina
+  save_as_template: Salva come modello
+  close: Chiudi
+  rename_confirm: OK
+  rename_cancel: Annulla
+  drag_handle_hint: Trascina per riordinare
+  close_ws_hint: Chiudi area di lavoro
+  locked_hint: Area bloccata
+  unlocked_hint: Area sbloccata
+  empty_hint: Clicca '+ Nuova area' per crearne una
+  templates: Modelli
+  templates_empty: (vuoto)
+  name_prefix: 'Area '
 close_confirm:
-  message_prefix: "Sei sicuro di voler chiudere l'area \""
-  message_suffix: "\"?"
-  confirm: "Conferma"
-  cancel: "Annulla"
-  terminal_title: "Chiudi terminale"
-  terminal_message: "Sei sicuro di voler chiudere questo terminale? La cronologia dei comandi verrà eliminata."
-
+  message_prefix: Sei sicuro di voler chiudere l'area "
+  message_suffix: '"?'
+  confirm: Conferma
+  cancel: Annulla
+  terminal_title: Chiudi terminale
+  terminal_message: Sei sicuro di voler chiudere questo terminale? La cronologia dei comandi verrà eliminata.
 password:
-  enter: "Inserisci password:"
-  confirm: "Conferma password:"
-  original: "Password attuale:"
-  new: "Nuova password:"
-  confirm_new: "Conferma nuova password:"
-  input_label: "Password:"
-  mismatch: "Non corrisponde"
-  match: "Corrisponde"
-  empty_error: "La password non può essere vuota"
-  mismatch_error: "Le password non corrispondono"
-  wrong_error: "Password attuale errata"
-  wrong_password: "Password errata"
-  confirm_button: "Conferma"
-  cancel_button: "Annulla"
-  set_title: "Imposta password"
-  change_title: "Cambia password"
-  clear_title: "Cancella password"
-
+  enter: 'Inserisci password:'
+  confirm: 'Conferma password:'
+  original: 'Password attuale:'
+  new: 'Nuova password:'
+  confirm_new: 'Conferma nuova password:'
+  input_label: 'Password:'
+  mismatch: Non corrisponde
+  match: Corrisponde
+  empty_error: La password non può essere vuota
+  mismatch_error: Le password non corrispondono
+  wrong_error: Password attuale errata
+  wrong_password: Password errata
+  confirm_button: Conferma
+  cancel_button: Annulla
+  set_title: Imposta password
+  change_title: Cambia password
+  clear_title: Cancella password
 lock_overlay:
-  title: "Questa area è bloccata"
-  password_label: "Password:"
-  unlock_button: "Sblocca"
-  wrong_password: "Password errata"
-
+  title: Questa area è bloccata
+  password_label: 'Password:'
+  unlock_button: Sblocca
+  wrong_password: Password errata
 terminal:
-  not_found: "Terminale non trovato"
-  rename: "Rinomina"
-  clear_history: "Cancella cronologia comandi"
-  new_tab: "+ Nuova scheda"
-  add_tab: "+ Scheda"
-  rename_hint: "Inserisci nome..."
-  default_name_prefix: "Terminale "
-
+  not_found: Terminale non trovato
+  rename: Rinomina
+  clear_history: Cancella cronologia comandi
+  new_tab: + Nuova scheda
+  add_tab: + Scheda
+  rename_hint: Inserisci nome...
+  default_name_prefix: 'Terminale '
 theme:
-  light: "Chiaro"
-  dark: "Scuro"
-
+  light: Chiaro
+  dark: Scuro
 about:
-  menu_label: "Informazioni"
-  title: "Informazioni su OpenNex"
-  version_label: "Versione"
-  description: "Gestore di terminali multifunzionale con layout a schede, cronologia dei comandi, ridimensionamento dell'interfaccia e aree di lavoro crittografate per una gestione efficiente."
-  homepage_label: "Sito web"
-  source_label: "Codice sorgente"
-  license_label: "Licenza"
-  credits_label: "Riconoscimenti"
-  credits: "Basato su progetti open source tra cui egui, egui_dock, alacritty_terminal ed egui_term."
-  close: "Chiudi"
+  menu_label: Informazioni
+  title: Informazioni su OpenNex
+  version_label: Versione
+  description: 'Un gestore di terminali multi-finestra a schede impilate, pensato per flussi di lavoro AI e utilizzatori intensivi della riga di comando.
+
+
+    Disponi liberamente i layout delle finestre dei terminali e impila le schede per gestire numerose sessioni; i layout si salvano e ricaricano. Include cronologia comandi illimitata per sessione, zoom
+    globale dell''interfaccia, temi personalizzati, aree di lavoro cifrate e scorciatoie configurabili — tutto per dominare un ambiente terminale complesso.
+
+
+    Costruito in Rust: il motore ad alte prestazioni regge stabilmente 6000+ finestre attive in parallelo, con supporto nativo per Linux, Windows e macOS, e oltre 20 lingue.
+
+    Trovato un bug o hai un suggerimento? Feedback benvenuto.'
+  homepage_label: Sito web
+  source_label: Codice sorgente
+  license_label: Licenza
+  credits_label: Riconoscimenti
+  credits: Basato su progetti open source tra cui egui, egui_dock, alacritty_terminal ed egui_term.
+  close: Chiudi
+update:
+  checking: ''
+  downloading: Download aggiornamento...
+  verifying: Verifica integrità...
+  ready: Aggiornamento pronto
+  failed: 'Aggiornamento fallito: {}'
+  available: Nuova versione v{} trovata — pronto al download
+  up_to_date: Già aggiornato
+  check: Cerca aggiornamenti
+  update_now: Aggiorna ora
+  restart: Riavvia app
+  restart_title: Aggiornamento pronto
+  restart_body: Nuova versione scaricata. Riavviare ora?
+  restart_confirm: Riavvia
+theme_editor:
+  colors:
+    app_bg: Sfondo app
+    sidebar: Barra laterale
+    panel: Pannello
+    input_bg: Campo input
+    text: Testo
+    weak_text: Testo attenuato
+    accent: Accento
+    warning: Avviso
+    danger: Pericolo
+    hover: Hover
+    active: Attivo
+    selection_bg: Sfondo selezione
+    selection_text: Testo selezione
+    border: Bordo
+    lock: Blocco
+    window_shadow: Ombra
+    tab_highlight: Scheda attiva
+    fg: Primo piano
+    bg: Sfondo
+    cursor: Cursore
+    selection_term_bg: Sfondo selezione
+    selection_term_text: Testo selezione
+    link: Collegamento
+  edit_title: Modifica tema
+  name_label: 'Nome:'
+  confirm: Salva
+  cancel: Annulla
+  system_ui: System UI
+  terminal: Terminal
+  ui_font_label: 'Font UI: '
+  ui_font_size: 'Dimensione UI: '
+  terminal_font_label: 'Font terminale: '
+  terminal_font_size: 'Dimensione terminale: '
+  cell_spacing: 'Spaziatura: '
+  terminal_padding: 'Margine: '
+stats:
+  focused: Terminale corrente
+  workspace: Area di lavoro corrente
+  global: Globale
+  terminals: terminali
+  clear_history_title: Elimina tutta la cronologia
+  clear_history_body: Eliminare la cronologia comandi di tutti i terminali? Irreversibile.

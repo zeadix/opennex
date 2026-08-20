@@ -1,8 +1,16 @@
 # OpenNex
 
-多功能堆叠式终端管理器，集成标签布局、会话命令记忆、全局界面缩放与加密工作区，高效管控你的终端环境。
+一款面向 AI 应用场景与命令行重度使用者的多窗口堆叠式终端管理器。
 
-A multi-functional stacked terminal manager with tabbed layouts, unlimited session command memory, global interface scaling, and encrypted workspaces for efficient terminal management.
+支持自由排布终端窗口布局、标签堆叠管理大量会话，布局可保存与加载；内置无限会话命令记忆、全局界面缩放、自定义主题美化、工作区加密保护，自定义快捷键等能力，一站式管控复杂的终端运行环境。
+
+基于 Rust 构建，高性能引擎可稳定支撑 **6000+ 活动窗口并行运行**，原生跨平台支持 Linux、Windows、macOS，并提供 20+ 国际化语言。
+如在使用中遇到 Bug 或有功能优化建议，欢迎反馈。   给我英文版
+
+A multi-window stacked terminal manager designed for AI application scenarios and heavy command-line users.
+It supports freely arranged terminal window layouts, tab stacking for mass session management, and one-click layout saving & loading. Built-in capabilities include unlimited session command history persistence, global UI scaling, customizable themes, encrypted workspaces, and custom keyboard shortcuts, providing one-stop control for complex terminal environments.
+Built with Rust, this high-performance engine stably supports6000+ concurrent active terminal windows. It is natively cross-platform for Linux, Windows, and macOS, and supports more than 20 international languages.
+Bug reports and feature suggestions are highly welcome.
 
 ## 核心特性 / Key Features
 

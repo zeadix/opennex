@@ -1,0 +1,79 @@
+{
+  "format_version": 1,
+  "id": "catppuccin-mocha",
+  "name": "Catppuccin Mocha",
+  "author": "OpenNex",
+  "app": {
+    "app_bg": "#1e1e2e",
+    "sidebar": "#181825",
+    "panel": "#313244",
+    "hover": "#45475a",
+    "active": "#45475a",
+    "border": "#585b70",
+    "text": "#cdd6f4",
+    "weak_text": "#7f849c",
+    "accent": "#cba6f7",
+    "warning": "#f9e2af",
+    "danger": "#f38ba8",
+    "lock": "#fab387",
+    "input_bg": "#11111b",
+    "selection_bg": "#585b70",
+    "selection_text": "#cdd6f4",
+    "window_shadow": "#00000078",
+    "menu_bg": "#313244",
+    "menu_fg": "#cdd6f4",
+    "button_bg": "#181825",
+    "button_fg": "#cdd6f4",
+    "button_hover_bg": "#45475a",
+    "sidebar_border": "#585b70",
+    "tab_highlight": "#45475a"
+  },
+  "terminal": {
+    "foreground": "#cdd6f4",
+    "background": "#1e1e2e",
+    "normal": {
+      "black": "#45475a",
+      "red": "#f38ba8",
+      "green": "#a6e3a1",
+      "yellow": "#f9e2af",
+      "blue": "#89b4fa",
+      "magenta": "#f5c2e7",
+      "cyan": "#94e2d5",
+      "white": "#bac2de"
+    },
+    "bright": {
+      "black": "#585b70",
+      "red": "#f38ba8",
+      "green": "#a6e3a1",
+      "yellow": "#f9e2af",
+      "blue": "#89b4fa",
+      "magenta": "#f5c2e7",
+      "cyan": "#94e2d5",
+      "white": "#a6adc8"
+    },
+    "dim": {
+      "black": "#313244",
+      "red": "#b46b7e",
+      "green": "#82ab7e",
+      "yellow": "#bda883",
+      "blue": "#6f8cb9",
+      "magenta": "#bd9bb4",
+      "cyan": "#79b0a7",
+      "white": "#8b93b0"
+    },
+    "dim_foreground": "#7f849c",
+    "cursor": "#f5e0dc",
+    "selection_bg": "#585b70",
+    "selection_text": "#cdd6f4",
+    "link": "#89b4fa"
+  },
+  "typography": {
+    "terminal_font_families": [
+      "monospace"
+    ],
+    "terminal_font_size": 14.0,
+    "cell_spacing": 1.0,
+    "menu_font_size": 14.0,
+    "terminal_padding": 4.0
+  }
+}

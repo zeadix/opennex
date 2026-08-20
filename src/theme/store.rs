@@ -2,13 +2,18 @@ use std::path::{Path, PathBuf};
 
 use crate::theme::model::{ThemeDefinition, ThemeError};
 
-const EMBEDDED_THEME_JSON: [&str; 6] = [
+const EMBEDDED_THEME_JSON: [&str; 11] = [
     include_str!("../../assets/themes/opennex-dark.json"),
     include_str!("../../assets/themes/opennex-light.json"),
     include_str!("../../assets/themes/opennex-noir.json"),
     include_str!("../../assets/themes/solarized-dark.json"),
     include_str!("../../assets/themes/gruvbox-dark.json"),
     include_str!("../../assets/themes/dracula.json"),
+    include_str!("../../assets/themes/nord.json"),
+    include_str!("../../assets/themes/tokyo-night.json"),
+    include_str!("../../assets/themes/one-dark.json"),
+    include_str!("../../assets/themes/monokai-pro.json"),
+    include_str!("../../assets/themes/catppuccin-mocha.json"),
 ];
 
 /// Parse and validate a theme document. No unvalidated theme may leave the store API.
@@ -97,7 +102,12 @@ pub fn save_user_theme(dir: &Path, theme: &ThemeDefinition) -> Result<(), ThemeE
     let tmp = dir.join(format!("{}.json.tmp", theme.id));
     let backup = dir.join(format!("{}.json.bak", theme.id));
 
-    let json = serde_json::to_string_pretty(theme)?;
+    // Stamp creation time on first save (imports and legacy files).
+    let mut theme = theme.clone();
+    if theme.created_at == 0 {
+        theme.created_at = now_unix();
+    }
+    let json = serde_json::to_string_pretty(&theme)?;
     {
         let mut file = std::fs::File::create(&tmp)?;
         use std::io::Write;
@@ -192,8 +202,16 @@ pub fn copy_theme(
     let new_id = find_free_import_id(dir, &theme.id);
     theme.id = new_id;
     theme.name = display_name.to_string();
+    theme.created_at = now_unix();
     save_user_theme(dir, &theme)?;
     Ok(theme)
+}
+
+fn now_unix() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 /// Pick a non-colliding ID for a theme by appending `-2`, `-3`, ...
@@ -265,7 +283,7 @@ mod tests {
     #[test]
     fn every_embedded_theme_is_valid_and_has_a_unique_id() {
         let themes = embedded_themes().unwrap();
-        assert_eq!(themes.len(), 6);
+        assert_eq!(themes.len(), EMBEDDED_THEME_JSON.len());
         let ids: std::collections::HashSet<_> = themes.iter().map(|t| &t.id).collect();
         assert_eq!(ids.len(), themes.len());
         assert!(themes.iter().all(|theme| theme.validate().is_ok()));
@@ -293,7 +311,11 @@ mod tests {
         let path = dir.path().join("opennex-dark.json");
         assert!(path.exists());
         let reloaded = load_user_theme(dir.path(), "opennex-dark").unwrap();
-        assert_eq!(reloaded, theme);
+        // created_at is stamped on first save; compare with it ignored.
+        let mut expected = theme.clone();
+        expected.created_at = reloaded.created_at;
+        assert!(reloaded.created_at > 0);
+        assert_eq!(reloaded, expected);
         assert!(!dir.path().join("opennex-dark.json.tmp").exists());
         assert!(!dir.path().join("opennex-dark.json.bak").exists());
     }

@@ -1,172 +1,246 @@
-display_name: "日本語"
-
+display_name: 日本語
 menu:
-  file: "ファイル"
-  view: "表示"
-  language: "言語"
-  theme: "テーマ"
-
+  workspace: ワークスペース
+  view: 表示
+  language: 言語
+  theme: テーマ
 file_menu:
-  save: "保存"
-  load: "読み込み"
-  save_as: "名前を付けて保存..."
-  exit: "終了"
-
+  save: 保存
+  load: 読み込み
+  save_as: 名前を付けて保存...
+  exit: 終了
 view_menu:
-  split_right: "右に分割"
-  split_down: "下に分割"
-  settings: "設定"
-  workspace_toggle: "ワークスペース"
-
+  split_right: 右に分割
+  split_down: 下に分割
+  settings: 設定
+  workspace_toggle: ワークスペース
 settings:
-  title: "設定"
+  title: 設定
   tabs:
-    general: "一般"
-    themes: "テーマ"
-    shortcuts: "ショートカット"
-    lock: "ロック"
+    general: 一般
+    themes: テーマ
+    shortcuts: ショートカット
+    lock: ロック
   nav:
-    general: "一般"
-    themes: "テーマ"
-    shortcuts: "ショートカット"
-    lock: "ロック"
+    general: 一般
+    themes: テーマ
+    shortcuts: ショートカット
+    lock: ロック
+    group_settings: 設定
+    group_theme: テーマ
+    theme_select: 選択と管理
+    theme_ui: UI 外観
+    theme_terminal: ターミナル
+    theme_ansi: ANSI パレット
   general:
-    heading: "一般"
-    scene_info: "シーンとテンプレートは固定パスを使用します:"
-    scene_path: "  シーン: ./scene.json"
-    templates_path: "  テンプレート: ./templates/"
-    history_section: "履歴"
-    max_history: "最大エントリ数:"
-    scrollback: "スクロールバック:"
-    clear_all_history: "全履歴を消去"
-    auto_copy: "選択したテキストを自動コピー"
+    heading: 一般
+    scene_info: 'シーンとテンプレートは固定パスを使用します:'
+    scene_path: '  シーン: ./scene.json'
+    templates_path: '  テンプレート: ./templates/'
+    history_section: 履歴
+    max_history: '最大エントリ数:'
+    scrollback: 'スクロールバック:'
+    clear_all_history: すべての履歴を削除
+    auto_copy: 選択したテキストを自動コピー
   appearance:
-    heading: "外観"
-    terminal_section: "ターミナル外観"
-    font_size: "フォントサイズ:"
-    cell_spacing: "文字間隔:"
-    font_family: "フォント:"
-    bg_color: "背景色:"
-    fg_color: "前景色:"
-    command_menu_section: "コマンドメニュー"
-    menu_bg_color: "背景色:"
-    menu_fg_color: "文字色:"
-    menu_font_size: "フォントサイズ:"
-    apply_theme_typography: "テーマのフォントとサイズを適用"
-    import_theme: "テーマをインポート"
-    export_theme: "テーマをエクスポート"
-    import_success: "テーマをインポートしました"
-    export_success: "テーマをエクスポートしました"
-    invalid_theme: "無効なテーマファイル"
-    unsupported_version: "サポートされていないテーマ形式のバージョン"
-    save_failure: "テーマの保存に失敗しました"
-    subtab_ui: "UI 外観"
-    subtab_terminal: "ターミナル"
-    subtab_ansi: "ANSI パレット"
+    heading: 外観
+    terminal_section: ターミナル外観
+    font_size: 'フォントサイズ:'
+    cell_spacing: '文字間隔:'
+    font_family: 'フォント:'
+    bg_color: '背景色:'
+    fg_color: '前景色:'
+    command_menu_section: コマンドメニュー
+    menu_bg_color: '背景色:'
+    menu_fg_color: '文字色:'
+    menu_font_size: 'フォントサイズ:'
+    apply_theme_typography: テーマのフォントとサイズを適用
+    import_theme: テーマをインポート
+    export_theme: テーマをエクスポート
+    import_success: テーマをインポートしました
+    export_success: テーマをエクスポートしました
+    invalid_theme: 無効なテーマファイル
+    unsupported_version: サポートされていないテーマ形式のバージョン
+    save_failure: テーマの保存に失敗しました
+    subtab_ui: UI 外観
+    subtab_terminal: ターミナル
+    subtab_ansi: ANSI パレット
   shortcuts:
-    heading: "ショートカット"
-    hint: "ショートカット名をクリックして新しいキーを押す"
-    not_set: "未設定"
-    reset_defaults: "デフォルトに戻す"
+    heading: ショートカット
+    hint: ショートカット名をクリックして新しいキーを押す
+    not_set: 未設定
+    reset_defaults: デフォルトに戻す
   lock:
-    heading: "ロック"
-    password_section: "パスワード設定:"
-    set_password: "パスワードを設定"
-    change_password: "パスワードを変更"
-    clear_password: "パスワードを消去"
-    lock_section: "ロック:"
-    lock_overlay_color: "オーバーレイ色:"
+    heading: ロック
+    password_section: 'パスワード設定:'
+    set_password: パスワードを設定
+    change_password: パスワードを変更
+    clear_password: パスワードを消去
+    lock_section: 'ロック:'
+    lock_overlay_color: 'オーバーレイ色:'
   buttons:
-    apply: "適用"
-    close: "閉じる"
-
+    apply: 適用
+    close: 閉じる
+    revert: 元に戻す
+    applied: 適用済み
+    builtin: 内蔵
+    user_group: カスタムテーマ
+    builtin_group: 内蔵テーマ
+    user: ユーザー
+    behavior_section: 選択
+    data_section: コマンド履歴
+    maintenance_section: メンテナンス
+    font_section: フォント
+    color_section: 色
+    preview_section: プレビュー
+    template_section: パレットテンプレート
+    base_color_section: 基本色
 shortcut_labels:
-  new_terminal: "新規ターミナル"
-  close_terminal: "ターミナルを閉じる"
-  workspace_up: "ワークスペース上へ"
-  workspace_down: "ワークスペース下へ"
-  panel_left: "パネル左へ"
-  panel_right: "パネル右へ"
-  lock_workspace: "ワークスペースをロック"
-  history_menu: "履歴メニュー"
-  history_prev: "前の履歴"
-  history_next: "次の履歴"
-  toggle_workspace_sidebar: "ワークスペースバー表示切替"
-  zoom_in: "拡大"
-  zoom_out: "縮小"
-  shortcuts_heading: "ショートカット"
-
+  new_terminal: 新規ターミナル
+  close_terminal: ターミナルを閉じる
+  workspace_up: ワークスペース上へ
+  workspace_down: ワークスペース下へ
+  panel_left: パネル左へ
+  panel_right: パネル右へ
+  lock_workspace: ワークスペースをロック
+  history_menu: 履歴メニュー
+  history_prev: 前の履歴
+  history_next: 次の履歴
+  toggle_workspace_sidebar: ワークスペースバー表示切替
+  zoom_in: 拡大
+  zoom_out: 縮小
+  shortcuts_heading: ショートカット
 workspace:
-  heading: "ワークスペース"
-  new: "+ 新規ワークスペース"
-  rename: "名前変更"
-  save_as_template: "テンプレートとして保存"
-  close: "閉じる"
-  rename_confirm: "OK"
-  rename_cancel: "キャンセル"
-  drag_handle_hint: "ドラッグで並び替え"
-  close_ws_hint: "ワークスペースを閉じる"
-  locked_hint: "ロック済みワークスペース"
-  unlocked_hint: "未ロックワークスペース"
-  empty_hint: "'+ 新規ワークスペース' をクリックして作成"
-  templates: "テンプレート"
-  templates_empty: "(空)"
-  name_prefix: "ワークスペース "
-
+  heading: ワークスペース
+  new: + 新規ワークスペース
+  rename: 名前変更
+  save_as_template: テンプレートとして保存
+  close: 閉じる
+  rename_confirm: OK
+  rename_cancel: キャンセル
+  drag_handle_hint: ドラッグで並び替え
+  close_ws_hint: ワークスペースを閉じる
+  locked_hint: ロック済みワークスペース
+  unlocked_hint: 未ロックワークスペース
+  empty_hint: '''+ 新規ワークスペース'' をクリックして作成'
+  templates: テンプレート
+  templates_empty: (空)
+  name_prefix: 'ワークスペース '
 close_confirm:
-  message_prefix: "ワークスペース「"
-  message_suffix: "」を閉じてもよろしいですか？"
-  confirm: "確認"
-  cancel: "キャンセル"
-  terminal_title: "ターミナルを閉じる"
-  terminal_message: "このターミナルを閉じますか？コマンド履歴が削除されます。"
-
+  message_prefix: ワークスペース「
+  message_suffix: 」を閉じてもよろしいですか？
+  confirm: 確認
+  cancel: キャンセル
+  terminal_title: ターミナルを閉じる
+  terminal_message: このターミナルを閉じますか？コマンド履歴が削除されます。
 password:
-  enter: "パスワード入力:"
-  confirm: "パスワード確認:"
-  original: "現在のパスワード:"
-  new: "新しいパスワード:"
-  confirm_new: "新しいパスワード確認:"
-  input_label: "パスワード:"
-  mismatch: "不一致"
-  match: "一致"
-  empty_error: "パスワードは空にできません"
-  mismatch_error: "パスワードが一致しません"
-  wrong_error: "現在のパスワードが正しくありません"
-  wrong_password: "パスワードエラー"
-  confirm_button: "確認"
-  cancel_button: "キャンセル"
-  set_title: "パスワードを設定"
-  change_title: "パスワードを変更"
-  clear_title: "パスワードを消去"
-
+  enter: 'パスワード入力:'
+  confirm: 'パスワード確認:'
+  original: '現在のパスワード:'
+  new: '新しいパスワード:'
+  confirm_new: '新しいパスワード確認:'
+  input_label: 'パスワード:'
+  mismatch: 不一致
+  match: 一致
+  empty_error: パスワードは空にできません
+  mismatch_error: パスワードが一致しません
+  wrong_error: 現在のパスワードが正しくありません
+  wrong_password: パスワードエラー
+  confirm_button: 確認
+  cancel_button: キャンセル
+  set_title: パスワードを設定
+  change_title: パスワードを変更
+  clear_title: パスワードを消去
 lock_overlay:
-  title: "このワークスペースはロックされています"
-  password_label: "パスワード:"
-  unlock_button: "ロック解除"
-  wrong_password: "パスワードエラー"
-
+  title: このワークスペースはロックされています
+  password_label: 'パスワード:'
+  unlock_button: ロック解除
+  wrong_password: パスワードエラー
 terminal:
-  not_found: "ターミナルが見つかりません"
-  rename: "名前変更"
-  clear_history: "コマンド履歴を消去"
-  new_tab: "+ 新規タブ"
-  add_tab: "+ タブ"
-  rename_hint: "名前を入力..."
-  default_name_prefix: "ターミナル "
-
+  not_found: ターミナルが見つかりません
+  rename: 名前変更
+  clear_history: コマンド履歴を消去
+  new_tab: + 新規タブ
+  add_tab: + タブ
+  rename_hint: 名前を入力...
+  default_name_prefix: 'ターミナル '
 theme:
-  light: "ライト"
-  dark: "ダーク"
-
+  light: ライト
+  dark: ダーク
 about:
-  menu_label: "について"
-  title: "OpenNex について"
-  version_label: "バージョン"
-  description: "タブレイアウト、コマンド履歴、グローバルインターフェーススケーリング、暗号化ワークスペースを備えた多機能スタック型ターミナルマネージャー。"
-  homepage_label: "ホームページ"
-  source_label: "ソースコード"
-  license_label: "ライセンス"
-  credits_label: "クレジット"
-  credits: "egui、egui_dock、alacritty_terminal、egui_term などのオープンソースプロジェクトに基づいて構築。"
-  close: "閉じる"
+  menu_label: について
+  title: OpenNex について
+  version_label: バージョン
+  description: 'AI ワークフローとコマンドラインヘビーユーザー向けのマルチウィンドウ積み上げ型ターミナルマネージャー。
+
+
+    ターミナルウィンドウのレイアウトを自由に配置し、タブの積み上げで多数のセッションを管理。レイアウトの保存と読み込みに対応。無制限のセッションコマンド履歴、グローバルUIズーム、カスタムテーマ、ワークスペース暗号化、カスタムショートカットなどを内蔵し、複雑なターミナル環境を一元管理します。
+
+
+    Rust で構築され、高性能エンジンは 6000+ のアクティブウィンドウを並行して安定稼働。Linux・Windows・macOS をネイティブサポートし、20+ 言語に対応しています。
+
+    バグや改善のご提案はお気軽にお寄せください。'
+  homepage_label: ホームページ
+  source_label: ソースコード
+  license_label: ライセンス
+  credits_label: クレジット
+  credits: egui、egui_dock、alacritty_terminal、egui_term などのオープンソースプロジェクトに基づいて構築。
+  close: 閉じる
+update:
+  checking: ''
+  downloading: アップデートをダウンロード中...
+  verifying: 整合性を検証中...
+  ready: アップデート準備完了
+  failed: 'アップデート失敗: {}'
+  available: 新バージョン v{} を発見 — ダウンロード準備完了
+  up_to_date: 最新です
+  check: 更新を確認
+  update_now: 今すぐ更新
+  restart: アプリ再起動
+  restart_title: アップデート準備完了
+  restart_body: 新バージョンをダウンロードしました。再起動しますか？
+  restart_confirm: 再起動
+theme_editor:
+  colors:
+    app_bg: アプリ背景
+    sidebar: サイドバー
+    panel: パネル
+    input_bg: 入力欄
+    text: 文字
+    weak_text: 淡い文字
+    accent: アクセント
+    warning: 警告
+    danger: 危険
+    hover: ホバー
+    active: アクティブ
+    selection_bg: 選択背景
+    selection_text: 選択文字
+    border: 枠線
+    lock: ロック
+    window_shadow: 影
+    tab_highlight: フォーカスタブ
+    fg: 前景
+    bg: 背景
+    cursor: カーソル
+    selection_term_bg: 選択背景
+    selection_term_text: 選択文字
+    link: リンク
+  edit_title: テーマ編集
+  name_label: '名前:'
+  confirm: 保存
+  cancel: キャンセル
+  system_ui: System UI
+  terminal: Terminal
+  ui_font_label: 'UI フォント: '
+  ui_font_size: 'UI サイズ: '
+  terminal_font_label: 'ターミナルフォント: '
+  terminal_font_size: 'ターミナルサイズ: '
+  cell_spacing: '間隔: '
+  terminal_padding: '余白: '
+stats:
+  focused: 現在のターミナル
+  workspace: 現在のワークスペース
+  global: 全体
+  terminals: ターミナル
+  clear_history_title: 全コマンド履歴を削除
+  clear_history_body: 全ターミナルのコマンド履歴を削除しますか？取り消せません。

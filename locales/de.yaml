@@ -1,172 +1,247 @@
-display_name: "Deutsch"
-
+display_name: Deutsch
 menu:
-  file: "Datei"
-  view: "Ansicht"
-  language: "Sprache"
-  theme: "Design"
-
+  workspace: Arbeitsbereich
+  view: Ansicht
+  language: Sprache
+  theme: Design
 file_menu:
-  save: "Speichern"
-  load: "Laden"
-  save_as: "Speichern unter..."
-  exit: "Beenden"
-
+  save: Speichern
+  load: Laden
+  save_as: Speichern unter...
+  exit: Beenden
 view_menu:
-  split_right: "Rechts teilen"
-  split_down: "Nach unten teilen"
-  settings: "Einstellungen"
-  workspace_toggle: "Arbeitsbereich"
-
+  split_right: Rechts teilen
+  split_down: Nach unten teilen
+  settings: Einstellungen
+  workspace_toggle: Arbeitsbereich
 settings:
-  title: "Einstellungen"
+  title: Einstellungen
   tabs:
-    general: "Allgemein"
-    themes: "Designs"
-    shortcuts: "Tastenkürzel"
-    lock: "Sperre"
+    general: Allgemein
+    themes: Designs
+    shortcuts: Tastenkürzel
+    lock: Sperre
   nav:
-    general: "Allgemein"
-    themes: "Designs"
-    shortcuts: "Tastenkürzel"
-    lock: "Sperren"
+    general: Allgemein
+    themes: Designs
+    shortcuts: Tastenkürzel
+    lock: Sperren
+    group_settings: Einstellungen
+    group_theme: Designs
+    theme_select: Verwalten
+    theme_ui: UI-Darstellung
+    theme_terminal: Terminal
+    theme_ansi: ANSI-Palette
   general:
-    heading: "Allgemein"
-    scene_info: "Szene und Vorlagen verwenden feste Pfade:"
-    scene_path: "  Szene: ./scene.json"
-    templates_path: "  Vorlagen: ./templates/"
-    history_section: "Verlauf"
-    max_history: "Max. Einträge:"
-    scrollback: "Scrollback:"
-    clear_all_history: "Gesamten Verlauf löschen"
-    auto_copy: "Ausgewählten Text automatisch kopieren"
+    heading: Allgemein
+    scene_info: 'Szene und Vorlagen verwenden feste Pfade:'
+    scene_path: '  Szene: ./scene.json'
+    templates_path: '  Vorlagen: ./templates/'
+    history_section: Verlauf
+    max_history: 'Max. Einträge:'
+    scrollback: 'Scrollback:'
+    clear_all_history: Gesamten Verlauf löschen
+    auto_copy: Ausgewählten Text automatisch kopieren
   appearance:
-    heading: "Darstellung"
-    terminal_section: "Terminal-Darstellung"
-    font_size: "Schriftgröße:"
-    cell_spacing: "Zeichenabstand:"
-    font_family: "Schriftart:"
-    bg_color: "Hintergrund:"
-    fg_color: "Vordergrund:"
-    command_menu_section: "Befehlsmenü"
-    menu_bg_color: "Hintergrund:"
-    menu_fg_color: "Textfarbe:"
-    menu_font_size: "Schriftgröße:"
-    apply_theme_typography: "Theme-Schriften und Größen anwenden"
-    import_theme: "Theme importieren"
-    export_theme: "Theme exportieren"
-    import_success: "Theme importiert"
-    export_success: "Theme exportiert"
-    invalid_theme: "Ungültige Theme-Datei"
-    unsupported_version: "Nicht unterstütztes Theme-Format"
-    save_failure: "Theme konnte nicht gespeichert werden"
-    subtab_ui: "UI-Darstellung"
-    subtab_terminal: "Terminal"
-    subtab_ansi: "ANSI-Palette"
+    heading: Darstellung
+    terminal_section: Terminal-Darstellung
+    font_size: 'Schriftgröße:'
+    cell_spacing: 'Zeichenabstand:'
+    font_family: 'Schriftart:'
+    bg_color: 'Hintergrund:'
+    fg_color: 'Vordergrund:'
+    command_menu_section: Befehlsmenü
+    menu_bg_color: 'Hintergrund:'
+    menu_fg_color: 'Textfarbe:'
+    menu_font_size: 'Schriftgröße:'
+    apply_theme_typography: Theme-Schriften und Größen anwenden
+    import_theme: Theme importieren
+    export_theme: Theme exportieren
+    import_success: Theme importiert
+    export_success: Theme exportiert
+    invalid_theme: Ungültige Theme-Datei
+    unsupported_version: Nicht unterstütztes Theme-Format
+    save_failure: Theme konnte nicht gespeichert werden
+    subtab_ui: UI-Darstellung
+    subtab_terminal: Terminal
+    subtab_ansi: ANSI-Palette
   shortcuts:
-    heading: "Tastenkürzel"
-    hint: "Auf einen Tastenkürzelnamen klicken und neue Taste drücken"
-    not_set: "Nicht festgelegt"
-    reset_defaults: "Auf Standard zurücksetzen"
+    heading: Tastenkürzel
+    hint: Auf einen Tastenkürzelnamen klicken und neue Taste drücken
+    not_set: Nicht festgelegt
+    reset_defaults: Auf Standard zurücksetzen
   lock:
-    heading: "Sperre"
-    password_section: "Passwortkonfiguration:"
-    set_password: "Passwort festlegen"
-    change_password: "Passwort ändern"
-    clear_password: "Passwort löschen"
-    lock_section: "Sperre:"
-    lock_overlay_color: "Overlay-Farbe:"
+    heading: Sperre
+    password_section: 'Passwortkonfiguration:'
+    set_password: Passwort festlegen
+    change_password: Passwort ändern
+    clear_password: Passwort löschen
+    lock_section: 'Sperre:'
+    lock_overlay_color: 'Overlay-Farbe:'
   buttons:
-    apply: "Anwenden"
-    close: "Schließen"
-
+    apply: Anwenden
+    close: Schließen
+    revert: Zurücksetzen
+    applied: Angewendet
+    builtin: Integriert
+    user_group: Eigene Themes
+    builtin_group: Integrierte Themes
+    user: Benutzer
+    behavior_section: Auswahl
+    data_section: Befehlsverlauf
+    maintenance_section: Wartung
+    font_section: Schriften
+    color_section: Farben
+    preview_section: Vorschau
+    template_section: Paletten-Vorlagen
+    base_color_section: Grundfarben
 shortcut_labels:
-  new_terminal: "Neues Terminal"
-  close_terminal: "Terminal schließen"
-  workspace_up: "Arbeitsbereich nach oben"
-  workspace_down: "Arbeitsbereich nach unten"
-  panel_left: "Panel links"
-  panel_right: "Panel rechts"
-  lock_workspace: "Arbeitsbereich sperren"
-  history_menu: "Verlaufsmenü"
-  history_prev: "Vorheriger Verlauf"
-  history_next: "Nächster Verlauf"
-  toggle_workspace_sidebar: "Arbeitsbereichsleiste ein/ausblenden"
-  zoom_in: "Vergrößern"
-  zoom_out: "Verkleinern"
-  shortcuts_heading: "Tastenkürzel"
-
+  new_terminal: Neues Terminal
+  close_terminal: Terminal schließen
+  workspace_up: Arbeitsbereich nach oben
+  workspace_down: Arbeitsbereich nach unten
+  panel_left: Panel links
+  panel_right: Panel rechts
+  lock_workspace: Arbeitsbereich sperren
+  history_menu: Verlaufsmenü
+  history_prev: Vorheriger Verlauf
+  history_next: Nächster Verlauf
+  toggle_workspace_sidebar: Arbeitsbereichsleiste ein/ausblenden
+  zoom_in: Vergrößern
+  zoom_out: Verkleinern
+  shortcuts_heading: Tastenkürzel
 workspace:
-  heading: "Arbeitsbereiche"
-  new: "+ Neuer Arbeitsbereich"
-  rename: "Umbenennen"
-  save_as_template: "Als Vorlage speichern"
-  close: "Schließen"
-  rename_confirm: "OK"
-  rename_cancel: "Abbrechen"
-  drag_handle_hint: "Ziehen zum Neuanordnen"
-  close_ws_hint: "Arbeitsbereich schließen"
-  locked_hint: "Gesperrter Arbeitsbereich"
-  unlocked_hint: "Entsperrter Arbeitsbereich"
-  empty_hint: "Auf '+ Neuer Arbeitsbereich' klicken zum Erstellen"
-  templates: "Vorlagen"
-  templates_empty: "(leer)"
-  name_prefix: "Arbeitsbereich "
-
+  heading: Arbeitsbereiche
+  new: + Neuer Arbeitsbereich
+  rename: Umbenennen
+  save_as_template: Als Vorlage speichern
+  close: Schließen
+  rename_confirm: OK
+  rename_cancel: Abbrechen
+  drag_handle_hint: Ziehen zum Neuanordnen
+  close_ws_hint: Arbeitsbereich schließen
+  locked_hint: Gesperrter Arbeitsbereich
+  unlocked_hint: Entsperrter Arbeitsbereich
+  empty_hint: Auf '+ Neuer Arbeitsbereich' klicken zum Erstellen
+  templates: Vorlagen
+  templates_empty: (leer)
+  name_prefix: 'Arbeitsbereich '
 close_confirm:
-  message_prefix: "Möchten Sie den Arbeitsbereich \""
-  message_suffix: "\" wirklich schließen?"
-  confirm: "Bestätigen"
-  cancel: "Abbrechen"
-  terminal_title: "Terminal schließen"
-  terminal_message: "Möchten Sie dieses Terminal wirklich schließen? Der Befehlsverlauf wird gelöscht."
-
+  message_prefix: Möchten Sie den Arbeitsbereich "
+  message_suffix: '" wirklich schließen?'
+  confirm: Bestätigen
+  cancel: Abbrechen
+  terminal_title: Terminal schließen
+  terminal_message: Möchten Sie dieses Terminal wirklich schließen? Der Befehlsverlauf wird gelöscht.
 password:
-  enter: "Passwort eingeben:"
-  confirm: "Passwort bestätigen:"
-  original: "Aktuelles Passwort:"
-  new: "Neues Passwort:"
-  confirm_new: "Neues Passwort bestätigen:"
-  input_label: "Passwort:"
-  mismatch: "Keine Übereinstimmung"
-  match: "Übereinstimmung"
-  empty_error: "Passwort darf nicht leer sein"
-  mismatch_error: "Passwörter stimmen nicht überein"
-  wrong_error: "Aktuelles Passwort falsch"
-  wrong_password: "Falsches Passwort"
-  confirm_button: "Bestätigen"
-  cancel_button: "Abbrechen"
-  set_title: "Passwort festlegen"
-  change_title: "Passwort ändern"
-  clear_title: "Passwort löschen"
-
+  enter: 'Passwort eingeben:'
+  confirm: 'Passwort bestätigen:'
+  original: 'Aktuelles Passwort:'
+  new: 'Neues Passwort:'
+  confirm_new: 'Neues Passwort bestätigen:'
+  input_label: 'Passwort:'
+  mismatch: Keine Übereinstimmung
+  match: Übereinstimmung
+  empty_error: Passwort darf nicht leer sein
+  mismatch_error: Passwörter stimmen nicht überein
+  wrong_error: Aktuelles Passwort falsch
+  wrong_password: Falsches Passwort
+  confirm_button: Bestätigen
+  cancel_button: Abbrechen
+  set_title: Passwort festlegen
+  change_title: Passwort ändern
+  clear_title: Passwort löschen
 lock_overlay:
-  title: "Dieser Arbeitsbereich ist gesperrt"
-  password_label: "Passwort:"
-  unlock_button: "Entsperren"
-  wrong_password: "Falsches Passwort"
-
+  title: Dieser Arbeitsbereich ist gesperrt
+  password_label: 'Passwort:'
+  unlock_button: Entsperren
+  wrong_password: Falsches Passwort
 terminal:
-  not_found: "Terminal nicht gefunden"
-  rename: "Umbenennen"
-  clear_history: "Befehlsverlauf löschen"
-  new_tab: "+ Neuer Tab"
-  add_tab: "+ Tab"
-  rename_hint: "Name eingeben..."
-  default_name_prefix: "Terminal "
-
+  not_found: Terminal nicht gefunden
+  rename: Umbenennen
+  clear_history: Befehlsverlauf löschen
+  new_tab: + Neuer Tab
+  add_tab: + Tab
+  rename_hint: Name eingeben...
+  default_name_prefix: 'Terminal '
 theme:
-  light: "Hell"
-  dark: "Dunkel"
-
+  light: Hell
+  dark: Dunkel
 about:
-  menu_label: "Über"
-  title: "Über OpenNex"
-  version_label: "Version"
-  description: "Multifunktionaler Terminalmanager mit Registerkartenlayout, Befehlsverlauf, globaler Skalierung und verschlüsselten Arbeitsbereichen für effiziente Terminalverwaltung."
-  homepage_label: "Webseite"
-  source_label: "Quellcode"
-  license_label: "Lizenz"
-  credits_label: "Danksagung"
-  credits: "Basiert auf Open-Source-Projekten wie egui, egui_dock, alacritty_terminal und egui_term."
-  close: "Schließen"
+  menu_label: Über
+  title: Über OpenNex
+  version_label: Version
+  description: 'Ein Multi-Window-Stacking-Terminal-Manager für KI-Workflows und Vielnutzer der Kommandozeile.
+
+
+    Terminal-Fensterlayouts frei anordnen und Sitzungen über Tab-Stacking verwalten; Layouts speichern und laden. Enthält unbegrenzte Sitzungs-Befehlshistorie, globale Interface-Skalierung, eigene Themes,
+    verschlüsselte Arbeitsbereiche und konfigurierbare Shortcuts — alles für die Kontrolle komplexer Terminal-Umgebungen.
+
+
+    In Rust gebaut: Die Hochleistungs-Engine betreibt stabil 6000+ aktive Fenster parallel, mit nativer Plattformunterstützung für Linux, Windows und macOS sowie 20+ Sprachen.
+
+    Fehler gefunden oder Verbesserungsvorschläge? Feedback ist willkommen.'
+  homepage_label: Webseite
+  source_label: Quellcode
+  license_label: Lizenz
+  credits_label: Danksagung
+  credits: Basiert auf Open-Source-Projekten wie egui, egui_dock, alacritty_terminal und egui_term.
+  close: Schließen
+update:
+  checking: ''
+  downloading: Update wird heruntergeladen...
+  verifying: Integrität wird geprüft...
+  ready: Update bereit
+  failed: 'Update fehlgeschlagen: {}'
+  available: Neue Version v{} gefunden — bereit zum Download
+  up_to_date: Aktuellste Version
+  check: Nach Updates suchen
+  update_now: Jetzt aktualisieren
+  restart: App neu starten
+  restart_title: Update bereit
+  restart_body: Neue Version heruntergeladen. Jetzt neu starten?
+  restart_confirm: Neustart
+theme_editor:
+  colors:
+    app_bg: App-Hintergrund
+    sidebar: Seitenleiste
+    panel: Panel
+    input_bg: Eingabefeld
+    text: Text
+    weak_text: Schwacher Text
+    accent: Akzent
+    warning: Warnung
+    danger: Gefahr
+    hover: Hover
+    active: Aktiv
+    selection_bg: Auswahl-BG
+    selection_text: Auswahl-Text
+    border: Rahmen
+    lock: Sperre
+    window_shadow: Schatten
+    tab_highlight: Fokussierter Tab
+    fg: Vordergrund
+    bg: Hintergrund
+    cursor: Cursor
+    selection_term_bg: Auswahl-BG
+    selection_term_text: Auswahl-Text
+    link: Link
+  edit_title: Theme bearbeiten
+  name_label: 'Name:'
+  confirm: Speichern
+  cancel: Abbrechen
+  system_ui: System UI
+  terminal: Terminal
+  ui_font_label: 'UI-Schrift: '
+  ui_font_size: 'UI-Größe: '
+  terminal_font_label: 'Terminal-Schrift: '
+  terminal_font_size: 'Terminal-Größe: '
+  cell_spacing: 'Abstand: '
+  terminal_padding: 'Rand: '
+stats:
+  focused: Aktuelles Terminal
+  workspace: Aktueller Arbeitsbereich
+  global: Global
+  terminals: Terminals
+  clear_history_title: Gesamten Befehlsverlauf löschen
+  clear_history_body: Befehlsverlauf aller Terminals löschen? Kann nicht rückgängig gemacht werden.

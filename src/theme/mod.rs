@@ -1,5 +1,4 @@
 pub mod model;
-pub mod palettes;
 pub mod store;
 pub mod ui;
 
@@ -71,6 +70,11 @@ pub fn apply_theme_definition(ctx: &egui::Context, theme: &ThemeDefinition) {
         color: Color32::from_rgba_unmultiplied(sr, sg, sb, sa),
     };
     visuals.text_cursor.stroke = Stroke::new(2.0, accent);
+
+    // Square corners for menus and popups (menu bar dropdowns, context
+    // menus on workspace rows and terminal tabs).
+    visuals.menu_corner_radius = egui::CornerRadius::ZERO;
+    visuals.window_corner_radius = egui::CornerRadius::ZERO;
 
     // Apply the theme's UI font size by rescaling the default text-style
     // ladder around the base body size (14pt default).
@@ -258,12 +262,6 @@ pub fn terminal_font_size_label() -> String {
 pub fn cell_spacing_label() -> String {
     ui::texts::cell_spacing()
 }
-pub fn palette_template_label() -> String {
-    ui::texts::palette_template()
-}
-pub fn apply_template_text() -> String {
-    ui::texts::apply_template()
-}
 pub fn terminal_base_colors_text() -> String {
     ui::texts::terminal_base_colors()
 }
@@ -350,4 +348,16 @@ pub fn ok_text() -> String {
 }
 pub fn builtin_readonly_text() -> String {
     ui::texts::builtin_readonly()
+}
+pub fn keep_text() -> String {
+    ui::texts::keep()
+}
+pub fn discard_text() -> String {
+    ui::texts::discard()
+}
+pub fn edit_theme_text() -> String {
+    ui::texts::edit_theme()
+}
+pub fn name_label_text() -> String {
+    ui::texts::name_label()
 }

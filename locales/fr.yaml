@@ -1,172 +1,247 @@
-display_name: "Français"
-
+display_name: Français
 menu:
-  file: "Fichier"
-  view: "Affichage"
-  language: "Langue"
-  theme: "Thème"
-
+  workspace: Espace de travail
+  view: Affichage
+  language: Langue
+  theme: Thème
 file_menu:
-  save: "Enregistrer"
-  load: "Charger"
-  save_as: "Enregistrer sous..."
-  exit: "Quitter"
-
+  save: Enregistrer
+  load: Charger
+  save_as: Enregistrer sous...
+  exit: Quitter
 view_menu:
-  split_right: "Diviser à droite"
-  split_down: "Diviser vers le bas"
-  settings: "Paramètres"
-  workspace_toggle: "Espace de travail"
-
+  split_right: Diviser à droite
+  split_down: Diviser vers le bas
+  settings: Paramètres
+  workspace_toggle: Espace de travail
 settings:
-  title: "Paramètres"
+  title: Paramètres
   tabs:
-    general: "Général"
-    themes: "Thèmes"
-    shortcuts: "Raccourcis"
-    lock: "Verrouillage"
+    general: Général
+    themes: Thèmes
+    shortcuts: Raccourcis
+    lock: Verrouillage
   nav:
-    general: "Général"
-    themes: "Thèmes"
-    shortcuts: "Raccourcis"
-    lock: "Verrouiller"
+    general: Général
+    themes: Thèmes
+    shortcuts: Raccourcis
+    lock: Verrouiller
+    group_settings: Paramètres
+    group_theme: Thèmes
+    theme_select: Gérer
+    theme_ui: Apparence UI
+    theme_terminal: Terminal
+    theme_ansi: Palette ANSI
   general:
-    heading: "Général"
-    scene_info: "Scène et modèles utilisent des chemins fixes :"
-    scene_path: "  Scène : ./scene.json"
-    templates_path: "  Modèles : ./templates/"
-    history_section: "Historique"
-    max_history: "Entrées max :"
-    scrollback: "Défilement :"
-    clear_all_history: "Effacer tout l'historique"
-    auto_copy: "Copier automatiquement le texte sélectionné"
+    heading: Général
+    scene_info: 'Scène et modèles utilisent des chemins fixes :'
+    scene_path: '  Scène : ./scene.json'
+    templates_path: '  Modèles : ./templates/'
+    history_section: Historique
+    max_history: 'Entrées max :'
+    scrollback: 'Défilement :'
+    clear_all_history: Supprimer tout l'historique
+    auto_copy: Copier automatiquement le texte sélectionné
   appearance:
-    heading: "Apparence"
-    terminal_section: "Apparence du terminal"
-    font_size: "Taille de police :"
-    cell_spacing: "Espacement :"
-    font_family: "Police :"
-    bg_color: "Arrière-plan :"
-    fg_color: "Premier plan :"
-    command_menu_section: "Menu de commandes"
-    menu_bg_color: "Arrière-plan :"
-    menu_fg_color: "Couleur du texte :"
-    menu_font_size: "Taille de police :"
-    apply_theme_typography: "Appliquer les polices et tailles du thème"
-    import_theme: "Importer le thème"
-    export_theme: "Exporter le thème"
-    import_success: "Thème importé"
-    export_success: "Thème exporté"
-    invalid_theme: "Fichier de thème invalide"
-    unsupported_version: "Version de format de thème non prise en charge"
-    save_failure: "Échec de l'enregistrement du thème"
-    subtab_ui: "Apparence UI"
-    subtab_terminal: "Terminal"
-    subtab_ansi: "Palette ANSI"
+    heading: Apparence
+    terminal_section: Apparence du terminal
+    font_size: 'Taille de police :'
+    cell_spacing: 'Espacement :'
+    font_family: 'Police :'
+    bg_color: 'Arrière-plan :'
+    fg_color: 'Premier plan :'
+    command_menu_section: Menu de commandes
+    menu_bg_color: 'Arrière-plan :'
+    menu_fg_color: 'Couleur du texte :'
+    menu_font_size: 'Taille de police :'
+    apply_theme_typography: Appliquer les polices et tailles du thème
+    import_theme: Importer le thème
+    export_theme: Exporter le thème
+    import_success: Thème importé
+    export_success: Thème exporté
+    invalid_theme: Fichier de thème invalide
+    unsupported_version: Version de format de thème non prise en charge
+    save_failure: Échec de l'enregistrement du thème
+    subtab_ui: Apparence UI
+    subtab_terminal: Terminal
+    subtab_ansi: Palette ANSI
   shortcuts:
-    heading: "Raccourcis"
-    hint: "Cliquez sur un raccourci puis appuyez sur une nouvelle touche"
-    not_set: "Non défini"
-    reset_defaults: "Réinitialiser par défaut"
+    heading: Raccourcis
+    hint: Cliquez sur un raccourci puis appuyez sur une nouvelle touche
+    not_set: Non défini
+    reset_defaults: Réinitialiser par défaut
   lock:
-    heading: "Verrouillage"
-    password_section: "Configuration du mot de passe :"
-    set_password: "Définir mot de passe"
-    change_password: "Changer mot de passe"
-    clear_password: "Effacer mot de passe"
-    lock_section: "Verrouillage :"
-    lock_overlay_color: "Couleur de superposition :"
+    heading: Verrouillage
+    password_section: 'Configuration du mot de passe :'
+    set_password: Définir mot de passe
+    change_password: Changer mot de passe
+    clear_password: Effacer mot de passe
+    lock_section: 'Verrouillage :'
+    lock_overlay_color: 'Couleur de superposition :'
   buttons:
-    apply: "Appliquer"
-    close: "Fermer"
-
+    apply: Appliquer
+    close: Fermer
+    revert: Rétablir
+    applied: Appliqué
+    builtin: Intégré
+    user_group: Thèmes personnalisés
+    builtin_group: Thèmes intégrés
+    user: Utilisateur
+    behavior_section: Sélection
+    data_section: Historique des commandes
+    maintenance_section: Maintenance
+    font_section: Polices
+    color_section: Couleurs
+    preview_section: Aperçu
+    template_section: Modèles de palette
+    base_color_section: Couleurs de base
 shortcut_labels:
-  new_terminal: "Nouveau terminal"
-  close_terminal: "Fermer terminal"
-  workspace_up: "Espace de travail haut"
-  workspace_down: "Espace de travail bas"
-  panel_left: "Panneau gauche"
-  panel_right: "Panneau droit"
-  lock_workspace: "Verrouiller espace"
-  history_menu: "Menu historique"
-  history_prev: "Historique précédent"
-  history_next: "Historique suivant"
-  toggle_workspace_sidebar: "Afficher/Masquer barre latérale"
-  zoom_in: "Agrandir"
-  zoom_out: "Réduire"
-  shortcuts_heading: "Raccourcis"
-
+  new_terminal: Nouveau terminal
+  close_terminal: Fermer terminal
+  workspace_up: Espace de travail haut
+  workspace_down: Espace de travail bas
+  panel_left: Panneau gauche
+  panel_right: Panneau droit
+  lock_workspace: Verrouiller espace
+  history_menu: Menu historique
+  history_prev: Historique précédent
+  history_next: Historique suivant
+  toggle_workspace_sidebar: Afficher/Masquer barre latérale
+  zoom_in: Agrandir
+  zoom_out: Réduire
+  shortcuts_heading: Raccourcis
 workspace:
-  heading: "Espaces de travail"
-  new: "+ Nouvel espace"
-  rename: "Renommer"
-  save_as_template: "Enregistrer comme modèle"
-  close: "Fermer"
-  rename_confirm: "OK"
-  rename_cancel: "Annuler"
-  drag_handle_hint: "Glisser pour réorganiser"
-  close_ws_hint: "Fermer l'espace"
-  locked_hint: "Espace verrouillé"
-  unlocked_hint: "Espace déverrouillé"
-  empty_hint: "Cliquez sur '+ Nouvel espace' pour en créer un"
-  templates: "Modèles"
-  templates_empty: "(vide)"
-  name_prefix: "Espace "
-
+  heading: Espaces de travail
+  new: + Nouvel espace
+  rename: Renommer
+  save_as_template: Enregistrer comme modèle
+  close: Fermer
+  rename_confirm: OK
+  rename_cancel: Annuler
+  drag_handle_hint: Glisser pour réorganiser
+  close_ws_hint: Fermer l'espace
+  locked_hint: Espace verrouillé
+  unlocked_hint: Espace déverrouillé
+  empty_hint: Cliquez sur '+ Nouvel espace' pour en créer un
+  templates: Modèles
+  templates_empty: (vide)
+  name_prefix: 'Espace '
 close_confirm:
-  message_prefix: "Voulez-vous vraiment fermer l'espace \""
-  message_suffix: "\" ?"
-  confirm: "Confirmer"
-  cancel: "Annuler"
-  terminal_title: "Fermer le terminal"
-  terminal_message: "Voulez-vous vraiment fermer ce terminal ? L'historique des commandes sera supprimé."
-
+  message_prefix: Voulez-vous vraiment fermer l'espace "
+  message_suffix: '" ?'
+  confirm: Confirmer
+  cancel: Annuler
+  terminal_title: Fermer le terminal
+  terminal_message: Voulez-vous vraiment fermer ce terminal ? L'historique des commandes sera supprimé.
 password:
-  enter: "Entrer mot de passe :"
-  confirm: "Confirmer mot de passe :"
-  original: "Mot de passe actuel :"
-  new: "Nouveau mot de passe :"
-  confirm_new: "Confirmer nouveau mot de passe :"
-  input_label: "Mot de passe :"
-  mismatch: "Inadéquation"
-  match: "Correspondance"
-  empty_error: "Le mot de passe ne peut pas être vide"
-  mismatch_error: "Les mots de passe ne correspondent pas"
-  wrong_error: "Mot de passe actuel incorrect"
-  wrong_password: "Mot de passe incorrect"
-  confirm_button: "Confirmer"
-  cancel_button: "Annuler"
-  set_title: "Définir mot de passe"
-  change_title: "Changer mot de passe"
-  clear_title: "Effacer mot de passe"
-
+  enter: 'Entrer mot de passe :'
+  confirm: 'Confirmer mot de passe :'
+  original: 'Mot de passe actuel :'
+  new: 'Nouveau mot de passe :'
+  confirm_new: 'Confirmer nouveau mot de passe :'
+  input_label: 'Mot de passe :'
+  mismatch: Inadéquation
+  match: Correspondance
+  empty_error: Le mot de passe ne peut pas être vide
+  mismatch_error: Les mots de passe ne correspondent pas
+  wrong_error: Mot de passe actuel incorrect
+  wrong_password: Mot de passe incorrect
+  confirm_button: Confirmer
+  cancel_button: Annuler
+  set_title: Définir mot de passe
+  change_title: Changer mot de passe
+  clear_title: Effacer mot de passe
 lock_overlay:
-  title: "Cet espace est verrouillé"
-  password_label: "Mot de passe :"
-  unlock_button: "Déverrouiller"
-  wrong_password: "Mot de passe incorrect"
-
+  title: Cet espace est verrouillé
+  password_label: 'Mot de passe :'
+  unlock_button: Déverrouiller
+  wrong_password: Mot de passe incorrect
 terminal:
-  not_found: "Terminal introuvable"
-  rename: "Renommer"
-  clear_history: "Effacer l'historique"
-  new_tab: "+ Nouvel onglet"
-  add_tab: "+ Onglet"
-  rename_hint: "Entrer le nom..."
-  default_name_prefix: "Terminal "
-
+  not_found: Terminal introuvable
+  rename: Renommer
+  clear_history: Effacer l'historique
+  new_tab: + Nouvel onglet
+  add_tab: + Onglet
+  rename_hint: Entrer le nom...
+  default_name_prefix: 'Terminal '
 theme:
-  light: "Clair"
-  dark: "Sombre"
-
+  light: Clair
+  dark: Sombre
 about:
-  menu_label: "À propos"
-  title: "À propos d'OpenNex"
-  version_label: "Version"
-  description: "Gestionnaire de terminaux polyvalent avec disposition à onglets, historique des commandes, mise à l'échelle de l'interface et espaces de travail chiffrés pour une gestion efficace."
-  homepage_label: "Page d'accueil"
-  source_label: "Code source"
-  license_label: "Licence"
-  credits_label: "Crédits"
-  credits: "Construit sur des projets open source notamment egui, egui_dock, alacritty_terminal et egui_term."
-  close: "Fermer"
+  menu_label: À propos
+  title: À propos d'OpenNex
+  version_label: Version
+  description: 'Un gestionnaire de terminaux empilables multi-fenêtres, pensé pour les workflows IA et les utilisateurs intensifs de la ligne de commande.
+
+
+    Disposez librement les fenêtres de terminaux et empilez les onglets pour gérer de nombreuses sessions ; les dispositions s''enregistrent et se rechargent. Intègre un historique illimité des commandes
+    par session, un zoom global de l''interface, des thèmes personnalisés, des espaces chiffrés et des raccourcis configurables — tout pour maîtriser un environnement de terminaux complexe.
+
+
+    Conçu en Rust : le moteur haute performance fait tourner 6000+ fenêtres actives en parallèle, avec un support natif de Linux, Windows et macOS, et plus de 20 langues.
+
+    Un bug ou une suggestion ? Vos retours sont les bienvenus.'
+  homepage_label: Page d'accueil
+  source_label: Code source
+  license_label: Licence
+  credits_label: Crédits
+  credits: Construit sur des projets open source notamment egui, egui_dock, alacritty_terminal et egui_term.
+  close: Fermer
+update:
+  checking: ''
+  downloading: Téléchargement de la mise à jour...
+  verifying: Vérification de l'intégrité...
+  ready: Mise à jour prête
+  failed: 'Échec de la mise à jour : {}'
+  available: Nouvelle version v{} disponible — prêt à télécharger
+  up_to_date: Déjà à jour
+  check: Vérifier les mises à jour
+  update_now: Mettre à jour
+  restart: Redémarrer
+  restart_title: Mise à jour prête
+  restart_body: Nouvelle version téléchargée. Redémarrer maintenant ?
+  restart_confirm: Redémarrer
+theme_editor:
+  colors:
+    app_bg: Fond application
+    sidebar: Barre latérale
+    panel: Panneau
+    input_bg: Champ de saisie
+    text: Texte
+    weak_text: Texte atténué
+    accent: Accent
+    warning: Avertissement
+    danger: Danger
+    hover: Survol
+    active: Actif
+    selection_bg: Fond sélection
+    selection_text: Texte sélection
+    border: Bordure
+    lock: Verrou
+    window_shadow: Ombre
+    tab_highlight: Onglet actif
+    fg: Premier plan
+    bg: Arrière-plan
+    cursor: Curseur
+    selection_term_bg: Fond sélection
+    selection_term_text: Texte sélection
+    link: Lien
+  edit_title: Modifier le thème
+  name_label: 'Nom :'
+  confirm: Enregistrer
+  cancel: Annuler
+  system_ui: System UI
+  terminal: Terminal
+  ui_font_label: 'Police UI : '
+  ui_font_size: 'Taille UI : '
+  terminal_font_label: 'Police terminal : '
+  terminal_font_size: 'Taille terminal : '
+  cell_spacing: 'Espacement : '
+  terminal_padding: 'Marge : '
+stats:
+  focused: Terminal actuel
+  workspace: Espace actuel
+  global: Global
+  terminals: terminaux
+  clear_history_title: Supprimer tout l'historique
+  clear_history_body: Supprimer l'historique des commandes de tous les terminaux ? Irréversible.

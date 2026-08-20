@@ -3,7 +3,6 @@ use egui::{
     CornerRadius, CursorIcon, Frame, Id, Key, LayerId, Layout, NumExt, Order, Rect, Response,
     ScrollArea, Sense, Shape, Stroke, StrokeKind, TextStyle, Ui, UiBuilder, Vec2, WidgetText,
 };
-use std::ops::RangeInclusive;
 
 use crate::dock_area::tab_removal::TabRemoval;
 use crate::{
@@ -527,12 +526,12 @@ impl<Tab> DockArea<'_, Tab> {
             };
             Rect::from_min_max(
                 tabbar_outer_rect.left_top() + vec2(collapse, 0.0),
-                tabbar_outer_rect.left_bottom() + vec2(collapse + Style::TAB_ADD_BUTTON_SIZE, -2.0),
+                tabbar_outer_rect.left_bottom() + vec2(collapse + Style::TAB_ADD_BUTTON_SIZE, 0.0),
             )
         } else {
             Rect::from_min_max(
                 tabbar_outer_rect.right_top() - vec2(Style::TAB_ADD_BUTTON_SIZE + offset, 0.0),
-                tabbar_outer_rect.right_bottom() - vec2(offset, 2.0),
+                tabbar_outer_rect.right_bottom() - vec2(offset, 0.0),
             )
         };
 
@@ -1002,8 +1001,19 @@ impl<Tab> DockArea<'_, Tab> {
             .at_least(text_width + close_button_size);
         let tab_width = preferred_width.unwrap_or(0.0).at_least(minimum_width);
 
-        let (_, tab_rect) = ui.allocate_space(vec2(tab_width, ui.available_height()));
-        let mut response = ui.interact(tab_rect, id, Sense::click_and_drag());
+        // OpenNex patch: allocate the tab at the full height of the tab bar
+        // so its border touches the bar's top and bottom edges. The layout's
+        // cross-axis centering shifts `cursor().min` down, so anchor to
+        // `max_rect().min` instead to span the whole bar height.
+        let tab_rect = Rect::from_min_size(
+            pos2(ui.cursor().min.x, ui.max_rect().min.y),
+            vec2(tab_width, ui.max_rect().height()),
+        );
+        let mut response = ui.allocate_rect(tab_rect, Sense::click_and_drag());
+        // Re-register the interaction under the tab's own id: drag detection
+        // (`is_being_dragged(id)`) and click handling key off this id, and
+        // `allocate_rect` would otherwise assign an automatic one.
+        response = ui.interact(tab_rect, id, Sense::click_and_drag());
         if ui.ctx().dragged_id().is_none() && self.draggable_tabs {
             response = response.on_hover_cursor(CursorIcon::Grab);
         }
@@ -1032,24 +1042,17 @@ impl<Tab> DockArea<'_, Tab> {
         // mixing with the background color.
         ui.painter()
             .rect_filled(tab_rect, tab_style.corner_radius, tab_style.bg_fill);
-        let stroke_rect = rect_stroke_box(tab_rect, 1.0);
-        ui.painter().rect_stroke(
-            stroke_rect,
-            tab_style.corner_radius,
-            Stroke::new(1.0, tab_style.outline_color),
-            StrokeKind::Inside,
-        );
-        if !is_being_dragged {
-            // Make the tab name area connect with the tab ui area.
-            ui.painter().hline(
-                RangeInclusive::new(
-                    stroke_rect.min.x + f32::max(tab_style.corner_radius.sw.into(), 1.5),
-                    stroke_rect.max.x - f32::max(tab_style.corner_radius.se.into(), 1.5),
-                ),
-                stroke_rect.bottom(),
-                Stroke::new(2.0, tab_style.bg_fill),
-            );
-        }
+        // OpenNex patch: stroke only the left, right and bottom edges of the
+        // tab. The top edge is omitted so the tab visually merges with the
+        // module's top border line (a single shared line, not two parallel
+        // lines).
+        let stroke = Stroke::new(1.0, tab_style.outline_color);
+        ui.painter()
+            .line_segment([tab_rect.left_top(), tab_rect.left_bottom()], stroke);
+        ui.painter()
+            .line_segment([tab_rect.right_top(), tab_rect.right_bottom()], stroke);
+        ui.painter()
+            .line_segment([tab_rect.left_bottom(), tab_rect.right_bottom()], stroke);
 
         let mut text_rect = tab_rect;
         text_rect.set_width(text_rect.width() - close_button_size);

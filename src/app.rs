@@ -12,7 +12,7 @@ const FONT_SIZE_STEP: f32 = 1.0;
 const WORKSPACE_SIDEBAR_DEFAULT_WIDTH: f32 = 192.0;
 const WORKSPACE_DRAG_HANDLE_WIDTH: f32 = 20.0;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct AppSettings {
     #[serde(default = "default_max_history")]
     max_history: usize,
@@ -161,6 +161,24 @@ fn default_key_binds() -> HashMap<String, ShortcutBinding> {
             alt: false,
         },
     );
+    m.insert(
+        "zoom_in".into(),
+        ShortcutBinding {
+            key: "Plus".into(),
+            ctrl: true,
+            shift: false,
+            alt: false,
+        },
+    );
+    m.insert(
+        "zoom_out".into(),
+        ShortcutBinding {
+            key: "Minus".into(),
+            ctrl: true,
+            shift: false,
+            alt: false,
+        },
+    );
     m
 }
 
@@ -208,6 +226,9 @@ fn binding_to_key(b: &ShortcutBinding) -> Option<egui::Key> {
         "F10" => Some(egui::Key::F10),
         "F11" => Some(egui::Key::F11),
         "F12" => Some(egui::Key::F12),
+        "Plus" => Some(egui::Key::Plus),
+        "Minus" => Some(egui::Key::Minus),
+        "Equals" => Some(egui::Key::Equals),
         _ => None,
     }
 }
@@ -260,7 +281,7 @@ fn shortcut_display(b: &ShortcutBinding) -> String {
     s
 }
 
-fn shortcut_hint_ids() -> [&'static str; 11] {
+fn shortcut_hint_ids() -> [&'static str; 13] {
     [
         "new_terminal",
         "close_terminal",
@@ -273,6 +294,8 @@ fn shortcut_hint_ids() -> [&'static str; 11] {
         "history_prev",
         "history_next",
         "toggle_workspace_sidebar",
+        "zoom_in",
+        "zoom_out",
     ]
 }
 
@@ -308,32 +331,17 @@ fn screen_center(ctx: &egui::Context) -> egui::Pos2 {
     ctx.input(|i| i.screen_rect).center()
 }
 
-fn shortcut_hint_available_height(available_height: f32) -> f32 {
-    available_height.max(0.0)
-}
-
-fn paint_keycap(ui: &mut egui::Ui, text: &str) {
-    let galley = ui.fonts(|f| {
-        f.layout_no_wrap(
-            text.to_string(),
-            egui::FontId::proportional(11.0),
-            ui.visuals().text_color(),
-        )
-    });
-    let pad = egui::vec2(5.0, 2.0);
-    let size = galley.size() + pad * 2.0;
-    let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
-    let visuals = ui.visuals();
-    let bg = visuals.widgets.inactive.weak_bg_fill.linear_multiply(0.6)
-        + visuals.window_fill.linear_multiply(0.4);
-    let stroke = visuals.widgets.noninteractive.bg_stroke;
-    ui.painter()
-        .rect(rect, 3.0, bg, stroke, egui::StrokeKind::Inside);
-    ui.painter()
-        .galley(rect.min + pad, galley, visuals.text_color());
-}
-
 const WORKSPACE_ACTION_BUTTON_SIZE: egui::Vec2 = egui::vec2(24.0, 24.0);
+
+/// Reserved font families holding the CLEAN generic stacks (before the
+/// active theme injects its fonts at the head). Theme-list previews use
+/// these so switching themes never changes other previews' rendering.
+fn preview_prop_family() -> egui::FontFamily {
+    egui::FontFamily::Name(std::sync::Arc::from("__preview_proportional__"))
+}
+fn preview_mono_family() -> egui::FontFamily {
+    egui::FontFamily::Name(std::sync::Arc::from("__preview_monospace__"))
+}
 
 fn check_column_width(ui: &egui::Ui) -> f32 {
     ui.spacing().icon_width + ui.spacing().icon_spacing + ui.spacing().button_padding.x
@@ -699,7 +707,7 @@ impl Default for StartCheckResult {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct SettingsWindowState {
     x: f32,
     y: f32,
@@ -1006,6 +1014,37 @@ enum DialogKind {
     Switch,
 }
 
+/// Pages of the Unity-style settings window. The numeric order matches
+/// the nav listing; `as u8` is persisted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SettingsPage {
+    General = 0,
+    Shortcuts = 1,
+    Lock = 2,
+    Theme = 3,
+}
+
+impl SettingsPage {
+    fn from_u8(v: u8) -> Self {
+        match v {
+            1 => SettingsPage::Shortcuts,
+            2 => SettingsPage::Lock,
+            3 | 4 | 5 | 6 => SettingsPage::Theme,
+            _ => SettingsPage::General,
+        }
+    }
+
+    fn title(&self, texts: &crate::i18n::Texts) -> String {
+        let nav = &texts.settings.nav;
+        match self {
+            SettingsPage::General => nav.general.clone(),
+            SettingsPage::Shortcuts => nav.shortcuts.clone(),
+            SettingsPage::Lock => nav.lock.clone(),
+            SettingsPage::Theme => nav.themes.clone(),
+        }
+    }
+}
+
 pub struct App {
     panels: Vec<Panel>,
     active_panel: usize,
@@ -1029,11 +1068,18 @@ pub struct App {
     pending_load_scene: bool,
     pending_save_scene_as: bool,
     pending_clear_history: bool,
+    /// Confirmation dialog for deleting ALL terminal command history.
+    show_clear_history_confirm: bool,
     settings: AppSettings,
     show_settings: bool,
     show_about: bool,
     settings_edit: AppSettings,
-    settings_tab: usize,
+    /// Active settings page (see `SettingsPage`). Stored as u8 for serde
+    /// compatibility with the persisted `settings_window` payload.
+    settings_tab: u8,
+    /// Transient "已应用" toast shown in the settings footer.
+    settings_applied_toast: Option<(String, std::time::Instant)>,
+    settings_window_open: bool,
     binding_recording: Option<String>,
     cached_template_files: Vec<(String, PathBuf)>,
     completion: crate::completion::CompletionEngine,
@@ -1070,6 +1116,10 @@ pub struct App {
     pending_export_theme: bool,
     theme_dialog: crate::theme::ui::ThemeDialogState,
     theme_dirty: bool,
+    /// Whether the standalone theme editor popup is open.
+    theme_editor_open: bool,
+    /// Theme id the editor popup is editing (None = closed).
+    theme_edit_origin: Option<String>,
     theme_editor_subtab: crate::theme::ui::ThemeEditorSubtab,
     auto_copy_selection: bool,
     show_update_dialog: bool,
@@ -1211,14 +1261,21 @@ impl App {
 
         let themes_root = crate::theme::store::themes_dir(&app_data_dir());
         let _ = std::fs::create_dir_all(&themes_root);
+        // Same ordering as refresh_themes: custom block first (newest by
+        // creation time), builtin block always below — never a global
+        // name-sort that interleaves the two blocks.
         let mut available_themes =
             crate::theme::store::load_user_themes(&themes_root).unwrap_or_default();
+        available_themes.sort_by(|a, b| {
+            b.created_at
+                .cmp(&a.created_at)
+                .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+        });
         for embedded in crate::theme::store::embedded_themes().unwrap_or_default() {
             if !available_themes.iter().any(|t| t.id == embedded.id) {
                 available_themes.push(embedded);
             }
         }
-        available_themes.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
         let active_theme = crate::theme::store::load_theme(&themes_root, &settings.theme_id)
             .unwrap_or_else(|err| {
                 log::warn!("failed to load theme '{}': {err}", settings.theme_id);
@@ -1260,11 +1317,14 @@ impl App {
             pending_load_scene: false,
             pending_save_scene_as: false,
             pending_clear_history: false,
+            show_clear_history_confirm: false,
             settings,
             show_settings: false,
             show_about: false,
             settings_edit: AppSettings::default(),
             settings_tab: 0,
+            settings_applied_toast: None,
+            settings_window_open: false,
             binding_recording: None,
             cached_template_files: Vec::new(),
             completion: crate::completion::CompletionEngine::new(),
@@ -1301,6 +1361,8 @@ impl App {
             pending_export_theme: false,
             theme_dialog: Default::default(),
             theme_dirty: false,
+            theme_editor_open: false,
+            theme_edit_origin: None,
             theme_editor_subtab: Default::default(),
             auto_copy_selection: true,
             show_update_dialog: false,
@@ -1361,6 +1423,7 @@ impl App {
                     app.dock_states.insert(idx, panel.dock_state.clone());
                 }
                 app.active_panel = 0;
+                app.restore_workspace_focus(0);
                 app.refresh_template_files();
                 return app;
             }
@@ -1466,6 +1529,7 @@ impl App {
             bound_file: None,
         });
         self.active_panel = 0;
+        self.restore_workspace_focus(0);
     }
 
     fn load_workspace_state(
@@ -1535,13 +1599,31 @@ impl App {
 
     fn process_pending(&mut self, ctx: &egui::Context) {
         if let Some((panel_idx, surface_idx, node_idx)) = self.pending_new_terminal.take() {
-            let _split_after = self.pending_split_after.take();
+            let split_after = self.pending_split_after.take();
+            let split_vertical = self.pending_split_vertical;
             let Some(tab_id) = self.create_terminal_inner(ctx) else {
                 return;
             };
             if let Some(tree) = self.dock_states.get_mut(&panel_idx) {
-                tree.set_focused_node_and_surface((surface_idx, node_idx));
-                tree.push_to_focused_leaf(tab_id);
+                if split_after.is_some() {
+                    // Split the node holding the current tab and place the
+                    // new terminal in the freshly created leaf.
+                    let split = if split_vertical {
+                        egui_dock::Split::Below
+                    } else {
+                        egui_dock::Split::Right
+                    };
+                    let [_old, new] = tree.split(
+                        (surface_idx, node_idx),
+                        split,
+                        0.5,
+                        egui_dock::Node::leaf(tab_id),
+                    );
+                    tree.set_focused_node_and_surface((surface_idx, new));
+                } else {
+                    tree.set_focused_node_and_surface((surface_idx, node_idx));
+                    tree.push_to_focused_leaf(tab_id);
+                }
             }
         }
         if let Some(tab) = self.pending_close.take() {
@@ -1700,11 +1782,31 @@ impl App {
             return;
         };
         self.dock_states
-            .insert(self.panels.len(), DockState::new(vec![tab_id]));
+            .insert(self.panels.len(), DockState::new(vec![tab_id.clone()]));
         self.panels.push(Panel {
             name,
             bound_file: None,
         });
+        // New workspace becomes active and its first terminal gets focus.
+        self.active_panel = self.panels.len() - 1;
+        self.focused_terminal = Some(tab_id);
+        self.restore_workspace_focus(self.active_panel);
+    }
+
+    /// Ensure the workspace's dock tree has a focused surface/leaf so its
+    /// active tab renders as selected, and sync `focused_terminal` to it.
+    fn restore_workspace_focus(&mut self, panel_idx: usize) {
+        if let Some(tree) = self.dock_states.get_mut(&panel_idx) {
+            if tree.find_active_focused().is_none() {
+                tree.set_focused_node_and_surface((
+                    egui_dock::SurfaceIndex::main(),
+                    egui_dock::NodeIndex::root(),
+                ));
+            }
+            if let Some((_, tab)) = tree.find_active_focused() {
+                self.focused_terminal = Some(tab.clone());
+            }
+        }
     }
 
     fn close_workspace(&mut self, i: usize) {
@@ -1805,6 +1907,9 @@ impl App {
         self.theme_edit = theme;
         self.theme_dirty = false;
         crate::theme::apply_theme_definition(ctx, &self.active_theme);
+        // Font tables must be rebuilt so the new theme's UI/terminal fonts
+        // actually take effect (Monospace/Proportional family heads).
+        self.rebuild_fonts(ctx);
         let _ = save_settings(&self.settings);
     }
 
@@ -1850,15 +1955,6 @@ impl App {
             }
             ThemeAction::ExportTheme => {
                 self.pending_export_theme = true;
-            }
-            ThemeAction::ApplyPaletteTemplate(template_id) => {
-                if let Some(colors) = crate::theme::palettes::terminal_colors(&template_id) {
-                    let mut new_draft = draft;
-                    new_draft.terminal = colors;
-                    self.theme_edit = new_draft;
-                    self.theme_dirty = true;
-                    crate::theme::apply_theme_definition(ctx, &self.theme_edit);
-                }
             }
             ThemeAction::DraftModified => {
                 self.theme_edit = draft;
@@ -1986,7 +2082,7 @@ impl App {
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button(crate::theme::confirm_text()).clicked() {
+                    if ui.button(&self.texts.theme_editor.confirm).clicked() {
                         do_action = true;
                     }
                     if matches!(
@@ -1996,7 +2092,7 @@ impl App {
                     {
                         do_action = true;
                     }
-                    if ui.button(crate::theme::cancel_text()).clicked() {
+                    if ui.button(&self.texts.theme_editor.cancel).clicked() {
                         close_after = true;
                     }
                 });
@@ -2077,6 +2173,191 @@ impl App {
         }
     }
 
+    /// Standalone theme editor popup: live-preview editing with
+    /// "keep"(保存) / "discard"(放弃) on close.
+    fn show_theme_editor_popup(&mut self, ctx: &egui::Context) {
+        if !self.theme_editor_open {
+            return;
+        }
+        let themes_root = crate::theme::store::themes_dir(&app_data_dir());
+        let mut keep = false;
+        let mut discard = false;
+        let mut is_open = self.theme_editor_open;
+        let mut editor_name = self.theme_edit.name.clone();
+        let mut editor_dirty = self.theme_dirty;
+        let mut editor_draft = self.theme_edit.clone();
+        let available_themes = self.available_themes.clone();
+        let system_fonts = self.system_fonts.clone();
+        let mut theme_dialog = self.theme_dialog.clone();
+        let accent = self.active_theme.app.accent.to_egui();
+        let mut actions_out: Vec<crate::theme::ui::ThemeAction> = Vec::new();
+        let mut draft_changed = false;
+        let te = &self.texts.theme_editor;
+        let editor_labels = crate::theme::ui::ThemeEditorLabels {
+            system_ui: te.system_ui.clone(),
+            terminal: te.terminal.clone(),
+            ui_font: te.ui_font_label.clone(),
+            ui_font_size: te.ui_font_size.clone(),
+            terminal_font: te.terminal_font_label.clone(),
+            terminal_font_size: te.terminal_font_size.clone(),
+            cell_spacing: te.cell_spacing.clone(),
+            terminal_padding: te.terminal_padding.clone(),
+            colors: crate::theme::ui::ColorLabels {
+                app_bg: te.colors.app_bg.clone(),
+                sidebar: te.colors.sidebar.clone(),
+                panel: te.colors.panel.clone(),
+                input_bg: te.colors.input_bg.clone(),
+                text: te.colors.text.clone(),
+                weak_text: te.colors.weak_text.clone(),
+                accent: te.colors.accent.clone(),
+                warning: te.colors.warning.clone(),
+                danger: te.colors.danger.clone(),
+                hover: te.colors.hover.clone(),
+                active: te.colors.active.clone(),
+                selection_bg: te.colors.selection_bg.clone(),
+                selection_text: te.colors.selection_text.clone(),
+                border: te.colors.border.clone(),
+                lock: te.colors.lock.clone(),
+                window_shadow: te.colors.window_shadow.clone(),
+                tab_highlight: te.colors.tab_highlight.clone(),
+                fg: te.colors.fg.clone(),
+                bg: te.colors.bg.clone(),
+                cursor: te.colors.cursor.clone(),
+                selection_term_bg: te.colors.selection_term_bg.clone(),
+                selection_term_text: te.colors.selection_term_text.clone(),
+                link: te.colors.link.clone(),
+            },
+        };
+        let title = format!("{} - {}", self.texts.theme_editor.edit_title, editor_name);
+        egui::Window::new(title)
+            .id(egui::Id::new("theme_editor_window"))
+            .open(&mut is_open)
+            .resizable(false)
+            .collapsible(false)
+            .fixed_size([360.0, 560.0])
+            .show(ctx, |ui| {
+                ui.style_mut().spacing.item_spacing.y = 4.0;
+                // Name row (fixed at top).
+                ui.horizontal(|ui| {
+                    ui.label(&self.texts.theme_editor.name_label);
+                    ui.text_edit_singleline(&mut editor_name);
+                });
+                ui.add_space(4.0);
+
+                // Scrollable editor body pinned above the footer.
+                egui::TopBottomPanel::bottom("theme_editor_footer")
+                    .frame(egui::Frame::none())
+                    .show_inside(ui, |ui| {
+                        ui.add_space(6.0);
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui
+                                .add(
+                                    egui::Button::new(
+                                        egui::RichText::new(&self.texts.theme_editor.confirm)
+                                            .strong(),
+                                    )
+                                    .fill(accent),
+                                )
+                                .clicked()
+                            {
+                                keep = true;
+                            }
+                            if ui.button(&self.texts.theme_editor.cancel).clicked() {
+                                discard = true;
+                            }
+                        });
+                    });
+                egui::ScrollArea::vertical()
+                    .id_salt("theme_editor_scroll")
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        // Live-preview editor body: render BOTH sub-pages
+                        // (UI appearance AND terminal incl. fonts) — the
+                        // popup must show every config item.
+                        let is_builtin = crate::theme::store::is_embedded_id(&editor_draft.id);
+                        let mut font_choices: Vec<String> =
+                            vec!["system-ui".into(), "monospace".into()];
+                        for f in &system_fonts {
+                            if !font_choices.contains(f) {
+                                font_choices.push(f.clone());
+                            }
+                        }
+                        let mut actions = crate::theme::ui::show_theme_editor_body(
+                            ui,
+                            &mut editor_draft,
+                            &available_themes,
+                            &font_choices,
+                            is_builtin,
+                            editor_dirty,
+                            crate::theme::ui::ThemeEditorSubtab::UiAppearance,
+                            &mut theme_dialog,
+                            &editor_labels,
+                        );
+                        // (No separator between the System UI and Terminal
+                        // blocks — spacing alone separates them.)
+                        ui.add_space(12.0);
+                        actions.extend(crate::theme::ui::show_theme_editor_body(
+                            ui,
+                            &mut editor_draft,
+                            &available_themes,
+                            &font_choices,
+                            is_builtin,
+                            editor_dirty,
+                            crate::theme::ui::ThemeEditorSubtab::Terminal,
+                            &mut theme_dialog,
+                            &editor_labels,
+                        ));
+                        actions_out = actions;
+                    });
+            });
+        self.theme_editor_open = is_open;
+        self.theme_dialog = theme_dialog;
+        editor_draft.name = editor_name;
+
+        // Apply live preview + collect editor actions.
+        for action in actions_out {
+            self.handle_theme_action(ctx, action, editor_draft.clone());
+        }
+        if editor_draft != self.theme_edit {
+            self.theme_edit = editor_draft;
+            self.theme_dirty = true;
+            crate::theme::apply_theme_definition(ctx, &self.theme_edit);
+            self.rebuild_fonts(ctx);
+        }
+
+        if keep || !self.theme_editor_open {
+            // Save the edited theme under its origin id.
+            let mut theme = self.theme_edit.clone();
+            if let Some(origin) = self.theme_edit_origin.clone() {
+                theme.id = origin;
+                // Builtin ids can't be saved; give it a user id.
+                if crate::theme::store::is_embedded_id(&theme.id) {
+                    theme.id = crate::theme::store::find_free_id(&themes_root, "custom-theme");
+                }
+                match crate::theme::store::save_user_theme(&themes_root, &theme) {
+                    Ok(()) => {
+                        self.refresh_themes(&themes_root);
+                        self.switch_theme_by_id(ctx, &theme.id);
+                    }
+                    Err(e) => self.theme_message = Some(Err(e.to_string())),
+                }
+            }
+            self.theme_editor_open = false;
+            self.theme_edit_origin = None;
+        }
+        if discard {
+            // Revert to the currently active theme.
+            self.theme_edit = self.active_theme.clone();
+            self.theme_dirty = false;
+            crate::theme::apply_theme_definition(ctx, &self.active_theme);
+            // Restore the active theme's fonts (the editor had installed
+            // the draft fonts for live preview).
+            self.rebuild_fonts(ctx);
+            self.theme_editor_open = false;
+            self.theme_edit_origin = None;
+        }
+    }
+
     fn close_dialog(&mut self, kind: DialogKind) {
         self.theme_dialog.name_input.clear();
         self.theme_dialog.focus_requested = false;
@@ -2117,9 +2398,627 @@ impl App {
         self.start_download(ctx, info);
     }
 
-    /// Rebuild egui FontDefinitions from the scanned system fonts plus the
-    /// embedded multilingual faces, honoring the active theme's UI and
-    /// terminal font choices by inserting them first in their families.
+    /// Unity-inspector settings row: label in a 42% column on the left,
+    /// control starting at a fixed column and left-aligned. 32px row with
+    /// a hairline divider; controls get a uniform 180px width budget.
+    fn settings_row(
+        &self,
+        ui: &mut egui::Ui,
+        label: &str,
+        add_control: impl FnOnce(&mut egui::Ui),
+    ) {
+        let avail = ui.available_rect_before_wrap();
+        let row_rect = egui::Rect::from_min_size(avail.min, egui::vec2(avail.width(), 32.0));
+        let resp = ui.allocate_rect(row_rect, egui::Sense::hover());
+        if resp.hovered() {
+            let h = self.active_theme.app.hover.to_egui();
+            let dim = egui::Color32::from_rgba_unmultiplied(
+                (h.r() as f32 * 0.5) as u8,
+                (h.g() as f32 * 0.5) as u8,
+                (h.b() as f32 * 0.5) as u8,
+                36,
+            );
+            ui.painter().rect_filled(row_rect, 0.0, dim);
+        }
+        let b = self.active_theme.app.border.to_egui();
+        let divider = egui::Color32::from_rgba_unmultiplied(b.r(), b.g(), b.b(), 40);
+        ui.painter()
+            .hline(row_rect.x_range(), row_rect.bottom(), (1.0, divider));
+        let label_x = row_rect.min.x + 10.0;
+        ui.painter().text(
+            egui::pos2(label_x, row_rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            label,
+            egui::FontId::proportional(12.0),
+            self.active_theme.app.text.to_egui(),
+        );
+        let ctrl_x = row_rect.min.x + row_rect.width() * 0.42;
+        let ctrl_rect = egui::Rect::from_min_max(
+            egui::pos2(ctrl_x, row_rect.min.y),
+            egui::pos2(row_rect.max.x, row_rect.max.y),
+        );
+        let mut ctrl_ui = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(ctrl_rect)
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        );
+        add_control(&mut ctrl_ui);
+    }
+
+    /// A full-width action row: content starts flush at the row's left
+    /// edge (no label column) and there is no divider below. Used for
+    /// button groups like the lock page's change/clear password actions.
+    fn settings_action_row(&self, ui: &mut egui::Ui, add_controls: impl FnOnce(&mut egui::Ui)) {
+        let avail = ui.available_rect_before_wrap();
+        let row_rect = egui::Rect::from_min_size(avail.min, egui::vec2(avail.width(), 32.0));
+        let resp = ui.allocate_rect(row_rect, egui::Sense::hover());
+        if resp.hovered() {
+            let h = self.active_theme.app.hover.to_egui();
+            let dim = egui::Color32::from_rgba_unmultiplied(
+                (h.r() as f32 * 0.5) as u8,
+                (h.g() as f32 * 0.5) as u8,
+                (h.b() as f32 * 0.5) as u8,
+                36,
+            );
+            ui.painter().rect_filled(row_rect, 0.0, dim);
+        }
+        let mut ctrl_ui = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(row_rect)
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        );
+        ctrl_ui.add_space(10.0);
+        add_controls(&mut ctrl_ui);
+    }
+
+    /// Weak group heading with consistent rhythm (16px above, 6px below).
+    fn settings_group(&self, ui: &mut egui::Ui, title: &str) {
+        ui.add_space(16.0);
+        ui.label(
+            egui::RichText::new(title)
+                .size(10.0)
+                .color(self.active_theme.app.weak_text.to_egui()),
+        );
+        ui.add_space(6.0);
+    }
+
+    fn settings_page_general(&mut self, ui: &mut egui::Ui) {
+        let t = self.texts.settings.general.clone();
+        let b = self.texts.settings.buttons.clone();
+
+        self.settings_group(ui, &b.behavior_section);
+        let mut auto_copy = self.settings_edit.auto_copy_selection;
+        self.settings_row(ui, &t.auto_copy, |ui| {
+            ui.checkbox(&mut auto_copy, "");
+        });
+        self.settings_edit.auto_copy_selection = auto_copy;
+
+        self.settings_group(ui, &b.data_section);
+        let mut max_h = self.settings_edit.max_history;
+        let mut sb = self.settings_edit.scrollback;
+        self.settings_row(ui, &t.max_history, |ui| {
+            ui.add_sized(
+                [180.0, 20.0],
+                egui::DragValue::new(&mut max_h).range(10..=10000),
+            );
+        });
+        self.settings_row(ui, &t.scrollback, |ui| {
+            ui.add_sized(
+                [180.0, 20.0],
+                egui::DragValue::new(&mut sb).range(100..=50000),
+            );
+        });
+        self.settings_edit.max_history = max_h;
+        self.settings_edit.scrollback = sb;
+
+        // Maintenance action: plain button (same style as all other
+        // settings buttons), flush left, no divider; clicking opens a
+        // confirmation dialog.
+        let mut clear = false;
+        let clear_label = t.clear_all_history.clone();
+        self.settings_action_row(ui, |ui| {
+            if ui.button(&clear_label).clicked() {
+                clear = true;
+            }
+        });
+        if clear {
+            self.show_clear_history_confirm = true;
+        }
+
+        // Group footer: path hints as weak, wrapping small text.
+        ui.add_space(8.0);
+        ui.weak(egui::RichText::new(format!("{}  {}", t.scene_path, t.templates_path)).small());
+    }
+
+    fn settings_page_shortcuts(&mut self, ui: &mut egui::Ui) {
+        let texts = self.texts.clone();
+        ui.label(&texts.settings.shortcuts.hint);
+        ui.add_space(4.0);
+        for id in shortcut_hint_ids() {
+            let label = shortcut_label_for(&texts, id).to_string();
+            let rec = self.binding_recording.clone();
+            let binds = self.settings_edit.key_binds.clone();
+            let mut clicked = false;
+            self.settings_row(ui, &label, |ui| {
+                let text = if rec.as_deref() == Some(id) {
+                    "…".to_string()
+                } else if let Some(b) = binds.get(id) {
+                    shortcut_display(b)
+                } else {
+                    texts.settings.shortcuts.not_set.clone()
+                };
+                if ui
+                    .add(egui::Button::new(text).min_size(egui::vec2(180.0, 0.0)))
+                    .clicked()
+                {
+                    clicked = true;
+                }
+            });
+            if clicked {
+                self.binding_recording = Some(id.to_string());
+            }
+        }
+        ui.add_space(6.0);
+        if ui
+            .button(&texts.settings.shortcuts.reset_defaults)
+            .clicked()
+        {
+            self.settings_edit.key_binds = default_key_binds();
+            self.binding_recording = None;
+        }
+    }
+
+    fn settings_page_lock(&mut self, ui: &mut egui::Ui) {
+        let t = self.texts.settings.lock.clone();
+        self.settings_group(ui, &t.password_section);
+        let mut action: Option<&'static str> = None;
+        if self.settings.lock_password.is_empty() {
+            // No password yet: only the "set password" button.
+            let set_label = t.set_password.clone();
+            self.settings_action_row(ui, |ui| {
+                if ui.button(&set_label).clicked() {
+                    action = Some("set");
+                }
+            });
+        } else {
+            // Password exists: change + clear on one row, both flush left,
+            // 20px apart, no divider below.
+            let ch_label = t.change_password.clone();
+            let cl_label = t.clear_password.clone();
+            self.settings_action_row(ui, |ui| {
+                if ui.button(&ch_label).clicked() {
+                    action = Some("change");
+                }
+                ui.add_space(20.0);
+                if ui.button(&cl_label).clicked() {
+                    action = Some("clear");
+                }
+            });
+        }
+        match action {
+            Some("set") => {
+                self.pw_popup = Some("set");
+                self.pw_set1.clear();
+                self.pw_set2.clear();
+                self.pw_message.clear();
+            }
+            Some("change") => {
+                self.pw_popup = Some("change");
+                self.pw_old.clear();
+                self.pw_new1.clear();
+                self.pw_new2.clear();
+                self.pw_message.clear();
+            }
+            Some("clear") => {
+                self.pw_popup = Some("clear");
+                self.pw_clear.clear();
+                self.pw_message.clear();
+            }
+            _ => {}
+        }
+    }
+
+    /// Theme page: one page with section headings for 选择与管理 /
+    /// UI 外观 / 终端.
+    fn settings_page_theme(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
+        if let Some(Err(msg)) = &self.theme_message {
+            ui.colored_label(egui::Color32::from_rgb(230, 120, 120), msg);
+        }
+        if let Some(Ok(msg)) = &self.theme_message {
+            ui.colored_label(egui::Color32::from_rgb(120, 200, 130), msg);
+        }
+
+        // The list takes all the remaining height down to the window bottom.
+        ui.allocate_ui_with_layout(
+            egui::vec2(ui.available_width(), ui.available_height()),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+                ui.set_width(ui.available_width());
+                self.settings_page_theme_select(ctx, ui);
+            },
+        );
+    }
+
+    fn settings_page_theme_select(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
+        let current = self.settings_edit.theme_id.clone();
+
+        let mut pick: Option<String> = None;
+        let mut edit_target: Option<String> = None;
+        let mut copy_target: Option<String> = None;
+        let mut delete_target: Option<String> = None;
+
+        let text_col = self.active_theme.app.text.to_egui();
+        let _weak_col = self.active_theme.app.weak_text.to_egui();
+        let sel_bg = self.active_theme.app.active.to_egui();
+        let hover_bg = self.active_theme.app.hover.to_egui();
+        let accent_col = self.active_theme.app.accent.to_egui();
+        let _border_col = self.active_theme.app.border.to_egui();
+        let builtin_tag = self.texts.settings.buttons.builtin.clone();
+
+        // Theme list: fills the remaining settings-page height, one preview
+        // row per theme. The whole row is a preview: left half rendered with
+        // the theme's UI styling (bg/text/font), right half a terminal demo.
+        let scroll_to_top = ui.ctx().memory_mut(|m| {
+            m.data
+                .remove_temp::<bool>(egui::Id::new("theme_list_scroll_top"))
+                .unwrap_or(false)
+        });
+        let scroll_area = egui::ScrollArea::vertical()
+            .id_salt("theme_list_scroll")
+            .auto_shrink([false, false])
+            .max_height(ui.available_height());
+        let mut scroll_area = scroll_area;
+        if scroll_to_top {
+            scroll_area = scroll_area.vertical_scroll_offset(0.0);
+        }
+        scroll_area.show(ui, |ui| {
+            let weak_col = self.active_theme.app.weak_text.to_egui();
+            let mut shown_custom_heading = false;
+            let mut shown_builtin_heading = false;
+            let mut group_heading = |ui: &mut egui::Ui, title: &str| {
+                ui.add_space(10.0);
+                ui.label(egui::RichText::new(title).size(10.0).color(weak_col));
+                ui.add_space(4.0);
+            };
+            for theme in self.available_themes.iter() {
+                let is_builtin = crate::theme::store::is_embedded_id(&theme.id);
+                if !is_builtin && !shown_custom_heading {
+                    shown_custom_heading = true;
+                    group_heading(ui, &self.texts.settings.buttons.user_group);
+                }
+                if is_builtin && !shown_builtin_heading {
+                    shown_builtin_heading = true;
+                    group_heading(ui, &self.texts.settings.buttons.builtin_group);
+                }
+                let selected = theme.id == current;
+                // Entry = title line above a shortened preview strip.
+                let title_h = 22.0;
+                let preview_h = 36.0;
+                let row_h = title_h + preview_h;
+                let (rect, _) = ui.allocate_exact_size(
+                    egui::vec2(ui.available_width(), row_h),
+                    egui::Sense::hover(),
+                );
+                ui.add_space(4.0); // gap between entries
+                                   // Accent bar width (the selected-theme highlight strip).
+                let accent_w = 2.0;
+                // Clickable/hover region: from just after the accent bar to
+                // the terminal preview's right border — the row must not be
+                // triggerable beyond the preview blocks.
+                let content_left = rect.min.x + accent_w;
+                let preview_w_total = (rect.width() - accent_w) * 0.42 * 2.0;
+                let clickable_rect = egui::Rect::from_min_max(
+                    egui::pos2(content_left, rect.min.y),
+                    egui::pos2((content_left + preview_w_total).min(rect.max.x), rect.max.y),
+                );
+                let hovered = clickable_rect.contains(
+                    ui.input(|i| i.pointer.hover_pos())
+                        .unwrap_or(rect.min - egui::vec2(1.0, 1.0)),
+                );
+
+                // Register the row click FIRST so it sits below the
+                // action buttons in the hit-test order.
+                let row_resp = ui.interact(
+                    clickable_rect,
+                    egui::Id::new((&theme.id, "row-click")),
+                    egui::Sense::click(),
+                );
+                if row_resp.clicked() {
+                    pick = Some(theme.id.clone());
+                }
+
+                // Selected/hover overlay + accent bar.
+                if selected {
+                    ui.painter().rect_filled(rect, 0.0, sel_bg);
+                    ui.painter().rect_filled(
+                        egui::Rect::from_min_max(
+                            rect.min,
+                            egui::pos2(rect.min.x + accent_w, rect.max.y),
+                        ),
+                        0.0,
+                        accent_col,
+                    );
+                } else if hovered {
+                    ui.painter().rect_filled(rect, 0.0, hover_bg);
+                }
+
+                // Title line: theme name (+ builtin tag) above the preview,
+                // followed by the ANSI palette dots on the same line.
+                let name = if is_builtin {
+                    format!("{} ({})", theme.name, builtin_tag)
+                } else {
+                    theme.name.clone()
+                };
+                let title_cy = rect.min.y + title_h / 2.0;
+                let dot_r = 3.0;
+                let colors = [
+                    theme.terminal.normal.red.to_egui(),
+                    theme.terminal.normal.green.to_egui(),
+                    theme.terminal.normal.yellow.to_egui(),
+                    theme.terminal.normal.blue.to_egui(),
+                    theme.terminal.bright.magenta.to_egui(),
+                    theme.terminal.bright.cyan.to_egui(),
+                    theme.terminal.cursor.to_egui(),
+                ];
+
+                // Preview strip area (below the title), shifted right by the
+                // accent-bar width so the UI preview no longer covers the
+                // selected-theme highlight strip.
+                let preview_rect = egui::Rect::from_min_max(
+                    egui::pos2(rect.min.x + accent_w, rect.min.y + title_h),
+                    rect.max,
+                );
+                // The action buttons moved up to the title line, so the
+                // preview strip no longer reserves a right-hand button
+                // column and spans the full row width.
+                let content = preview_rect;
+                // Preview width: 0.42 of the content width each. Both halves
+                // are anchored left.
+                let preview_w = content.width() * 0.42;
+
+                // Resolve a FontId for a theme-configured font NAME. The
+                // LIST ITEM's theme config must fully decide the preview:
+                //  - a registered named font -> that font's own family
+                //  - a generic name ("system-ui"/"monospace") -> the CLEAN
+                //    default-stack snapshot, NOT the live generic family
+                //    (whose head is the ACTIVE theme's font — using it
+                //    would make every preview follow the active theme).
+                let resolve_font =
+                    |name: &str, size: f32, generic: egui::FontFamily| -> egui::FontId {
+                        if name.is_empty() || name == "system-ui" || name == "monospace" {
+                            let fam = if generic == egui::FontFamily::Monospace {
+                                preview_mono_family()
+                            } else {
+                                preview_prop_family()
+                            };
+                            return egui::FontId::new(size, fam);
+                        }
+                        egui::FontId::new(
+                            size,
+                            egui::FontFamily::Name(std::sync::Arc::from(name.to_owned())),
+                        )
+                    };
+                // Title line: theme name rendered with THIS theme's own
+                // UI font (not the active theme's), followed by the ANSI
+                // palette dots on the same line.
+                let ui_font_name_for_title = theme
+                    .app
+                    .ui_font_families
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| "system-ui".into());
+                let title_font = resolve_font(
+                    &ui_font_name_for_title,
+                    11.0,
+                    egui::FontFamily::Proportional,
+                );
+                let name_galley =
+                    ui.fonts(|f| f.layout_no_wrap(name.clone(), title_font, text_col));
+                ui.painter().galley(
+                    egui::pos2(rect.min.x + 8.0, title_cy - name_galley.size().y / 2.0),
+                    name_galley.clone(),
+                    text_col,
+                );
+                {
+                    let mut dx = rect.min.x + 8.0 + name_galley.size().x + 10.0;
+                    for c in colors {
+                        ui.painter()
+                            .circle_filled(egui::pos2(dx + dot_r, title_cy), dot_r, c);
+                        dx += dot_r * 2.0 + 2.0;
+                    }
+                }
+
+                // --- Left half: UI-style preview labeled "OpenNex UI:". ---
+                let ui_half = egui::Rect::from_min_max(
+                    content.min,
+                    egui::pos2(content.min.x + preview_w, content.max.y),
+                );
+                let p = ui.painter();
+                p.rect_filled(ui_half, 0.0, theme.app.app_bg.to_egui());
+                let ui_font_name = theme
+                    .app
+                    .ui_font_families
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| "system-ui".into());
+                // Two lines at FIXED fractional centers (33% / 66% of the
+                // block height): changing fonts can no longer shift the
+                // lines up or down.
+                let label_font_size = theme.app.ui_font_size.min(12.0);
+                let meta_font_size = 9.0;
+                let line1_cy = ui_half.min.y + ui_half.height() * 0.33;
+                let line2_cy = ui_half.min.y + ui_half.height() * 0.66;
+                ui.painter().text(
+                    egui::pos2(ui_half.min.x + 8.0, line1_cy),
+                    egui::Align2::LEFT_CENTER,
+                    "OpenNex UI:",
+                    resolve_font(
+                        &ui_font_name,
+                        label_font_size,
+                        egui::FontFamily::Proportional,
+                    ),
+                    theme.app.text.to_egui(),
+                );
+                ui.painter().text(
+                    egui::pos2(ui_half.min.x + 8.0, line2_cy),
+                    egui::Align2::LEFT_CENTER,
+                    format!("{} {:.0}px", ui_font_name, theme.app.ui_font_size),
+                    resolve_font(
+                        &ui_font_name,
+                        meta_font_size,
+                        egui::FontFamily::Proportional,
+                    ),
+                    theme.app.weak_text.to_egui(),
+                );
+
+                // --- Right half: terminal demo labeled "Terminal:". Same
+                // width as the UI half (not stretched to the row edge). ---
+                let term_half = egui::Rect::from_min_max(
+                    egui::pos2(ui_half.max.x, content.min.y),
+                    egui::pos2(ui_half.max.x + preview_w, content.max.y),
+                );
+                let term_bg = theme.terminal.background.to_egui();
+                p.rect_filled(term_half, 0.0, term_bg);
+                let term_font_name = theme
+                    .typography
+                    .terminal_font_families
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| "monospace".into());
+                let term_size = theme.typography.terminal_font_size.min(12.0);
+                let cmd_font =
+                    resolve_font(&term_font_name, term_size, egui::FontFamily::Monospace);
+                let cmd_galley = ui.fonts(|f| {
+                    f.layout_no_wrap(
+                        "Terminal:".into(),
+                        cmd_font,
+                        theme.terminal.foreground.to_egui(),
+                    )
+                });
+                // Fixed fractional line centers (33% / 66%): font changes
+                // cannot shift the lines vertically.
+                let line1_cy = term_half.min.y + term_half.height() * 0.33;
+                let line2_cy = term_half.min.y + term_half.height() * 0.66;
+                let cmd_pos =
+                    egui::pos2(term_half.min.x + 8.0, line1_cy - cmd_galley.size().y / 2.0);
+                ui.painter().galley(
+                    cmd_pos,
+                    cmd_galley.clone(),
+                    theme.terminal.foreground.to_egui(),
+                );
+                ui.painter().text(
+                    egui::pos2(term_half.min.x + 8.0, line2_cy),
+                    egui::Align2::LEFT_CENTER,
+                    format!(
+                        "$ ls -la  {} {:.0}px",
+                        term_font_name, theme.typography.terminal_font_size
+                    ),
+                    resolve_font(&term_font_name, 9.0, egui::FontFamily::Monospace),
+                    theme.terminal.dim_foreground.to_egui(),
+                );
+
+                // --- Right: per-row action buttons on the TITLE line,
+                // vertically centered with the theme name and palette dots;
+                // their right edge aligns with the terminal preview's
+                // right border.
+                let btn_y = title_cy - 9.0;
+                let mut x = term_half.max.x;
+                let mut btn =
+                    |ui: &mut egui::Ui, x: f32, y: f32, glyph: &str, id: egui::Id| -> bool {
+                        let r = egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(22.0, 18.0));
+                        let resp = ui.interact(r, id, egui::Sense::click());
+                        let g = ui.fonts(|f| {
+                            f.layout_no_wrap(
+                                glyph.to_string(),
+                                egui::FontId::proportional(12.0),
+                                text_col,
+                            )
+                        });
+                        ui.painter()
+                            .galley(r.center() - g.size() / 2.0, g, text_col);
+                        resp.clicked()
+                    };
+                // Action buttons laid out right-to-left at fixed offsets:
+                // [delete?] [edit?] [new(+)] — 24px pitch, no overlap.
+                if !is_builtin
+                    && btn(
+                        ui,
+                        x - 22.0,
+                        btn_y,
+                        egui_phosphor::regular::TRASH,
+                        egui::Id::new((&theme.id, "row-del")),
+                    )
+                {
+                    delete_target = Some(theme.id.clone());
+                }
+                if !is_builtin {
+                    x -= 24.0;
+                    if btn(
+                        ui,
+                        x - 22.0,
+                        btn_y,
+                        egui_phosphor::regular::PENCIL_SIMPLE,
+                        egui::Id::new((&theme.id, "row-ed")),
+                    ) {
+                        edit_target = Some(theme.id.clone());
+                    }
+                    x -= 24.0;
+                }
+                if btn(
+                    ui,
+                    x - 22.0,
+                    btn_y,
+                    egui_phosphor::regular::PLUS,
+                    egui::Id::new((&theme.id, "row-new")),
+                ) {
+                    copy_target = Some(theme.id.clone());
+                }
+            }
+        });
+
+        // Handle per-row actions.
+        if let Some(id) = pick {
+            self.try_switch_theme(ctx, id);
+        }
+        if let Some(id) = edit_target {
+            if let Some(theme) = self.available_themes.iter().find(|t| t.id == id).cloned() {
+                self.theme_edit = theme;
+                self.theme_edit_origin = Some(id);
+                self.theme_editor_open = true;
+            }
+        }
+        if let Some(id) = copy_target {
+            let themes_root = crate::theme::store::themes_dir(&app_data_dir());
+            let name = format!(
+                "{} (copy)",
+                self.available_themes
+                    .iter()
+                    .find(|t| t.id == id)
+                    .map(|t| t.name.clone())
+                    .unwrap_or_default()
+            );
+            match crate::theme::store::copy_theme(&themes_root, &id, &name) {
+                Ok(new_theme) => {
+                    self.refresh_themes(&themes_root);
+                    self.switch_theme_by_id(ctx, &new_theme.id);
+                    // The new theme sits at the top of the list (user themes
+                    // first); scroll the list back to the top.
+                    ui.ctx().memory_mut(|m| {
+                        m.data
+                            .insert_temp(egui::Id::new("theme_list_scroll_top"), true)
+                    });
+                }
+                Err(e) => self.theme_message = Some(Err(e.to_string())),
+            }
+        }
+        if let Some(id) = delete_target {
+            if let Some(theme) = self.available_themes.iter().find(|t| t.id == id) {
+                self.theme_edit = theme.clone();
+                self.theme_dialog.show_delete_confirm = true;
+            }
+        }
+    }
+
     fn rebuild_fonts(&self, ctx: &egui::Context) {
         let system_fonts = scan_system_fonts();
         let mut fonts = egui::FontDefinitions::default();
@@ -2150,13 +3049,61 @@ impl App {
                 mono_family.push(name.clone());
             }
         }
+        // Also register every scanned font under its OWN named family so
+        // the theme-list previews can render each theme's configured font
+        // exactly, independent of which font the ACTIVE theme puts at the
+        // head of the generic Proportional/Monospace families.
+        // Snapshot the CLEAN generic families (before the active theme's
+        // fonts are injected at their heads) as reserved preview families.
+        // Theme previews resolve generic names ("system-ui"/"monospace") to
+        // these snapshots so switching the active theme never changes how
+        // other themes' previews render.
+        let clean_prop = fonts
+            .families
+            .get(&egui::FontFamily::Proportional)
+            .cloned()
+            .unwrap_or_default();
+        let clean_mono = fonts
+            .families
+            .get(&egui::FontFamily::Monospace)
+            .cloned()
+            .unwrap_or_default();
+        fonts
+            .families
+            .insert(preview_prop_family(), clean_prop.clone());
+        fonts
+            .families
+            .insert(preview_mono_family(), clean_mono.clone());
+        // Register every scanned font under its OWN named family WITH a
+        // fallback chain (the font itself + the clean default stack): a
+        // named font may lack Latin/CJK glyphs entirely (e.g. symbol or
+        // single-script fonts), which would otherwise render theme names
+        // and previews as blank.
+        for name in &registered_names {
+            let mut chain = vec![name.clone()];
+            for fallback in clean_prop.iter() {
+                if !chain.contains(fallback) {
+                    chain.push(fallback.clone());
+                }
+            }
+            fonts.families.insert(
+                egui::FontFamily::Name(std::sync::Arc::from(name.as_str())),
+                chain,
+            );
+        }
 
         // Theme font choices: UI font goes first in Proportional, terminal
         // font first in Monospace. Generic families ("system-ui",
         // "monospace") map to the egui defaults already at the tail of the
-        // family list, so they're skipped here.
-        let ui_font = self
-            .active_theme
+        // family list, so they're skipped here. While the theme editor is
+        // open the DRAFT fonts are installed so the live preview shows the
+        // fonts being edited.
+        let font_source = if self.theme_editor_open {
+            &self.theme_edit
+        } else {
+            &self.active_theme
+        };
+        let ui_font = font_source
             .app
             .ui_font_families
             .first()
@@ -2167,8 +3114,7 @@ impl App {
                 family.insert(0, ui_font);
             }
         }
-        let term_font = self
-            .active_theme
+        let term_font = font_source
             .typography
             .terminal_font_families
             .first()
@@ -2187,14 +3133,20 @@ impl App {
     }
 
     fn refresh_themes(&mut self, themes_root: &std::path::Path) {
-        let mut themes = crate::theme::store::load_user_themes(themes_root).unwrap_or_default();
-        let mut themes = crate::theme::store::load_user_themes(themes_root).unwrap_or_default();
+        let mut user = crate::theme::store::load_user_themes(themes_root).unwrap_or_default();
+        // Custom-theme block: newest first (creation time, falling back to
+        // name order for legacy files without a timestamp).
+        user.sort_by(|a, b| {
+            b.created_at
+                .cmp(&a.created_at)
+                .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+        });
+        let mut themes = user;
         for embedded in crate::theme::store::embedded_themes().unwrap_or_default() {
             if !themes.iter().any(|t| t.id == embedded.id) {
                 themes.push(embedded);
             }
         }
-        themes.sort_by_key(|t| t.name.to_lowercase());
         self.available_themes = themes;
     }
 
@@ -2405,11 +3357,11 @@ impl App {
 /// the about window has been closed. The button click is recorded in egui
 /// memory under the "restart_popup_choice" id so the App update loop can
 /// read and clear it without borrowing self.
-fn render_restart_popup(ctx: &egui::Context) {
+fn render_restart_popup(ctx: &egui::Context, texts: &crate::i18n::Texts) {
     let mut open = true;
     let mut restart = false;
     let mut cancel = false;
-    egui::Window::new("更新已准备就绪")
+    egui::Window::new(&texts.update.restart_title)
         .open(&mut open)
         .resizable(false)
         .collapsible(false)
@@ -2417,13 +3369,13 @@ fn render_restart_popup(ctx: &egui::Context) {
         .pivot(egui::Align2::CENTER_CENTER)
         .show(ctx, |ui| {
             ui.vertical_centered(|ui| {
-                ui.label("新版本已下载，是否立即重启应用？");
+                ui.label(&texts.update.restart_body);
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
-                    if ui.button("重启").clicked() {
+                    if ui.button(&texts.update.restart_confirm).clicked() {
                         restart = true;
                     }
-                    if ui.button("取消").clicked() {
+                    if ui.button(&texts.theme_editor.cancel).clicked() {
                         cancel = true;
                     }
                 });
@@ -2453,6 +3405,7 @@ impl eframe::App for App {
                 self.renaming_terminal.is_some(),
             ) && !any_theme_dialog
                 && !self.show_settings
+                && self.pw_popup.is_none()
             {
                 ctx.memory_mut(|memory| {
                     memory.set_focus_lock_filter(id, egui_term::terminal_focus_event_filter())
@@ -2757,6 +3710,16 @@ impl eframe::App for App {
             }
         }
 
+        // Global UI zoom (Ctrl +/- by default, user-configurable).
+        if !workspace_renaming && check_shortcut(ctx, &binds, "zoom_in") {
+            let z = ctx.zoom_factor();
+            ctx.set_zoom_factor((z + 0.1).min(3.0));
+        }
+        if !workspace_renaming && check_shortcut(ctx, &binds, "zoom_out") {
+            let z = ctx.zoom_factor();
+            ctx.set_zoom_factor((z - 0.1).max(0.5));
+        }
+
         egui::TopBottomPanel::top("menu_bar")
             .frame(
                 egui::Frame::none()
@@ -2772,7 +3735,57 @@ impl eframe::App for App {
             .show(ctx, |ui| {
                 egui::menu::bar(ui, |ui| {
                     let fg_menu = self.active_theme.app.menu_fg.to_egui();
-                    ui.menu_button(self.texts.menu.file.clone(), |ui| {
+
+                    // Unified menu-bar button for ALL entries (dropdown
+                    // menus and plain buttons): same text size, padding,
+                    // square corners, transparent fill with hover highlight.
+                    let hover_bg = self.active_theme.app.hover.to_egui();
+                    let menu_btn = |ui: &mut egui::Ui, label: &str| -> egui::Response {
+                        // Fully hand-drawn button: the hover background is
+                        // painted BEFORE the text so it can never cover the
+                        // label (Button + later rect_filled hid the text).
+                        let galley = ui.fonts(|f| {
+                            f.layout_no_wrap(
+                                label.to_string(),
+                                egui::FontId::proportional(12.0),
+                                fg_menu,
+                            )
+                        });
+                        let pad = 8.0;
+                        let size = egui::vec2(galley.size().x + pad * 2.0, galley.size().y + 8.0);
+                        let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
+                        if resp.contains_pointer() {
+                            ui.painter().rect_filled(rect, 0.0, hover_bg);
+                        }
+                        ui.painter()
+                            .galley(rect.center() - galley.size() / 2.0, galley, fg_menu);
+                        resp
+                    };
+                    // Dropdown wrapper: the visible button + the popup menu
+                    // share one hit area (invisible overlay Button drives
+                    // egui's BarState so styling stays fully ours).
+                    let mut dropdown =
+                        |ui: &mut egui::Ui,
+                         label: &str,
+                         menu_id: &str,
+                         add_contents: &mut dyn FnMut(&mut egui::Ui)| {
+                            let btn = menu_btn(ui, label);
+                            let _ = btn;
+                            let mut bar =
+                                egui::menu::BarState::load(ui.ctx(), egui::Id::new(menu_id));
+                            // Re-use the same response via an overlay button so
+                            // egui's menu logic tracks the exact same rect.
+                            let overlay_resp = ui.interact(
+                                btn.rect,
+                                egui::Id::new((menu_id, "hit")),
+                                egui::Sense::click(),
+                            );
+                            bar.bar_menu(&overlay_resp, |ui| add_contents(ui));
+                            bar.store(ui.ctx(), egui::Id::new(menu_id));
+                        };
+
+                    let label = self.texts.menu.workspace.clone();
+                    dropdown(ui, &label, "menu_workspace", &mut |ui| {
                         if ui.button(self.texts.file_menu.save.clone()).clicked() {
                             self.save_scene();
                             ui.close_menu();
@@ -2789,7 +3802,8 @@ impl eframe::App for App {
                             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                         }
                     });
-                    ui.menu_button(self.texts.menu.view.clone(), |ui| {
+                    let label = self.texts.menu.view.clone();
+                    dropdown(ui, &label, "menu_view", &mut |ui| {
                         if let Some(tree) = self.dock_states.get_mut(&self.active_panel) {
                             let active_tab = tree.find_active_focused().map(|(_, t)| t.clone());
                             if let Some(ref tab) = active_tab {
@@ -2825,26 +3839,8 @@ impl eframe::App for App {
                             ui.close_menu();
                         }
                     });
-                    ui.menu_button(self.texts.menu.language.clone(), |ui| {
-                        let current_code = self.settings.language.clone();
-                        let languages = self.available_languages.clone();
-                        // Auto-fit: size submenu to the longest language label.
-                        let longest = languages
-                            .iter()
-                            .map(|(_, n)| n.chars().count())
-                            .max()
-                            .unwrap_or(8);
-                        let char_w = ui.fonts(|f| f.row_height(&egui::FontId::proportional(13.0)));
-                        ui.set_min_width((longest as f32) * char_w * 0.55 + 32.0);
-                        for (code, display_name) in &languages {
-                            let selected = *code == current_code;
-                            if ui.selectable_label(selected, display_name).clicked() {
-                                self.switch_language(code);
-                                ui.close_menu();
-                            }
-                        }
-                    });
-                    ui.menu_button(self.texts.menu.theme.clone(), |ui| {
+                    let label = self.texts.menu.theme.clone();
+                    dropdown(ui, &label, "menu_theme", &mut |ui| {
                         ui.set_min_width(120.0);
                         ui.set_max_width(180.0);
                         let current = self.settings.theme_id.clone();
@@ -2862,46 +3858,43 @@ impl eframe::App for App {
                                 }
                             });
                     });
+                    let label = self.texts.menu.language.clone();
+                    dropdown(ui, &label, "menu_language", &mut |ui| {
+                        let current_code = self.settings.language.clone();
+                        let languages = self.available_languages.clone();
+                        let longest = languages
+                            .iter()
+                            .map(|(_, n)| n.chars().count())
+                            .max()
+                            .unwrap_or(8);
+                        let char_w = ui.fonts(|f| f.row_height(&egui::FontId::proportional(13.0)));
+                        ui.set_min_width((longest as f32) * char_w * 0.55 + 32.0);
+                        for (code, display_name) in &languages {
+                            let selected = *code == current_code;
+                            if ui.selectable_label(selected, display_name).clicked() {
+                                self.switch_language(code);
+                                ui.close_menu();
+                            }
+                        }
+                    });
 
-                    // Settings and About as regular menu-bar entries.
-                    if ui
-                        .add(
-                            egui::Button::new(
-                                egui::RichText::new(&self.texts.about.menu_label)
-                                    .color(fg_menu)
-                                    .size(12.0),
-                            )
-                            .fill(egui::Color32::TRANSPARENT)
-                            .stroke(egui::Stroke::NONE),
-                        )
-                        .clicked()
-                    {
-                        self.show_about = true;
-                    }
-                    if ui
-                        .add(
-                            egui::Button::new(
-                                egui::RichText::new(&self.texts.view_menu.settings)
-                                    .color(fg_menu)
-                                    .size(12.0),
-                            )
-                            .fill(egui::Color32::TRANSPARENT)
-                            .stroke(egui::Stroke::NONE),
-                        )
-                        .clicked()
-                    {
+                    // Settings and About: same button, no dropdown.
+                    if menu_btn(ui, &self.texts.view_menu.settings).clicked() {
                         self.show_settings = true;
                         self.settings_edit = self.settings.clone();
                         self.theme_edit = self.active_theme.clone();
                         self.theme_message = None;
                         self.theme_dirty = false;
                     }
+                    if menu_btn(ui, &self.texts.about.menu_label).clicked() {
+                        self.show_about = true;
+                    }
 
-                    // Right-aligned extras: active theme name only.
+                    // Right-aligned extras: app version.
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let weak = self.active_theme.app.weak_text.to_egui();
                         ui.label(
-                            egui::RichText::new(self.active_theme.name.as_str())
+                            egui::RichText::new(format!("v{}", env!("CARGO_PKG_VERSION")))
                                 .color(weak)
                                 .size(11.0),
                         );
@@ -2910,295 +3903,355 @@ impl eframe::App for App {
             });
 
         if self.show_settings {
+            // Expire the applied toast.
+            if let Some((_, until)) = self.settings_applied_toast {
+                if std::time::Instant::now() >= until {
+                    self.settings_applied_toast = None;
+                }
+            }
             let mut open = self.show_settings;
-            let ws = &self.settings_edit.settings_window;
-            egui::Window::new(&self.texts.settings.title)
-                .open(&mut open)
-                .resizable(true)
-                .default_pos(screen_center(ctx))
-                .pivot(egui::Align2::CENTER_CENTER)
-                .default_size([ws.width.max(760.0), ws.height.max(540.0)])
-                .min_width(680.0)
-                .min_height(420.0)
-                .frame(egui::Frame::window(&ctx.style()).inner_margin(egui::Margin::same(8)))
+            let was_open = self.settings_window_open;
+            self.settings_window_open = true;
+            let screen = ctx.screen_rect();
+            // Fixed-width window (680px); only the height persists (clamped
+            // to the screen). Nested panels inside a Window misbehave, so
+            // the layout below is plain rect allocation: fixed nav column on
+            // the left, content filling the remaining width.
+            let mut ws = self.settings_edit.settings_window.clone();
+            ws.width = 680.0;
+            // Clamp with guarded bounds: after UI zoom the logical screen
+            // can be smaller than the window, which would otherwise make
+            // clamp(min, negative-max) panic.
+            ws.height = ws.height.clamp(200.0, (screen.height() - 40.0).max(200.0));
+            if !was_open {
+                ws.x = screen.center().x - ws.width / 2.0;
+                ws.y = screen.center().y - ws.height / 2.0;
+            }
+            ws.x = ws.x.clamp(
+                screen.left(),
+                (screen.right() - ws.width).max(screen.left()),
+            );
+            ws.y = ws.y.clamp(
+                screen.top(),
+                (screen.bottom() - ws.height).max(screen.top()),
+            );
+            let texts = self.texts.clone();
+            let nav_w = 124.0;
+            // Stateless custom window (Area + Frame + manual title bar):
+            // egui::Window keeps persistent state that has repeatedly
+            // fought our fixed size, so we render the settings window
+            // ourselves. Content is clipped to the frame rect, so nothing
+            // can ever render outside the window.
+            let mut close_clicked = false;
+            let title_h = 32.0;
+            let win_rect =
+                egui::Rect::from_min_size(egui::pos2(ws.x, ws.y), egui::vec2(ws.width, ws.height));
+            let layer_id = egui::LayerId::new(egui::Order::Middle, egui::Id::new("settings_area"));
+            egui::Area::new(egui::Id::new("settings_area"))
+                .order(egui::Order::Middle)
+                .fixed_pos(win_rect.min)
+                .interactable(true)
                 .show(ctx, |ui| {
-                    // Allocate two columns. allocate_ui_with_layout reserves
-                    // the rect so subsequent content cannot overlap.
-                    let nav_width: f32 = 140.0;
-                    let nav_size = egui::vec2(nav_width, ui.available_height());
-                    ui.allocate_ui_with_layout(
-                        nav_size,
-                        egui::Layout::top_down(egui::Align::LEFT),
-                        |ui| {
-                            ui.add_space(4.0);
-                            let nav_items = [
-                                &self.texts.settings.nav.general,
-                                &self.texts.settings.nav.themes,
-                                &self.texts.settings.nav.shortcuts,
-                                &self.texts.settings.nav.lock,
-                            ];
-                            for (i, label) in nav_items.iter().enumerate() {
-                                let selected = self.settings_tab == i;
-                                let text = format!("  {}  ", label);
-                                if ui.selectable_label(selected, &text).clicked() {
-                                    self.settings_tab = i;
-                                }
+                    ui.set_clip_rect(win_rect.expand(24.0));
+                    // Window frame from the theme (fill, stroke, shadow,
+                    // corner radius) but with NO inner margin, so the title
+                    // bar background reaches the window edge like a native
+                    // title bar.
+                    let frame = egui::Frame::window(ui.style()).inner_margin(egui::Margin::same(0));
+                    frame.show(ui, |ui| {
+                        ui.set_min_size(egui::vec2(ws.width, ws.height));
+                        ui.set_max_size(egui::vec2(ws.width, ws.height));
+                        let full = ui.max_rect();
+                        // --- Title bar (egui-native look): centered title
+                        // text, hand-drawn X close button on the right with
+                        // hover-reactive stroke color, separator below. ---
+                        let title_rect = egui::Rect::from_min_max(
+                            full.min,
+                            egui::pos2(full.max.x, full.min.y + title_h),
+                        );
+                        let title_resp = ui.interact(
+                            title_rect,
+                            egui::Id::new("settings_title_bar"),
+                            egui::Sense::click_and_drag(),
+                        );
+                        ui.painter().rect_filled(
+                            title_rect,
+                            0.0,
+                            // Same header color as a topmost egui::Window
+                            // (the About window): widgets.open.weak_bg_fill.
+                            ui.visuals().widgets.open.weak_bg_fill,
+                        );
+                        // Close button: two line segments like egui's
+                        // `close_button`, colored by the interact style so
+                        // it brightens on hover like the About window's.
+                        {
+                            let icon_w = ui.spacing().icon_width;
+                            let size = egui::Vec2::splat(icon_w);
+                            let cb = egui::Rect::from_center_size(
+                                egui::pos2(
+                                    title_rect.max.x - title_rect.height() / 2.0,
+                                    title_rect.center().y,
+                                ),
+                                size,
+                            );
+                            let resp = ui.interact(
+                                cb,
+                                egui::Id::new("settings_close"),
+                                egui::Sense::click(),
+                            );
+                            let visuals = ui.style().interact(&resp);
+                            let r = cb.shrink(2.0).expand(visuals.expansion);
+                            let stroke = visuals.fg_stroke;
+                            ui.painter() // \
+                                .line_segment([r.left_top(), r.right_bottom()], stroke);
+                            ui.painter() // /
+                                .line_segment([r.right_top(), r.left_bottom()], stroke);
+                            if resp.clicked() {
+                                close_clicked = true;
                             }
-                            ui.add_space(8.0);
-                            ui.separator();
-                        },
-                    );
+                        }
+                        // Title text: same font and color as egui::Window's
+                        // title bar (the About window) — Heading style via
+                        // the current text-style ladder, text_color().
+                        let title_font = ui
+                            .style()
+                            .text_styles
+                            .get(&egui::TextStyle::Heading)
+                            .cloned()
+                            .unwrap_or_else(|| egui::FontId::proportional(14.0));
+                        ui.painter().text(
+                            title_rect.center(),
+                            egui::Align2::CENTER_CENTER,
+                            &texts.settings.title,
+                            title_font,
+                            ui.visuals().text_color(),
+                        );
+                        // Drag to move the window.
+                        if title_resp.dragged() {
+                            let delta = title_resp.drag_delta();
+                            let p = win_rect.min + delta;
+                            let p = egui::pos2(
+                                p.x.clamp(
+                                    screen.left(),
+                                    (screen.right() - ws.width).max(screen.left()),
+                                ),
+                                p.y.clamp(
+                                    screen.top(),
+                                    (screen.bottom() - ws.height).max(screen.top()),
+                                ),
+                            );
+                            self.settings_edit.settings_window.x = p.x;
+                            self.settings_edit.settings_window.y = p.y;
+                        }
 
-                    // Right content fills the rest of the window.
-                    ui.vertical(|ui| {
-                        ui.add_space(4.0);
-                        match self.settings_tab {
-                            0 => {
-                                ui.checkbox(
-                                    &mut self.settings_edit.auto_copy_selection,
-                                    &self.texts.settings.general.auto_copy,
+                        let body = egui::Rect::from_min_max(
+                            egui::pos2(full.min.x, title_rect.max.y),
+                            full.max,
+                        );
+                        let nav_rect = egui::Rect::from_min_max(
+                            body.min,
+                            egui::pos2(body.min.x + nav_w, body.max.y),
+                        );
+                        let content_rect = egui::Rect::from_min_max(
+                            egui::pos2(nav_rect.max.x, body.min.y),
+                            body.max,
+                        );
+
+                        // ---- Left nav column (plain rect) ----
+                        let nav_ui = &mut ui.new_child(
+                            egui::UiBuilder::new()
+                                .max_rect(nav_rect)
+                                .layout(egui::Layout::top_down(egui::Align::Min))
+                                .id_salt("settings_nav_ui"),
+                        );
+                        nav_ui.set_clip_rect(nav_rect);
+                        nav_ui.painter().rect_filled(
+                            nav_rect,
+                            0.0,
+                            self.active_theme.app.menu_bg.to_egui(),
+                        );
+                        nav_ui.painter().rect_filled(
+                            egui::Rect::from_min_max(
+                                egui::pos2(nav_rect.max.x - 1.0, nav_rect.min.y),
+                                nav_rect.max,
+                            ),
+                            0.0,
+                            self.active_theme.app.sidebar_border.to_egui(),
+                        );
+                        // Divider under the title bar, drawn AFTER the nav
+                        // background so the nav column's fill (which starts
+                        // right at the divider's y) doesn't cover the line's
+                        // anti-aliased pixels above it.
+                        ui.painter().hline(
+                            title_rect.x_range(),
+                            title_rect.bottom(),
+                            (1.0, self.active_theme.app.sidebar_border.to_egui()),
+                        );
+                        let nav_fg = self.active_theme.app.menu_fg.to_egui();
+                        let nav_weak = self.active_theme.app.weak_text.to_egui();
+                        let nav_sel_bg = self.active_theme.app.active.to_egui();
+                        let accent = self.active_theme.app.accent.to_egui();
+                        let item_font = egui::FontId::proportional(12.0);
+                        let current = SettingsPage::from_u8(self.settings_tab);
+
+                        let mut nav_item =
+                            |ui: &mut egui::Ui, label: &str, page: SettingsPage| -> bool {
+                                let id = egui::Id::new(("settings_nav", page as u8));
+                                let (rect, _) = ui.allocate_exact_size(
+                                    egui::vec2(ui.available_width(), 28.0),
+                                    egui::Sense::click(),
                                 );
-                                ui.add_space(8.0);
-                                ui.weak(self.texts.settings.general.scene_info.as_str());
-                                ui.weak(self.texts.settings.general.scene_path.as_str());
-                                ui.weak(self.texts.settings.general.templates_path.as_str());
-                                ui.add_space(8.0);
-                                ui.weak(self.texts.settings.general.history_section.as_str());
-                                ui.horizontal(|ui| {
-                                    ui.label(&self.texts.settings.general.max_history);
-                                    ui.add(
-                                        egui::DragValue::new(&mut self.settings_edit.max_history)
-                                            .range(10..=10000),
+                                let selected = current == page;
+                                if selected {
+                                    ui.painter().rect_filled(rect, 0.0, nav_sel_bg);
+                                    ui.painter().rect_filled(
+                                        egui::Rect::from_min_max(
+                                            rect.min,
+                                            egui::pos2(rect.min.x + 2.0, rect.max.y),
+                                        ),
+                                        0.0,
+                                        accent,
                                     );
-                                });
-                                ui.horizontal(|ui| {
-                                    ui.label(&self.texts.settings.general.scrollback);
-                                    ui.add(
-                                        egui::DragValue::new(&mut self.settings_edit.scrollback)
-                                            .range(100..=50000),
+                                } else if rect.contains(
+                                    ui.input(|i| i.pointer.hover_pos())
+                                        .unwrap_or(rect.min - egui::vec2(1.0, 1.0)),
+                                ) {
+                                    ui.painter().rect_filled(
+                                        rect,
+                                        0.0,
+                                        self.active_theme.app.hover.to_egui(),
                                     );
-                                });
-                                if ui
-                                    .button(&self.texts.settings.general.clear_all_history)
-                                    .clicked()
-                                {
-                                    self.pending_clear_history = true;
                                 }
-                            }
-                            1 => {
-                                let is_builtin =
-                                    crate::theme::store::is_embedded_id(&self.theme_edit.id);
-                                if is_builtin {
-                                    ui.weak(
-                                        egui::RichText::new(format!(
-                                            "{}（保存时将自动创建副本）",
-                                            crate::theme::builtin_readonly_text()
-                                        ))
-                                        .small(),
-                                    );
-                                    ui.add_space(4.0);
-                                }
-                                let any_dialog_open = self.theme_dialog.show_copy_dialog
-                                    || self.theme_dialog.show_new_dialog
-                                    || self.theme_dialog.show_rename_dialog
-                                    || self.theme_dialog.show_delete_confirm
-                                    || self.theme_dialog.show_switch_confirm;
+                                ui.painter().text(
+                                    egui::pos2(rect.min.x + 12.0, rect.center().y),
+                                    egui::Align2::LEFT_CENTER,
+                                    label,
+                                    item_font.clone(),
+                                    if selected { nav_fg } else { nav_weak },
+                                );
+                                let resp = ui.interact(rect, id, egui::Sense::click());
+                                resp.clicked()
+                            };
 
-                                if any_dialog_open {
-                                    if let Some(Err(msg)) = &self.theme_message {
-                                        ui.colored_label(
-                                            egui::Color32::from_rgb(230, 120, 120),
-                                            msg,
-                                        );
-                                    }
-                                    if let Some(Ok(msg)) = &self.theme_message {
-                                        ui.colored_label(
-                                            egui::Color32::from_rgb(120, 200, 130),
-                                            msg,
-                                        );
-                                    }
-                                } else {
-                                    egui::ScrollArea::vertical()
-                                        .id_salt("appearance_scroll")
-                                        .show(ui, |ui| {
-                                            let mut draft = self.theme_edit.clone();
-                                            // Built-in generic families first,
-                                            // then every detected system font.
-                                            let mut font_choices: Vec<String> =
-                                                vec!["system-ui".into(), "monospace".into()];
-                                            for f in &self.system_fonts {
-                                                if !font_choices.contains(f) {
-                                                    font_choices.push(f.clone());
+                        if nav_item(nav_ui, &texts.settings.nav.general, SettingsPage::General) {
+                            self.settings_tab = SettingsPage::General as u8;
+                        }
+                        if nav_item(
+                            nav_ui,
+                            &texts.settings.nav.shortcuts,
+                            SettingsPage::Shortcuts,
+                        ) {
+                            self.settings_tab = SettingsPage::Shortcuts as u8;
+                        }
+                        if nav_item(nav_ui, &texts.settings.nav.lock, SettingsPage::Lock) {
+                            self.settings_tab = SettingsPage::Lock as u8;
+                        }
+                        if nav_item(nav_ui, &texts.settings.nav.themes, SettingsPage::Theme) {
+                            self.settings_tab = SettingsPage::Theme as u8;
+                        }
+
+                        // ---- Content column (plain rect, clipped) ----
+                        let content_ui = &mut ui.new_child(
+                            egui::UiBuilder::new()
+                                .max_rect(content_rect)
+                                .layout(egui::Layout::top_down(egui::Align::Min))
+                                .id_salt("settings_content_ui"),
+                        );
+                        content_ui.set_clip_rect(content_rect);
+                        let page = SettingsPage::from_u8(self.settings_tab);
+                        if page == SettingsPage::Theme {
+                            self.settings_page_theme(ctx, content_ui);
+                        } else {
+                            egui::ScrollArea::vertical()
+                                .id_salt("settings_content_scroll")
+                                .auto_shrink([false, false])
+                                .max_width(content_rect.width())
+                                .show(content_ui, |ui| {
+                                    ui.set_width(content_rect.width() - 36.0);
+                                    ui.add_space(20.0);
+                                    ui.horizontal(|ui| {
+                                        ui.add_space(18.0);
+                                        ui.vertical(|ui| {
+                                            ui.set_width(ui.available_width());
+                                            match page {
+                                                SettingsPage::General => {
+                                                    self.settings_page_general(ui)
                                                 }
-                                            }
-                                            let actions = crate::theme::ui::show_theme_section(
-                                                ui,
-                                                &mut draft,
-                                                &self.available_themes,
-                                                &font_choices,
-                                                is_builtin,
-                                                self.theme_dirty,
-                                                self.theme_editor_subtab,
-                                                &mut self.theme_dialog,
-                                            );
-                                            for action in actions {
-                                                self.handle_theme_action(
-                                                    ctx,
-                                                    action,
-                                                    draft.clone(),
-                                                );
-                                            }
-                                            if draft != self.theme_edit {
-                                                self.theme_edit = draft;
-                                                self.theme_dirty = true;
-                                                crate::theme::apply_theme_definition(
-                                                    ctx,
-                                                    &self.theme_edit,
-                                                );
+                                                SettingsPage::Shortcuts => {
+                                                    self.settings_page_shortcuts(ui)
+                                                }
+                                                SettingsPage::Lock => self.settings_page_lock(ui),
+                                                SettingsPage::Theme => unreachable!(),
                                             }
                                         });
-                                    if let Some(Err(msg)) = &self.theme_message {
-                                        ui.colored_label(
-                                            egui::Color32::from_rgb(230, 120, 120),
-                                            msg,
-                                        );
-                                    }
-                                    if let Some(Ok(msg)) = &self.theme_message {
-                                        ui.colored_label(
-                                            egui::Color32::from_rgb(120, 200, 130),
-                                            msg,
-                                        );
-                                    }
-                                }
-                            }
-                            2 => {
-                                ui.weak(self.texts.settings.shortcuts.hint.as_str());
-                                for id in shortcut_hint_ids() {
-                                    let label = shortcut_label_for(&self.texts, id).to_string();
-                                    ui.horizontal(|ui| {
-                                        ui.label(&label);
-                                        ui.with_layout(
-                                            egui::Layout::right_to_left(egui::Align::Center),
-                                            |ui| {
-                                                let text = if self.binding_recording.as_deref()
-                                                    == Some(id)
-                                                {
-                                                    "按下按键...".to_string()
-                                                } else if let Some(b) =
-                                                    self.settings_edit.key_binds.get(id)
-                                                {
-                                                    shortcut_display(b)
-                                                } else {
-                                                    self.texts.settings.shortcuts.not_set.clone()
-                                                };
-                                                if ui.button(text).clicked() {
-                                                    self.binding_recording = Some(id.to_string());
-                                                }
-                                            },
-                                        );
                                     });
-                                }
-                                if ui
-                                    .button(&self.texts.settings.shortcuts.reset_defaults)
-                                    .clicked()
-                                {
-                                    self.settings_edit.key_binds = default_key_binds();
-                                    self.binding_recording = None;
-                                }
-                            }
-                            3 => {
-                                ui.weak(self.texts.settings.lock.password_section.as_str());
-                                if self.settings.lock_password.is_empty() {
-                                    if ui.button(&self.texts.settings.lock.set_password).clicked() {
-                                        self.pw_popup = Some("set");
-                                        self.pw_set1.clear();
-                                        self.pw_set2.clear();
-                                        self.pw_message.clear();
-                                    }
-                                } else {
-                                    if ui
-                                        .button(&self.texts.settings.lock.change_password)
-                                        .clicked()
-                                    {
-                                        self.pw_popup = Some("change");
-                                        self.pw_old.clear();
-                                        self.pw_new1.clear();
-                                        self.pw_new2.clear();
-                                        self.pw_message.clear();
-                                    }
-                                    ui.add_space(10.0);
-                                    if ui
-                                        .button(&self.texts.settings.lock.clear_password)
-                                        .clicked()
-                                    {
-                                        self.pw_popup = Some("clear");
-                                        self.pw_clear.clear();
-                                        self.pw_message.clear();
-                                    }
-                                }
-                            }
-                            _ => {}
+                                });
                         }
-                        ui.add_space(8.0);
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button(&self.texts.workspace.close).clicked() {
-                                self.settings_edit = self.settings.clone();
-                                self.theme_edit = self.active_theme.clone();
-                                self.theme_message = None;
-                                self.theme_dirty = false;
-                                self.binding_recording = None;
-                                crate::theme::apply_theme_definition(ctx, &self.active_theme);
-                                self.show_settings = false;
-                            }
-                            if ui.button(&self.texts.settings.buttons.apply).clicked() {
-                                self.settings = self.settings_edit.clone();
-                                self.history_db.set_max_entries(self.settings.max_history);
-                                let _ = save_settings(&self.settings);
-                                if self.theme_dirty {
-                                    let themes_root =
-                                        crate::theme::store::themes_dir(&app_data_dir());
-                                    if !crate::theme::store::is_embedded_id(&self.theme_edit.id) {
-                                        let _ = std::fs::create_dir_all(&themes_root);
-                                        if let Err(err) = crate::theme::store::save_user_theme(
-                                            &themes_root,
-                                            &self.theme_edit,
-                                        ) {
-                                            log::error!("failed to save theme: {err}");
-                                        }
-                                    }
-                                }
-                                self.active_theme = self.theme_edit.clone();
-                                self.settings.theme_id = self.active_theme.id.clone();
-                                crate::theme::apply_theme_definition(ctx, &self.active_theme);
-                                // Re-register fonts so the theme's UI and
-                                // terminal font choices take effect.
-                                self.rebuild_fonts(ctx);
-                                if self.settings.apply_theme_typography {
-                                    let new_size = self.active_theme.typography.terminal_font_size;
-                                    for td in self.terminals.values_mut() {
-                                        td.font_size = new_size;
-                                    }
-                                }
-                                self.theme_dirty = false;
-                            }
-                        });
                     });
                 });
+            if close_clicked {
+                self.show_settings = false;
+                self.settings_window_open = false;
+                self.binding_recording = None;
+                let _ = save_settings(&self.settings);
+            }
+
+            // Instant-apply: commit any changed settings every frame.
+            if self.settings_edit != self.settings {
+                self.settings = self.settings_edit.clone();
+                self.history_db.set_max_entries(self.settings.max_history);
+                let _ = save_settings(&self.settings);
+            }
             if !open {
                 self.show_settings = false;
+                self.settings_window_open = false;
                 self.binding_recording = None;
-                self.settings.settings_window = self.settings_edit.settings_window.clone();
                 let _ = save_settings(&self.settings);
             }
         }
 
         // Theme dialog popups
         self.show_theme_dialogs(ctx);
+        self.show_theme_editor_popup(ctx);
+
+        // Confirm-dialog for deleting ALL terminal command history.
+        if self.show_clear_history_confirm {
+            let mut open = self.show_clear_history_confirm;
+            let mut confirmed = false;
+            let mut cancelled = false;
+            egui::Window::new(&self.texts.stats.clear_history_title)
+                .open(&mut open)
+                .resizable(false)
+                .collapsible(false)
+                .default_pos(screen_center(ctx))
+                .pivot(egui::Align2::CENTER_CENTER)
+                .show(ctx, |ui| {
+                    ui.label(&self.texts.stats.clear_history_body);
+                    ui.add_space(8.0);
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button(&self.texts.password.confirm_button).clicked() {
+                            confirmed = true;
+                        }
+                        if ui.button(&self.texts.password.cancel_button).clicked() {
+                            cancelled = true;
+                        }
+                    });
+                });
+            if cancelled {
+                self.show_clear_history_confirm = false;
+            } else if confirmed {
+                self.history_db.clear_all();
+                self.show_clear_history_confirm = false;
+            } else if !open {
+                self.show_clear_history_confirm = false;
+            }
+        }
 
         if self.show_about {
             let mut open = self.show_about;
             let mut clicked_close = false;
-            egui::Window::new("OpenNex")
+            egui::Window::new(format!("OpenNex v{}", env!("CARGO_PKG_VERSION")))
+                .id(egui::Id::new("about_window"))
                 .open(&mut open)
                 .resizable(false)
                 .collapsible(false)
@@ -3206,23 +4259,24 @@ impl eframe::App for App {
                 .pivot(egui::Align2::CENTER_CENTER)
                 .default_width(380.0)
                 .show(ctx, |ui| {
-                    ui.vertical_centered(|ui| {
-                        ui.add_space(4.0);
-                        ui.weak(format!(
-                            "{}: v{}",
-                            self.texts.about.version_label,
-                            env!("CARGO_PKG_VERSION")
-                        ));
-                    });
-                    ui.add_space(6.0);
-                    ui.weak(self.texts.about.description.as_str());
-                    ui.add_space(6.0);
+                    ui.add_space(4.0);
+                    // Render the multi-paragraph description: each
+                    // newline-separated paragraph on its own wrapped label.
+                    for para in self.texts.about.description.split('\n') {
+                        if para.trim().is_empty() {
+                            continue;
+                        }
+                        ui.weak(
+                            egui::RichText::new(para)
+                                .size(12.0)
+                                .color(self.active_theme.app.weak_text.to_egui()),
+                        );
+                        ui.add_space(2.0);
+                    }
+                    ui.add_space(4.0);
                     ui.horizontal(|ui| {
                         ui.weak(self.texts.about.homepage_label.as_str());
-                        ui.hyperlink_to(
-                            "https://opennex.zeadix.com/",
-                            "https://opennex.zeadix.com/",
-                        );
+                        ui.hyperlink_to("https://opennex.zeadix.com", "https://opennex.zeadix.com");
                     });
                     ui.horizontal(|ui| {
                         ui.weak(self.texts.about.source_label.as_str());
@@ -3252,32 +4306,32 @@ impl eframe::App for App {
                             } else {
                                 None
                             };
+                        let ut = self.texts.update.clone();
                         let (text, color) = match &self.update_state {
                             UpdateState::Idle | UpdateState::Checking => {
                                 ("".to_string(), egui::Color32::WHITE)
                             }
                             UpdateState::Downloading(_) => (
-                                "正在下载更新...".to_string(),
+                                ut.downloading.clone(),
                                 egui::Color32::from_rgb(0x3b, 0x82, 0xf6),
                             ),
                             UpdateState::Verifying => (
-                                "正在校验文件完整性...".to_string(),
+                                ut.verifying.clone(),
                                 egui::Color32::from_rgb(0xa8, 0x55, 0xf7),
                             ),
-                            UpdateState::Ready(_) => (
-                                "更新已准备就绪".to_string(),
-                                egui::Color32::from_rgb(0x22, 0xc5, 0x5e),
-                            ),
+                            UpdateState::Ready(_) => {
+                                (ut.ready.clone(), egui::Color32::from_rgb(0x22, 0xc5, 0x5e))
+                            }
                             UpdateState::Error(msg) => (
-                                format!("更新失败: {}", msg),
+                                ut.failed.replace("{}", msg),
                                 egui::Color32::from_rgb(0xef, 0x44, 0x44),
                             ),
                             UpdateState::Available(info) => (
-                                format!("发现新版本 v{} — 准备下载", info.version),
+                                ut.available.replace("{}", &info.version),
                                 egui::Color32::from_rgb(0x22, 0xc5, 0x5e),
                             ),
                             UpdateState::UpToDate => (
-                                "当前已是最新版本".to_string(),
+                                ut.up_to_date.clone(),
                                 egui::Color32::from_rgb(0x6b, 0x72, 0x80),
                             ),
                         };
@@ -3365,9 +4419,11 @@ impl eframe::App for App {
                                 | crate::updater::UpdateState::UpToDate => PrimaryAction::Check,
                             };
                             let label = match primary {
-                                PrimaryAction::Check => "检查更新",
-                                PrimaryAction::StartDownload => "立即更新",
-                                PrimaryAction::Restart => "重启应用",
+                                PrimaryAction::Check => self.texts.update.check.as_str(),
+                                PrimaryAction::StartDownload => {
+                                    self.texts.update.update_now.as_str()
+                                }
+                                PrimaryAction::Restart => self.texts.update.restart.as_str(),
                             };
                             if ui.add_enabled(!is_busy, egui::Button::new(label)).clicked() {
                                 match primary {
@@ -3410,7 +4466,7 @@ impl eframe::App for App {
         // Restart confirmation popup (shown when the about window is
         // closed and the update is ready; user can pick "重启" or "取消").
         if let crate::updater::UpdateState::Ready(path) = &self.update_state.clone() {
-            render_restart_popup(ctx);
+            render_restart_popup(ctx, &self.texts.clone());
             // Read the user's choice from egui memory.
             let choice: Option<bool> = ctx.memory_mut(|mem| {
                 mem.data
@@ -3554,181 +4610,237 @@ impl eframe::App for App {
                 "clear" => self.texts.password.clear_title.as_str(),
                 _ => "",
             };
+            // Auto-focus the first input whenever the popup is open, so
+            // the terminal (or any other layer) can't leave the dialog
+            // without an active focus target.
+            let focus_target = match popup {
+                "set" => egui::Id::new("pw_set1"),
+                "change" => egui::Id::new("pw_old"),
+                _ => egui::Id::new("pw_clear"),
+            };
+            ctx.memory_mut(|m| {
+                if m.focused().is_none() {
+                    m.request_focus(focus_target);
+                }
+            });
             egui::Window::new(title)
                 .open(&mut open)
                 .resizable(false)
                 .collapsible(false)
                 .default_pos(screen_center(ctx))
                 .pivot(egui::Align2::CENTER_CENTER)
-                .show(ctx, |ui| match popup {
-                    "set" => {
-                        ui.horizontal_centered(|ui| {
-                            ui.label(&self.texts.password.enter);
-                            ui.add(
-                                egui::TextEdit::singleline(&mut self.pw_set1)
-                                    .password(true)
-                                    .desired_width(150.0)
-                                    .id_source("pw_set1"),
-                            );
-                        });
-                        ui.horizontal(|ui| {
-                            ui.label(&self.texts.password.confirm);
-                            ui.add(
-                                egui::TextEdit::singleline(&mut self.pw_set2)
-                                    .password(true)
-                                    .desired_width(150.0)
-                                    .id_source("pw_set2"),
-                            );
-                            if !self.pw_set2.is_empty() && self.pw_set1 != self.pw_set2 {
+                .show(ctx, |ui| {
+                    // Compact dialog metrics: the theme's font-size ladder
+                    // scales text styles, which also inflates egui's
+                    // default row heights and item spacing. Pin them back
+                    // so the dialog stays tight at any UI font size.
+                    ui.style_mut().spacing.item_spacing = egui::vec2(6.0, 4.0);
+                    ui.style_mut().spacing.interact_size.y = 20.0;
+                    ui.style_mut().spacing.button_padding = egui::vec2(6.0, 2.0);
+                    match popup {
+                        "set" => {
+                            ui.horizontal(|ui| {
                                 ui.label(
-                                    egui::RichText::new(&self.texts.password.mismatch)
-                                        .color(egui::Color32::RED),
+                                    egui::RichText::new(&self.texts.password.enter).size(12.0),
                                 );
-                            } else if !self.pw_set2.is_empty() {
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut self.pw_set1)
+                                        .password(true)
+                                        .desired_width(150.0)
+                                        .font(egui::TextStyle::Monospace)
+                                        .id_source("pw_set1"),
+                                );
+                            });
+                            ui.horizontal(|ui| {
                                 ui.label(
-                                    egui::RichText::new(&self.texts.password.r#match)
-                                        .color(egui::Color32::GREEN),
+                                    egui::RichText::new(&self.texts.password.confirm).size(12.0),
+                                );
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut self.pw_set2)
+                                        .password(true)
+                                        .desired_width(150.0)
+                                        .font(egui::TextStyle::Monospace)
+                                        .id_source("pw_set2"),
+                                );
+                                if !self.pw_set2.is_empty() && self.pw_set1 != self.pw_set2 {
+                                    ui.label(
+                                        egui::RichText::new(&self.texts.password.mismatch)
+                                            .color(egui::Color32::RED)
+                                            .size(11.0),
+                                    );
+                                } else if !self.pw_set2.is_empty() {
+                                    ui.label(
+                                        egui::RichText::new(&self.texts.password.r#match)
+                                            .color(egui::Color32::GREEN)
+                                            .size(11.0),
+                                    );
+                                }
+                            });
+                            if !self.pw_message.is_empty() {
+                                ui.label(
+                                    egui::RichText::new(&self.pw_message)
+                                        .color(egui::Color32::RED)
+                                        .size(11.0),
                                 );
                             }
-                        });
-                        if !self.pw_message.is_empty() {
-                            ui.label(
-                                egui::RichText::new(&self.pw_message).color(egui::Color32::RED),
-                            );
-                        }
-                        ui.horizontal(|ui| {
-                            if ui.button(&self.texts.password.confirm_button).clicked() {
-                                if self.pw_set1.is_empty() {
-                                    self.pw_message = self.texts.password.empty_error.clone();
-                                } else if self.pw_set1 != self.pw_set2 {
-                                    self.pw_message = self.texts.password.mismatch_error.clone();
-                                } else {
-                                    self.settings_edit.lock_password = self.pw_set1.clone();
-                                    self.settings.lock_password = self.pw_set1.clone();
-                                    let _ = save_settings(&self.settings);
+                            ui.horizontal(|ui| {
+                                if ui.button(&self.texts.password.confirm_button).clicked() {
+                                    if self.pw_set1.is_empty() {
+                                        self.pw_message = self.texts.password.empty_error.clone();
+                                    } else if self.pw_set1 != self.pw_set2 {
+                                        self.pw_message =
+                                            self.texts.password.mismatch_error.clone();
+                                    } else {
+                                        self.settings_edit.lock_password = self.pw_set1.clone();
+                                        self.settings.lock_password = self.pw_set1.clone();
+                                        let _ = save_settings(&self.settings);
+                                        self.pw_set1.clear();
+                                        self.pw_set2.clear();
+                                        self.pw_message.clear();
+                                        self.pw_popup = None;
+                                    }
+                                }
+                                if ui.button(&self.texts.password.cancel_button).clicked() {
                                     self.pw_set1.clear();
                                     self.pw_set2.clear();
                                     self.pw_message.clear();
                                     self.pw_popup = None;
                                 }
-                            }
-                            if ui.button(&self.texts.password.cancel_button).clicked() {
-                                self.pw_set1.clear();
-                                self.pw_set2.clear();
-                                self.pw_message.clear();
-                                self.pw_popup = None;
-                            }
-                        });
-                    }
-                    "change" => {
-                        ui.horizontal(|ui| {
-                            ui.label(&self.texts.password.original);
-                            ui.add(
-                                egui::TextEdit::singleline(&mut self.pw_old)
-                                    .password(true)
-                                    .desired_width(150.0)
-                                    .id_source("pw_old"),
-                            );
-                        });
-                        ui.horizontal(|ui| {
-                            ui.label(&self.texts.password.new);
-                            ui.add(
-                                egui::TextEdit::singleline(&mut self.pw_new1)
-                                    .password(true)
-                                    .desired_width(150.0)
-                                    .id_source("pw_new1"),
-                            );
-                        });
-                        ui.horizontal(|ui| {
-                            ui.label(&self.texts.password.confirm_new);
-                            ui.add(
-                                egui::TextEdit::singleline(&mut self.pw_new2)
-                                    .password(true)
-                                    .desired_width(150.0)
-                                    .id_source("pw_new2"),
-                            );
-                            if !self.pw_new2.is_empty() && self.pw_new1 != self.pw_new2 {
-                                ui.label(
-                                    egui::RichText::new(&self.texts.password.mismatch)
-                                        .color(egui::Color32::RED),
-                                );
-                            } else if !self.pw_new2.is_empty() {
-                                ui.label(
-                                    egui::RichText::new(&self.texts.password.r#match)
-                                        .color(egui::Color32::GREEN),
-                                );
-                            }
-                        });
-                        if !self.pw_message.is_empty() {
-                            ui.label(
-                                egui::RichText::new(&self.pw_message).color(egui::Color32::RED),
-                            );
+                            });
                         }
-                        ui.horizontal(|ui| {
-                            if ui.button(&self.texts.password.confirm_button).clicked() {
-                                if self.pw_old != self.settings.lock_password {
-                                    self.pw_message = self.texts.password.wrong_error.clone();
-                                } else if self.pw_new1.is_empty() {
-                                    self.pw_message = self.texts.password.empty_error.clone();
-                                } else if self.pw_new1 != self.pw_new2 {
-                                    self.pw_message = self.texts.password.mismatch_error.clone();
-                                } else {
-                                    self.settings_edit.lock_password = self.pw_new1.clone();
-                                    self.settings.lock_password = self.pw_new1.clone();
-                                    let _ = save_settings(&self.settings);
+                        "change" => {
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new(&self.texts.password.original).size(12.0),
+                                );
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut self.pw_old)
+                                        .password(true)
+                                        .desired_width(150.0)
+                                        .font(egui::TextStyle::Monospace)
+                                        .id_source("pw_old"),
+                                );
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new(&self.texts.password.new).size(12.0));
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut self.pw_new1)
+                                        .password(true)
+                                        .desired_width(150.0)
+                                        .id_source("pw_new1"),
+                                );
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new(&self.texts.password.confirm_new)
+                                        .size(12.0),
+                                );
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut self.pw_new2)
+                                        .password(true)
+                                        .desired_width(150.0)
+                                        .id_source("pw_new2"),
+                                );
+                                if !self.pw_new2.is_empty() && self.pw_new1 != self.pw_new2 {
+                                    ui.label(
+                                        egui::RichText::new(&self.texts.password.mismatch)
+                                            .color(egui::Color32::RED)
+                                            .size(11.0),
+                                    );
+                                } else if !self.pw_new2.is_empty() {
+                                    ui.label(
+                                        egui::RichText::new(&self.texts.password.r#match)
+                                            .color(egui::Color32::GREEN)
+                                            .size(11.0),
+                                    );
+                                }
+                            });
+                            if !self.pw_message.is_empty() {
+                                ui.label(
+                                    egui::RichText::new(&self.pw_message)
+                                        .color(egui::Color32::RED)
+                                        .size(11.0),
+                                );
+                            }
+                            ui.horizontal(|ui| {
+                                if ui.button(&self.texts.password.confirm_button).clicked() {
+                                    if self.pw_old != self.settings.lock_password {
+                                        self.pw_message = self.texts.password.wrong_error.clone();
+                                    } else if self.pw_new1.is_empty() {
+                                        self.pw_message = self.texts.password.empty_error.clone();
+                                    } else if self.pw_new1 != self.pw_new2 {
+                                        self.pw_message =
+                                            self.texts.password.mismatch_error.clone();
+                                    } else {
+                                        self.settings_edit.lock_password = self.pw_new1.clone();
+                                        self.settings.lock_password = self.pw_new1.clone();
+                                        let _ = save_settings(&self.settings);
+                                        self.pw_old.clear();
+                                        self.pw_new1.clear();
+                                        self.pw_new2.clear();
+                                        self.pw_message.clear();
+                                        self.pw_popup = None;
+                                    }
+                                }
+                                if ui.button(&self.texts.password.cancel_button).clicked() {
                                     self.pw_old.clear();
                                     self.pw_new1.clear();
                                     self.pw_new2.clear();
                                     self.pw_message.clear();
                                     self.pw_popup = None;
                                 }
-                            }
-                            if ui.button(&self.texts.password.cancel_button).clicked() {
-                                self.pw_old.clear();
-                                self.pw_new1.clear();
-                                self.pw_new2.clear();
-                                self.pw_message.clear();
-                                self.pw_popup = None;
-                            }
-                        });
-                    }
-                    "clear" => {
-                        ui.horizontal(|ui| {
-                            ui.label(&self.texts.password.input_label);
-                            ui.add(
+                            });
+                        }
+                        "clear" => {
+                            // Mirrors the set-password popup layout: centered
+                            // input, enter-to-confirm, error line, buttons.
+                            let mut confirmed = false;
+                            let pw_resp = ui.add(
                                 egui::TextEdit::singleline(&mut self.pw_clear)
                                     .password(true)
                                     .desired_width(150.0)
+                                    .font(egui::TextStyle::Monospace)
+                                    .hint_text(&self.texts.password.input_label)
                                     .id_source("pw_clear"),
                             );
-                        });
-                        if !self.pw_message.is_empty() {
-                            ui.label(
-                                egui::RichText::new(&self.pw_message).color(egui::Color32::RED),
-                            );
-                        }
-                        ui.horizontal(|ui| {
-                            if ui.button(&self.texts.password.confirm_button).clicked() {
-                                if self.pw_clear != self.settings.lock_password {
-                                    self.pw_message = self.texts.password.wrong_password.clone();
-                                } else {
-                                    self.settings_edit.lock_password.clear();
-                                    self.settings.lock_password.clear();
-                                    self.locked_panels.clear();
-                                    let _ = save_settings(&self.settings);
+                            if pw_resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))
+                            {
+                                confirmed = true;
+                            }
+                            if !self.pw_message.is_empty() {
+                                ui.label(
+                                    egui::RichText::new(&self.pw_message)
+                                        .color(egui::Color32::RED)
+                                        .size(11.0),
+                                );
+                            }
+                            ui.horizontal(|ui| {
+                                if confirmed
+                                    || ui.button(&self.texts.password.confirm_button).clicked()
+                                {
+                                    if self.pw_clear != self.settings.lock_password {
+                                        self.pw_message =
+                                            self.texts.password.wrong_password.clone();
+                                        self.pw_clear.clear();
+                                    } else {
+                                        self.settings_edit.lock_password.clear();
+                                        self.settings.lock_password.clear();
+                                        self.locked_panels.clear();
+                                        let _ = save_settings(&self.settings);
+                                        self.pw_clear.clear();
+                                        self.pw_message.clear();
+                                        self.pw_popup = None;
+                                    }
+                                }
+                                if ui.button(&self.texts.password.cancel_button).clicked() {
                                     self.pw_clear.clear();
                                     self.pw_message.clear();
                                     self.pw_popup = None;
                                 }
-                            }
-                            if ui.button(&self.texts.password.cancel_button).clicked() {
-                                self.pw_clear.clear();
-                                self.pw_message.clear();
-                                self.pw_popup = None;
-                            }
-                        });
+                            });
+                        }
+                        _ => {}
                     }
-                    _ => {}
                 });
             if !open {
                 self.pw_popup = None;
@@ -3759,105 +4871,91 @@ impl eframe::App for App {
                         }),
                 )
                 .show(ctx, |ui| {
-                    // Header row: section title on the left, square icon
-                    // buttons on the right — background fill only, no
-                    // stroke, no rounding, Phosphor regular glyphs.
+                    // Header row: square icon buttons on the LEFT (新建
+                    // leftmost, 模板 to its right) — background fill only,
+                    // no stroke, no rounding, Phosphor regular glyphs.
                     ui.horizontal(|ui| {
                         let fg = self.active_theme.app.button_fg.to_egui();
                         let icon_active = self.active_theme.app.text.to_egui();
                         let btn_bg = self.active_theme.app.button_bg.to_egui();
 
-                        let btn_size = 22.0;
-                        let glyph = 14.0;
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.style_mut().spacing.item_spacing.x = 4.0;
-
-                            // 新建 (rightmost): square bg + PLUS glyph.
-                            let (new_rect, new_resp) = ui.allocate_exact_size(
-                                egui::vec2(btn_size, btn_size),
-                                egui::Sense::click(),
-                            );
-                            ui.painter().rect_filled(new_rect, 0.0, btn_bg);
-                            let new_color = if new_resp.hovered() { icon_active } else { fg };
-                            let new_galley = ui.fonts(|f| {
-                                f.layout_no_wrap(
-                                    egui_phosphor::regular::PLUS.to_string(),
-                                    egui::FontId::proportional(glyph),
-                                    new_color,
-                                )
-                            });
-                            ui.painter().galley(
-                                new_rect.center()
-                                    - egui::vec2(
-                                        new_galley.size().x / 2.0,
-                                        new_galley.size().y / 2.0,
-                                    ),
-                                new_galley,
+                        let btn_size = 18.5;
+                        let glyph = 12.0;
+                        // 新建 (leftmost): flat PLUS glyph, no background.
+                        let (new_rect, new_resp) = ui.allocate_exact_size(
+                            egui::vec2(btn_size, btn_size),
+                            egui::Sense::click(),
+                        );
+                        let new_color = if new_resp.hovered() { icon_active } else { fg };
+                        let new_galley = ui.fonts(|f| {
+                            f.layout_no_wrap(
+                                egui_phosphor::regular::PLUS.to_string(),
+                                egui::FontId::proportional(glyph),
                                 new_color,
-                            );
-                            let new_hovered = new_resp.hovered();
-                            let new_clicked = new_resp.clicked();
-                            let _ = new_resp.on_hover_text(&self.texts.workspace.new);
-                            if new_clicked {
-                                self.add_panel(ui.ctx());
-                            }
-                            let _ = new_hovered;
-
-                            // 模板: square bg + STACK glyph, left-click menu
-                            // via BarState (same as the row three-dot).
-                            let (tpl_rect, tpl_resp) = ui.allocate_exact_size(
-                                egui::vec2(btn_size, btn_size),
-                                egui::Sense::click(),
-                            );
-                            ui.painter().rect_filled(tpl_rect, 0.0, btn_bg);
-                            let tpl_color = if tpl_resp.hovered() { icon_active } else { fg };
-                            let tpl_galley = ui.fonts(|f| {
-                                f.layout_no_wrap(
-                                    egui_phosphor::regular::STACK.to_string(),
-                                    egui::FontId::proportional(glyph),
-                                    tpl_color,
-                                )
-                            });
-                            ui.painter().galley(
-                                tpl_rect.center()
-                                    - egui::vec2(
-                                        tpl_galley.size().x / 2.0,
-                                        tpl_galley.size().y / 2.0,
-                                    ),
-                                tpl_galley,
-                                tpl_color,
-                            );
-                            let bar_id = tpl_resp.id;
-                            if self.cached_template_files.is_empty() {
-                                self.refresh_template_files();
-                            }
-                            let template_files = self.cached_template_files.clone();
-                            let mut bar_state = egui::menu::BarState::load(ui.ctx(), bar_id);
-                            bar_state.bar_menu(&tpl_resp, |ui| {
-                                if template_files.is_empty() {
-                                    ui.label(&self.texts.workspace.templates_empty);
-                                } else {
-                                    for (display_name, path) in &template_files {
-                                        let path = path.clone();
-                                        let display_name = display_name.clone();
-                                        ui.horizontal(|ui| {
-                                            if ui.button(display_name.as_str()).clicked() {
-                                                self.pending_load_from_template =
-                                                    Some(path.clone());
-                                                ui.close_menu();
-                                            }
-                                            if ui.small_button(egui_phosphor::regular::X).clicked()
-                                            {
-                                                self.pending_delete_template = Some(path);
-                                                ui.close_menu();
-                                            }
-                                        });
-                                    }
-                                }
-                            });
-                            bar_state.store(ui.ctx(), bar_id);
-                            let _ = tpl_resp.on_hover_text(&self.texts.workspace.templates);
+                            )
                         });
+                        ui.painter().galley(
+                            new_rect.center()
+                                - egui::vec2(new_galley.size().x / 2.0, new_galley.size().y / 2.0),
+                            new_galley,
+                            new_color,
+                        );
+                        let new_hovered = new_resp.hovered();
+                        let new_clicked = new_resp.clicked();
+                        let _ = new_resp.on_hover_text(&self.texts.workspace.new);
+                        if new_clicked {
+                            self.add_panel(ui.ctx());
+                        }
+                        let _ = new_hovered;
+
+                        // 模板: flat STACK glyph, no background, left-click menu
+                        // via BarState (same as the row three-dot).
+                        let (tpl_rect, tpl_resp) = ui.allocate_exact_size(
+                            egui::vec2(btn_size, btn_size),
+                            egui::Sense::click(),
+                        );
+                        let tpl_color = if tpl_resp.hovered() { icon_active } else { fg };
+                        let tpl_galley = ui.fonts(|f| {
+                            f.layout_no_wrap(
+                                egui_phosphor::regular::STACK.to_string(),
+                                egui::FontId::proportional(glyph),
+                                tpl_color,
+                            )
+                        });
+                        ui.painter().galley(
+                            tpl_rect.center()
+                                - egui::vec2(tpl_galley.size().x / 2.0, tpl_galley.size().y / 2.0),
+                            tpl_galley,
+                            tpl_color,
+                        );
+                        let bar_id = tpl_resp.id;
+                        if self.cached_template_files.is_empty() {
+                            self.refresh_template_files();
+                        }
+                        let template_files = self.cached_template_files.clone();
+                        let mut bar_state = egui::menu::BarState::load(ui.ctx(), bar_id);
+                        bar_state.bar_menu(&tpl_resp, |ui| {
+                            if template_files.is_empty() {
+                                ui.label(&self.texts.workspace.templates_empty);
+                            } else {
+                                for (display_name, path) in &template_files {
+                                    let path = path.clone();
+                                    let display_name = display_name.clone();
+                                    ui.horizontal(|ui| {
+                                        if ui.button(display_name.as_str()).clicked() {
+                                            self.pending_load_from_template = Some(path.clone());
+                                            ui.close_menu();
+                                        }
+                                        if ui.small_button(egui_phosphor::regular::X).clicked() {
+                                            self.pending_delete_template = Some(path);
+                                            ui.close_menu();
+                                        }
+                                    });
+                                }
+                            }
+                        });
+                        bar_state.store(ui.ctx(), bar_id);
+                        let _ = tpl_resp.on_hover_text(&self.texts.workspace.templates);
                     });
                     ui.add_space(4.0);
                     // Remove the default vertical spacing between workspace
@@ -4195,101 +5293,30 @@ impl eframe::App for App {
                         self.reorder_panel(src, dst);
                     }
                     if let Some(i) = to_select {
-                        self.active_panel = i;
+                        if self.active_panel != i {
+                            self.active_panel = i;
+                            // Restore the workspace's last focused terminal
+                            // (the dock tree keeps it as its active tab).
+                            if let Some(tree) = self.dock_states.get_mut(&i) {
+                                if let Some((_, tab)) = tree.find_active_focused() {
+                                    self.focused_terminal = Some(tab.clone());
+                                }
+                            }
+                        }
                     }
-                    ui.separator();
-                    ui.allocate_ui_with_layout(
-                        egui::vec2(
-                            ui.available_width(),
-                            shortcut_hint_available_height(ui.available_height() - 64.0),
-                        ),
-                        egui::Layout::top_down(egui::Align::Min),
-                        |ui| {
-                            ui.label(
-                                egui::RichText::new(&self.texts.shortcut_labels.shortcuts_heading)
-                                    .small()
-                                    .strong()
-                                    .color(ui.visuals().text_color()),
-                            );
-                            egui::ScrollArea::vertical()
-                                .id_salt("navigation_shortcuts")
-                                .auto_shrink([false, false])
-                                .show(ui, |ui| {
-                                    let extra_shortcuts: [(&str, Vec<&str>); 2] = [
-                                        ("zoom_in", vec!["Ctrl", "+"]),
-                                        ("zoom_out", vec!["Ctrl", "-"]),
-                                    ];
-                                    let ids: Vec<(&str, Vec<String>)> = shortcut_hint_ids()
-                                        .iter()
-                                        .map(|id| {
-                                            let binding = self
-                                                .settings
-                                                .key_binds
-                                                .get(*id)
-                                                .map(shortcut_display)
-                                                .unwrap_or_else(|| {
-                                                    self.texts.settings.shortcuts.not_set.clone()
-                                                });
-                                            (
-                                                *id,
-                                                binding
-                                                    .split('+')
-                                                    .map(|s| s.trim().to_string())
-                                                    .collect(),
-                                            )
-                                        })
-                                        .chain(extra_shortcuts.iter().map(|(id, parts)| {
-                                            (*id, parts.iter().map(|s| s.to_string()).collect())
-                                        }))
-                                        .collect();
-                                    for (id, parts) in ids {
-                                        let label = shortcut_label_for(&self.texts, id).to_string();
-                                        ui.horizontal(|ui| {
-                                            ui.label(
-                                                egui::RichText::new(&label)
-                                                    .small()
-                                                    .color(ui.visuals().text_color()),
-                                            );
-                                            ui.with_layout(
-                                                egui::Layout::right_to_left(egui::Align::Center),
-                                                |ui| {
-                                                    let mut parts_rev = parts.clone();
-                                                    parts_rev.reverse();
-                                                    ui.horizontal(|ui| {
-                                                        for (i, part) in
-                                                            parts_rev.iter().enumerate()
-                                                        {
-                                                            if i > 0 {
-                                                                ui.label(
-                                                                    egui::RichText::new("+")
-                                                                        .small()
-                                                                        .color(
-                                                                            ui.visuals()
-                                                                                .weak_text_color(),
-                                                                        ),
-                                                                );
-                                                            }
-                                                            paint_keycap(ui, part);
-                                                        }
-                                                    });
-                                                },
-                                            );
-                                        });
-                                    }
-                                });
-                        },
-                    );
-
-                    // Sidebar footer: two labeled groups as plain 10-11pt
-                    // weak text — no background, no stroke.
-                    //   当前工作区
-                    //   n 终端 │ x% CPU │ y MB
-                    //   全局
-                    //   m 终端 │ x% CPU │ y MB
+                    // Sidebar footer pinned 40px above the bottom: let the
+                    // workspace list take all remaining space first, then
+                    // allocate the gap and the fixed-height footer.
                     let weak = self.active_theme.app.weak_text.to_egui();
                     let fg = self.active_theme.app.button_fg.to_egui();
-                    let footer_h = 64.0;
+                    let footer_h = 96.0;
                     let line_h = 16.0;
+                    let bottom_gap = 10.0;
+                    let avail_h = ui.available_height();
+                    let flex_h = (avail_h - footer_h - bottom_gap).max(0.0);
+                    if flex_h > 0.0 {
+                        ui.add_space(flex_h);
+                    }
                     let (footer_rect, _) = ui.allocate_exact_size(
                         egui::vec2(ui.available_width(), footer_h),
                         egui::Sense::hover(),
@@ -4302,18 +5329,17 @@ impl eframe::App for App {
                     ui.painter().text(
                         egui::pos2(x, line(0)),
                         egui::Align2::LEFT_CENTER,
-                        "当前工作区",
+                        self.texts.stats.focused.as_str(),
                         title_font.clone(),
                         fg,
                     );
                     ui.painter().text(
-                        egui::pos2(x + 12.0, line(1)),
+                        egui::pos2(x, line(1)),
                         egui::Align2::LEFT_CENTER,
                         format!(
-                            "{} 终端 │ {} │ {}",
-                            format_active_ws_terminal_count(self),
-                            format_cpu(self.workspace_cpu),
-                            format_memory(self.workspace_mem)
+                            "{} │ {}",
+                            format_cpu(self.focused_cpu),
+                            format_memory(self.focused_mem)
                         ),
                         data_font.clone(),
                         weak,
@@ -4321,16 +5347,37 @@ impl eframe::App for App {
                     ui.painter().text(
                         egui::pos2(x, line(2)),
                         egui::Align2::LEFT_CENTER,
-                        "全局",
+                        self.texts.stats.workspace.as_str(),
+                        title_font.clone(),
+                        fg,
+                    );
+                    ui.painter().text(
+                        egui::pos2(x, line(3)),
+                        egui::Align2::LEFT_CENTER,
+                        format!(
+                            "{} {} │ {} │ {}",
+                            format_active_ws_terminal_count(self),
+                            self.texts.stats.terminals,
+                            format_cpu(self.workspace_cpu),
+                            format_memory(self.workspace_mem)
+                        ),
+                        data_font.clone(),
+                        weak,
+                    );
+                    ui.painter().text(
+                        egui::pos2(x, line(4)),
+                        egui::Align2::LEFT_CENTER,
+                        self.texts.stats.global.as_str(),
                         title_font,
                         fg,
                     );
                     ui.painter().text(
-                        egui::pos2(x + 12.0, line(3)),
+                        egui::pos2(x, line(5)),
                         egui::Align2::LEFT_CENTER,
                         format!(
-                            "{} 终端 │ {} │ {}",
+                            "{} {} │ {} │ {}",
                             format_ws_terminal_count(self),
+                            self.texts.stats.terminals,
                             format_cpu(self.terminal_cpu),
                             format_memory(self.terminal_mem)
                         ),
@@ -4471,6 +5518,7 @@ impl eframe::App for App {
                                 // Error message
                                 if !self.pw_message.is_empty() {
                                     ui.add_space(8.0);
+                                    let nav_fg = self.active_theme.app.menu_fg.to_egui();
                                     ui.label(
                                         egui::RichText::new(&self.pw_message)
                                             .color(egui::Color32::from_rgb(255, 120, 120)),
@@ -4521,11 +5569,36 @@ impl eframe::App for App {
                     let tab_hl = self.active_theme.app.tab_highlight.to_egui();
                     dock_style.tab.focused.bg_fill = tab_hl;
                     dock_style.tab.focused_with_kb_focus.bg_fill = tab_hl;
-                    dock_style.tab.focused.outline_color = egui::Color32::TRANSPARENT;
-                    dock_style.tab.focused_with_kb_focus.outline_color = egui::Color32::TRANSPARENT;
                     dock_style.tab.focused.text_color = self.active_theme.app.text.to_egui();
                     dock_style.tab.focused_with_kb_focus.text_color =
                         self.active_theme.app.text.to_egui();
+                    // Shared 1px border line (same color as the global theme
+                    // "边框" setting) between tabs, around the tab bar, and
+                    // along the panel edges.
+                    let border = self.active_theme.app.border.to_egui();
+                    for s in [
+                        &mut dock_style.tab.active,
+                        &mut dock_style.tab.inactive,
+                        &mut dock_style.tab.hovered,
+                        &mut dock_style.tab.focused,
+                        &mut dock_style.tab.active_with_kb_focus,
+                        &mut dock_style.tab.inactive_with_kb_focus,
+                        &mut dock_style.tab.focused_with_kb_focus,
+                    ] {
+                        s.outline_color = border;
+                    }
+                    dock_style.tab_bar.hline_color = border;
+                    // Make the tab bar and tabs merge seamlessly with the
+                    // surrounding UI: backgrounds match the app surface, so
+                    // the only visible separators are the 1px border lines.
+                    let bar_bg = central_fill;
+                    dock_style.tab_bar.bg_fill = bar_bg;
+                    dock_style.tab.inactive.bg_fill = bar_bg;
+                    dock_style.tab.inactive_with_kb_focus.bg_fill = bar_bg;
+                    dock_style.tab.hovered.bg_fill = self.active_theme.app.hover.to_egui();
+                    dock_style.tab.active.bg_fill = self.active_theme.app.panel.to_egui();
+                    dock_style.tab.active_with_kb_focus.bg_fill =
+                        self.active_theme.app.panel.to_egui();
                     DockArea::new(tree)
                         .style(dock_style)
                         .show_add_buttons(true)
@@ -4555,6 +5628,7 @@ impl eframe::App for App {
                                 focused_terminal: &mut self.focused_terminal,
                                 terminal_focus_id: &mut self.terminal_focus_id,
                                 show_settings: self.show_settings,
+                                pw_popup_open: self.pw_popup.is_some(),
                                 theme: if self.show_settings {
                                     &self.theme_edit
                                 } else {
@@ -4568,41 +5642,6 @@ impl eframe::App for App {
                         ui.label(&self.texts.workspace.empty_hint);
                     });
                 }
-            });
-
-        // Minimalist status bar (24px). Reports ONLY the focused
-        // terminal's process-tree CPU% and memory. No frame stroke, no
-        // separator line — just the themed fill with plain weak text.
-        egui::TopBottomPanel::bottom("status_bar")
-            .resizable(false)
-            .exact_height(24.0)
-            .frame(
-                egui::Frame::none()
-                    .fill(self.active_theme.app.menu_bg.to_egui())
-                    .stroke(egui::Stroke::NONE)
-                    .inner_margin(egui::Margin {
-                        left: 10,
-                        right: 10,
-                        top: 4,
-                        bottom: 4,
-                    }),
-            )
-            .show(ctx, |ui| {
-                let weak = self.active_theme.app.weak_text.to_egui();
-                let sep = self.active_theme.app.sidebar_border.to_egui();
-                ui.horizontal(|ui| {
-                    ui.label(
-                        egui::RichText::new(format_cpu(self.focused_cpu))
-                            .color(weak)
-                            .size(11.0),
-                    );
-                    ui.label(egui::RichText::new("│").color(sep).size(11.0));
-                    ui.label(
-                        egui::RichText::new(format_memory(self.focused_mem))
-                            .color(weak)
-                            .size(11.0),
-                    );
-                });
             });
     }
 }
@@ -4686,12 +5725,6 @@ mod tests {
         ] {
             assert!(ids.contains(&id), "missing shortcut hint for {id}");
         }
-    }
-
-    #[test]
-    fn shortcut_hint_area_uses_all_remaining_sidebar_height() {
-        assert_eq!(super::shortcut_hint_available_height(240.0), 240.0);
-        assert_eq!(super::shortcut_hint_available_height(-1.0), 0.0);
     }
 
     #[test]
@@ -5051,6 +6084,7 @@ struct TerminalTabViewer<'a> {
     focused_terminal: &'a mut Option<String>,
     terminal_focus_id: &'a mut Option<egui::Id>,
     show_settings: bool,
+    pw_popup_open: bool,
     theme: &'a crate::theme::ThemeDefinition,
     texts: &'a crate::i18n::Texts,
 }
@@ -5117,14 +6151,6 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                     td.font_size = (td.font_size - FONT_SIZE_STEP).max(MIN_FONT_SIZE);
                 }
             }
-            if self.active_tab.as_ref() == Some(tab) {
-                if ui.input(|i| i.key_pressed(egui::Key::Equals) && i.modifiers.ctrl) {
-                    td.font_size = (td.font_size + FONT_SIZE_STEP).min(MAX_FONT_SIZE);
-                }
-                if ui.input(|i| i.key_pressed(egui::Key::Minus) && i.modifiers.ctrl) {
-                    td.font_size = (td.font_size - FONT_SIZE_STEP).max(MIN_FONT_SIZE);
-                }
-            }
 
             let is_focused = terminal_should_have_focus(
                 self.focused_terminal.as_ref() == Some(tab),
@@ -5148,7 +6174,12 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                 tv = tv.set_font(egui_term::TerminalFont::new(egui_term::FontSettings {
                     font_type: egui::FontId::monospace(td.font_size),
                 }));
-                tv = tv.set_focus(is_focused);
+                // While the settings window (and its password popups) is
+                // open, the terminal must NOT claim keyboard focus every
+                // frame — otherwise text inputs in the popups lose focus
+                // immediately after being clicked.
+                let terminal_may_focus = is_focused && !self.show_settings && !self.pw_popup_open;
+                tv = tv.set_focus(terminal_may_focus);
                 // Override keys handled by app-level history UI
                 tv = tv.add_bindings(vec![
                     (

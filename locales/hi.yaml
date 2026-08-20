@@ -1,173 +1,247 @@
-display_name: "हिन्दी"
-
+display_name: हिन्दी
 menu:
-  file: "फ़ाइल"
-  view: "दृश्य"
-  language: "भाषा"
-  theme: "थीम"
-
+  workspace: कार्यक्षेत्र
+  view: दृश्य
+  language: भाषा
+  theme: थीम
 file_menu:
-  save: "सहेजें"
-  load: "लोड करें"
-  save_as: "नाम सहेजें..."
-
-  exit: "बाहर निकलें"
-
+  save: सहेजें
+  load: लोड करें
+  save_as: नाम सहेजें...
+  exit: बाहर निकलें
 view_menu:
-  split_right: "दाईं ओर विभाजित करें"
-  split_down: "नीचे विभाजित करें"
-  settings: "सेटिंग्स"
-  workspace_toggle: "कार्यक्षेत्र"
-
+  split_right: दाईं ओर विभाजित करें
+  split_down: नीचे विभाजित करें
+  settings: सेटिंग्स
+  workspace_toggle: कार्यक्षेत्र
 settings:
-  title: "सेटिंग्स"
+  title: सेटिंग्स
   tabs:
-    general: "सामान्य"
-    themes: "थीम"
-    shortcuts: "शॉर्टकट"
-    lock: "लॉक"
+    general: सामान्य
+    themes: थीम
+    shortcuts: शॉर्टकट
+    lock: लॉक
   nav:
-    general: "सामान्य"
-    themes: "थीम"
-    shortcuts: "शॉर्टकट"
-    lock: "लॉक"
+    general: सामान्य
+    themes: थीम
+    shortcuts: शॉर्टकट
+    lock: लॉक
+    group_settings: सेटिंग्स
+    group_theme: थीम
+    theme_select: प्रबंधन
+    theme_ui: UI स्वरूप
+    theme_terminal: टर्मिनल
+    theme_ansi: ANSI पैलेट
   general:
-    heading: "सामान्य"
-    scene_info: "दृश्य और टेम्पलेट निश्चित पथ का उपयोग करते हैं:"
-    scene_path: "  दृश्य: ./scene.json"
-    templates_path: "  टेम्पलेट: ./templates/"
-    history_section: "इतिहास"
-    max_history: "अधिकतम प्रविष्टियाँ:"
-    scrollback: "स्क्रॉलबैक:"
-    clear_all_history: "सभी इतिहास साफ़ करें"
-    auto_copy: "चयनित पाठ स्वतः कॉपी करें"
+    heading: सामान्य
+    scene_info: 'दृश्य और टेम्पलेट निश्चित पथ का उपयोग करते हैं:'
+    scene_path: '  दृश्य: ./scene.json'
+    templates_path: '  टेम्पलेट: ./templates/'
+    history_section: इतिहास
+    max_history: 'अधिकतम प्रविष्टियाँ:'
+    scrollback: 'स्क्रॉलबैक:'
+    clear_all_history: सारा इतिहास मिटाएँ
+    auto_copy: चयनित पाठ स्वतः कॉपी करें
   appearance:
-    heading: "रूप"
-    terminal_section: "टर्मिनल रूप"
-    font_size: "फ़ॉन्ट आकार:"
-    cell_spacing: "अक्षर अंतराल:"
-    font_family: "फ़ॉन्ट:"
-    bg_color: "पृष्ठभूमि:"
-    fg_color: "अग्रभूमि:"
-    command_menu_section: "कमांड मेनू"
-    menu_bg_color: "पृष्ठभूमि:"
-    menu_fg_color: "पाठ रंग:"
-    menu_font_size: "फ़ॉन्ट आकार:"
-    apply_theme_typography: "थीम फ़ॉन्ट और आकार लागू करें"
-    import_theme: "थीम आयात करें"
-    export_theme: "थीम निर्यात करें"
-    import_success: "थीम आयात की गई"
-    export_success: "थीम निर्यात की गई"
-    invalid_theme: "अमान्य थीम फ़ाइल"
-    unsupported_version: "असमर्थित थीम प्रारूप संस्करण"
-    save_failure: "थीम सहेजने में विफल"
-    subtab_ui: "UI स्वरूप"
-    subtab_terminal: "टर्मिनल"
-    subtab_ansi: "ANSI पैलेट"
+    heading: रूप
+    terminal_section: टर्मिनल रूप
+    font_size: 'फ़ॉन्ट आकार:'
+    cell_spacing: 'अक्षर अंतराल:'
+    font_family: 'फ़ॉन्ट:'
+    bg_color: 'पृष्ठभूमि:'
+    fg_color: 'अग्रभूमि:'
+    command_menu_section: कमांड मेनू
+    menu_bg_color: 'पृष्ठभूमि:'
+    menu_fg_color: 'पाठ रंग:'
+    menu_font_size: 'फ़ॉन्ट आकार:'
+    apply_theme_typography: थीम फ़ॉन्ट और आकार लागू करें
+    import_theme: थीम आयात करें
+    export_theme: थीम निर्यात करें
+    import_success: थीम आयात की गई
+    export_success: थीम निर्यात की गई
+    invalid_theme: अमान्य थीम फ़ाइल
+    unsupported_version: असमर्थित थीम प्रारूप संस्करण
+    save_failure: थीम सहेजने में विफल
+    subtab_ui: UI स्वरूप
+    subtab_terminal: टर्मिनल
+    subtab_ansi: ANSI पैलेट
   shortcuts:
-    heading: "शॉर्टकट"
-    hint: "एक शॉर्टकट पर क्लिक करें और नई कुंजी दबाएँ"
-    not_set: "सेट नहीं है"
-    reset_defaults: "डिफ़ॉल्ट पर पुनर्स्थापित करें"
+    heading: शॉर्टकट
+    hint: एक शॉर्टकट पर क्लिक करें और नई कुंजी दबाएँ
+    not_set: सेट नहीं है
+    reset_defaults: डिफ़ॉल्ट पर पुनर्स्थापित करें
   lock:
-    heading: "लॉक"
-    password_section: "पासवर्ड कॉन्फ़िगरेशन:"
-    set_password: "पासवर्ड सेट करें"
-    change_password: "पासवर्ड बदलें"
-    clear_password: "पासवर्ड साफ़ करें"
-    lock_section: "लॉक:"
-    lock_overlay_color: "ओवरले रंग:"
+    heading: लॉक
+    password_section: 'पासवर्ड कॉन्फ़िगरेशन:'
+    set_password: पासवर्ड सेट करें
+    change_password: पासवर्ड बदलें
+    clear_password: पासवर्ड साफ़ करें
+    lock_section: 'लॉक:'
+    lock_overlay_color: 'ओवरले रंग:'
   buttons:
-    apply: "लागू करें"
-    close: "बंद करें"
-
+    apply: लागू करें
+    close: बंद करें
+    revert: पूर्ववत करें
+    applied: लागू हो गया
+    builtin: इनबिल्ट
+    user_group: कस्टम थीम
+    builtin_group: इनबिल्ट थीम
+    user: उपयोगकर्ता
+    behavior_section: चयन
+    data_section: कमांड इतिहास
+    maintenance_section: रखरखाव
+    font_section: फ़ॉन्ट
+    color_section: रंग
+    preview_section: पूर्वावलोकन
+    template_section: पैलेट टेम्पलेट
+    base_color_section: मूल रंग
 shortcut_labels:
-  new_terminal: "नया टर्मिनल"
-  close_terminal: "टर्मिनल बंद करें"
-  workspace_up: "कार्यक्षेत्र ऊपर"
-  workspace_down: "कार्यक्षेत्र नीचे"
-  panel_left: "पैनल बाएँ"
-  panel_right: "पैनल दाएँ"
-  lock_workspace: "कार्यक्षेत्र लॉक करें"
-  history_menu: "इतिहास मेनू"
-  history_prev: "पिछला इतिहास"
-  history_next: "अगला इतिहास"
-  toggle_workspace_sidebar: "कार्यक्षेत्र पट्टी दिखाएँ/छुपाएँ"
-  zoom_in: "बड़ा करें"
-  zoom_out: "छोटा करें"
-  shortcuts_heading: "शॉर्टकट"
-
+  new_terminal: नया टर्मिनल
+  close_terminal: टर्मिनल बंद करें
+  workspace_up: कार्यक्षेत्र ऊपर
+  workspace_down: कार्यक्षेत्र नीचे
+  panel_left: पैनल बाएँ
+  panel_right: पैनल दाएँ
+  lock_workspace: कार्यक्षेत्र लॉक करें
+  history_menu: इतिहास मेनू
+  history_prev: पिछला इतिहास
+  history_next: अगला इतिहास
+  toggle_workspace_sidebar: कार्यक्षेत्र पट्टी दिखाएँ/छुपाएँ
+  zoom_in: बड़ा करें
+  zoom_out: छोटा करें
+  shortcuts_heading: शॉर्टकट
 workspace:
-  heading: "कार्यक्षेत्र"
-  new: "+ नया कार्यक्षेत्र"
-  rename: "नाम बदलें"
-  save_as_template: "टेम्पलेट के रूप में सहेजें"
-  close: "बंद करें"
-  rename_confirm: "ठीक है"
-  rename_cancel: "रद्द करें"
-  drag_handle_hint: "पुनर्व्यवस्थित करने के लिए खींचें"
-  close_ws_hint: "कार्यक्षेत्र बंद करें"
-  locked_hint: "लॉक किया गया कार्यक्षेत्र"
-  unlocked_hint: "अनलॉक किया गया कार्यक्षेत्र"
-  empty_hint: "बनाने के लिए '+ नया कार्यक्षेत्र' पर क्लिक करें"
-  templates: "टेम्पलेट"
-  templates_empty: "(खाली)"
-  name_prefix: "कार्यक्षेत्र "
-
+  heading: कार्यक्षेत्र
+  new: + नया कार्यक्षेत्र
+  rename: नाम बदलें
+  save_as_template: टेम्पलेट के रूप में सहेजें
+  close: बंद करें
+  rename_confirm: ठीक है
+  rename_cancel: रद्द करें
+  drag_handle_hint: पुनर्व्यवस्थित करने के लिए खींचें
+  close_ws_hint: कार्यक्षेत्र बंद करें
+  locked_hint: लॉक किया गया कार्यक्षेत्र
+  unlocked_hint: अनलॉक किया गया कार्यक्षेत्र
+  empty_hint: बनाने के लिए '+ नया कार्यक्षेत्र' पर क्लिक करें
+  templates: टेम्पलेट
+  templates_empty: (खाली)
+  name_prefix: 'कार्यक्षेत्र '
 close_confirm:
-  message_prefix: "क्या आप वाकई कार्यक्षेत्र \""
-  message_suffix: "\" को बंद करना चाहते हैं?"
-  confirm: "पुष्टि करें"
-  cancel: "रद्द करें"
-  terminal_title: "टर्मिनल बंद करें"
-  terminal_message: "क्या आप वाकई इस टर्मिनल को बंद करना चाहते हैं? कमांड इतिहास हटा दिया जाएगा।"
-
+  message_prefix: क्या आप वाकई कार्यक्षेत्र "
+  message_suffix: '" को बंद करना चाहते हैं?'
+  confirm: पुष्टि करें
+  cancel: रद्द करें
+  terminal_title: टर्मिनल बंद करें
+  terminal_message: क्या आप वाकई इस टर्मिनल को बंद करना चाहते हैं? कमांड इतिहास हटा दिया जाएगा।
 password:
-  enter: "पासवर्ड दर्ज करें:"
-  confirm: "पासवर्ड पुष्टि करें:"
-  original: "वर्तमान पासवर्ड:"
-  new: "नया पासवर्ड:"
-  confirm_new: "नया पासवर्ड पुष्टि करें:"
-  input_label: "पासवर्ड:"
-  mismatch: "मेल नहीं खाता"
-  match: "मेल खाता है"
-  empty_error: "पासवर्ड खाली नहीं हो सकता"
-  mismatch_error: "पासवर्ड मेल नहीं खाते"
-  wrong_error: "वर्तमान पासवर्ड गलत है"
-  wrong_password: "गलत पासवर्ड"
-  confirm_button: "पुष्टि करें"
-  cancel_button: "रद्द करें"
-  set_title: "पासवर्ड सेट करें"
-  change_title: "पासवर्ड बदलें"
-  clear_title: "पासवर्ड साफ़ करें"
-
+  enter: 'पासवर्ड दर्ज करें:'
+  confirm: 'पासवर्ड पुष्टि करें:'
+  original: 'वर्तमान पासवर्ड:'
+  new: 'नया पासवर्ड:'
+  confirm_new: 'नया पासवर्ड पुष्टि करें:'
+  input_label: 'पासवर्ड:'
+  mismatch: मेल नहीं खाता
+  match: मेल खाता है
+  empty_error: पासवर्ड खाली नहीं हो सकता
+  mismatch_error: पासवर्ड मेल नहीं खाते
+  wrong_error: वर्तमान पासवर्ड गलत है
+  wrong_password: गलत पासवर्ड
+  confirm_button: पुष्टि करें
+  cancel_button: रद्द करें
+  set_title: पासवर्ड सेट करें
+  change_title: पासवर्ड बदलें
+  clear_title: पासवर्ड साफ़ करें
 lock_overlay:
-  title: "यह कार्यक्षेत्र लॉक है"
-  password_label: "पासवर्ड:"
-  unlock_button: "अनलॉक करें"
-  wrong_password: "गलत पासवर्ड"
-
+  title: यह कार्यक्षेत्र लॉक है
+  password_label: 'पासवर्ड:'
+  unlock_button: अनलॉक करें
+  wrong_password: गलत पासवर्ड
 terminal:
-  not_found: "टर्मिनल नहीं मिला"
-  rename: "नाम बदलें"
-  clear_history: "कमांड इतिहास साफ़ करें"
-  new_tab: "+ नया टैब"
-  add_tab: "+ टैब"
-  rename_hint: "नाम दर्ज करें..."
-  default_name_prefix: "टर्मिनल "
-
+  not_found: टर्मिनल नहीं मिला
+  rename: नाम बदलें
+  clear_history: कमांड इतिहास साफ़ करें
+  new_tab: + नया टैब
+  add_tab: + टैब
+  rename_hint: नाम दर्ज करें...
+  default_name_prefix: 'टर्मिनल '
 theme:
-  light: "हल्का"
-  dark: "गहरा"
-
+  light: हल्का
+  dark: गहरा
 about:
-  menu_label: "के बारे में"
-  title: "OpenNex के बारे में"
-  version_label: "संस्करण"
-  description: "टैब लेआउट, कमांड इतिहास, वैश्विक इंटरफ़ेस स्केलिंग और एन्क्रिप्टेड कार्यक्षेत्र के साथ बहुउपयोगी स्टैक्ड टर्मिनल प्रबंधक।"
-  homepage_label: "मुखपृष्ठ"
-  source_label: "सोर्स कोड"
-  license_label: "लाइसेंस"
-  credits_label: "आभार"
-  credits: "egui, egui_dock, alacritty_terminal, और egui_term सहित ओपन-सोर्स परियोजनाओं पर निर्मित।"
-  close: "बंद करें"
+  menu_label: के बारे में
+  title: OpenNex के बारे में
+  version_label: संस्करण
+  description: 'AI वर्कफ़्लो और कमांड लाइन के भारी उपयोगकर्ताओं के लिए मल्टी-विंडो स्टैकिंग टर्मिनल मैनेजर।
+
+
+    टर्मिनल विंडो लेआउट को स्वतंत्र रूप से व्यवस्थित करें और टैब स्टैकिंग से अनगिनत सेशन प्रबंधित करें; लेआउट सहेजे और लोड किए जा सकते हैं। असीमित सेशन कमांड मेमोरी, ग्लोबल इंटरफ़ेस ज़ूम, कस्टम थीम, एन्क्रिप्टेड
+    वर्कस्पेस और कस्टम शॉर्टकट — जटिल टर्मिनल वातावरण को एक जगह प्रबंधित करने के लिए सब कुछ।
+
+
+    Rust में निर्मित: हाई-परफ़ॉर्मेंस इंजन 6000+ सक्रिय विंडो समानांतर में स्थिर रूप से चलाता है, Linux, Windows और macOS का नेटिव समर्थन करता है और 20+ भाषाएँ प्रदान करता है।
+
+    बग मिला या सुझाव हैं? फ़ीडबैक का स्वागत है।'
+  homepage_label: मुखपृष्ठ
+  source_label: सोर्स कोड
+  license_label: लाइसेंस
+  credits_label: आभार
+  credits: egui, egui_dock, alacritty_terminal, और egui_term सहित ओपन-सोर्स परियोजनाओं पर निर्मित।
+  close: बंद करें
+update:
+  checking: ''
+  downloading: अपडेट डाउनलोड हो रहा है...
+  verifying: अखंडता जाँची जा रही है...
+  ready: अपडेट तैयार
+  failed: 'अपडेट विफल: {}'
+  available: नया संस्करण v{} मिला — डाउनलोड तैयार
+  up_to_date: आप अद्यतित हैं
+  check: अपडेट देखें
+  update_now: अभी अपडेट करें
+  restart: ऐप पुनः आरंभ
+  restart_title: अपडेट तैयार
+  restart_body: नया संस्करण डाउनलोड हो गया। अभी पुनः आरंभ करें?
+  restart_confirm: पुनः आरंभ
+theme_editor:
+  colors:
+    app_bg: ऐप पृष्ठभूमि
+    sidebar: साइडबार
+    panel: पैनल
+    input_bg: इनपुट फ़ील्ड
+    text: पाठ
+    weak_text: हल्का पाठ
+    accent: एक्सेंट
+    warning: चेतावनी
+    danger: खतरा
+    hover: होवर
+    active: सक्रिय
+    selection_bg: चयन पृष्ठभूमि
+    selection_text: चयन पाठ
+    border: किनारा
+    lock: लॉक
+    window_shadow: छाया
+    tab_highlight: फ़ोकस टैब
+    fg: अग्रभूमि
+    bg: पृष्ठभूमि
+    cursor: कर्सर
+    selection_term_bg: चयन पृष्ठभूमि
+    selection_term_text: चयन पाठ
+    link: लिंक
+  edit_title: थीम संपादित करें
+  name_label: 'नाम:'
+  confirm: सहेजें
+  cancel: रद्द करें
+  system_ui: System UI
+  terminal: Terminal
+  ui_font_label: 'UI फ़ॉन्ट: '
+  ui_font_size: 'UI आकार: '
+  terminal_font_label: 'टर्मिनल फ़ॉन्ट: '
+  terminal_font_size: 'टर्मिनल आकार: '
+  cell_spacing: 'अंतराल: '
+  terminal_padding: 'पैडिंग: '
+stats:
+  focused: वर्तमान टर्मिनल
+  workspace: वर्तमान कार्यक्षेत्र
+  global: संपूर्ण
+  terminals: टर्मिनल
+  clear_history_title: सारा इतिहास मिटाएँ
+  clear_history_body: सभी टर्मिनल का इतिहास मिटाएँ? यह पूर्ववत नहीं होगा।

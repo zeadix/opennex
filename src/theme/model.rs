@@ -248,6 +248,11 @@ pub struct ThemeDefinition {
     pub name: String,
     #[serde(default)]
     pub author: String,
+    /// Unix timestamp (seconds) when the user theme was created. 0 for
+    /// builtin themes / legacy files (treated as oldest). Used to sort the
+    /// custom-theme block newest-first.
+    #[serde(default)]
+    pub created_at: u64,
     pub app: AppTheme,
     pub terminal: TerminalThemeConfig,
     pub typography: TypographyTheme,
@@ -362,6 +367,7 @@ mod tests {
                 id: "opennex-dark".into(),
                 name: "OpenNex Dark".into(),
                 author: String::new(),
+                created_at: 0,
                 app: AppTheme {
                     app_bg: ThemeColor::from_rgb_opaque(0x17, 0x19, 0x1c),
                     sidebar: ThemeColor::from_rgb_opaque(0x1d, 0x20, 0x24),

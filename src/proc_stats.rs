@@ -317,6 +317,172 @@ pub struct ProcSampler {
     pub last_mem_bytes: Option<u64>,
 }
 
+// ---------------------------------------------------------------------------
+// Network throughput (system-wide RX/TX rates)
+// ---------------------------------------------------------------------------
+
+/// Cumulative system-wide network counters in bytes.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NetCounters {
+    pub rx_bytes: u64,
+    pub tx_bytes: u64,
+}
+
+#[cfg(target_os = "linux")]
+pub fn read_net_counters() -> Option<NetCounters> {
+    let content = std::fs::read_to_string("/proc/net/dev").ok()?;
+    let mut c = NetCounters::default();
+    for line in content.lines().skip(2) {
+        let (iface, data) = line.split_once(':')?;
+        let iface = iface.trim();
+        // Skip virtual interfaces so we don't double-count.
+        if iface.starts_with("lo")
+            || iface.starts_with("docker")
+            || iface.starts_with("veth")
+            || iface.starts_with("br-")
+            || iface.starts_with("virbr")
+        {
+            continue;
+        }
+        let fields: Vec<&str> = data.split_whitespace().collect();
+        if fields.len() >= 9 {
+            c.rx_bytes += fields[0].parse().unwrap_or(0);
+            c.tx_bytes += fields[8].parse().unwrap_or(0);
+        }
+    }
+    Some(c)
+}
+
+#[cfg(target_os = "macos")]
+pub fn read_net_counters() -> Option<NetCounters> {
+    // netstat -ib -n: summed per-interface counters, first row per iface.
+    let out = std::process::Command::new("netstat")
+        .args(["-ib", "-n"])
+        .output()
+        .ok()?;
+    let mut seen: std::collections::HashSet<String> = Default::default();
+    let mut c = NetCounters::default();
+    for line in String::from_utf8_lossy(&out.stdout).lines().skip(1) {
+        let f: Vec<&str> = line.split_whitespace().collect();
+        // Name Mtu Network Address Ipkts Ierrs Ibytes Opkts Oerrs Obytes ...
+        if f.len() >= 10 {
+            let name = f[0];
+            if name.starts_with("lo") || seen.contains(name) {
+                continue;
+            }
+            seen.insert(name.to_string());
+            c.rx_bytes += f[6].parse().unwrap_or(0);
+            c.tx_bytes += f[9].parse().unwrap_or(0);
+        }
+    }
+    Some(c)
+}
+
+#[cfg(target_os = "windows")]
+pub fn read_net_counters() -> Option<NetCounters> {
+    // Type-perf-free approach: parse `netstat -e` (works on all Windows).
+    let out = std::process::Command::new("netstat")
+        .arg("-e")
+        .output()
+        .ok()?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut c = NetCounters::default();
+    let mut bytes_section = 0; // 0=none,1=received,2=sent
+    for line in text.lines() {
+        let l = line.trim();
+        if l.starts_with("Received") || l.starts_with("已接收") {
+            bytes_section = 1;
+            continue;
+        }
+        if l.starts_with("Sent") || l.starts_with("已发送") {
+            bytes_section = 2;
+            continue;
+        }
+        if bytes_section > 0 {
+            // Counter rows: "Bytes <n>" possibly grouped with spaces.
+            if let Some(v) = l.strip_prefix("Bytes").or_else(|| l.strip_prefix("字节")) {
+                if let Ok(n) = v.trim().replace(',', "").parse::<u64>() {
+                    match bytes_section {
+                        1 => {
+                            c.rx_bytes = n;
+                            bytes_section = 0;
+                        }
+                        2 => {
+                            c.tx_bytes = n;
+                            bytes_section = 0;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+    Some(c)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+pub fn read_net_counters() -> Option<NetCounters> {
+    None
+}
+
+/// Sampler that converts cumulative counters into RX/TX rates in bytes/sec.
+pub struct NetSampler {
+    last: Option<(Instant, NetCounters)>,
+    pub rx_rate: Option<f64>,
+    pub tx_rate: Option<f64>,
+}
+
+impl Default for NetSampler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl NetSampler {
+    pub fn new() -> Self {
+        Self {
+            last: None,
+            rx_rate: None,
+            tx_rate: None,
+        }
+    }
+
+    pub fn refresh(&mut self) {
+        let Some(now) = read_net_counters() else {
+            return;
+        };
+        if let Some((when, prev)) = &self.last {
+            let elapsed = when.elapsed().as_secs_f64();
+            if elapsed > 0.05 {
+                self.rx_rate = Some((now.rx_bytes.saturating_sub(prev.rx_bytes)) as f64 / elapsed);
+                self.tx_rate = Some((now.tx_bytes.saturating_sub(prev.tx_bytes)) as f64 / elapsed);
+            }
+        }
+        self.last = Some((Instant::now(), now));
+    }
+}
+
+/// Human-readable rate, e.g. `12.3 MB/s`.
+pub fn format_rate(bytes_per_sec: Option<f64>) -> String {
+    match bytes_per_sec {
+        Some(r) => {
+            const KB: f64 = 1024.0;
+            const MB: f64 = KB * 1024.0;
+            const GB: f64 = MB * 1024.0;
+            if r >= GB {
+                format!("{:.2} GB/s", r / GB)
+            } else if r >= MB {
+                format!("{:.1} MB/s", r / MB)
+            } else if r >= KB {
+                format!("{:.1} KB/s", r / KB)
+            } else {
+                format!("{:.0} B/s", r)
+            }
+        }
+        None => "--".into(),
+    }
+}
+
 impl Default for ProcSampler {
     fn default() -> Self {
         Self::new()

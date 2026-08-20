@@ -1,0 +1,79 @@
+{
+  "format_version": 1,
+  "id": "one-dark",
+  "name": "One Dark",
+  "author": "OpenNex",
+  "app": {
+    "app_bg": "#21252b",
+    "sidebar": "#1e2127",
+    "panel": "#282c34",
+    "hover": "#31353f",
+    "active": "#2c313a",
+    "border": "#3e4451",
+    "text": "#abb2bf",
+    "weak_text": "#5c6370",
+    "accent": "#61afef",
+    "warning": "#e5c07b",
+    "danger": "#e06c75",
+    "lock": "#d19a66",
+    "input_bg": "#1e2127",
+    "selection_bg": "#3e4451",
+    "selection_text": "#abb2bf",
+    "window_shadow": "#00000078",
+    "menu_bg": "#282c34",
+    "menu_fg": "#abb2bf",
+    "button_bg": "#1e2127",
+    "button_fg": "#abb2bf",
+    "button_hover_bg": "#31353f",
+    "sidebar_border": "#3e4451",
+    "tab_highlight": "#2c313a"
+  },
+  "terminal": {
+    "foreground": "#abb2bf",
+    "background": "#282c34",
+    "normal": {
+      "black": "#282c34",
+      "red": "#e06c75",
+      "green": "#98c379",
+      "yellow": "#e5c07b",
+      "blue": "#61afef",
+      "magenta": "#c678dd",
+      "cyan": "#56b6c2",
+      "white": "#abb2bf"
+    },
+    "bright": {
+      "black": "#5c6370",
+      "red": "#e06c75",
+      "green": "#98c379",
+      "yellow": "#e5c07b",
+      "blue": "#61afef",
+      "magenta": "#c678dd",
+      "cyan": "#56b6c2",
+      "white": "#ffffff"
+    },
+    "dim": {
+      "black": "#1c2026",
+      "red": "#9c4f56",
+      "green": "#6c8f57",
+      "yellow": "#a6895a",
+      "blue": "#477cab",
+      "magenta": "#8d559d",
+      "cyan": "#3d828a",
+      "white": "#757b85"
+    },
+    "dim_foreground": "#5c6370",
+    "cursor": "#5c6370",
+    "selection_bg": "#3e4451",
+    "selection_text": "#abb2bf",
+    "link": "#61afef"
+  },
+  "typography": {
+    "terminal_font_families": [
+      "monospace"
+    ],
+    "terminal_font_size": 14.0,
+    "cell_spacing": 1.0,
+    "menu_font_size": 14.0,
+    "terminal_padding": 4.0
+  }
+}

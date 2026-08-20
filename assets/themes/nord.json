@@ -1,0 +1,79 @@
+{
+  "format_version": 1,
+  "id": "nord",
+  "name": "Nord",
+  "author": "OpenNex",
+  "app": {
+    "app_bg": "#2e3440",
+    "sidebar": "#3b4252",
+    "panel": "#434c5e",
+    "hover": "#4c566a",
+    "active": "#434c5e",
+    "border": "#4c566a",
+    "text": "#eceff4",
+    "weak_text": "#7b88a1",
+    "accent": "#88c0d0",
+    "warning": "#ebcb8b",
+    "danger": "#bf616a",
+    "lock": "#d08770",
+    "input_bg": "#3b4252",
+    "selection_bg": "#434c5e",
+    "selection_text": "#eceff4",
+    "window_shadow": "#00000078",
+    "menu_bg": "#434c5e",
+    "menu_fg": "#eceff4",
+    "button_bg": "#3b4252",
+    "button_fg": "#eceff4",
+    "button_hover_bg": "#4c566a",
+    "sidebar_border": "#4c566a",
+    "tab_highlight": "#434c5e"
+  },
+  "terminal": {
+    "foreground": "#d8dee9",
+    "background": "#2e3440",
+    "normal": {
+      "black": "#3b4252",
+      "red": "#bf616a",
+      "green": "#a3be8c",
+      "yellow": "#ebcb8b",
+      "blue": "#81a1c1",
+      "magenta": "#b48ead",
+      "cyan": "#88c0d0",
+      "white": "#e5e9f0"
+    },
+    "bright": {
+      "black": "#4c566a",
+      "red": "#bf616a",
+      "green": "#a3be8c",
+      "yellow": "#ebcb8b",
+      "blue": "#81a1c1",
+      "magenta": "#b48ead",
+      "cyan": "#8fbcbb",
+      "white": "#eceff4"
+    },
+    "dim": {
+      "black": "#333c47",
+      "red": "#9a5a61",
+      "green": "#879c76",
+      "yellow": "#bfa874",
+      "blue": "#6d8aa8",
+      "magenta": "#977991",
+      "cyan": "#75a3b2",
+      "white": "#b7bfc9"
+    },
+    "dim_foreground": "#7b88a1",
+    "cursor": "#d8dee9",
+    "selection_bg": "#434c5e",
+    "selection_text": "#eceff4",
+    "link": "#88c0d0"
+  },
+  "typography": {
+    "terminal_font_families": [
+      "monospace"
+    ],
+    "terminal_font_size": 14.0,
+    "cell_spacing": 1.0,
+    "menu_font_size": 14.0,
+    "terminal_padding": 4.0
+  }
+}

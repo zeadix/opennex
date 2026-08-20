@@ -1,5 +1,5 @@
 use crate::theme::model::{AnsiColors, ThemeColor, ThemeDefinition};
-use crate::theme::{model, palettes, store};
+use crate::theme::store;
 use egui::Color32;
 
 /// Actions returned by the theme editor UI, handled by `app.rs`.
@@ -22,7 +22,6 @@ pub enum ThemeAction {
     /// User wants to export the current theme.
     ExportTheme,
     /// User applied a terminal palette template (only terminal colors change).
-    ApplyPaletteTemplate(String),
     /// Draft was modified — triggers live preview.
     DraftModified,
 }
@@ -51,7 +50,87 @@ pub enum ThemeEditorSubtab {
     AnsiPalette,
 }
 
+/// Render only the theme editor BODY for one subtab — no theme selector,
+/// no management buttons, no subtab tab row. Used by the unified theme
+/// settings page which draws its own section headings.
+/// Localized color names for the theme editor.
+#[derive(Clone, Default)]
+pub struct ColorLabels {
+    pub app_bg: String,
+    pub sidebar: String,
+    pub panel: String,
+    pub input_bg: String,
+    pub text: String,
+    pub weak_text: String,
+    pub accent: String,
+    pub warning: String,
+    pub danger: String,
+    pub hover: String,
+    pub active: String,
+    pub selection_bg: String,
+    pub selection_text: String,
+    pub border: String,
+    pub lock: String,
+    pub window_shadow: String,
+    pub tab_highlight: String,
+    pub fg: String,
+    pub bg: String,
+    pub cursor: String,
+    pub selection_term_bg: String,
+    pub selection_term_text: String,
+    pub link: String,
+}
+
+/// Localized labels for the theme editor sections.
+#[derive(Clone, Default)]
+pub struct ThemeEditorLabels {
+    pub system_ui: String,
+    pub terminal: String,
+    pub ui_font: String,
+    pub ui_font_size: String,
+    pub terminal_font: String,
+    pub terminal_font_size: String,
+    pub cell_spacing: String,
+    pub terminal_padding: String,
+    pub colors: ColorLabels,
+}
+
+pub fn show_theme_editor_body(
+    ui: &mut egui::Ui,
+    draft: &mut ThemeDefinition,
+    available: &[ThemeDefinition],
+    available_fonts: &[String],
+    is_builtin: bool,
+    has_unsaved: bool,
+    subtab: ThemeEditorSubtab,
+    dialog: &mut ThemeDialogState,
+    labels: &ThemeEditorLabels,
+) -> Vec<ThemeAction> {
+    let mut actions = Vec::new();
+    let _ = (available, has_unsaved, dialog);
+    match subtab {
+        ThemeEditorSubtab::UiAppearance => {
+            show_ui_appearance_editor(ui, draft, available_fonts, is_builtin, &mut actions, labels);
+        }
+        ThemeEditorSubtab::Terminal => {
+            show_terminal_section_editor(
+                ui,
+                draft,
+                available_fonts,
+                is_builtin,
+                &mut actions,
+                labels,
+            );
+        }
+        ThemeEditorSubtab::AnsiPalette => {
+            show_ansi_palette_editor(ui, draft, is_builtin, &mut actions);
+        }
+    }
+    actions
+}
+
 /// Render the full theme management section.
+#[allow(dead_code)]
 pub fn show_theme_section(
     ui: &mut egui::Ui,
     draft: &mut ThemeDefinition,
@@ -63,6 +142,17 @@ pub fn show_theme_section(
     dialog: &mut ThemeDialogState,
 ) -> Vec<ThemeAction> {
     let mut actions = Vec::new();
+    let labels = ThemeEditorLabels {
+        system_ui: "System UI".into(),
+        terminal: "Terminal".into(),
+        ui_font: "UI 字体: ".into(),
+        ui_font_size: "UI 字号: ".into(),
+        terminal_font: "终端字体: ".into(),
+        terminal_font_size: "终端字号: ".into(),
+        cell_spacing: "间距: ".into(),
+        terminal_padding: "终端内边距: ".into(),
+        colors: Default::default(),
+    };
 
     actions.extend(show_theme_selector(ui, draft, available, has_unsaved));
     actions.extend(show_theme_buttons(ui, is_builtin, dialog));
@@ -102,10 +192,24 @@ pub fn show_theme_section(
 
     match subtab {
         ThemeEditorSubtab::UiAppearance => {
-            show_ui_appearance_editor(ui, draft, available_fonts, is_builtin, &mut actions);
+            show_ui_appearance_editor(
+                ui,
+                draft,
+                available_fonts,
+                is_builtin,
+                &mut actions,
+                &labels,
+            );
         }
         ThemeEditorSubtab::Terminal => {
-            show_terminal_section_editor(ui, draft, available_fonts, is_builtin, &mut actions);
+            show_terminal_section_editor(
+                ui,
+                draft,
+                available_fonts,
+                is_builtin,
+                &mut actions,
+                &labels,
+            );
         }
         ThemeEditorSubtab::AnsiPalette => {
             show_ansi_palette_editor(ui, draft, is_builtin, &mut actions);
@@ -208,7 +312,10 @@ fn show_ui_appearance_editor(
     available_fonts: &[String],
     is_builtin: bool,
     actions: &mut Vec<ThemeAction>,
+    labels: &ThemeEditorLabels,
 ) {
+    ui.strong(egui::RichText::new(&labels.system_ui).size(12.0));
+    ui.add_space(4.0);
     // Row 1: font + size (inline)
     ui.horizontal(|ui| {
         let current = draft
@@ -240,7 +347,7 @@ fn show_ui_appearance_editor(
         ui.add(
             egui::DragValue::new(&mut draft.app.ui_font_size)
                 .range(8.0..=32.0)
-                .prefix("UI 字号: "),
+                .prefix(&labels.ui_font_size),
         )
         .on_hover_text(crate::theme::ui_font_size_label());
     });
@@ -249,31 +356,44 @@ fn show_ui_appearance_editor(
 
     // Color grid: 3 columns × ~6 rows of compact color cells.
     // Each row: 3 swatch+hex combos using minimal vertical space.
-    let mut pairs: [(&mut ThemeColor, &str); 17] = [
-        (&mut draft.app.app_bg, "主背景"),
-        (&mut draft.app.sidebar, "侧栏"),
-        (&mut draft.app.panel, "面板"),
-        (&mut draft.app.input_bg, "输入框"),
-        (&mut draft.app.text, "文字"),
-        (&mut draft.app.weak_text, "弱化文字"),
-        (&mut draft.app.accent, "强调"),
-        (&mut draft.app.warning, "警告"),
-        (&mut draft.app.danger, "危险"),
-        (&mut draft.app.hover, "悬停"),
-        (&mut draft.app.active, "激活"),
-        (&mut draft.app.selection_bg, "选中背景"),
-        (&mut draft.app.selection_text, "选中文字"),
-        (&mut draft.app.border, "边框"),
-        (&mut draft.app.lock, "锁定"),
-        (&mut draft.app.window_shadow, "阴影"),
-        (&mut draft.app.tab_highlight, "焦点标签"),
+    let c = &labels.colors;
+    let mut pairs: [(&mut ThemeColor, &str, &'static str); 17] = [
+        (&mut draft.app.app_bg, c.app_bg.as_str(), "app_bg"),
+        (&mut draft.app.sidebar, c.sidebar.as_str(), "sidebar"),
+        (&mut draft.app.panel, c.panel.as_str(), "panel"),
+        (&mut draft.app.input_bg, c.input_bg.as_str(), "input_bg"),
+        (&mut draft.app.text, c.text.as_str(), "text"),
+        (&mut draft.app.weak_text, c.weak_text.as_str(), "weak_text"),
+        (&mut draft.app.accent, c.accent.as_str(), "accent"),
+        (&mut draft.app.warning, c.warning.as_str(), "warning"),
+        (&mut draft.app.danger, c.danger.as_str(), "danger"),
+        (&mut draft.app.hover, c.hover.as_str(), "hover"),
+        (&mut draft.app.active, c.active.as_str(), "active"),
+        (
+            &mut draft.app.selection_bg,
+            c.selection_bg.as_str(),
+            "app_sel_bg",
+        ),
+        (
+            &mut draft.app.selection_text,
+            c.selection_text.as_str(),
+            "app_sel_text",
+        ),
+        (&mut draft.app.border, c.border.as_str(), "border"),
+        (&mut draft.app.lock, c.lock.as_str(), "lock"),
+        (
+            &mut draft.app.window_shadow,
+            c.window_shadow.as_str(),
+            "shadow",
+        ),
+        (
+            &mut draft.app.tab_highlight,
+            c.tab_highlight.as_str(),
+            "tab_hl",
+        ),
     ];
-    for chunk in pairs.chunks_mut(3) {
-        ui.horizontal(|ui| {
-            for (color, label) in chunk {
-                let _ = compact_color_cell(ui, color, label, true, actions);
-            }
-        });
+    for (color, label, key) in pairs {
+        compact_color_cell(ui, color, label, true, actions, key);
     }
 }
 
@@ -284,7 +404,10 @@ fn show_terminal_section_editor(
     available_fonts: &[String],
     is_builtin: bool,
     actions: &mut Vec<ThemeAction>,
+    labels: &ThemeEditorLabels,
 ) {
+    ui.strong(egui::RichText::new(&labels.terminal).size(12.0));
+    ui.add_space(4.0);
     // Row 1: terminal font + size + cell spacing (inline)
     ui.horizontal(|ui| {
         let current = draft
@@ -316,44 +439,44 @@ fn show_terminal_section_editor(
         ui.add(
             egui::DragValue::new(&mut draft.typography.terminal_font_size)
                 .range(8.0..=32.0)
-                .prefix("终端字号: "),
+                .prefix(labels.terminal_font_size.clone()),
         );
         ui.add_space(8.0);
         ui.add(
             egui::DragValue::new(&mut draft.typography.cell_spacing)
                 .range(0.5..=2.0)
-                .prefix("间距: "),
+                .prefix(labels.cell_spacing.clone()),
         );
         ui.add_space(8.0);
         ui.add(
             egui::DragValue::new(&mut draft.typography.terminal_padding)
                 .range(0.0..=32.0)
-                .prefix("终端内边距: "),
+                .prefix(labels.terminal_padding.clone()),
         );
     });
 
     ui.add_space(6.0);
 
-    // Palette template
-    palette_template_selector(ui, actions);
-
-    ui.add_space(6.0);
-
     // Base colors in 3-column grid.
-    let mut pairs: [(&mut ThemeColor, &str); 6] = [
-        (&mut draft.terminal.foreground, "前景"),
-        (&mut draft.terminal.background, "背景"),
-        (&mut draft.terminal.cursor, "光标"),
-        (&mut draft.terminal.selection_bg, "选区背景"),
-        (&mut draft.terminal.selection_text, "选区文字"),
-        (&mut draft.terminal.link, "链接"),
+    let c = &labels.colors;
+    let mut pairs: [(&mut ThemeColor, &str, &'static str); 6] = [
+        (&mut draft.terminal.foreground, c.fg.as_str(), "term_fg"),
+        (&mut draft.terminal.background, c.bg.as_str(), "term_bg"),
+        (&mut draft.terminal.cursor, c.cursor.as_str(), "term_cursor"),
+        (
+            &mut draft.terminal.selection_bg,
+            c.selection_term_bg.as_str(),
+            "term_sel_bg",
+        ),
+        (
+            &mut draft.terminal.selection_text,
+            c.selection_term_text.as_str(),
+            "term_sel_text",
+        ),
+        (&mut draft.terminal.link, c.link.as_str(), "term_link"),
     ];
-    for chunk in pairs.chunks_mut(3) {
-        ui.horizontal(|ui| {
-            for (color, label) in chunk {
-                let _ = compact_color_cell(ui, color, label, true, actions);
-            }
-        });
+    for (color, label, key) in pairs {
+        compact_color_cell(ui, color, label, true, actions, key);
     }
 }
 
@@ -393,7 +516,7 @@ fn show_ansi_palette_editor(
                 (white, "白"),
             ];
             for (color, name) in slots.iter_mut() {
-                let _ = compact_color_cell(ui, color, name, true, actions);
+                let _ = compact_color_cell(ui, color, name, true, actions, "ansi");
             }
         });
         ui.add_space(4.0);
@@ -401,27 +524,6 @@ fn show_ansi_palette_editor(
     let _ = color_dragvalue_row; // suppress unused warning
 }
 
-fn palette_template_selector(ui: &mut egui::Ui, actions: &mut Vec<ThemeAction>) {
-    ui.horizontal(|ui| {
-        ui.label(crate::theme::palette_template_label());
-        let templates = palettes::templates();
-        let mut selected = 0usize;
-        egui::ComboBox::from_id_salt("palette_template_select")
-            .selected_text(templates[selected].name)
-            .show_ui(ui, |ui| {
-                for (i, template) in templates.iter().enumerate() {
-                    ui.selectable_value(&mut selected, i, template.name);
-                }
-            });
-        if ui.button(crate::theme::apply_template_text()).clicked() {
-            actions.push(ThemeAction::ApplyPaletteTemplate(
-                templates[selected].id.to_string(),
-            ));
-        }
-    });
-}
-
-#[allow(dead_code)]
 fn ansi_palette_grid(
     ui: &mut egui::Ui,
     colors: &mut AnsiColors,
@@ -470,13 +572,20 @@ fn color_swatch(
     }
 }
 
-/// Compact color cell: shows label + color swatch + hex value.
+/// Compact color cell as a two-column table row: the label column and the
+/// value column each left-align within their column, so every row's label
+/// and swatch line up. The hex code is rendered INSIDE the swatch,
+/// horizontally and vertically centered.
 fn compact_color_cell(
     ui: &mut egui::Ui,
     color: &mut ThemeColor,
     label: &str,
     enabled: bool,
     actions: &mut Vec<ThemeAction>,
+    // Stable widget-id key: must be unique per row and NOT derived from the
+    // (translatable) label — different rows can share a translation in some
+    // languages ("Selection text"), which would clash egui widget ids.
+    key: &'static str,
 ) {
     let mut srgb = [
         color.to_array()[0],
@@ -484,13 +593,89 @@ fn compact_color_cell(
         color.to_array()[2],
     ];
     let prev = srgb;
-    let label_width = 64.0;
-    ui.add_enabled_ui(enabled, |ui| {
-        ui.label(label);
-        egui::widgets::color_picker::color_edit_button_srgb(ui, &mut srgb);
-        ui.weak(egui::RichText::new(color.as_hex()).small());
-        let _ = label_width;
+    let row_h = 22.0;
+    let (rect, _) = ui.allocate_exact_size(
+        // Table width: half of the available width (50% reduction).
+        egui::vec2(ui.available_width() * 0.5, row_h),
+        egui::Sense::hover(),
+    );
+    // --- Column 1: label, left-aligned within a fixed 40% column. ---
+    let label_col_w = rect.width() * 0.4;
+    let galley = ui.fonts(|f| {
+        f.layout_no_wrap(
+            label.to_string(),
+            egui::FontId::proportional(12.0),
+            ui.visuals().text_color(),
+        )
     });
+    ui.painter().galley(
+        egui::pos2(rect.min.x, rect.center().y - galley.size().y / 2.0),
+        galley,
+        ui.visuals().text_color(),
+    );
+
+    // --- Column 2: swatch with the hex code inside (centered). ---
+    let swatch_w = 110.0;
+    let swatch = egui::Rect::from_min_size(
+        egui::pos2(rect.min.x + label_col_w, rect.center().y - row_h / 2.0),
+        egui::vec2(swatch_w, row_h),
+    );
+    let sw_bg = egui::Color32::from_rgb(srgb[0], srgb[1], srgb[2]);
+    let resp = if enabled {
+        ui.interact(
+            swatch,
+            egui::Id::new(("color_swatch", key)),
+            egui::Sense::click(),
+        )
+    } else {
+        ui.interact(
+            swatch,
+            egui::Id::new(("color_swatch", key)),
+            egui::Sense::hover(),
+        )
+    };
+    ui.painter().rect_filled(swatch, 2.0, sw_bg);
+    ui.painter().rect_stroke(
+        swatch,
+        2.0,
+        egui::Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color),
+        egui::StrokeKind::Inside,
+    );
+    // Hex text inside the swatch: pick black or white for contrast.
+    let lum = 0.299 * srgb[0] as f32 + 0.587 * srgb[1] as f32 + 0.114 * srgb[2] as f32;
+    let hex_color = if lum > 128.0 {
+        egui::Color32::BLACK
+    } else {
+        egui::Color32::WHITE
+    };
+    let hex_galley =
+        ui.fonts(|f| f.layout_no_wrap(color.as_hex(), egui::FontId::monospace(10.0), hex_color));
+    ui.painter().galley(
+        swatch.center() - hex_galley.size() / 2.0,
+        hex_galley,
+        hex_color,
+    );
+
+    // Clicking the swatch toggles a color picker popup anchored below it.
+    let popup_id = egui::Id::new(("color_popup", key));
+    if enabled {
+        egui::popup_below_widget(
+            ui,
+            popup_id,
+            &resp,
+            egui::PopupCloseBehavior::CloseOnClickOutside,
+            |ui| {
+                let mut c32 = egui::Color32::from_rgb(srgb[0], srgb[1], srgb[2]);
+                if egui::widgets::color_picker::color_picker_color32(
+                    ui,
+                    &mut c32,
+                    egui::color_picker::Alpha::Opaque,
+                ) {
+                    srgb = [c32.r(), c32.g(), c32.b()];
+                }
+            },
+        );
+    }
     if srgb != prev {
         *color = ThemeColor::from_rgb_opaque(srgb[0], srgb[1], srgb[2]);
         actions.push(ThemeAction::DraftModified);
@@ -741,5 +926,17 @@ pub mod texts {
     }
     pub fn builtin_readonly() -> String {
         "内置主题只读，编辑将创建副本".into()
+    }
+    pub fn keep() -> String {
+        "保留".into()
+    }
+    pub fn discard() -> String {
+        "放弃修改".into()
+    }
+    pub fn edit_theme() -> String {
+        "编辑主题".into()
+    }
+    pub fn name_label() -> String {
+        "名称:".into()
     }
 }

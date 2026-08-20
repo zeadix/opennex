@@ -17,11 +17,14 @@ pub struct Texts {
     pub terminal: TerminalTexts,
     pub theme: ThemeTexts,
     pub about: AboutTexts,
+    pub update: UpdateTexts,
+    pub theme_editor: ThemeEditorTexts,
+    pub stats: StatsTexts,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct MenuTexts {
-    pub file: String,
+    pub workspace: String,
     pub view: String,
     pub language: String,
     pub theme: String,
@@ -69,6 +72,18 @@ pub struct SettingsNavTexts {
     pub themes: String,
     pub shortcuts: String,
     pub lock: String,
+    #[serde(default)]
+    pub group_settings: String,
+    #[serde(default)]
+    pub group_theme: String,
+    #[serde(default)]
+    pub theme_select: String,
+    #[serde(default)]
+    pub theme_ui: String,
+    #[serde(default)]
+    pub theme_terminal: String,
+    #[serde(default)]
+    pub theme_ansi: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -158,6 +173,32 @@ pub struct SettingsLockTexts {
 pub struct SettingsButtonsTexts {
     pub apply: String,
     pub close: String,
+    #[serde(default)]
+    pub revert: String,
+    #[serde(default)]
+    pub applied: String,
+    #[serde(default)]
+    pub builtin: String,
+    pub user_group: String,
+    pub builtin_group: String,
+    #[serde(default)]
+    pub user: String,
+    #[serde(default)]
+    pub behavior_section: String,
+    #[serde(default)]
+    pub data_section: String,
+    #[serde(default)]
+    pub maintenance_section: String,
+    #[serde(default)]
+    pub font_section: String,
+    #[serde(default)]
+    pub color_section: String,
+    #[serde(default)]
+    pub preview_section: String,
+    #[serde(default)]
+    pub template_section: String,
+    #[serde(default)]
+    pub base_color_section: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -267,12 +308,87 @@ pub struct AboutTexts {
     pub close: String,
 }
 
+/// About-window update section strings.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct UpdateTexts {
+    pub checking: String,
+    pub downloading: String,
+    pub verifying: String,
+    pub ready: String,
+    pub failed: String,
+    pub available: String,
+    pub up_to_date: String,
+    pub check: String,
+    pub update_now: String,
+    pub restart: String,
+    pub restart_title: String,
+    pub restart_body: String,
+    pub restart_confirm: String,
+}
+
+/// Theme editor color names.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ColorNameTexts {
+    pub app_bg: String,
+    pub sidebar: String,
+    pub panel: String,
+    pub input_bg: String,
+    pub text: String,
+    pub weak_text: String,
+    pub accent: String,
+    pub warning: String,
+    pub danger: String,
+    pub hover: String,
+    pub active: String,
+    pub selection_bg: String,
+    pub selection_text: String,
+    pub border: String,
+    pub lock: String,
+    pub window_shadow: String,
+    pub tab_highlight: String,
+    pub fg: String,
+    pub bg: String,
+    pub cursor: String,
+    pub selection_term_bg: String,
+    pub selection_term_text: String,
+    pub link: String,
+}
+
+/// Theme editor popup strings.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ThemeEditorTexts {
+    pub colors: ColorNameTexts,
+    pub edit_title: String,
+    pub name_label: String,
+    pub confirm: String,
+    pub cancel: String,
+    pub system_ui: String,
+    pub terminal: String,
+    pub ui_font_label: String,
+    pub ui_font_size: String,
+    pub terminal_font_label: String,
+    pub terminal_font_size: String,
+    pub cell_spacing: String,
+    pub terminal_padding: String,
+}
+
+/// Sidebar system-info strings.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct StatsTexts {
+    pub focused: String,
+    pub workspace: String,
+    pub global: String,
+    pub terminals: String,
+    pub clear_history_title: String,
+    pub clear_history_body: String,
+}
+
 impl Texts {
     pub fn zh_default() -> Self {
         Self {
             display_name: "中文".into(),
             menu: MenuTexts {
-                file: "文件".into(),
+                workspace: "工作区".into(),
                 view: "视图".into(),
                 language: "语言".into(),
                 theme: "主题".into(),
@@ -302,6 +418,12 @@ impl Texts {
                     themes: "主题".into(),
                     shortcuts: "快捷键".into(),
                     lock: "锁定".into(),
+                    group_settings: "设置".into(),
+                    group_theme: "主题".into(),
+                    theme_select: "选择与管理".into(),
+                    theme_ui: "UI 外观".into(),
+                    theme_terminal: "终端".into(),
+                    theme_ansi: "ANSI 调色板".into(),
                 },
                 general: SettingsGeneralTexts {
                     heading: "通用".into(),
@@ -311,7 +433,7 @@ impl Texts {
                     history_section: "历史记录".into(),
                     max_history: "最大条数:".into(),
                     scrollback: "滚动回溯:".into(),
-                    clear_all_history: "清空所有历史".into(),
+                    clear_all_history: "删除所有指令记录".into(),
                     auto_copy: "选中字符自动复制".into(),
                 },
                 appearance: SettingsAppearanceTexts {
@@ -357,6 +479,20 @@ impl Texts {
                 buttons: SettingsButtonsTexts {
                     apply: "应用".into(),
                     close: "关闭".into(),
+                    revert: "还原".into(),
+                    applied: "已应用".into(),
+                    builtin: "内置".into(),
+                    user_group: "自定义主题".into(),
+                    builtin_group: "内置主题".into(),
+                    user: "用户".into(),
+                    behavior_section: "选择".into(),
+                    data_section: "指令记录".into(),
+                    maintenance_section: "维护".into(),
+                    font_section: "字体".into(),
+                    color_section: "颜色".into(),
+                    preview_section: "预览".into(),
+                    template_section: "配色模板".into(),
+                    base_color_section: "基础颜色".into(),
                 },
             },
             shortcut_labels: ShortcutLabelTexts {
@@ -442,13 +578,75 @@ impl Texts {
                 menu_label: "关于".into(),
                 title: "关于 OpenNex".into(),
                 version_label: "版本".into(),
-                description: "多功能堆叠式终端管理器，集成标签布局、会话命令记忆、全局界面缩放与加密工作区，高效管控你的终端环境。".into(),
+                description: "一款面向 AI 应用场景与命令行重度使用者的多窗口堆叠式终端管理器。\n\n支持自由排布终端窗口布局、标签堆叠管理大量会话，布局可保存与加载；内置无限会话命令记忆、全局界面缩放、自定义主题美化、工作区加密保护，自定义快捷键等能力，一站式管控复杂的终端运行环境。\n\n基于 Rust 构建，高性能引擎可稳定支撑6000+ 活动窗口并行运行，原生跨平台支持 Linux、Windows、macOS，并提供 20+ 国际化语言。\n如在使用中遇到 Bug 或有功能优化建议，欢迎反馈。".into(),
                 homepage_label: "主页".into(),
                 source_label: "开源".into(),
                 license_label: "开源协议".into(),
                 credits_label: "致谢".into(),
                 credits: "基于 egui、egui_dock、alacritty_terminal、egui_term 等开源项目构建。".into(),
                 close: "关闭".into(),
+            },
+            update: UpdateTexts {
+                checking: "正在检查更新...".into(),
+                downloading: "正在下载更新...".into(),
+                verifying: "正在校验文件完整性...".into(),
+                ready: "更新已准备就绪".into(),
+                failed: "更新失败: {}".into(),
+                available: "发现新版本 v{} — 准备下载".into(),
+                up_to_date: "当前已是最新版本".into(),
+                check: "检查更新".into(),
+                update_now: "立即更新".into(),
+                restart: "重启应用".into(),
+                restart_title: "更新已准备就绪".into(),
+                restart_body: "新版本已下载，是否立即重启应用？".into(),
+                restart_confirm: "重启".into(),
+            },
+            theme_editor: ThemeEditorTexts {
+                colors: ColorNameTexts {
+                    app_bg: "主背景".into(),
+                    sidebar: "侧栏".into(),
+                    panel: "面板".into(),
+                    input_bg: "输入框".into(),
+                    text: "文字".into(),
+                    weak_text: "弱化文字".into(),
+                    accent: "强调".into(),
+                    warning: "警告".into(),
+                    danger: "危险".into(),
+                    hover: "悬停".into(),
+                    active: "激活".into(),
+                    selection_bg: "选中背景".into(),
+                    selection_text: "选中文字".into(),
+                    border: "边框".into(),
+                    lock: "锁定".into(),
+                    window_shadow: "阴影".into(),
+                    tab_highlight: "焦点标签".into(),
+                    fg: "前景".into(),
+                    bg: "背景".into(),
+                    cursor: "光标".into(),
+                    selection_term_bg: "选区背景".into(),
+                    selection_term_text: "选区文字".into(),
+                    link: "链接".into(),
+                },
+                edit_title: "编辑主题".into(),
+                name_label: "名称:".into(),
+                confirm: "保存".into(),
+                cancel: "取消".into(),
+                system_ui: "System UI".into(),
+                terminal: "Terminal".into(),
+                ui_font_label: "UI 字体: ".into(),
+                ui_font_size: "UI 字号: ".into(),
+                terminal_font_label: "终端字体: ".into(),
+                terminal_font_size: "终端字号: ".into(),
+                cell_spacing: "间距: ".into(),
+                terminal_padding: "终端内边距: ".into(),
+            },
+            stats: StatsTexts {
+                focused: "当前终端".into(),
+                workspace: "当前工作区".into(),
+                global: "全局".into(),
+                terminals: "终端".into(),
+                clear_history_title: "删除所有指令记录".into(),
+                clear_history_body: "确认删除所有终端的指令记录？此操作不可恢复。".into(),
             },
         }
     }
@@ -554,7 +752,7 @@ mod tests {
     fn zh_default_contains_all_fields() {
         let texts = Texts::zh_default();
         assert!(!texts.display_name.is_empty());
-        assert!(!texts.menu.file.is_empty());
+        assert!(!texts.menu.workspace.is_empty());
         assert!(!texts.workspace.heading.is_empty());
         assert!(!texts.terminal.rename.is_empty());
     }
@@ -565,8 +763,19 @@ mod tests {
         let yaml = serde_yaml::to_string(&texts).unwrap();
         let parsed: Texts = serde_yaml::from_str(&yaml).unwrap();
         assert_eq!(parsed.display_name, texts.display_name);
-        assert_eq!(parsed.menu.file, texts.menu.file);
+        assert_eq!(parsed.menu.workspace, texts.menu.workspace);
         assert_eq!(parsed.workspace.heading, texts.workspace.heading);
+    }
+
+    #[test]
+    fn every_embedded_locale_parses_into_texts() {
+        for code in known_locale_codes() {
+            let y = embedded_locale(code).unwrap();
+            assert!(
+                serde_yaml::from_str::<Texts>(y).is_ok(),
+                "embedded locale {code} failed to parse"
+            );
+        }
     }
 
     #[test]
