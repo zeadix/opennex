@@ -2381,6 +2381,20 @@ impl App {
     /// Restart the application to apply the downloaded update.
     /// Used by both the in-place About button and the standalone popup.
     fn apply_update_and_restart(&mut self, ctx: &egui::Context, path: std::path::PathBuf) {
+        // Surface a previous failed replacement (the Windows helper writes
+        // this marker when the swap did not succeed).
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(dir) = exe.parent() {
+                let marker = dir.join("opennex_update_failed.txt");
+                if marker.exists() {
+                    let _ = std::fs::remove_file(&marker);
+                    self.update_state = crate::updater::UpdateState::Error(
+                        "上次更新替换失败，已保留旧版本。请手动下载安装包更新。".into(),
+                    );
+                    return;
+                }
+            }
+        }
         match crate::updater::replace_and_restart(&path) {
             Ok(_) => {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);

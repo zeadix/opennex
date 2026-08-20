@@ -267,34 +267,62 @@ pub fn replace_and_restart(new_binary: &Path) -> Result<(), String> {
     let current = current_exe_path()?;
     let parent = current.parent().ok_or("无法获取父目录")?.to_path_buf();
 
+    // Sanity check BEFORE spawning any helper: the staged binary must
+    // exist and be non-empty, otherwise we'd "restart" straight into the
+    // old version with no diagnostics.
+    let staged_len = fs::metadata(new_binary).map(|m| m.len()).unwrap_or(0);
+    if staged_len == 0 {
+        return Err("更新的二进制文件无效（空文件）".into());
+    }
+
+    // Stage a durable copy next to the current binary. The downloaded
+    // file lives in the system temp dir which may be cleaned (or lost
+    // across a reboot) between "download ready" and "user clicks
+    // restart"; the update must not depend on that lifetime.
+    let staged = parent.join(if cfg!(windows) {
+        "opennex_new.exe"
+    } else {
+        "opennex_new"
+    });
+    fs::copy(new_binary, &staged).map_err(|e| format!("暂存更新文件失败: {e}"))?;
+
     #[cfg(target_os = "windows")]
     {
         let script_path = parent.join("opennex_update.bat");
-        let new_name = new_binary
-            .file_name()
-            .ok_or("文件名错误")?
-            .to_string_lossy()
-            .to_string();
-        let new_path = new_binary.to_string_lossy().replace('\\', "/");
-        let current_name = current
-            .file_name()
-            .ok_or("文件名错误")?
-            .to_string_lossy()
-            .to_string();
-
         let script = format!(
+            // Wait for the OLD process to actually exit before replacing:
+            // a running exe is locked and a blind copy would fail (the
+            // silent failure mode that restarted the OLD version).
+            // Retry the replacement for up to ~30s, then verify the file
+            // was swapped before launching.
             r#"@echo off
-timeout /t 2 /nobreak >nul
-move /y "{new_path}" "{parent}\{new_name}" 2>nul
-copy /y "{parent}\{new_name}" "{current}"
-del /f /q "{parent}\{new_name}" 2>nul
-start "" "{current}"
-del /f /q "%~f0"
+set /a tries=0
+:wait_exit
+tasklist /FI "IMAGENAME eq {cur_name}" 2>nul | find /I "{cur_name}" >nul
+if %errorlevel%==0 (
+  set /a tries+=1
+  if %tries% geq 30 goto fail
+  timeout /t 1 /nobreak >nul
+  goto wait_exit
+)
+copy /y "{staged}" "{current}" >nul 2>&1
+if not errorlevel 1 (
+  del /f /q "{staged}" >nul 2>&1
+  start "" "{current}"
+  del /f /q "%~f0" >nul 2>&1
+  exit /b 0
+)
+:fail
+echo OpenNex update failed to replace the binary. > "{parent}\opennex_update_failed.txt"
+del /f /q "%~f0" >nul 2>&1
 "#,
-            new_path = new_path,
-            parent = parent.to_string_lossy().replace('\\', "/"),
-            new_name = new_name,
+            cur_name = current
+                .file_name()
+                .and_then(|n| n.to_str())
+                .ok_or("文件名错误")?,
+            staged = staged.to_string_lossy().replace('\\', "/"),
             current = current.to_string_lossy().replace('\\', "/"),
+            parent = parent.to_string_lossy().replace('\\', "/"),
         );
 
         fs::write(&script_path, script).map_err(|e| format!("写入脚本失败: {e}"))?;
@@ -302,26 +330,50 @@ del /f /q "%~f0"
         std::process::Command::new("cmd")
             .arg("/C")
             .arg(&script_path)
+            .creation_flags_windows()
             .spawn()
             .map_err(|e| format!("启动脚本失败: {e}"))?;
     }
     #[cfg(not(target_os = "windows"))]
     {
         use std::os::unix::fs::PermissionsExt;
-        let script_path = parent.join("opennex_update.sh");
-        let new_path = new_binary.to_string_lossy();
-        let current_str = current.to_string_lossy();
+        // Test write permission to the install dir first: system packages
+        // (e.g. /usr/bin from .deb) are root-owned and a plain user run
+        // cannot mv over them — report that instead of silently
+        // restarting the old binary.
+        let probe = parent.join(".opennex_write_probe");
+        let writable = fs::write(&probe, b"").is_ok();
+        let _ = fs::remove_file(&probe);
+        if !writable {
+            let _ = fs::remove_file(&staged);
+            return Err(format!(
+                "无权替换安装目录中的程序（{parent}）。请重新下载安装包更新，或以管理员权限运行。",
+                parent = parent.display()
+            ));
+        }
 
+        let script_path = parent.join("opennex_update.sh");
         let script = format!(
+            // Wait for the old PID to exit (binary may be busy briefly),
+            // then atomic mv + exec. mktemp log for diagnostics.
             r#"#!/bin/bash
-sleep 2
-mv -f "{new}" "{current}"
-chmod +x "{current}"
-nohup "{current}" &
-rm -f -- "$0"
+for i in $(seq 1 30); do
+  kill -0 {pid} 2>/dev/null || break
+  sleep 1
+done
+if mv -f "{staged}" "{current}" 2>>"{parent}/opennex_update.log"; then
+  chmod +x "{current}"
+  rm -f -- "$0"
+  exec "{current}"
+else
+  echo "update replace failed" >> "{parent}/opennex_update.log"
+  rm -f -- "$0"
+fi
 "#,
-            new = new_path,
-            current = current_str,
+            pid = std::process::id(),
+            staged = staged.to_string_lossy(),
+            current = current.to_string_lossy(),
+            parent = parent.to_string_lossy(),
         );
 
         fs::write(&script_path, &script).map_err(|e| format!("写入脚本失败: {e}"))?;
@@ -336,6 +388,30 @@ rm -f -- "$0"
 
     Ok(())
 }
+
+#[cfg(target_os = "windows")]
+trait CreateFlagsWindows {
+    fn creation_flags_windows(&mut self) -> &mut Self;
+}
+#[cfg(target_os = "windows")]
+impl CreateFlagsWindows for std::process::Command {
+    fn creation_flags_windows(&mut self) -> &mut Self {
+        // DETACHED_PROCESS: the helper must survive our exit and must not
+        // flash a console window in GUI-subsystem builds.
+        const DETACHED_PROCESS: u32 = 0x0000_0008;
+        use std::os::windows::process::CommandExt;
+        self.creation_flags(DETACHED_PROCESS);
+        self
+    }
+}
+#[cfg(not(target_os = "windows"))]
+trait CreateFlagsWindows {
+    fn creation_flags_windows(&mut self) -> &mut Self {
+        self
+    }
+}
+#[cfg(not(target_os = "windows"))]
+impl CreateFlagsWindows for std::process::Command {}
 
 #[cfg(test)]
 mod tests {
