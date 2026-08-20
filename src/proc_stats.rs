@@ -192,6 +192,45 @@ pub fn read_sample() -> Option<ProcSample> {
 }
 
 #[cfg(target_os = "windows")]
+pub fn ticks_per_sec() -> u64 {
+    // FILETIME deltas are converted to centiseconds in
+    // windows_query_process, so ticks-per-second is 100.
+    100
+}
+
+#[cfg(target_os = "windows")]
+pub fn read_sample() -> Option<ProcSample> {
+    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+        TH32CS_SNAPPROCESS,
+    };
+
+    unsafe {
+        let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if snap == INVALID_HANDLE_VALUE {
+            return None;
+        }
+        let mut entry: PROCESSENTRY32W = std::mem::zeroed();
+        entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+        let mut sample = ProcSample::default();
+        let mut more = Process32FirstW(snap, &mut entry);
+        while more != 0 {
+            let pid = entry.th32ProcessID;
+            let ppid = entry.th32ParentProcessID;
+            if pid != 0 {
+                if let Some((ticks, rss)) = windows_query_process(pid) {
+                    sample.insert(pid, ppid, ticks, rss);
+                }
+            }
+            more = Process32NextW(snap, &mut entry);
+        }
+        CloseHandle(snap);
+        Some(sample)
+    }
+}
+
+#[cfg(target_os = "windows")]
 unsafe fn windows_query_process(pid: u32) -> Option<(u64, u64)> {
     use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
     // GetProcessMemoryInfo / PROCESS_MEMORY_COUNTERS live in

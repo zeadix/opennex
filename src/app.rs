@@ -5442,7 +5442,7 @@ impl eframe::App for App {
                     painter.rect_stroke(
                         card,
                         4.0,
-                        egui::Stroke::new(1.0, app.border.to_egui()),
+                        egui::Stroke::new(1.0_f32, app.border.to_egui()),
                         egui::StrokeKind::Inside,
                     );
 
