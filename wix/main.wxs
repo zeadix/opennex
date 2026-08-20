@@ -7,14 +7,20 @@
            Language="1033"
            UpgradeCode="11111111-2222-3333-4444-555555555555">
     <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" />
-    <MajorUpgrade DowngradeErrorMessage="已安装更新版本。" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version is already installed." />
     <MediaTemplate EmbedCab="yes" />
     <Feature Id="ProductFeature" Title="OpenNex" Level="1">
       <ComponentGroupRef Id="ProductComponents" />
     </Feature>
   </Product>
   <Fragment>
-    <Directory Id="INSTALLDIR" Name="OpenNex" />
+    <!-- WiX requires a single root Directory with Id TARGETDIR and
+         Name SourceDir; INSTALLDIR must live underneath it. -->
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFilesFolder">
+        <Directory Id="INSTALLDIR" Name="OpenNex" />
+      </Directory>
+    </Directory>
     <ComponentGroup Id="ProductComponents" Directory="INSTALLDIR">
       <Component Id="MainExecutable" Guid="*">
         <File Id="opennex.exe" Name="opennex.exe" Source="$(var.SourcePath)" KeyPath="yes" />
