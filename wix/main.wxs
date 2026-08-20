@@ -20,12 +20,44 @@
       <Directory Id="ProgramFilesFolder">
         <Directory Id="INSTALLDIR" Name="OpenNex" />
       </Directory>
+      <!-- Start-menu subfolder for the shortcuts. -->
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="ApplicationProgramsFolder" Name="OpenNex" />
+      </Directory>
+      <Directory Id="DesktopFolder" />
     </Directory>
     <ComponentGroup Id="ProductComponents" Directory="INSTALLDIR">
       <Component Id="MainExecutable" Guid="*">
         <!-- Bind variables parse on '.', so the File Id must not contain
              dots; the on-disk name stays opennex.exe via Name. -->
         <File Id="OpennexExe" Name="opennex.exe" Source="$(var.SourcePath)" KeyPath="yes" />
+        <!-- Start-menu shortcut. -->
+        <Shortcut Id="StartMenuShortcut"
+                  Directory="ApplicationProgramsFolder"
+                  Name="OpenNex"
+                  Description="OpenNex Terminal Manager"
+                  WorkingDirectory="INSTALLDIR"
+                  Advertise="yes" />
+        <!-- Desktop shortcut. -->
+        <Shortcut Id="DesktopShortcut"
+                  Directory="DesktopFolder"
+                  Name="OpenNex"
+                  Description="OpenNex Terminal Manager"
+                  WorkingDirectory="INSTALLDIR"
+                  Advertise="yes" />
+      </Component>
+      <!-- Cleans up the start-menu subfolder on uninstall (shortcuts alone
+           don't remove the directory). -->
+      <Component Id="CleanupStartMenuFolder" Guid="*" Directory="ApplicationProgramsFolder">
+        <RemoveFolder Id="RemoveApplicationProgramsFolder"
+                      Directory="ApplicationProgramsFolder"
+                      On="uninstall" />
+        <RegistryValue Root="HKCU"
+                       Key="Software\OpenNex"
+                       Name="installed"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
       </Component>
     </ComponentGroup>
   </Fragment>
