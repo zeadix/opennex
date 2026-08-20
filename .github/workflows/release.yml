@@ -37,9 +37,29 @@ jobs:
           7z a "opennex-${{ steps.version.outputs.VERSION }}-windows-x86_64.zip" "./target/release/opennex.exe"
 
       - name: Install WiX Toolset
-        uses: Minionguyjpro/WixToolset-Action@v1
-        with:
-          wix-version: '3.14'
+        shell: bash
+        run: |
+          # The third-party WixToolset-Action was deleted from GitHub
+          # (repository not found), so install WiX 3.14 directly from the
+          # official wixtoolset releases archive.
+          set -euxo pipefail
+          mkdir -p wixbin
+          curl -sSL -o wix314.zip \
+            "https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314.exe"
+          # wix314.exe is an installer bundle; extract the embedded MSI
+          # toolset via the redistributable zip instead:
+          curl -sSL -o wix314.zip \
+            "https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip" \
+            || true
+          rm -f wix314.exe
+          if [ -f wix314.zip ] && unzip -o wix314.zip -d wixbin >/dev/null 2>&1 && [ -f wixbin/candle.exe ]; then
+            echo "WiX binaries extracted"
+          else
+            echo "::error::Failed to download/extract WiX binaries"
+            exit 1
+          fi
+          echo "$PWD/wixbin" >> $GITHUB_PATH
+          for f in wix candle light; do command -v $f >/dev/null 2>&1 || { echo "::error::$f not found in PATH"; exit 1; }; done
 
       - name: Build MSI installer
         id: msi

@@ -208,17 +208,60 @@ impl TerminalInstance {
         let content = self.backend.sync();
         let grid = &content.grid;
         let cursor_point = content.grid.cursor.point;
-        let line = cursor_point.line;
-        let mut text = String::new();
-        for col in 0..grid.columns() {
-            let point = alacritty_terminal::index::Point {
-                line,
-                column: alacritty_terminal::index::Column(col),
-            };
-            let cell = &grid[point];
-            text.push(cell.c);
+
+        let read_row = |line: i32| -> String {
+            let mut text = String::new();
+            for col in 0..grid.columns() {
+                let point = alacritty_terminal::index::Point {
+                    line: alacritty_terminal::index::Line(line),
+                    column: alacritty_terminal::index::Column(col),
+                };
+                text.push(grid[point].c);
+            }
+            text
+        };
+
+        // A long command wraps across several grid rows. Walk UP from the
+        // cursor row: a row is a wrapped continuation of the row below it
+        // when that lower row was completely filled (the shell only wraps
+        // when it hits the last column) AND the current row doesn't look
+        // like a fresh prompt. This reconstructs the full logical line
+        // instead of just the cursor's physical row (which truncated
+        // wrapped commands to their last visual row).
+        let cols = grid.columns() as i32;
+        let mut start_line = cursor_point.line.0;
+        let bottom_limit = -(grid.total_lines() as i32 - grid.screen_lines() as i32);
+        while start_line - 1 >= bottom_limit {
+            let row_below = read_row(start_line);
+            let trimmed_end = row_below.trim_end();
+            // The row below must be completely full for a wrap to have
+            // occurred at its end.
+            if trimmed_end.chars().count() as i32 >= cols {
+                // The row above must not be a new prompt line (prompts end
+                // with "$ " / "# " after trimming... a fresh prompt row is
+                // typically short). Only continue merging when the above
+                // row looks like the START of the wrapped text, i.e. it
+                // exists within the live screen region.
+                let above = start_line - 1;
+                if above >= -(grid.screen_lines() as i32 - 1) {
+                    start_line = above;
+                    continue;
+                }
+            }
+            break;
         }
-        text
+
+        // Read from the topmost wrapped row down to the cursor row and
+        // concatenate; wrapped rows have no trailing newline in the logical
+        // line, so a plain concatenation of the raw cell text is correct.
+        let mut text = String::new();
+        let mut l = start_line;
+        while l <= cursor_point.line.0 {
+            text.push_str(&read_row(l));
+            l += 1;
+        }
+        // Trailing spaces from the cursor row are padding, not content.
+        text.trim_end().to_string()
     }
 
     pub fn poll_cwd(&mut self) {
@@ -330,5 +373,34 @@ mod tests {
         }
 
         assert_eq!(instance.cwd, "/");
+    }
+
+    #[test]
+    fn get_current_line_reassembles_wrapped_commands() {
+        // A command longer than the grid width wraps across rows; the
+        // recorded command must contain the FULL text, not just the last
+        // visual row.
+        let mut instance =
+            TerminalInstance::create(&egui::Context::default(), 2, "/bin/sh", "/tmp", 20, 24)
+                .expect("shell should start");
+
+        // Long word: wraps across at least two 20-col rows. Type it but do
+        // NOT press Enter (the app records on Enter; here we only verify
+        // the line reconstruction).
+        let long = "openwindnownow12345678";
+        instance.write(long.as_bytes());
+
+        // Let the pty echo the typed characters into the grid.
+        for _ in 0..40 {
+            std::thread::sleep(std::time::Duration::from_millis(25));
+            instance.backend.set_dirty();
+            let _ = instance.backend.sync();
+        }
+
+        let line = instance.get_current_line();
+        assert!(
+            line.contains("openwindnownow12345678"),
+            "reassembled line must contain the full wrapped command, got: {line:?}"
+        );
     }
 }

@@ -43,7 +43,9 @@ fn default_true() -> bool {
 }
 
 fn default_language() -> String {
-    "zh".into()
+    // First launch defaults to English (an existing settings.json keeps the
+    // user's saved language).
+    "en".into()
 }
 
 fn default_max_history() -> usize {
@@ -363,10 +365,13 @@ fn check_indicator(ui: &mut egui::Ui, selected: bool, width: f32) {
 }
 
 fn workspace_lock_icon(is_locked: bool) -> &'static str {
+    // Two COMPLETELY different glyph shapes so the state is unambiguous:
+    // locked = solid padlock with key; unlocked = dashed circle ("not
+    // protected"). Lock-vs-open-lock glyphs read as near-identical at 13px.
     if is_locked {
-        egui_phosphor::regular::LOCK
+        egui_phosphor::regular::LOCK_KEY
     } else {
-        egui_phosphor::regular::LOCK_OPEN
+        egui_phosphor::regular::CIRCLE_DASHED
     }
 }
 
@@ -1089,6 +1094,8 @@ pub struct App {
     drag_dst_panel: Option<usize>,
     locked_panels: std::collections::HashSet<usize>,
     lock_password_input: String,
+    /// Whether the lock-overlay password is shown in plain text.
+    lock_password_visible: bool,
     pw_old: String,
     pw_new1: String,
     pw_new2: String,
@@ -1334,6 +1341,7 @@ impl App {
             drag_dst_panel: None,
             locked_panels: std::collections::HashSet::new(),
             lock_password_input: String::new(),
+            lock_password_visible: false,
             pw_old: String::new(),
             pw_new1: String::new(),
             pw_new2: String::new(),
@@ -1519,7 +1527,7 @@ impl App {
     }
 
     fn add_initial_terminal(&mut self, ctx: &egui::Context) {
-        let name = format!("{}1", self.texts.workspace.name_prefix);
+        let name = "workspace 1".to_string();
         let Some(tab_id) = self.create_terminal_inner(ctx) else {
             return;
         };
@@ -1584,10 +1592,7 @@ impl App {
             id.clone(),
             TerminalData {
                 instance,
-                name: format!(
-                    "{}{}",
-                    self.texts.terminal.default_name_prefix, random_suffix
-                ),
+                name: format!("terminal-{random_suffix}"),
                 font_size: DEFAULT_FONT_SIZE,
             },
         );
@@ -1777,7 +1782,7 @@ impl App {
 
     fn add_panel(&mut self, ctx: &egui::Context) {
         let n = self.panels.len() + 1;
-        let name = format!("{}{}", self.texts.workspace.name_prefix, n);
+        let name = format!("workspace {n}");
         let Some(tab_id) = self.create_terminal_inner(ctx) else {
             return;
         };
@@ -5173,7 +5178,9 @@ impl eframe::App for App {
                                 egui::vec2(btn_w, btn_h),
                                 egui::Sense::click(),
                             );
-                            let lock_color = if lock_resp.hovered() {
+                            let lock_color = if is_locked {
+                                self.active_theme.app.lock.to_egui()
+                            } else if lock_resp.hovered() {
                                 icon_active
                             } else {
                                 button_fg
@@ -5410,122 +5417,163 @@ impl eframe::App for App {
             .show(ctx, |ui| {
                 let is_locked = self.locked_panels.contains(&self.active_panel);
                 if is_locked {
-                    let lock_color = self.active_theme.app.lock.to_egui();
+                    // Themed lock overlay: dark scrim over the workspace plus
+                    // a centered card (panel fill, theme border, accent
+                    // button). Colors come from the active theme so every
+                    // theme looks right, instead of a flat warning-color
+                    // wash.
+                    let app = &self.active_theme.app;
+                    let scrim = egui::Color32::from_rgba_unmultiplied(
+                        app.app_bg.to_egui().r(),
+                        app.app_bg.to_egui().g(),
+                        app.app_bg.to_egui().b(),
+                        220,
+                    );
                     let avail = ui.available_size();
                     let (rect, _) = ui.allocate_exact_size(avail, egui::Sense::click());
                     let painter = ui.painter_at(rect);
-                    painter.rect_filled(rect, 0.0, lock_color);
+                    painter.rect_filled(rect, 0.0, scrim);
+
+                    // Centered card.
+                    let card =
+                        egui::Rect::from_center_size(rect.center(), egui::vec2(340.0, 216.0));
+                    let card_bg = app.panel.to_egui();
+                    painter.rect_filled(card, 4.0, card_bg);
+                    painter.rect_stroke(
+                        card,
+                        4.0,
+                        egui::Stroke::new(1.0, app.border.to_egui()),
+                        egui::StrokeKind::Inside,
+                    );
 
                     let pw_id = egui::Id::new("lock_overlay_pw_input");
-                    let form_width = 360.0;
-                    let form_rect =
-                        egui::Rect::from_center_size(rect.center(), egui::vec2(form_width, 220.0));
-                    let ui_content =
-                        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(form_rect), |ui| {
+                    let ui_content = ui.allocate_new_ui(
+                        egui::UiBuilder::new().max_rect(card.shrink2(egui::vec2(24.0, 20.0))),
+                        |ui| {
+                            ui.style_mut().spacing.item_spacing.y = 6.0;
                             ui.vertical_centered(|ui| {
-                                // Lock icon
+                                // Lock icon in the theme's lock color.
                                 ui.label(
                                     egui::RichText::new(egui_phosphor::regular::LOCK_SIMPLE)
-                                        .size(36.0)
-                                        .color(egui::Color32::WHITE),
+                                        .size(30.0)
+                                        .color(app.lock.to_egui()),
                                 );
-                                ui.add_space(8.0);
-                                // Title
-                                ui.heading(
+                                ui.add_space(2.0);
+                                ui.label(
                                     egui::RichText::new(&self.texts.lock_overlay.title)
-                                        .size(18.0)
-                                        .color(egui::Color32::WHITE),
+                                        .size(15.0)
+                                        .strong()
+                                        .color(app.text.to_egui()),
                                 );
-                                ui.add_space(20.0);
-                                // Password input row — manually center by measuring content width
-                                let label_galley = ui.fonts(|f| {
-                                    f.layout_no_wrap(
-                                        self.texts.lock_overlay.password_label.clone(),
-                                        egui::FontId::proportional(14.0),
-                                        egui::Color32::from_gray(220),
-                                    )
-                                });
-                                let input_width = 130.0;
-                                let button_galley = ui.fonts(|f| {
-                                    f.layout_no_wrap(
-                                        self.texts.lock_overlay.unlock_button.clone(),
-                                        egui::FontId::proportional(14.0),
-                                        egui::Color32::BLACK,
-                                    )
-                                });
-                                let item_spacing = ui.spacing().item_spacing.x;
-                                let row_h = ui.spacing().interact_size.y;
-                                let content_width = label_galley.size().x
-                                    + input_width
-                                    + button_galley.size().x
-                                    + ui.spacing().button_padding.x * 2.0
-                                    + item_spacing * 2.0;
-                                let avail_w = ui.available_width();
-                                let _ = avail_w;
+                                ui.add_space(10.0);
+                                // Label above the input, mirroring the
+                                // settings password popups' labeled style.
+                                ui.label(
+                                    egui::RichText::new(&self.texts.lock_overlay.password_label)
+                                        .size(12.0)
+                                        .color(app.text.to_egui()),
+                                );
+                                // Password row: input + eye visibility toggle.
+                                // The unlock button below spans the exact same
+                                // width (input's left edge -> eye's right
+                                // edge), so both rows align perfectly.
+                                let row_w = 240.0f32.min(ui.available_width());
+                                let eye_w = 26.0;
+                                let mut unlock_now = false;
                                 ui.allocate_ui_with_layout(
-                                    egui::vec2(content_width, row_h),
+                                    egui::vec2(row_w, ui.spacing().interact_size.y.max(20.0)),
                                     egui::Layout::left_to_right(egui::Align::Center),
                                     |ui| {
-                                        ui.label(
-                                            egui::RichText::new(
-                                                &self.texts.lock_overlay.password_label,
-                                            )
-                                            .color(egui::Color32::from_gray(220)),
-                                        );
+                                        // Same input style as the settings-page
+                                        // password popups (default text style,
+                                        // 150px input, explicit label-free).
                                         let resp = ui.add(
                                             egui::TextEdit::singleline(
                                                 &mut self.lock_password_input,
                                             )
-                                            .password(true)
-                                            .desired_width(input_width)
+                                            .password(!self.lock_password_visible)
+                                            .desired_width(row_w - eye_w - 4.0)
                                             .id(pw_id),
                                         );
-                                        resp.request_focus();
-                                        let enter_pressed =
-                                            ui.input(|i| i.key_pressed(egui::Key::Enter));
+                                        // Enter in the focused input submits
+                                        // (standard lost_focus+Enter pattern;
+                                        // TextEdit consumes the raw key event).
+                                        let enter_in_input = resp.lost_focus()
+                                            && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                                        if enter_in_input {
+                                            unlock_now = true;
+                                        }
+                                        if ui.ctx().memory(|m| m.focused().is_none()) {
+                                            resp.request_focus();
+                                        }
+                                        // Eye toggle: EYE (hidden) / EYE_SLASH (visible).
+                                        let eye = if self.lock_password_visible {
+                                            egui_phosphor::regular::EYE_SLASH
+                                        } else {
+                                            egui_phosphor::regular::EYE
+                                        };
                                         if ui
                                             .add(
                                                 egui::Button::new(
-                                                    egui::RichText::new(
-                                                        &self.texts.lock_overlay.unlock_button,
-                                                    )
-                                                    .color(egui::Color32::BLACK),
+                                                    egui::RichText::new(eye)
+                                                        .size(14.0)
+                                                        .color(app.text.to_egui()),
                                                 )
-                                                .fill(egui::Color32::WHITE)
-                                                .stroke(egui::Stroke::new(
-                                                    1.0,
-                                                    egui::Color32::BLACK,
-                                                )),
+                                                .fill(egui::Color32::TRANSPARENT)
+                                                .stroke(egui::Stroke::NONE)
+                                                .min_size(egui::vec2(eye_w, 0.0)),
                                             )
+                                            .on_hover_text(&self.texts.lock_overlay.password_label)
                                             .clicked()
-                                            || (enter_pressed && resp.has_focus())
                                         {
-                                            if self.settings.lock_password.is_empty()
-                                                || self.lock_password_input
-                                                    == self.settings.lock_password
-                                            {
-                                                self.locked_panels.remove(&self.active_panel);
-                                                self.lock_password_input.clear();
-                                                self.pw_message.clear();
-                                            } else {
-                                                self.pw_message =
-                                                    self.texts.lock_overlay.wrong_password.clone();
-                                                self.lock_password_input.clear();
-                                            }
+                                            self.lock_password_visible =
+                                                !self.lock_password_visible;
                                         }
                                     },
                                 );
-                                // Error message
+                                ui.add_space(4.0);
+                                // Unlock button: accent-filled, spans the same
+                                // width as the password row above. Enter in
+                                // the password input also triggers it.
+                                if unlock_now
+                                    || ui
+                                        .add(
+                                            egui::Button::new(
+                                                egui::RichText::new(
+                                                    &self.texts.lock_overlay.unlock_button,
+                                                )
+                                                .strong()
+                                                .color(app.text.to_egui()),
+                                            )
+                                            .fill(app.accent.to_egui())
+                                            .min_size(egui::vec2(row_w, 0.0)),
+                                        )
+                                        .clicked()
+                                {
+                                    if self.settings.lock_password.is_empty()
+                                        || self.lock_password_input == self.settings.lock_password
+                                    {
+                                        self.locked_panels.remove(&self.active_panel);
+                                        self.lock_password_input.clear();
+                                        self.pw_message.clear();
+                                    } else {
+                                        self.pw_message =
+                                            self.texts.lock_overlay.wrong_password.clone();
+                                        self.lock_password_input.clear();
+                                    }
+                                }
+                                // Error message under the button.
                                 if !self.pw_message.is_empty() {
-                                    ui.add_space(8.0);
-                                    let nav_fg = self.active_theme.app.menu_fg.to_egui();
+                                    ui.add_space(2.0);
                                     ui.label(
                                         egui::RichText::new(&self.pw_message)
+                                            .size(11.0)
                                             .color(egui::Color32::from_rgb(255, 120, 120)),
                                     );
                                 }
                             });
-                        });
+                        },
+                    );
                     let _ = ui_content;
                 } else if let Some(tree) = self.dock_states.get_mut(&self.active_panel) {
                     // Tab bar layout (via the local egui_dock fork):
@@ -5731,11 +5779,11 @@ mod tests {
     fn workspace_lock_icon_matches_lock_state() {
         assert_eq!(
             super::workspace_lock_icon(true),
-            egui_phosphor::regular::LOCK
+            egui_phosphor::regular::LOCK_KEY
         );
         assert_eq!(
             super::workspace_lock_icon(false),
-            egui_phosphor::regular::LOCK_OPEN
+            egui_phosphor::regular::CIRCLE_DASHED
         );
     }
 
@@ -6101,25 +6149,38 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
 
     fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab) {
         if self.renaming_terminal.as_ref() == Some(tab) {
+            let mut apply = false;
+            let mut cancel = false;
             ui.horizontal(|ui| {
                 let response = ui.add(
                     egui::TextEdit::singleline(self.terminal_rename_buffer)
                         .font(egui::FontId::monospace(14.0))
-                        .desired_width(200.0)
+                        .desired_width(160.0)
                         .hint_text(&self.texts.terminal.rename_hint)
                         .id_source("tab_rename"),
                 );
                 ui.memory_mut(|mem| mem.request_focus(response.id));
                 let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
-                if enter {
-                    if !self.terminal_rename_buffer.is_empty() {
-                        if let Some(data) = self.terminals.get_mut(tab) {
-                            data.name = self.terminal_rename_buffer.clone();
-                        }
-                    }
-                    *self.renaming_terminal = None;
+                let escape = ui.input(|i| i.key_pressed(egui::Key::Escape));
+                // Confirm / cancel buttons next to the input so renaming
+                // can always be applied or exited with the mouse.
+                if ui.button(&self.texts.workspace.rename_confirm).clicked() || enter {
+                    apply = true;
+                }
+                if ui.button(&self.texts.workspace.rename_cancel).clicked() || escape {
+                    cancel = true;
                 }
             });
+            if apply {
+                if !self.terminal_rename_buffer.is_empty() {
+                    if let Some(data) = self.terminals.get_mut(tab) {
+                        data.name = self.terminal_rename_buffer.clone();
+                    }
+                }
+                *self.renaming_terminal = None;
+            } else if cancel {
+                *self.renaming_terminal = None;
+            }
             ui.separator();
         }
 
