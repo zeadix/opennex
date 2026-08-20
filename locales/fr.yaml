@@ -239,6 +239,7 @@ theme_editor:
   cell_spacing: 'Espacement : '
   terminal_padding: 'Marge : '
 stats:
+  copied_toast: Copié dans le presse-papiers
   focused: Terminal actuel
   workspace: Espace actuel
   global: Global

@@ -239,6 +239,7 @@ theme_editor:
   cell_spacing: 'अंतराल: '
   terminal_padding: 'पैडिंग: '
 stats:
+  copied_toast: क्लिपबोर्ड पर कॉपी हो गया
   focused: वर्तमान टर्मिनल
   workspace: वर्तमान कार्यक्षेत्र
   global: संपूर्ण

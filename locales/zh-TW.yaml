@@ -238,6 +238,7 @@ theme_editor:
   cell_spacing: '間距: '
   terminal_padding: '終端內邊距: '
 stats:
+  copied_toast: 已複製到剪貼板
   focused: 當前終端
   workspace: 當前工作區
   global: 全域

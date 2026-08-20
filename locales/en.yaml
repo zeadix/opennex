@@ -239,6 +239,7 @@ theme_editor:
   cell_spacing: 'Spacing: '
   terminal_padding: 'Terminal padding: '
 stats:
+  copied_toast: Copied to clipboard
   focused: Current Terminal
   workspace: Current Workspace
   global: Global

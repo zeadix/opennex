@@ -238,6 +238,7 @@ theme_editor:
   cell_spacing: '間隔: '
   terminal_padding: '余白: '
 stats:
+  copied_toast: クリップボードにコピーしました
   focused: 現在のターミナル
   workspace: 現在のワークスペース
   global: 全体

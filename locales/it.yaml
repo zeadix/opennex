@@ -239,6 +239,7 @@ theme_editor:
   cell_spacing: 'Spaziatura: '
   terminal_padding: 'Margine: '
 stats:
+  copied_toast: Copiato negli appunti
   focused: Terminale corrente
   workspace: Area di lavoro corrente
   global: Globale

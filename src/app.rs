@@ -1133,6 +1133,8 @@ pub struct App {
     update_dialog_info: Option<crate::updater::UpdateInfo>,
     skipped_versions: std::collections::HashSet<String>,
     update_toast: Option<(String, std::time::Instant)>,
+    /// Transient "copied to clipboard" notice (auto-copy selection).
+    copy_toast: Option<std::time::Instant>,
     startup_frame_count: u32,
     /// Aggregated CPU% across every live terminal's process tree,
     /// refreshed on the 2 s sampling tick.
@@ -1377,6 +1379,7 @@ impl App {
             update_dialog_info: None,
             skipped_versions: std::collections::HashSet::new(),
             update_toast: None,
+            copy_toast: None,
             startup_frame_count: 0,
             terminal_cpu: None,
             terminal_mem: None,
@@ -3354,7 +3357,61 @@ impl App {
         let text = td.instance.backend.selectable_content();
         if !text.is_empty() {
             ctx.copy_text(text);
+            self.copy_toast = Some(std::time::Instant::now());
+            ctx.request_repaint_after(std::time::Duration::from_millis(700));
         }
+    }
+
+    /// Small transient bottom-center notice: "已复制到剪切板" after the
+    /// auto-copy selection feature copies text. Auto-hides after 0.6s.
+    fn show_copy_toast(&mut self, ctx: &egui::Context) {
+        let Some(until) = self.copy_toast else {
+            return;
+        };
+        let elapsed = until.elapsed();
+        if elapsed >= std::time::Duration::from_millis(600) {
+            self.copy_toast = None;
+            return;
+        }
+        // Fade out over the last 150ms.
+        let alpha = if elapsed >= std::time::Duration::from_millis(450) {
+            1.0 - (elapsed - std::time::Duration::from_millis(450)).as_secs_f32() / 0.15
+        } else {
+            1.0
+        };
+        let text = self.texts.stats.copied_toast.clone();
+        let weak = self.active_theme.app.panel.to_egui();
+        let fg = self.active_theme.app.text.to_egui();
+        let border = self.active_theme.app.border.to_egui();
+        let alpha = alpha.clamp(0.0, 1.0);
+        let frame_fill = egui::Color32::from_rgba_unmultiplied(
+            weak.r(),
+            weak.g(),
+            weak.b(),
+            (alpha * 235.0) as u8,
+        );
+        let fg =
+            egui::Color32::from_rgba_unmultiplied(fg.r(), fg.g(), fg.b(), (alpha * 255.0) as u8);
+        let border = egui::Color32::from_rgba_unmultiplied(
+            border.r(),
+            border.g(),
+            border.b(),
+            (alpha * 255.0) as u8,
+        );
+        egui::Area::new(egui::Id::new("copy_toast"))
+            .order(egui::Order::Tooltip)
+            .anchor(egui::Align2::CENTER_BOTTOM, [0.0, -80.0])
+            .interactable(false)
+            .show(ctx, |ui| {
+                egui::Frame::new()
+                    .fill(frame_fill)
+                    .stroke(egui::Stroke::new(1.0, border))
+                    .corner_radius(4.0)
+                    .inner_margin(egui::Margin::symmetric(10, 4))
+                    .show(ui, |ui| {
+                        ui.label(egui::RichText::new(text).size(11.0).color(fg));
+                    });
+            });
     }
 }
 
@@ -4572,6 +4629,7 @@ impl eframe::App for App {
         // Update window + dialog + toast
         self.render_update_window(ctx);
         self.show_update_toast(ctx);
+        self.show_copy_toast(ctx);
 
         // Terminal close confirmation
         if let Some(ref tab_id) = self.pending_close_confirm.clone() {

@@ -12,6 +12,13 @@ It supports freely arranged terminal window layouts, tab stacking for mass sessi
 Built with Rust, this high-performance engine stably supports6000+ concurrent active terminal windows. It is natively cross-platform for Linux, Windows, and macOS, and supports more than 20 international languages.
 Bug reports and feature suggestions are highly welcome.
 
+## 下载安装 / Download & Install
+
+**[opennex.zeadix.com](https://opennex.zeadix.com)**
+
+- 中文：访问 [opennex.zeadix.com](https://opennex.zeadix.com) 获取 Windows（.msi / .zip）、Linux（.deb / .tar.gz）、macOS（.dmg / .tar.gz）安装包。
+- English: Get Windows (.msi / .zip), Linux (.deb / .tar.gz) and macOS (.dmg / .tar.gz) installers at [opennex.zeadix.com](https://opennex.zeadix.com).
+
 ## 核心特性 / Key Features
 
 ### 多窗口与可堆叠布局 / Multi-Window & Stackable Layouts

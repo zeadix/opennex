@@ -2,7 +2,7 @@
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
   <Product Id="*"
            Name="OpenNex"
-           Version="!(bind.fileVersion.opennex.exe)"
+           Version="!(bind.fileVersion.OpennexExe)"
            Manufacturer="OpenNex"
            Language="1033"
            UpgradeCode="11111111-2222-3333-4444-555555555555">
@@ -23,7 +23,9 @@
     </Directory>
     <ComponentGroup Id="ProductComponents" Directory="INSTALLDIR">
       <Component Id="MainExecutable" Guid="*">
-        <File Id="opennex.exe" Name="opennex.exe" Source="$(var.SourcePath)" KeyPath="yes" />
+        <!-- Bind variables parse on '.', so the File Id must not contain
+             dots; the on-disk name stays opennex.exe via Name. -->
+        <File Id="OpennexExe" Name="opennex.exe" Source="$(var.SourcePath)" KeyPath="yes" />
       </Component>
     </ComponentGroup>
   </Fragment>

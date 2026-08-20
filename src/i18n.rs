@@ -375,6 +375,7 @@ pub struct ThemeEditorTexts {
 /// Sidebar system-info strings.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct StatsTexts {
+    pub copied_toast: String,
     pub focused: String,
     pub workspace: String,
     pub global: String,
@@ -641,6 +642,7 @@ impl Texts {
                 terminal_padding: "终端内边距: ".into(),
             },
             stats: StatsTexts {
+                copied_toast: "已复制到剪切板".into(),
                 focused: "当前终端".into(),
                 workspace: "当前工作区".into(),
                 global: "全局".into(),

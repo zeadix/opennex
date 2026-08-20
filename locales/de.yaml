@@ -239,6 +239,7 @@ theme_editor:
   cell_spacing: 'Abstand: '
   terminal_padding: 'Rand: '
 stats:
+  copied_toast: In die Zwischenablage kopiert
   focused: Aktuelles Terminal
   workspace: Aktueller Arbeitsbereich
   global: Global
