@@ -514,11 +514,15 @@ impl<Tab> DockArea<'_, Tab> {
         offset: f32,
         fade_style: Option<&Style>,
     ) {
-        // OpenNex patch: with TabAddAlign::Left the + button is pinned to
-        // the LEFT edge of the tab bar — immediately right of the collapse
-        // button — instead of trailing behind the last tab. This matches
-        // the requested layout: [collapse][+][tabs...].
-        let rect = if offset > 0.0 {
+        // OpenNex patch: with TabAddAlign::Left the + button is ALWAYS
+        // pinned to the LEFT edge of the tab bar — immediately right of
+        // the collapse button — regardless of tab overflow/scrolling.
+        // Layout: [collapse][+][tabs...] and the tabs area starts after
+        // the + button (see the caller's plus_left_shift).
+        let rect = if matches!(
+            self.style.as_ref().map(|s| s.buttons.add_tab_align),
+            Some(TabAddAlign::Left)
+        ) {
             let collapse = if self.show_leaf_collapse_buttons {
                 Style::TAB_COLLAPSE_BUTTON_SIZE
             } else {

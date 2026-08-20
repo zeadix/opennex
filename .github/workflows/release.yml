@@ -44,22 +44,13 @@ jobs:
           # official wixtoolset releases archive.
           set -euxo pipefail
           mkdir -p wixbin
+          # wix314-binaries.zip contains candle.exe + light.exe (no wix.exe).
           curl -sSL -o wix314.zip \
-            "https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314.exe"
-          # wix314.exe is an installer bundle; extract the embedded MSI
-          # toolset via the redistributable zip instead:
-          curl -sSL -o wix314.zip \
-            "https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip" \
-            || true
-          rm -f wix314.exe
-          if [ -f wix314.zip ] && unzip -o wix314.zip -d wixbin >/dev/null 2>&1 && [ -f wixbin/candle.exe ]; then
-            echo "WiX binaries extracted"
-          else
-            echo "::error::Failed to download/extract WiX binaries"
-            exit 1
-          fi
+            "https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip"
+          unzip -o wix314.zip -d wixbin >/dev/null
+          test -f wixbin/candle.exe && test -f wixbin/light.exe
           echo "$PWD/wixbin" >> $GITHUB_PATH
-          for f in wix candle light; do command -v $f >/dev/null 2>&1 || { echo "::error::$f not found in PATH"; exit 1; }; done
+          for f in candle light; do command -v $f >/dev/null 2>&1 || { echo "::error::$f not found in PATH"; exit 1; }; done
 
       - name: Build MSI installer
         id: msi
@@ -69,7 +60,7 @@ jobs:
             echo "::error::wix/main.wxs missing — MSI cannot be built without the template."
             exit 1
           fi
-          for f in wix candle light; do command -v $f >/dev/null 2>&1 || { echo "::error::$f not found in PATH"; exit 1; }; done
+          for f in candle light; do command -v $f >/dev/null 2>&1 || { echo "::error::$f not found in PATH"; exit 1; }; done
           candle -ext WixUIExtension -out "opennex-${GITHUB_REF_NAME}-windows-x86_64.wixobj" wix/main.wxs -dSourcePath="$(pwd)/target/release/opennex.exe"
           light -ext WixUIExtension -cultures:en-US \
             -out "opennex-${GITHUB_REF_NAME}-windows-x86_64.msi" \
