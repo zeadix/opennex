@@ -256,7 +256,8 @@ jobs:
         id: changelog
         shell: bash
         run: |
-          PREV_TAG=$(git tag --sort=-v:refname | grep -v "${GITHUB_REF_NAME}" | head -1)
+          # grep exits 1 when no other tags exist (first release); guard it.
+          PREV_TAG=$(git tag --sort=-v:refname | grep -v "${GITHUB_REF_NAME}" | head -1 || true)
           if [ -n "$PREV_TAG" ]; then
             CHANGELOG=$(git log --no-merges --pretty=format:'%s' "$PREV_TAG..${GITHUB_REF_NAME}" | head -30)
           else

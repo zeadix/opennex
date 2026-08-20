@@ -46,6 +46,14 @@ pub fn terminal_focus_event_filter() -> egui::EventFilter {
 pub struct TerminalViewState {
     is_dragged: bool,
     scroll_pixels: f32,
+    /// Scrollbar thumb drag: (lines-per-pixel, offset at drag start).
+    scrollbar_drag: Option<(f32, usize)>,
+    /// Target absolute display offset requested by the scrollbar; applied
+    /// to the backend right after drawing.
+    pending_scroll_to: Option<usize>,
+    /// Scrollbar geometry+colors to paint at the end of show().
+    pending_scrollbar:
+        Option<(egui::Rect, egui::Rect, egui::Color32, egui::Color32)>,
     current_mouse_position_on_grid: TerminalGridPoint,
     /// Last cols/rows actually applied to the terminal backend.
     last_cols: u16,
@@ -67,7 +75,7 @@ pub struct TerminalView<'a> {
 }
 
 impl Widget for TerminalView<'_> {
-    fn ui(self, ui: &mut egui::Ui) -> Response {
+    fn ui(mut self, ui: &mut egui::Ui) -> Response {
         let (layout, painter) =
             ui.allocate_painter(self.size, egui::Sense::click());
 
@@ -77,6 +85,9 @@ impl Widget for TerminalView<'_> {
                 .get_temp::<TerminalViewState>(widget_id)
                 .unwrap_or_default()
         });
+
+        // Scrollback scrollbar (interaction + Foreground-layer paint).
+        self.draw_scrollbar(ui, &mut state, &layout);
 
         self.focus(&layout)
             .resize(&layout, &mut state)
@@ -322,6 +333,118 @@ impl<'a> TerminalView<'a> {
         self
     }
 
+    /// Right-edge scrollbar for the scrollback history: appears only when
+    /// content exceeds the viewport, thumb size/position track the live
+    /// display_offset (wheel, resize and drag all stay in sync), fully
+    /// themed from the terminal colors.
+    fn draw_scrollbar(
+        &mut self,
+        ui: &mut egui::Ui,
+        state: &mut TerminalViewState,
+        layout: &egui::Response,
+    ) {
+        use alacritty_terminal::grid::Dimensions;
+
+        let content = self.backend.sync();
+        let display_offset = content.grid.display_offset();
+        let screen_lines = content.grid.screen_lines();
+        let history = content.grid.history_size();
+        let max_offset = history;
+        if max_offset == 0 {
+            state.scrollbar_drag = None;
+            return;
+        }
+
+        let total = (screen_lines + history) as f32;
+        let track = egui::Rect::from_min_max(
+            egui::pos2(layout.rect.max.x - 8.0, layout.rect.min.y),
+            egui::pos2(layout.rect.max.x, layout.rect.max.y),
+        );
+        // Thumb covers its share of the total lines (min 24px grip).
+        let thumb_h =
+            ((screen_lines as f32 / total) * track.height()).max(24.0);
+        let scrollable = (track.height() - thumb_h).max(1.0);
+        // display_offset == history → viewing the oldest line → thumb TOP.
+        let thumb_y = track.min.y
+            + scrollable * (1.0 - display_offset as f32 / max_offset as f32);
+        let thumb = egui::Rect::from_min_size(
+            egui::pos2(track.min.x, thumb_y),
+            egui::vec2(track.width(), thumb_h),
+        );
+
+        let track_resp = ui.interact(
+            track,
+            egui::Id::new((self.widget_id, "sb_track")),
+            egui::Sense::click_and_drag(),
+        );
+        let thumb_resp = ui.interact(
+            thumb.expand(3.0).intersect(track),
+            egui::Id::new((self.widget_id, "sb_thumb")),
+            egui::Sense::click_and_drag(),
+        );
+        let hovered = thumb_resp.hovered() || track_resp.hovered();
+        let dragging = state.scrollbar_drag.is_some();
+
+        if thumb_resp.drag_started() {
+            let lines_per_px = max_offset as f32 / scrollable;
+            state.scrollbar_drag = Some((lines_per_px, display_offset));
+        }
+        if let Some((lines_per_px, start_offset)) = state.scrollbar_drag {
+            if thumb_resp.dragged() {
+                let dy = ui.input(|i| i.pointer.delta().y);
+                // Thumb DOWN → offset toward 0 (newer); UP → older.
+                let delta_lines = -(dy * lines_per_px);
+                let target = (start_offset as f32 + delta_lines)
+                    .round()
+                    .clamp(0.0, max_offset as f32);
+                state.pending_scroll_to = Some(target as usize);
+            } else {
+                state.scrollbar_drag = None;
+            }
+        } else if track_resp.clicked() {
+            if let Some(p) = track_resp.interact_pointer_pos() {
+                let page = screen_lines as f32;
+                let delta = if p.y < thumb.min.y { page } else { -page };
+                let target = (display_offset as f32 + delta)
+                    .round()
+                    .clamp(0.0, max_offset as f32);
+                state.pending_scroll_to = Some(target as usize);
+            }
+        }
+
+        // Apply any requested scroll target directly to the backend.
+        if let Some(target) = state.pending_scroll_to.take() {
+            let delta = target as i64 - display_offset as i64;
+            if delta != 0 {
+                self.backend
+                    .process_command(BackendCommand::Scroll(delta as i32));
+                self.backend.set_dirty();
+            }
+        }
+
+        // Themed colors; brighter on hover/drag.
+        let fg = self.theme.get_color(Color::Named(NamedColor::Foreground));
+        let base_alpha: u8 = if dragging {
+            200
+        } else if hovered {
+            160
+        } else {
+            90
+        };
+        let bar_bg = Color32::from_rgba_unmultiplied(
+            fg.r(),
+            fg.g(),
+            fg.b(),
+            (base_alpha as u32 * 35 / 100) as u8,
+        );
+        let thumb_col =
+            Color32::from_rgba_unmultiplied(fg.r(), fg.g(), fg.b(), base_alpha);
+
+        // Defer painting to show(): it runs on the widget's own painter
+        // AFTER the background/content shapes, so nothing covers the bar.
+        state.pending_scrollbar = Some((track, thumb, bar_bg, thumb_col));
+    }
+
     fn show(
         self,
         state: &mut TerminalViewState,
@@ -474,6 +597,15 @@ impl<'a> TerminalView<'a> {
         }
 
         painter.extend(shapes);
+
+        // Scrollbar (deferred from draw_scrollbar): painted after the
+        // background/content shapes so it stays visible.
+        if let Some((track, thumb, bar_bg, thumb_col)) =
+            state.pending_scrollbar.take()
+        {
+            painter.rect_filled(track, 3.0, bar_bg);
+            painter.rect_filled(thumb, 3.0, thumb_col);
+        }
     }
 }
 

@@ -14,10 +14,8 @@ Bug reports and feature suggestions are highly welcome.
 
 ## 下载安装 / Download & Install
 
-**[opennex.zeadix.com](https://opennex.zeadix.com)**
-
-- 中文：访问 [opennex.zeadix.com](https://opennex.zeadix.com) 获取 Windows（.msi / .zip）、Linux（.deb / .tar.gz）、macOS（.dmg / .tar.gz）安装包。
-- English: Get Windows (.msi / .zip), Linux (.deb / .tar.gz) and macOS (.dmg / .tar.gz) installers at [opennex.zeadix.com](https://opennex.zeadix.com).
+- 访问 [opennex.zeadix.com](https://opennex.zeadix.com) 获取 Windows（.msi / .zip）、Linux（.deb / .tar.gz）、macOS（.dmg / .tar.gz）安装包。
+- Get Windows (.msi / .zip), Linux (.deb / .tar.gz) and macOS (.dmg / .tar.gz) installers at [opennex.zeadix.com](https://opennex.zeadix.com).
 
 ## 核心特性 / Key Features
 
