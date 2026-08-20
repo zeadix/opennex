@@ -2,7 +2,7 @@
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
   <Product Id="*"
            Name="OpenNex"
-           Version="!(bind.fileVersion.OpennexExe)"
+           Version="$(var.Version)"
            Manufacturer="OpenNex"
            Language="1033"
            UpgradeCode="11111111-2222-3333-4444-555555555555">

@@ -61,7 +61,8 @@ jobs:
             exit 1
           fi
           for f in candle light; do command -v $f >/dev/null 2>&1 || { echo "::error::$f not found in PATH"; exit 1; }; done
-          candle -ext WixUIExtension -out "opennex-${GITHUB_REF_NAME}-windows-x86_64.wixobj" wix/main.wxs -dSourcePath="$(pwd)/target/release/opennex.exe"
+          VERSION_NUM="${GITHUB_REF_NAME#v}"
+          candle -ext WixUIExtension -out "opennex-${GITHUB_REF_NAME}-windows-x86_64.wixobj" wix/main.wxs -dSourcePath="$(pwd)/target/release/opennex.exe" -dVersion="$VERSION_NUM"
           light -ext WixUIExtension -cultures:en-US \
             -out "opennex-${GITHUB_REF_NAME}-windows-x86_64.msi" \
             "opennex-${GITHUB_REF_NAME}-windows-x86_64.wixobj"
