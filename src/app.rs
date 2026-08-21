@@ -3609,8 +3609,10 @@ impl eframe::App for App {
         if !workspace_renaming && history_menu_active {
             let close =
                 ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
-            let confirm =
-                ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+            let confirm = ctx.input_mut(|input| {
+                input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
+                    || input.consume_key(egui::Modifiers::NONE, egui::Key::Space)
+            });
             let previous = !close && !confirm && check_shortcut(ctx, &binds, "history_prev");
             let next = !close && !confirm && check_shortcut(ctx, &binds, "history_next");
 
