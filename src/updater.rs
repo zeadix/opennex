@@ -275,105 +275,116 @@ pub fn replace_and_restart(new_binary: &Path) -> Result<(), String> {
         return Err("更新的二进制文件无效（空文件）".into());
     }
 
-    // Stage a durable copy next to the current binary. The downloaded
-    // file lives in the system temp dir which may be cleaned (or lost
-    // across a reboot) between "download ready" and "user clicks
-    // restart"; the update must not depend on that lifetime.
-    let staged = parent.join(if cfg!(windows) {
-        "opennex_new.exe"
-    } else {
-        "opennex_new"
-    });
-    fs::copy(new_binary, &staged).map_err(|e| format!("暂存更新文件失败: {e}"))?;
+    // The downloaded binary already lives in the user-writable temp dir —
+    // do NOT copy it into the install dir from here: the install dir
+    // (Program Files, /usr/bin, /Applications) is usually NOT writable by
+    // the running user, which failed with Permission denied. The helper
+    // script performs the staging+swap with whatever privileges it can
+    // obtain (UAC elevation on Windows, pkexec/sudo on Linux).
 
     #[cfg(target_os = "windows")]
     {
-        let script_path = parent.join("opennex_update.bat");
-        let script = format!(
-            // Wait for the OLD process to actually exit before replacing:
-            // a running exe is locked and a blind copy would fail (the
-            // silent failure mode that restarted the OLD version).
-            // Retry the replacement for up to ~30s, then verify the file
-            // was swapped before launching.
-            r#"@echo off
-set /a tries=0
-:wait_exit
-tasklist /FI "IMAGENAME eq {cur_name}" 2>nul | find /I "{cur_name}" >nul
-if %errorlevel%==0 (
-  set /a tries+=1
-  if %tries% geq 30 goto fail
-  timeout /t 1 /nobreak >nul
-  goto wait_exit
-)
-copy /y "{staged}" "{current}" >nul 2>&1
-if not errorlevel 1 (
-  del /f /q "{staged}" >nul 2>&1
-  start "" "{current}"
-  del /f /q "%~f0" >nul 2>&1
-  exit /b 0
-)
-:fail
-echo OpenNex update failed to replace the binary. > "{parent}\opennex_update_failed.txt"
-del /f /q "%~f0" >nul 2>&1
-"#,
-            cur_name = current
-                .file_name()
-                .and_then(|n| n.to_str())
-                .ok_or("文件名错误")?,
-            staged = staged.to_string_lossy().replace('\\', "/"),
-            current = current.to_string_lossy().replace('\\', "/"),
-            parent = parent.to_string_lossy().replace('\\', "/"),
-        );
+        use std::os::windows::fs::PermissionsExt;
+        // Make sure the temp copy is executable (it was written by us).
+        let _ = fs::set_permissions(new_binary, fs::Permissions::from_mode(0o755));
 
+        let script_path = std::env::temp_dir().join("opennex_update.ps1");
+        let script = r#"$ErrorActionPreference = 'Stop'
+$cur = '@CUR@'
+$new = '@NEW@'
+$failMarker = '@FAIL@'
+$procName = [IO.Path]::GetFileNameWithoutExtension($cur)
+for ($i = 0; $i -lt 30; $i++) {
+    $p = Get-Process -Name $procName -ErrorAction SilentlyContinue
+    if (-not $p) { break }
+    Start-Sleep -Seconds 1
+}
+try {
+    Copy-Item -LiteralPath $new -Destination $cur -Force
+} catch {
+    [IO.File]::WriteAllText($failMarker, 'replace failed: ' + $_.Exception.Message)
+    exit 1
+}
+Remove-Item -LiteralPath $new -Force -ErrorAction SilentlyContinue
+Start-Process -FilePath $cur
+Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
+"#
+        .replace("@CUR@", &current.to_string_lossy())
+        .replace("@NEW@", &new_binary.to_string_lossy())
+        .replace(
+            "@FAIL@",
+            &parent
+                .join("opennex_update_failed.txt")
+                .to_string_lossy()
+                .replace('\\', "/"),
+        );
         fs::write(&script_path, script).map_err(|e| format!("写入脚本失败: {e}"))?;
 
-        std::process::Command::new("cmd")
-            .arg("/C")
-            .arg(&script_path)
+        // Launch elevated (UAC): Program Files requires admin to write.
+        // '-Verb RunAs' shows the standard elevation prompt.
+        let launcher = format!(
+            "Start-Process powershell -Verb RunAs -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-WindowStyle','Hidden','-File','{}'",
+            script_path.to_string_lossy()
+        );
+        std::process::Command::new("powershell")
+            .args(["-NoProfile", "-Command", &launcher])
             .creation_flags_windows()
             .spawn()
-            .map_err(|e| format!("启动脚本失败: {e}"))?;
+            .map_err(|e| format!("启动更新脚本失败: {e}"))?;
     }
     #[cfg(not(target_os = "windows"))]
     {
         use std::os::unix::fs::PermissionsExt;
-        // Test write permission to the install dir first: system packages
-        // (e.g. /usr/bin from .deb) are root-owned and a plain user run
-        // cannot mv over them — report that instead of silently
-        // restarting the old binary.
-        let probe = parent.join(".opennex_write_probe");
-        let writable = fs::write(&probe, b"").is_ok();
-        let _ = fs::remove_file(&probe);
-        if !writable {
-            let _ = fs::remove_file(&staged);
-            return Err(format!(
-                "无权替换安装目录中的程序（{parent}）。请重新下载安装包更新，或以管理员权限运行。",
-                parent = parent.display()
-            ));
-        }
+        let _ = fs::set_permissions(new_binary, fs::Permissions::from_mode(0o755));
 
-        let script_path = parent.join("opennex_update.sh");
+        // Prefer a user-writable staging area: try the install dir first,
+        // fall back to the data dir next to the config.
+        let staged = parent.join("opennex_new");
+        let staged = match fs::copy(new_binary, &staged).and_then(|_| {
+            fs::set_permissions(&staged, fs::Permissions::from_mode(0o755)).map(|_| staged.clone())
+        }) {
+            Ok(p) => p,
+            Err(_) => {
+                // Cannot stage in the install dir (e.g. /usr/bin): the
+                // script will elevate via pkexec/sudo for the swap.
+                new_binary.to_path_buf()
+            }
+        };
+
+        let script_path = std::env::temp_dir().join("opennex_update.sh");
         let script = format!(
-            // Wait for the old PID to exit (binary may be busy briefly),
-            // then atomic mv + exec. mktemp log for diagnostics.
+            // Try the swap as the user first; if permission denied,
+            // escalate via pkexec (GUI) or sudo. Success is verified by
+            // comparing file sizes before relaunching.
             r#"#!/bin/bash
 for i in $(seq 1 30); do
   kill -0 {pid} 2>/dev/null || break
   sleep 1
 done
-if mv -f "{staged}" "{current}" 2>>"{parent}/opennex_update.log"; then
-  chmod +x "{current}"
+want_size=$(stat -c %s "{staged}" 2>/dev/null || stat -f %z "{staged}")
+if ! mv -f "{staged}" "{current}" 2>>"{log}"; then
+  if command -v pkexec >/dev/null 2>&1; then
+    pkexec mv -f "{staged}" "{current}" >>"{log}" 2>&1
+  elif command -v sudo >/dev/null 2>&1; then
+    sudo -n mv -f "{staged}" "{current}" >>"{log}" 2>&1
+  fi
+fi
+got_size=$(stat -c %s "{current}" 2>/dev/null || stat -f %z "{current}")
+if [ -n "$want_size" ] && [ "$want_size" = "$got_size" ]; then
+  chmod +x "{current}" 2>>"{log}"
+  nohup "{current}" >/dev/null 2>&1 &
   rm -f -- "$0"
-  exec "{current}"
 else
-  echo "update replace failed" >> "{parent}/opennex_update.log"
+  echo "update replace failed (no permission)" >> "{log}"
   rm -f -- "$0"
 fi
 "#,
             pid = std::process::id(),
             staged = staged.to_string_lossy(),
             current = current.to_string_lossy(),
-            parent = parent.to_string_lossy(),
+            log = std::env::temp_dir()
+                .join("opennex_update.log")
+                .to_string_lossy(),
         );
 
         fs::write(&script_path, &script).map_err(|e| format!("写入脚本失败: {e}"))?;
