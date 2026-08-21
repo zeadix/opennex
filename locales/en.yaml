@@ -42,6 +42,7 @@ settings:
     scrollback: 'Scrollback:'
     clear_all_history: Delete All Command History
     auto_copy: Auto-copy selected text
+    auto_match: Auto-match commands
   appearance:
     heading: Appearance
     terminal_section: Terminal Appearance

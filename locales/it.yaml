@@ -42,6 +42,7 @@ settings:
     scrollback: 'Scrollback:'
     clear_all_history: Elimina tutta la cronologia
     auto_copy: Copia automatica del testo selezionato
+    auto_match: Completamento automatico
   appearance:
     heading: Aspetto
     terminal_section: Aspetto terminale

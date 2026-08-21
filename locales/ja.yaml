@@ -42,6 +42,7 @@ settings:
     scrollback: 'スクロールバック:'
     clear_all_history: すべての履歴を削除
     auto_copy: 選択したテキストを自動コピー
+    auto_match: コマンド自動補完
   appearance:
     heading: 外観
     terminal_section: ターミナル外観

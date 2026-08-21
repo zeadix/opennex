@@ -25,6 +25,7 @@
     ],
     "ui_font_size": 14.0,
     "menu_bg": "#141417",
+    "menu_alt_bg": "#121215",
     "menu_fg": "#f5f5f5",
     "button_bg": "#1a1a1d",
     "button_fg": "#f5f5f5",

@@ -21,6 +21,7 @@
     "selection_text": "#eee8d5",
     "window_shadow": "#00000078",
     "menu_bg": "#0e4a5a",
+    "menu_alt_bg": "#0d4453",
     "menu_fg": "#eee8d5",
     "button_bg": "#05323d",
     "button_fg": "#eee8d5",

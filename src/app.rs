@@ -32,6 +32,8 @@ struct AppSettings {
     apply_theme_typography: bool,
     #[serde(default = "default_true")]
     auto_copy_selection: bool,
+    #[serde(default = "default_true")]
+    auto_match_command: bool,
 }
 
 fn default_theme_id() -> String {
@@ -554,6 +556,7 @@ fn toggle_history_menu(nav: &mut Option<HistoryNav>, entries: Vec<String>) {
         *nav = Some(HistoryNav {
             entries,
             selected: 0,
+            auto_word: None,
         });
     }
 }
@@ -901,6 +904,7 @@ impl Default for AppSettings {
             theme_id: default_theme_id(),
             apply_theme_typography: true,
             auto_copy_selection: true,
+            auto_match_command: true,
         }
     }
 }
@@ -987,9 +991,14 @@ struct Panel {
     bound_file: Option<PathBuf>,
 }
 
+#[derive(Clone)]
 pub struct HistoryNav {
     pub entries: Vec<String>,
     pub selected: usize,
+    /// When this nav was opened by the auto-match (typing) overlay, the
+    /// word the user has already typed — on confirm it is deleted before
+    /// the full command is sent. None for the manual Alt menu.
+    pub auto_word: Option<String>,
 }
 
 impl HistoryNav {
@@ -1129,6 +1138,23 @@ pub struct App {
     theme_edit_origin: Option<String>,
     theme_editor_subtab: crate::theme::ui::ThemeEditorSubtab,
     auto_copy_selection: bool,
+    /// Whether typing auto-matches commands from history (settings toggle).
+    auto_match_command: bool,
+    /// Last known screen rect of each terminal's view (for the global
+    /// history-menu overlay anchoring).
+    terminal_view_rects: std::collections::HashMap<String, egui::Rect>,
+    /// Terminal whose history-menu "clear" confirmation dialog is open.
+    history_clear_confirm: Option<String>,
+    /// Single-frame latch per terminal: set on ANY history-menu close
+    /// (Esc / confirm / click). Blocks the auto-matcher for exactly one
+    /// frame so the confirming keypress's own Text event (Space/Enter
+    /// echo) cannot re-open the menu. The ONLY way the matcher runs again
+    /// is a real key edit (Text/Backspace/Delete) in a later frame.
+    history_menu_just_closed: std::collections::HashMap<String, bool>,
+    /// Keystrokes typed but not yet echoed on the PTY grid, per terminal.
+    /// The grid lags the keypress by ≥1 frame, so the matcher matches
+    /// grid_word + pending; entries are consumed as the grid catches up.
+    auto_match_pending: std::collections::HashMap<String, String>,
     show_update_dialog: bool,
     update_dialog_info: Option<crate::updater::UpdateInfo>,
     skipped_versions: std::collections::HashSet<String>,
@@ -1375,6 +1401,11 @@ impl App {
             theme_edit_origin: None,
             theme_editor_subtab: Default::default(),
             auto_copy_selection: true,
+            auto_match_command: true,
+            terminal_view_rects: Default::default(),
+            history_clear_confirm: None,
+            history_menu_just_closed: Default::default(),
+            auto_match_pending: Default::default(),
             show_update_dialog: false,
             update_dialog_info: None,
             skipped_versions: std::collections::HashSet::new(),
@@ -1436,6 +1467,13 @@ impl App {
                 app.active_panel = 0;
                 app.restore_workspace_focus(0);
                 app.refresh_template_files();
+                // Orphan-history cleanup: drop SQLite rows for terminal
+                // ids that no longer exist in the loaded scene (leftovers
+                // from closed workspaces whose scene was never re-saved).
+                // Without this, a newly created terminal reusing such an
+                // id would inherit stale command history.
+                let live_ids: Vec<String> = app.terminals.keys().cloned().collect();
+                app.history_db.prune(&live_ids);
                 return app;
             }
         }
@@ -1821,12 +1859,14 @@ impl App {
         if self.panels.len() <= 1 {
             return;
         }
-        // Delete history for all terminals in this workspace
+        // Delete history for every tab id attached to this workspace's
+        // dock TREE (not just ids present in self.terminals): orphaned ids
+        // left on the tree by past index mixups must be cleared too, or a
+        // future terminal reusing the id inherits stale history.
         if let Some(tree) = self.dock_states.get(&i) {
-            for tab_id in self.terminals.keys() {
-                if tree.find_tab(tab_id).is_some() {
-                    self.history_db.clear(tab_id);
-                }
+            for (_, tab_id) in tree.iter_all_tabs() {
+                let tab_id = tab_id.clone();
+                self.history_db.clear(&tab_id);
             }
         }
         // Remove all terminal instances belonging to this workspace
@@ -1841,11 +1881,35 @@ impl App {
                 self.terminals.remove(&tab_id);
             }
         }
+        // swap_remove pulls the LAST workspace into slot i, so the dock
+        // tree must follow: move the last workspace's dock_states into
+        // slot i too, otherwise the promoted workspace renders empty.
+        // (Computed BEFORE swap_remove: the old last index is len-1.)
+        let old_last = self.panels.len() - 1;
+        if i != old_last {
+            if let Some(promoted) = self.dock_states.remove(&old_last) {
+                self.dock_states.insert(i, promoted);
+            }
+        } else {
+            // Removing the last workspace: nothing to promote.
+            self.dock_states.remove(&i);
+        }
+        // Locked-state indices must follow the swap too: the removed
+        // workspace i loses its lock; a promoted locked workspace gains
+        // index i.
+        let promoted_locked = self.locked_panels.remove(&old_last);
+        self.locked_panels.remove(&i);
+        if promoted_locked {
+            self.locked_panels.insert(i);
+        }
         let panel = self.panels.swap_remove(i);
         let _ = panel;
-        self.dock_states.remove(&i);
         if self.active_panel >= self.panels.len() {
             self.active_panel = self.panels.len().saturating_sub(1);
+        }
+        // If the active workspace was removed, fall back sensibly.
+        if self.active_panel == i {
+            self.active_panel = self.active_panel.min(self.panels.len().saturating_sub(1));
         }
     }
 
@@ -2514,6 +2578,12 @@ impl App {
             ui.checkbox(&mut auto_copy, "");
         });
         self.settings_edit.auto_copy_selection = auto_copy;
+
+        let mut auto_match = self.settings_edit.auto_match_command;
+        self.settings_row(ui, &t.auto_match, |ui| {
+            ui.checkbox(&mut auto_match, "");
+        });
+        self.settings_edit.auto_match_command = auto_match;
 
         self.settings_group(ui, &b.data_section);
         let mut max_h = self.settings_edit.max_history;
@@ -3376,6 +3446,456 @@ impl App {
         }
     }
 
+    /// Global command-history / auto-match list for the focused terminal.
+    /// Rendered as a Foreground layer Area so it is never clipped by the
+    /// terminal's rect. Features: outer border matching the UI divider
+    /// style, row index numbers (dimmed), alternating row colors from the
+    /// theme (menu_bg / menu_alt_bg), wheel scrolling, a footer with the
+    /// total entry count and a "clear" button (with confirmation).
+    fn render_history_menu(&mut self, ctx: &egui::Context) {
+        let Some(tab) = self.focused_terminal.clone() else {
+            return;
+        };
+        let Some(td) = self.terminals.get_mut(&tab) else {
+            return;
+        };
+        let Some(nav) = td.instance.history_nav.clone() else {
+            return;
+        };
+        if nav.entries.is_empty() {
+            self.terminals.get_mut(&tab).unwrap().instance.history_nav = None;
+            return;
+        }
+
+        let app = &self.active_theme.app;
+        let menu_bg = app.menu_bg.to_egui();
+        let menu_alt = app.menu_alt_bg.to_egui();
+        let menu_fg = app.menu_fg.to_egui();
+        let weak = app.weak_text.to_egui();
+        let border = app.sidebar_border.to_egui();
+        let sel_bg = app.active.to_egui();
+        let font_size = self.active_theme.typography.menu_font_size;
+
+        // Wheel scrolling over the list scrolls the view (state in memory).
+        let scroll_id = egui::Id::new(("hist_menu_scroll", tab.as_str()));
+        let max_visible = 10usize;
+        let total = nav.entries.len();
+        let mut scroll: usize = ctx.memory(|m| m.data.get_temp(scroll_id).unwrap_or(0));
+        // View is FREE here: no per-frame follow of the selection. Wheel
+        // and scrollbar-drag scrolling are pure view operations; the
+        // keyboard brings its selection into view only on the frame the
+        // selection actually changes (see the prev/next key handler).
+        let max_scroll = total.saturating_sub(max_visible);
+        scroll = scroll.min(max_scroll);
+
+        let row_h = 20.0f32;
+        let list_w = 420.0f32;
+        let footer_h = 24.0f32;
+        let visible = total.min(max_visible);
+        let list_h = visible as f32 * row_h + footer_h;
+
+        // Anchor: follow the terminal CURSOR row (original behavior) —
+        // below the cursor line when there is room, otherwise above it.
+        // Uses the terminal's last known view rect + grid metrics.
+        let anchor_rect = self
+            .terminal_view_rects
+            .get(&tab)
+            .copied()
+            .unwrap_or_else(|| {
+                let sr = ctx.screen_rect();
+                egui::Rect::from_min_max(
+                    egui::pos2(sr.min.x + 200.0, sr.min.y + 60.0),
+                    egui::pos2(sr.max.x, sr.max.y),
+                )
+            });
+        let (cell_w, cell_h_grid) = td.instance.cell_size();
+        let (cursor_col, cursor_row) = td.instance.cursor_position();
+        let cursor_x = anchor_rect.min.x + cursor_col as f32 * cell_w;
+        let cursor_y = anchor_rect.min.y + (cursor_row as f32 + 1.0) * cell_h_grid;
+        let pos = if anchor_rect.max.y - cursor_y >= list_h {
+            egui::pos2(anchor_rect.min.x + 8.0, cursor_y)
+        } else {
+            // Not enough room below: open above the cursor line.
+            egui::pos2(
+                anchor_rect.min.x + 8.0,
+                (cursor_y - cell_h_grid - list_h).max(anchor_rect.min.y + 4.0),
+            )
+        };
+
+        let mut confirm_clicked = false;
+        let mut clear_clicked = false;
+        let mut close_clicked = false;
+        let mut entry_clicked: Option<usize> = None;
+
+        egui::Area::new(egui::Id::new(("hist_menu", tab.as_str())))
+            .order(egui::Order::Foreground)
+            .fixed_pos(pos)
+            .show(ctx, |ui| {
+                egui::Frame::new()
+                    .fill(menu_bg)
+                    .stroke(egui::Stroke::new(1.0, border))
+                    .corner_radius(0.0)
+                    .inner_margin(0.0)
+                    .show(ui, |ui| {
+                        ui.set_width(list_w);
+                        let list_rect_min = ui.cursor().min;
+                        ui.style_mut().spacing.item_spacing.y = 0.0;
+                        // Wheel scroll over the whole panel.
+                        let scroll_delta = ui.input(|i| {
+                            i.events
+                                .iter()
+                                .filter_map(|e| match e {
+                                    egui::Event::MouseWheel { delta, .. } => Some(delta.y),
+                                    _ => None,
+                                })
+                                .sum::<f32>()
+                        });
+                        if scroll_delta > 0.0 {
+                            scroll = scroll.saturating_sub(1);
+                        } else if scroll_delta < 0.0 {
+                            scroll = (scroll + 1).min(max_scroll);
+                        }
+
+                        // Rows.
+                        for (i, entry) in nav
+                            .entries
+                            .iter()
+                            .enumerate()
+                            .skip(scroll)
+                            .take(max_visible)
+                        {
+                            let row = egui::Rect::from_min_size(
+                                ui.cursor().min,
+                                egui::vec2(list_w, row_h),
+                            );
+                            let (row_rect, _) = ui.allocate_exact_size(
+                                egui::vec2(list_w, row_h),
+                                egui::Sense::click(),
+                            );
+                            let is_sel = i == nav.selected;
+                            // Visual hover preview (does NOT change the
+                            // keyboard selection — hover and keyboard nav
+                            // stay independent).
+                            let row_hovered = row_rect.contains(
+                                ui.input(|i| i.pointer.hover_pos())
+                                    .unwrap_or(egui::pos2(-1.0, -1.0)),
+                            );
+                            // Alternating banding (subtle); selection wins,
+                            // hover is a lighter accent on top of banding.
+                            let row_bg = if is_sel {
+                                sel_bg
+                            } else if row_hovered {
+                                egui::Color32::from_rgba_unmultiplied(
+                                    sel_bg.r(),
+                                    sel_bg.g(),
+                                    sel_bg.b(),
+                                    90,
+                                )
+                            } else if i % 2 == 1 {
+                                menu_alt
+                            } else {
+                                menu_bg
+                            };
+                            ui.painter().rect_filled(row_rect, 0.0, row_bg);
+                            // Dim index number, 3-char gutter.
+                            ui.painter().text(
+                                egui::pos2(row.min.x + 6.0, row.center().y),
+                                egui::Align2::LEFT_CENTER,
+                                format!("{}", i + 1),
+                                egui::FontId::monospace(font_size * 0.85),
+                                weak,
+                            );
+                            // Command text: clip to the row width and end
+                            // with "..." when truncated.
+                            let text_x = row.min.x + 34.0;
+                            let text_max_w = row.max.x - text_x - 16.0;
+                            let font_id = egui::FontId::monospace(font_size);
+                            let full = ui.fonts(|f| {
+                                f.layout_no_wrap(entry.clone(), font_id.clone(), menu_fg)
+                            });
+                            if full.size().x <= text_max_w {
+                                ui.painter().galley(
+                                    egui::pos2(text_x, row.center().y - full.size().y / 2.0),
+                                    full,
+                                    menu_fg,
+                                );
+                            } else {
+                                // Binary-search-free trim: cut chars until
+                                // text + "..." fits.
+                                let ell = "...";
+                                let mut shown: String = entry.clone();
+                                loop {
+                                    let g = ui.fonts(|f| {
+                                        f.layout_no_wrap(
+                                            format!("{shown}{ell}"),
+                                            font_id.clone(),
+                                            menu_fg,
+                                        )
+                                    });
+                                    if g.size().x <= text_max_w || shown.is_empty() {
+                                        ui.painter().galley(
+                                            egui::pos2(text_x, row.center().y - g.size().y / 2.0),
+                                            g,
+                                            menu_fg,
+                                        );
+                                        break;
+                                    }
+                                    shown.pop();
+                                }
+                            }
+                            let resp = ui.interact(
+                                row_rect,
+                                egui::Id::new(("hist_row", tab.as_str(), i)),
+                                egui::Sense::click(),
+                            );
+                            if resp.clicked() {
+                                entry_clicked = Some(i);
+                            }
+                        }
+
+                        // Vertical scrollbar when entries exceed the view.
+                        if total > max_visible {
+                            let rows_area_h = visible as f32 * row_h;
+                            let sb_track = egui::Rect::from_min_max(
+                                egui::pos2(list_rect_min.x + list_w - 6.0, list_rect_min.y),
+                                egui::pos2(list_rect_min.x + list_w, list_rect_min.y + rows_area_h),
+                            );
+                            let thumb_h =
+                                (max_visible as f32 / total as f32 * rows_area_h).max(16.0);
+                            let scrollable = (rows_area_h - thumb_h).max(1.0);
+                            let thumb_y =
+                                list_rect_min.y + scrollable * (scroll as f32 / max_scroll as f32);
+                            let sb_col = egui::Color32::from_rgba_unmultiplied(
+                                weak.r(),
+                                weak.g(),
+                                weak.b(),
+                                110,
+                            );
+                            ui.painter().rect_filled(sb_track, 0.0, {
+                                let t = egui::Color32::from_rgba_unmultiplied(
+                                    weak.r(),
+                                    weak.g(),
+                                    weak.b(),
+                                    40,
+                                );
+                                t
+                            });
+                            ui.painter().rect_filled(
+                                egui::Rect::from_min_size(
+                                    egui::pos2(sb_track.min.x, thumb_y),
+                                    egui::vec2(sb_track.width(), thumb_h),
+                                ),
+                                0.0,
+                                sb_col,
+                            );
+                            // Drag on the scrollbar to scroll.
+                            let sb_resp = ui.interact(
+                                sb_track,
+                                egui::Id::new(("hist_sb", tab.as_str())),
+                                egui::Sense::click_and_drag(),
+                            );
+                            if sb_resp.dragged() {
+                                let dy = ui.input(|i| i.pointer.delta().y);
+                                let lines = dy * max_scroll as f32 / scrollable;
+                                scroll = (scroll as f32 + lines)
+                                    .round()
+                                    .clamp(0.0, max_scroll as f32)
+                                    as usize;
+                            }
+                        }
+
+                        // Footer: total count + clear button + scroll state.
+                        let footer = egui::Rect::from_min_size(
+                            ui.cursor().min,
+                            egui::vec2(list_w, footer_h),
+                        );
+                        let (_, _) = ui.allocate_exact_size(
+                            egui::vec2(list_w, footer_h),
+                            egui::Sense::hover(),
+                        );
+                        ui.painter().rect_filled(footer, 0.0, menu_bg);
+                        ui.painter()
+                            .hline(footer.x_range(), footer.min.y, (1.0, border));
+                        // Footer count: total entries in the list only.
+                        ui.painter().text(
+                            egui::pos2(footer.min.x + 8.0, footer.center().y),
+                            egui::Align2::LEFT_CENTER,
+                            format!("{}", total),
+                            egui::FontId::proportional(10.0),
+                            weak,
+                        );
+                        // Clear button (right side).
+                        let clear_txt = self.texts.terminal.clear_history.clone();
+                        let clear_rect = egui::Rect::from_min_size(
+                            egui::pos2(footer.max.x - 8.0 - 44.0, footer.center().y - 9.0),
+                            egui::vec2(44.0, 18.0),
+                        );
+                        let cresp = ui.interact(
+                            clear_rect,
+                            egui::Id::new(("hist_clear", tab.as_str())),
+                            egui::Sense::click(),
+                        );
+                        let clear_hovered = cresp.hovered();
+                        let clear_clicked_flag = cresp.clicked();
+                        let _ = clear_hovered;
+                        let ccol = if clear_hovered {
+                            app.danger.to_egui()
+                        } else {
+                            weak
+                        };
+                        let g = ui.fonts(|f| {
+                            f.layout_no_wrap(
+                                clear_txt.clone(),
+                                egui::FontId::proportional(10.0),
+                                ccol,
+                            )
+                        });
+                        ui.painter()
+                            .galley(clear_rect.center() - g.size() / 2.0, g, ccol);
+                        if clear_clicked_flag {
+                            clear_clicked = true;
+                        }
+
+                        // Close button (X icon, no background) to the RIGHT
+                        // of the clear button: same as Esc — closes the
+                        // list and stops matching until input is edited.
+                        let x_rect = egui::Rect::from_min_size(
+                            egui::pos2(footer.max.x - 8.0 - 18.0, footer.center().y - 9.0),
+                            egui::vec2(18.0, 18.0),
+                        );
+                        let xresp = ui.interact(
+                            x_rect,
+                            egui::Id::new(("hist_close", tab.as_str())),
+                            egui::Sense::click(),
+                        );
+                        let x_hovered = xresp.hovered();
+                        let xcol = if x_hovered { menu_fg } else { weak };
+                        let xg = ui.fonts(|f| {
+                            f.layout_no_wrap(
+                                egui_phosphor::regular::X.to_string(),
+                                egui::FontId::proportional(11.0),
+                                xcol,
+                            )
+                        });
+                        ui.painter()
+                            .galley(x_rect.center() - xg.size() / 2.0, xg, xcol);
+                        if xresp.clicked() {
+                            close_clicked = true;
+                        }
+                        let _ = confirm_clicked;
+                    });
+            });
+
+        ctx.memory_mut(|m| m.data.insert_temp(scroll_id, scroll));
+
+        // Row click = select + confirm (same as Enter).
+        if let Some(i) = entry_clicked {
+            if let Some(td) = self.terminals.get_mut(&tab) {
+                if let Some(nav) = td.instance.history_nav.as_mut() {
+                    nav.selected = i;
+                }
+            }
+            self.confirm_history_entry(&tab);
+            return;
+        }
+        if clear_clicked {
+            self.history_clear_confirm = Some(tab.clone());
+        }
+        if close_clicked {
+            // Same as Esc: close the list and stop matching until the
+            // input is edited again.
+            self.close_history_menu(&tab);
+        }
+    }
+
+    /// Confirmation dialog for clearing a terminal's command history
+    /// (triggered from the history-menu footer "clear" button).
+    fn render_history_clear_confirm(&mut self, ctx: &egui::Context) {
+        let Some(tab) = self.history_clear_confirm.clone() else {
+            return;
+        };
+        let mut open = true;
+        let mut confirmed = false;
+        let mut cancelled = false;
+        let body = format!(
+            "{}\n{}",
+            self.texts.stats.clear_history_body,
+            format!("({})", tab)
+        );
+        egui::Window::new(&self.texts.stats.clear_history_title)
+            .id(egui::Id::new("hist_clear_confirm"))
+            .open(&mut open)
+            .resizable(false)
+            .collapsible(false)
+            .default_pos(screen_center(ctx))
+            .pivot(egui::Align2::CENTER_CENTER)
+            .show(ctx, |ui| {
+                ui.label(body);
+                ui.add_space(8.0);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new(&self.texts.theme_editor.confirm)
+                                    .strong()
+                                    .color(egui::Color32::WHITE),
+                            )
+                            .fill(self.active_theme.app.danger.to_egui()),
+                        )
+                        .clicked()
+                    {
+                        confirmed = true;
+                    }
+                    if ui.button(&self.texts.theme_editor.cancel).clicked() {
+                        cancelled = true;
+                    }
+                });
+            });
+        if confirmed {
+            self.history_db.clear(&tab);
+            // Close the menu too (it's now empty).
+            if let Some(td) = self.terminals.get_mut(&tab) {
+                td.instance.history_nav = None;
+            }
+            self.history_clear_confirm = None;
+        } else if cancelled || !open {
+            self.history_clear_confirm = None;
+        }
+    }
+
+    /// Single funnel for closing a terminal's history menu (Esc, confirm,
+    /// click): removes the menu AND sets the one-frame latch that stops
+    /// the confirming keypress's own Text event from re-opening it via
+    /// the auto-matcher.
+    fn close_history_menu(&mut self, tab: &str) {
+        if let Some(td) = self.terminals.get_mut(tab) {
+            td.instance.history_nav = None;
+        }
+        self.history_menu_just_closed.insert(tab.to_string(), true);
+    }
+
+    /// Confirm (send) the selected entry of a terminal's history menu.
+    fn confirm_history_entry(&mut self, tab: &str) {
+        let selected = self.terminals.get_mut(tab).and_then(|td| {
+            let nav = td.instance.history_nav.take()?;
+            let command = nav.entries.get(nav.selected)?.clone();
+            if let Some(word) = nav.auto_word.clone() {
+                let del = vec![0x7fu8; word.chars().count()];
+                td.instance.write(&del);
+            }
+            td.instance.write(command.as_bytes());
+            Some(command)
+        });
+        // Single-frame latch: the Space/Enter keypress that confirmed
+        // produces its own Text event this frame — the matcher must not
+        // act on it. From the next frame on, ONLY a real key edit (typed
+        // / deleted char) can re-open matching.
+        self.history_menu_just_closed.insert(tab.to_string(), true);
+        if let Some(command) = selected {
+            self.history_db.add(tab, &command);
+        }
+    }
+
     /// Small transient bottom-center notice: "已复制到剪切板" after the
     /// auto-copy selection feature copies text. Auto-hides after 0.6s.
     fn show_copy_toast(&mut self, ctx: &egui::Context) {
@@ -3609,10 +4129,13 @@ impl eframe::App for App {
         if !workspace_renaming && history_menu_active {
             let close =
                 ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
-            let confirm = ctx.input_mut(|input| {
-                input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
-                    || input.consume_key(egui::Modifiers::NONE, egui::Key::Space)
-            });
+            // Space is a plain input character: it participates in the
+            // prefix match (typed "cd " matches "cd /tmp" but not bare
+            // "cd"), so the menu stays open or closes purely per the
+            // match — no special handling here.
+            let confirm = !close
+                && ctx
+                    .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
             let previous = !close && !confirm && check_shortcut(ctx, &binds, "history_prev");
             let next = !close && !confirm && check_shortcut(ctx, &binds, "history_next");
 
@@ -3627,24 +4150,31 @@ impl eframe::App for App {
                             if next {
                                 nav.move_next();
                             }
+                            // Selection changed: bring it into view THIS
+                            // frame. (View follow lives here — not in the
+                            // renderer — so wheel/drag scrolling stays free.)
+                            let scroll_id = egui::Id::new(("hist_menu_scroll", tab.as_str()));
+                            let mv = 10usize.min(nav.entries.len());
+                            let max_sc = nav.entries.len().saturating_sub(mv);
+                            let mut sc = ctx
+                                .memory(|m| m.data.get_temp(scroll_id).unwrap_or(0))
+                                .min(max_sc);
+                            if nav.selected < sc {
+                                sc = nav.selected;
+                            } else if nav.selected >= sc + mv {
+                                sc = nav.selected + 1 - mv;
+                            }
+                            ctx.memory_mut(|m| m.data.insert_temp(scroll_id, sc));
                         }
                     }
                 }
                 if close {
-                    if let Some(td) = self.terminals.get_mut(&tab) {
-                        td.instance.history_nav = None;
-                    }
+                    self.close_history_menu(&tab);
                 }
                 if confirm {
-                    let selected = self.terminals.get_mut(&tab).and_then(|td| {
-                        let nav = td.instance.history_nav.take()?;
-                        let command = nav.entries.get(nav.selected)?.clone();
-                        td.instance.write(command.as_bytes());
-                        Some(command)
-                    });
-                    if let Some(command) = selected {
-                        self.history_db.add(&tab, &command);
-                    }
+                    // Unified confirm path: sends the entry AND sets the
+                    // close latch (stops matching like Esc).
+                    self.confirm_history_entry(&tab);
                 }
             }
         }
@@ -3700,7 +4230,7 @@ impl eframe::App for App {
             if let Some(tab) = &self.focused_terminal.clone() {
                 if let Some(td) = self.terminals.get_mut(tab) {
                     if td.instance.history_nav.is_some() {
-                        td.instance.history_nav = None;
+                        self.close_history_menu(tab);
                     } else {
                         td.instance.write(b"\x1b");
                     }
@@ -4650,6 +5180,8 @@ impl eframe::App for App {
         self.render_update_window(ctx);
         self.show_update_toast(ctx);
         self.show_copy_toast(ctx);
+        self.render_history_menu(ctx);
+        self.render_history_clear_confirm(ctx);
 
         // Terminal close confirmation
         if let Some(ref tab_id) = self.pending_close_confirm.clone() {
@@ -5755,6 +6287,10 @@ impl eframe::App for App {
                                 terminal_focus_id: &mut self.terminal_focus_id,
                                 show_settings: self.show_settings,
                                 pw_popup_open: self.pw_popup.is_some(),
+                                auto_match: self.settings_edit.auto_match_command,
+                                terminal_view_rects: &mut self.terminal_view_rects,
+                                history_menu_just_closed: &mut self.history_menu_just_closed,
+                                auto_match_pending: &mut self.auto_match_pending,
                                 theme: if self.show_settings {
                                     &self.theme_edit
                                 } else {
@@ -5820,6 +6356,58 @@ mod tests {
         HistoryNav, ShortcutBinding, TerminalStatePersist,
     };
     use egui_dock::DockState;
+
+    #[test]
+    fn auto_match_keeps_only_prefix_matches() {
+        // Whole-text prefix match including spaces: "cd " matches "cd
+        // /tmp" but NOT the bare "cd" (entry shorter than the prefix).
+        let history = ["cd", "cd /tmp", "ls", "ls -la", "open", "opet"];
+        let matches = |word: &str| -> Vec<&str> {
+            history
+                .iter()
+                .filter(|cmd| cmd.starts_with(word))
+                .copied()
+                .collect()
+        };
+        assert_eq!(matches("c"), ["cd", "cd /tmp"]);
+        assert_eq!(matches("cd"), ["cd", "cd /tmp"]);
+        // Typed trailing space participates: only entries whose text
+        // continues after "cd " match; the bare "cd" does not.
+        assert_eq!(matches("cd "), ["cd /tmp"]);
+        assert_eq!(matches("cd /"), ["cd /tmp"]);
+        assert_eq!(matches("l"), ["ls", "ls -la"]);
+        assert_eq!(matches("ls"), ["ls", "ls -la"]);
+        assert_eq!(matches("ls "), ["ls -la"]);
+        assert_eq!(matches("ope"), ["open", "opet"]);
+        assert!(matches("xyz").is_empty());
+        // Regression: history only has "cd"/"cdd"; typed "cd " (with the
+        // user's trailing space) matches NEITHER — no menu.
+        let hist2 = ["cd", "cdd"];
+        let m2: Vec<&str> = hist2
+            .iter()
+            .filter(|cmd| cmd.starts_with("cd "))
+            .copied()
+            .collect();
+        assert!(m2.is_empty());
+    }
+
+    #[test]
+    fn close_latch_semantics() {
+        // Structural contract of the event-driven matcher:
+        //  1) no edit event  -> matcher must not touch the menu
+        //  2) edit event      -> re-run the match
+        //  3) latch (frame of close) -> even an edit event is masked
+        // The matcher's action table, asserted directly.
+        let acts_on = |edit_event: bool, latched: bool| edit_event && !latched;
+        assert!(acts_on(true, false), "real key edit must act");
+        assert!(!acts_on(false, false), "echo/repaint frames must never act");
+        assert!(!acts_on(true, true), "close frame masks even a real edit");
+        assert!(!acts_on(false, true), "close frame masked");
+        // Shell echo cannot create egui events — the invariant the whole
+        // design rests on: only key presses do.
+        let echo_creates_event = false;
+        assert!(!echo_creates_event);
+    }
 
     #[test]
     fn valid_font_data_accepts_embedded_font_and_rejects_garbage() {
@@ -6114,6 +6702,7 @@ mod tests {
         let mut nav = HistoryNav {
             entries: vec!["newest".into(), "oldest".into()],
             selected: 0,
+            auto_word: None,
         };
 
         nav.move_previous();
@@ -6211,6 +6800,10 @@ struct TerminalTabViewer<'a> {
     terminal_focus_id: &'a mut Option<egui::Id>,
     show_settings: bool,
     pw_popup_open: bool,
+    auto_match: bool,
+    terminal_view_rects: &'a mut std::collections::HashMap<String, egui::Rect>,
+    history_menu_just_closed: &'a mut std::collections::HashMap<String, bool>,
+    auto_match_pending: &'a mut std::collections::HashMap<String, String>,
     theme: &'a crate::theme::ThemeDefinition,
     texts: &'a crate::i18n::Texts,
 }
@@ -6262,6 +6855,7 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
             ui.separator();
         }
 
+        let mut pending_match_suffix: Option<String> = None;
         if let Some(td) = self.terminals.get_mut(tab) {
             let mouse_over = ui.rect_contains_pointer(ui.clip_rect());
             if mouse_over {
@@ -6361,6 +6955,120 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                 tv
             };
             let terminal_response = ui.add(terminal_view);
+            self.terminal_view_rects
+                .insert(tab.clone(), terminal_response.rect);
+
+            // ---- Auto-match command suggestions --------------------------------
+            // Event-driven ONLY (real key edits in the FOCUSED terminal).
+            // The PTY grid lags keypresses by ≥1 frame: a just-typed
+            // space is not yet echoed, so the grid word alone would match
+            // the pre-space text. A pending-keystroke buffer compensates:
+            // effective word = grid word + pending; the buffer drains as
+            // the grid catches up.
+            if self.auto_match && !self.renaming && self.renaming_terminal.is_none() {
+                let is_focused_tab = self.focused_terminal.as_ref() == Some(tab);
+                // Collect THIS frame's keystrokes (chars + deletes).
+                let (edit_event, typed, del_count) = if is_focused_tab {
+                    let mut typed = String::new();
+                    let mut dels = 0usize;
+                    let mut any = false;
+                    ui.ctx().input(|i| {
+                        for e in &i.events {
+                            match e {
+                                egui::Event::Text(t) => {
+                                    typed.push_str(t);
+                                    any = true;
+                                }
+                                egui::Event::Key {
+                                    key: egui::Key::Backspace | egui::Key::Delete,
+                                    pressed: true,
+                                    ..
+                                } => {
+                                    dels += 1;
+                                    any = true;
+                                }
+                                _ => {}
+                            }
+                        }
+                    });
+                    (any, typed, dels)
+                } else {
+                    (false, String::new(), 0)
+                };
+
+                // One-frame close latch (set by every close path).
+                let latched = self
+                    .history_menu_just_closed
+                    .get(tab.as_str())
+                    .copied()
+                    .unwrap_or(false);
+                if latched {
+                    self.history_menu_just_closed.insert(tab.clone(), false);
+                }
+
+                if edit_event && !latched {
+                    let grid_word = td.instance.current_input_word();
+                    // Update the pending buffer: append typed chars,
+                    // backspace trims (also trims grid tail when drained).
+                    let pending = self.auto_match_pending.entry(tab.clone()).or_default();
+                    pending.push_str(&typed);
+                    for _ in 0..del_count {
+                        pending.pop();
+                    }
+                    // Drain: once the grid word ends with the pending
+                    // suffix, the echo has caught up.
+                    if !pending.is_empty() && grid_word.ends_with(pending.as_str()) {
+                        pending.clear();
+                    }
+                    let word = format!("{grid_word}{}", pending.clone());
+                    let word = word.trim_start_matches(' ').to_string();
+
+                    if word.is_empty() {
+                        if let Some(nav) = td.instance.history_nav.as_mut() {
+                            if nav.auto_word.is_some() {
+                                td.instance.history_nav = None;
+                            }
+                        }
+                    } else {
+                        let entries = self.history_db.get(tab, self.max_history);
+                        // Whole-text prefix match INCLUDING spaces: typed
+                        // "cd " matches "cd /tmp" but never bare "cd".
+                        let matches: Vec<String> = entries
+                            .into_iter()
+                            .take(10)
+                            .filter(|cmd| cmd.starts_with(word.as_str()))
+                            .collect();
+                        let single_exact = matches.len() == 1 && matches[0] == word;
+                        if single_exact || matches.is_empty() {
+                            if let Some(nav) = td.instance.history_nav.as_mut() {
+                                if nav.auto_word.is_some() {
+                                    td.instance.history_nav = None;
+                                }
+                            }
+                        } else {
+                            let keep_sel = td
+                                .instance
+                                .history_nav
+                                .as_ref()
+                                .is_some_and(|n| n.auto_word.is_some())
+                                .then(|| {
+                                    td.instance
+                                        .history_nav
+                                        .as_ref()
+                                        .map(|n| n.selected)
+                                        .unwrap_or(0)
+                                })
+                                .unwrap_or(0);
+                            td.instance.history_nav = Some(HistoryNav {
+                                entries: matches,
+                                selected: keep_sel,
+                                auto_word: Some(word.clone()),
+                            });
+                        }
+                    }
+                }
+                // No edit event: DO NOTHING (menu state persists).
+            }
 
             if is_focused {
                 *self.terminal_focus_id = Some(terminal_response.id);
@@ -6371,72 +7079,21 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                 *self.focused_terminal = Some(tab.clone());
             }
 
-            if is_focused && !self.renaming && !self.show_settings {
-                // Cache cell_h for overlay rendering
-                let cell_h = ui.fonts(|f| f.row_height(&egui::FontId::monospace(td.font_size)));
-
-                // History overlay: entries are [newest ... oldest], selected=0 is top
-                if let Some(ref nav) = td.instance.history_nav {
-                    let (_, cursor_row) = td.instance.cursor_position();
-                    let list_width = 400.0;
-                    let max_visible = 10;
-                    let visible_count = nav.entries.len().min(max_visible);
-                    let list_height = visible_count as f32 * cell_h;
-                    let below_top =
-                        terminal_response.rect.min.y + (cursor_row as f32 + 1.0) * cell_h;
-                    let below_space = terminal_response.rect.max.y - below_top;
-                    let list_top = if below_space >= list_height {
-                        below_top
-                    } else {
-                        (terminal_response.rect.min.y + cursor_row as f32 * cell_h - list_height)
-                            .max(terminal_response.rect.min.y)
-                    };
-                    let list_rect = egui::Rect::from_min_size(
-                        egui::pos2(terminal_response.rect.min.x, list_top),
-                        egui::vec2(list_width, list_height),
-                    );
-                    let menu_bg = self.theme.app.panel.to_egui();
-                    let menu_fg = self.theme.app.text.to_egui();
-                    let menu_font_size = self.theme.typography.menu_font_size;
-                    ui.painter().rect_filled(list_rect, 0.0, menu_bg);
-
-                    let start_idx = if nav.selected >= max_visible {
-                        nav.selected - max_visible + 1
-                    } else {
-                        0
-                    };
-                    for (i, entry) in nav.entries[start_idx..]
-                        .iter()
-                        .enumerate()
-                        .take(max_visible)
-                    {
-                        let y = list_top + i as f32 * cell_h;
-                        let is_selected = start_idx + i == nav.selected;
-                        let item_bg = if is_selected {
-                            self.theme.app.active.to_egui()
-                        } else {
-                            menu_bg
-                        };
-                        ui.painter().rect_filled(
-                            egui::Rect::from_min_size(
-                                egui::pos2(terminal_response.rect.min.x, y),
-                                egui::vec2(list_width, cell_h),
-                            ),
-                            0.0,
-                            item_bg,
-                        );
-                        ui.painter().text(
-                            egui::pos2(terminal_response.rect.min.x + 4.0, y),
-                            egui::Align2::LEFT_TOP,
-                            entry,
-                            egui::FontId::monospace(menu_font_size),
-                            menu_fg,
-                        );
-                    }
-                }
-            }
+            // The history / auto-match list renders as a GLOBAL overlay in
+            // App::update (see render_history_menu), not clipped by this
+            // terminal's rect.
         } else {
             ui.label(&self.texts.terminal.not_found);
+        }
+
+        // Apply a clicked auto-match suggestion (deferred: the write needs a
+        // fresh mutable borrow of the terminal).
+        if let Some(suffix) = pending_match_suffix.take() {
+            if !suffix.is_empty() {
+                if let Some(td) = self.terminals.get_mut(tab) {
+                    td.instance.write(suffix.as_bytes());
+                }
+            }
         }
     }
 

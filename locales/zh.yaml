@@ -42,6 +42,7 @@ settings:
     scrollback: '滚动回溯:'
     clear_all_history: 删除所有指令记录
     auto_copy: 选中字符自动复制
+    auto_match: 自动匹配指令
   appearance:
     heading: 外观
     terminal_section: 终端外观

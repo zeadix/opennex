@@ -24,6 +24,17 @@ mod tests {
     }
 
     #[test]
+    fn prune_removes_history_of_unknown_terminal_ids() {
+        let (db, path) = test_db();
+        db.add("terminal-1", "ls");
+        db.add("terminal-2", "cd");
+        // Only terminal-2 survives the scene; terminal-1's history must go.
+        db.prune(&["terminal-2".to_string()]);
+        assert_eq!(db.get("terminal-2", 10), vec!["cd".to_string()]);
+        assert!(db.get("terminal-1", 10).is_empty());
+    }
+
+    #[test]
     fn adding_existing_command_moves_it_to_the_front_without_duplicates() {
         let (db, path) = test_db();
 
@@ -109,6 +120,30 @@ impl HistoryDb {
                 params![terminal_id],
             )
             .ok();
+    }
+
+    /// All terminal ids that currently have history rows.
+    pub fn terminal_ids(&self) -> Vec<String> {
+        let Ok(mut stmt) = self
+            .conn
+            .prepare("SELECT DISTINCT terminal_id FROM command_history")
+        else {
+            return Vec::new();
+        };
+        stmt.query_map([], |row| row.get::<_, String>(0))
+            .map(|rows| rows.flatten().collect())
+            .unwrap_or_default()
+    }
+
+    /// Delete history for every terminal id NOT in `keep` (orphan cleanup,
+    /// e.g. ids left behind by closed workspaces whose scene was never
+    /// re-saved).
+    pub fn prune(&self, keep: &[String]) {
+        let ids = self.terminal_ids();
+        let stale: Vec<&String> = ids.iter().filter(|id| !keep.contains(id)).collect();
+        for id in stale {
+            self.clear(id);
+        }
     }
 
     pub fn clear_all(&self) {

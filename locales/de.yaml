@@ -42,6 +42,7 @@ settings:
     scrollback: 'Scrollback:'
     clear_all_history: Gesamten Verlauf löschen
     auto_copy: Ausgewählten Text automatisch kopieren
+    auto_match: Befehle automatisch vervollständigen
   appearance:
     heading: Darstellung
     terminal_section: Terminal-Darstellung

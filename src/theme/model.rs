@@ -161,6 +161,10 @@ pub struct AppTheme {
     /// Background of the top menu bar and the bottom status bar.
     #[serde(default = "default_menu_bg")]
     pub menu_bg: ThemeColor,
+    /// Alternate row color for the command-history list (subtle
+    /// darker/lighter banding on top of menu_bg).
+    #[serde(default = "default_menu_alt_bg")]
+    pub menu_alt_bg: ThemeColor,
     /// Foreground (text) of the top menu bar and bottom status bar.
     #[serde(default = "default_menu_fg")]
     pub menu_fg: ThemeColor,
@@ -192,6 +196,10 @@ fn default_ui_font_size() -> f32 {
 fn default_menu_bg() -> ThemeColor {
     // Default matches `panel` (filled in by apply when missing from JSON).
     ThemeColor::from_rgb_opaque(0x14, 0x14, 0x17)
+}
+
+fn default_menu_alt_bg() -> ThemeColor {
+    ThemeColor::from_rgb_opaque(0x10, 0x10, 0x13)
 }
 fn default_menu_fg() -> ThemeColor {
     ThemeColor::from_rgb_opaque(0xe6, 0xe9, 0xed)
@@ -388,6 +396,7 @@ mod tests {
                     ui_font_families: vec!["system-ui".into()],
                     ui_font_size: 14.0,
                     menu_bg: ThemeColor::from_rgb_opaque(0x14, 0x14, 0x17),
+                    menu_alt_bg: ThemeColor::from_rgb_opaque(0x10, 0x10, 0x13),
                     menu_fg: ThemeColor::from_rgb_opaque(0xe6, 0xe9, 0xed),
                     button_bg: ThemeColor::from_rgb_opaque(0x1a, 0x1a, 0x1d),
                     button_fg: ThemeColor::from_rgb_opaque(0xe6, 0xe9, 0xed),

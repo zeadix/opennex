@@ -42,6 +42,7 @@ settings:
     scrollback: 'स्क्रॉलबैक:'
     clear_all_history: सारा इतिहास मिटाएँ
     auto_copy: चयनित पाठ स्वतः कॉपी करें
+    auto_match: कमांड ऑटो-मैच
   appearance:
     heading: रूप
     terminal_section: टर्मिनल रूप

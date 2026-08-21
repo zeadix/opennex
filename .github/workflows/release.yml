@@ -9,6 +9,9 @@ env:
   R2_BUCKET: opennex-ci
   R2_PUBLIC_URL: https://opennex.download.zeadix.com
 
+permissions:
+  contents: write
+
 jobs:
   build-windows:
     runs-on: windows-latest
@@ -416,6 +419,22 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           wrangler r2 object put "${{ env.R2_BUCKET }}/latest.json" --file=deploy/latest.json --remote --content-type="application/json"
+
+      - name: Create GitHub Release
+        # Archive every release on GitHub: attach all installers as
+        # release assets for historical download. Best-effort — a GitHub
+        # hiccup must not fail the publish (R2 is the primary channel).
+        continue-on-error: true
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/**/*.zip
+            artifacts/**/*.msi
+            artifacts/**/*.tar.gz
+            artifacts/**/*.dmg
+            artifacts/**/*.deb
+          generate_release_notes: true
+          fail_on_unmatched_files: false
 
       - name: Trigger website rebuild
         if: success()

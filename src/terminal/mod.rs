@@ -190,6 +190,16 @@ impl TerminalInstance {
             .process_command(egui_term::BackendCommand::Write(data.to_vec()));
     }
 
+    /// Pixel size of one terminal cell (width, height) from the last
+    /// rendered content — used to anchor overlays at the cursor.
+    pub fn cell_size(&self) -> (f32, f32) {
+        let content = self.backend.last_content();
+        (
+            content.terminal_size.cell_width as f32,
+            content.terminal_size.cell_height as f32,
+        )
+    }
+
     pub fn cursor_position(&self) -> (usize, usize) {
         let content = self.backend.last_content();
         let cursor = &content.grid.cursor;
@@ -262,6 +272,38 @@ impl TerminalInstance {
         }
         // Trailing spaces from the cursor row are padding, not content.
         text.trim_end().to_string()
+    }
+
+    /// The text the user is currently typing (for the auto-match overlay):
+    /// everything after the prompt up to the CURSOR column, with grid
+    /// padding stripped. Spaces participate: "cd " (typed space kept)
+    /// only matches history entries whose text starts with "cd ".
+    pub fn current_input_word(&mut self) -> String {
+        use alacritty_terminal::grid::Dimensions;
+        self.backend.set_dirty();
+        let content = self.backend.sync();
+        let grid = &content.grid;
+        let cursor = content.grid.cursor.point;
+
+        // Read the cursor's logical row (with wrapped rows joined).
+        let line = self.get_current_line();
+        let after_prompt = line
+            .rfind("$ ")
+            .or_else(|| line.rfind("# "))
+            .map(|p| &line[p + 2..])
+            .unwrap_or("");
+
+        // Clip to the cursor position: grid padding lives to the RIGHT of
+        // the cursor, so this alone removes it. NO trim_end — the user's
+        // typed trailing space ("cd ") must survive so it participates in
+        // the prefix match (bare "cd"/"cdd" then correctly fail to match).
+        let cursor_col = cursor.column.0;
+        let chars: Vec<char> = after_prompt.chars().collect();
+        if cursor_col < chars.len() {
+            chars[..cursor_col].iter().collect()
+        } else {
+            after_prompt.to_string()
+        }
     }
 
     pub fn poll_cwd(&mut self) {

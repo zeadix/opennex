@@ -42,6 +42,7 @@ settings:
     scrollback: '回溯行數:'
     clear_all_history: 刪除所有指令記錄
     auto_copy: 選中字元自動複製
+    auto_match: 自動匹配指令
   appearance:
     heading: 外觀
     terminal_section: 終端機外觀

@@ -42,6 +42,7 @@ settings:
     scrollback: 'Défilement :'
     clear_all_history: Supprimer tout l'historique
     auto_copy: Copier automatiquement le texte sélectionné
+    auto_match: Complétion automatique
   appearance:
     heading: Apparence
     terminal_section: Apparence du terminal

@@ -42,6 +42,7 @@ settings:
     scrollback: '스크롤백:'
     clear_all_history: 모든 기록 삭제
     auto_copy: 선택한 텍스트 자동 복사
+    auto_match: 명령 자동 완성
   appearance:
     heading: 외관
     terminal_section: 터미널 외관
