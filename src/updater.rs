@@ -284,9 +284,8 @@ pub fn replace_and_restart(new_binary: &Path) -> Result<(), String> {
 
     #[cfg(target_os = "windows")]
     {
-        use std::os::windows::fs::PermissionsExt;
-        // Make sure the temp copy is executable (it was written by us).
-        let _ = fs::set_permissions(new_binary, fs::Permissions::from_mode(0o755));
+        // (No chmod on Windows: executables extracted from the zip are
+        // runnable as-is; the Unix PermissionsExt API doesn't exist here.)
 
         let script_path = std::env::temp_dir().join("opennex_update.ps1");
         let script = r#"$ErrorActionPreference = 'Stop'
