@@ -62,10 +62,13 @@ for __opennex_rc in "/etc/bash.bashrc" "$HOME/.bashrc"; do
 done
 unset __opennex_rc
 __opennex_osc() { printf '\033]9;%s\007' "$PWD"; }
+# Guarded hook: if this file is ever sourced outside OpenNex (where the
+# function may be missing), the hook fails silently instead of printing
+# "__opennex_osc: command not found" on every prompt.
 if [ -n "${PROMPT_COMMAND}" ]; then
-  PROMPT_COMMAND="__opennex_osc;${PROMPT_COMMAND}"
+  PROMPT_COMMAND="command -v __opennex_osc >/dev/null 2>&1 && __opennex_osc;${PROMPT_COMMAND}"
 else
-  PROMPT_COMMAND="__opennex_osc"
+  PROMPT_COMMAND="command -v __opennex_osc >/dev/null 2>&1 && __opennex_osc"
 fi
 "#;
 

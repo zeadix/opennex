@@ -229,6 +229,7 @@ theme_editor:
   edit_title: テーマ編集
   name_label: '名前:'
   confirm: 保存
+  dialog_confirm: 確認
   cancel: キャンセル
   system_ui: System UI
   terminal: Terminal

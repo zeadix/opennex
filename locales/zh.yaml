@@ -229,6 +229,7 @@ theme_editor:
   edit_title: 编辑主题
   name_label: '名称:'
   confirm: 保存
+  dialog_confirm: 确认
   cancel: 取消
   system_ui: System UI
   terminal: Terminal

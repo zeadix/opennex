@@ -230,6 +230,7 @@ theme_editor:
   edit_title: थीम संपादित करें
   name_label: 'नाम:'
   confirm: सहेजें
+  dialog_confirm: पुष्टि
   cancel: रद्द करें
   system_ui: System UI
   terminal: Terminal

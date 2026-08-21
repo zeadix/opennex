@@ -362,6 +362,9 @@ pub struct ThemeEditorTexts {
     pub edit_title: String,
     pub name_label: String,
     pub confirm: String,
+    /// "Confirm" for generic confirmation dialogs (distinct from the theme
+    /// editor's save button, which reuses `confirm`).
+    pub dialog_confirm: String,
     pub cancel: String,
     pub system_ui: String,
     pub terminal: String,
@@ -633,6 +636,7 @@ impl Texts {
                 edit_title: "编辑主题".into(),
                 name_label: "名称:".into(),
                 confirm: "保存".into(),
+                dialog_confirm: "确认".into(),
                 cancel: "取消".into(),
                 system_ui: "System UI".into(),
                 terminal: "Terminal".into(),

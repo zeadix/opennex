@@ -3724,41 +3724,9 @@ impl App {
                             egui::FontId::proportional(10.0),
                             weak,
                         );
-                        // Clear button (right side).
-                        let clear_txt = self.texts.terminal.clear_history.clone();
-                        let clear_rect = egui::Rect::from_min_size(
-                            egui::pos2(footer.max.x - 8.0 - 44.0, footer.center().y - 9.0),
-                            egui::vec2(44.0, 18.0),
-                        );
-                        let cresp = ui.interact(
-                            clear_rect,
-                            egui::Id::new(("hist_clear", tab.as_str())),
-                            egui::Sense::click(),
-                        );
-                        let clear_hovered = cresp.hovered();
-                        let clear_clicked_flag = cresp.clicked();
-                        let _ = clear_hovered;
-                        let ccol = if clear_hovered {
-                            app.danger.to_egui()
-                        } else {
-                            weak
-                        };
-                        let g = ui.fonts(|f| {
-                            f.layout_no_wrap(
-                                clear_txt.clone(),
-                                egui::FontId::proportional(10.0),
-                                ccol,
-                            )
-                        });
-                        ui.painter()
-                            .galley(clear_rect.center() - g.size() / 2.0, g, ccol);
-                        if clear_clicked_flag {
-                            clear_clicked = true;
-                        }
-
-                        // Close button (X icon, no background) to the RIGHT
-                        // of the clear button: same as Esc — closes the
-                        // list and stops matching until input is edited.
+                        // Close button (X icon, no background) pinned to the
+                        // far RIGHT edge: same as Esc — closes the list and
+                        // stops matching until input is edited.
                         let x_rect = egui::Rect::from_min_size(
                             egui::pos2(footer.max.x - 8.0 - 18.0, footer.center().y - 9.0),
                             egui::vec2(18.0, 18.0),
@@ -3782,6 +3750,48 @@ impl App {
                         if xresp.clicked() {
                             close_clicked = true;
                         }
+
+                        // Clear button sits LEFT of the X button with a
+                        // 10px gap; width measured from its own galley so
+                        // the two can never overlap regardless of the
+                        // translated label length.
+                        let clear_txt = self.texts.terminal.clear_history.clone();
+                        let clear_id = egui::Id::new(("hist_clear", tab.as_str()));
+                        // Pass 1: measure the label width with the base
+                        // color to get the rect (hover needs the rect).
+                        let measure = ui.fonts(|f| {
+                            f.layout_no_wrap(
+                                clear_txt.clone(),
+                                egui::FontId::proportional(10.0),
+                                weak,
+                            )
+                        });
+                        let clear_w = measure.size().x + 10.0;
+                        let clear_rect = egui::Rect::from_min_max(
+                            egui::pos2(x_rect.min.x - 10.0 - clear_w, footer.center().y - 9.0),
+                            egui::pos2(x_rect.min.x - 10.0, footer.center().y + 9.0),
+                        );
+                        let cresp = ui.interact(clear_rect, clear_id, egui::Sense::click());
+                        let clear_hovered = cresp.hovered();
+                        // Pass 2: paint with the final color.
+                        let clear_col = if clear_hovered {
+                            app.danger.to_egui()
+                        } else {
+                            weak
+                        };
+                        let cg = ui.fonts(|f| {
+                            f.layout_no_wrap(
+                                clear_txt.clone(),
+                                egui::FontId::proportional(10.0),
+                                clear_col,
+                            )
+                        });
+                        ui.painter()
+                            .galley(clear_rect.center() - cg.size() / 2.0, cg, clear_col);
+                        if cresp.clicked() {
+                            clear_clicked = true;
+                        }
+                        let _ = confirm_clicked;
                         let _ = confirm_clicked;
                     });
             });
@@ -3809,7 +3819,8 @@ impl App {
     }
 
     /// Confirmation dialog for clearing a terminal's command history
-    /// (triggered from the history-menu footer "clear" button).
+    /// (from the history-menu footer "clear" button). Styled like the
+    /// password popups: compact metrics, fixed sizes, danger confirm.
     fn render_history_clear_confirm(&mut self, ctx: &egui::Context) {
         let Some(tab) = self.history_clear_confirm.clone() else {
             return;
@@ -3817,43 +3828,65 @@ impl App {
         let mut open = true;
         let mut confirmed = false;
         let mut cancelled = false;
-        let body = format!(
-            "{}\n{}",
-            self.texts.stats.clear_history_body,
-            format!("({})", tab)
-        );
-        egui::Window::new(&self.texts.stats.clear_history_title)
+        let title = self.texts.stats.clear_history_title.clone();
+        let body = self.texts.stats.clear_history_body.clone();
+        let confirm_txt = self.texts.theme_editor.dialog_confirm.clone();
+        let cancel_txt = self.texts.theme_editor.cancel.clone();
+        let danger = self.active_theme.app.danger.to_egui();
+        let text_col = self.active_theme.app.text.to_egui();
+        // Fixed-size dialog: the window is pinned to 360x300 so its
+        // available_height is a finite constant (auto-sized windows feed
+        // infinite height into the bottom-fill math, which both started
+        // the dialog huge and made it grow every frame). The button row
+        // lives in a bottom panel: 20px bottom margin + 24px row,
+        // horizontally centered.
+        let dlg_w = 360.0f32;
+        let dlg_h = 96.0f32;
+        let center = ctx.screen_rect().center();
+        let pos = egui::pos2(center.x - dlg_w / 2.0, center.y - dlg_h / 2.0);
+        egui::Window::new(title)
             .id(egui::Id::new("hist_clear_confirm"))
             .open(&mut open)
             .resizable(false)
             .collapsible(false)
-            .default_pos(screen_center(ctx))
-            .pivot(egui::Align2::CENTER_CENTER)
+            .fixed_pos(pos)
+            .fixed_size([dlg_w, dlg_h])
+            .frame(egui::Frame::window(&ctx.style()).inner_margin(egui::Margin::same(12)))
             .show(ctx, |ui| {
-                ui.label(body);
-                ui.add_space(8.0);
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui
-                        .add(
-                            egui::Button::new(
-                                egui::RichText::new(&self.texts.theme_editor.confirm)
-                                    .strong()
-                                    .color(egui::Color32::WHITE),
-                            )
-                            .fill(self.active_theme.app.danger.to_egui()),
-                        )
-                        .clicked()
-                    {
-                        confirmed = true;
-                    }
-                    if ui.button(&self.texts.theme_editor.cancel).clicked() {
-                        cancelled = true;
-                    }
-                });
+                ui.style_mut().spacing.item_spacing = egui::vec2(6.0, 4.0);
+                ui.style_mut().spacing.interact_size.y = 24.0;
+                ui.style_mut().spacing.button_padding = egui::vec2(10.0, 3.0);
+                // Button row pinned to the bottom: 20px margin + 24px row.
+                egui::TopBottomPanel::bottom("hist_clear_confirm_footer")
+                    .frame(egui::Frame::none())
+                    .exact_height(44.0)
+                    .show_inside(ui, |ui| {
+                        ui.add_space(20.0);
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui
+                                .add(
+                                    egui::Button::new(
+                                        egui::RichText::new(confirm_txt)
+                                            .strong()
+                                            .color(egui::Color32::WHITE),
+                                    )
+                                    .fill(danger),
+                                )
+                                .clicked()
+                            {
+                                confirmed = true;
+                            }
+                            ui.add_space(16.0);
+                            if ui.button(&cancel_txt).clicked() {
+                                cancelled = true;
+                            }
+                        });
+                    });
+                // Body fills the remaining central area (top-aligned).
+                ui.label(egui::RichText::new(body).size(13.0).color(text_col));
             });
         if confirmed {
             self.history_db.clear(&tab);
-            // Close the menu too (it's now empty).
             if let Some(td) = self.terminals.get_mut(&tab) {
                 td.instance.history_nav = None;
             }
@@ -4827,27 +4860,62 @@ impl eframe::App for App {
         self.show_theme_editor_popup(ctx);
 
         // Confirm-dialog for deleting ALL terminal command history.
+        // Styled like the password popups: compact metrics, danger confirm.
         if self.show_clear_history_confirm {
             let mut open = self.show_clear_history_confirm;
             let mut confirmed = false;
             let mut cancelled = false;
-            egui::Window::new(&self.texts.stats.clear_history_title)
+            let title = self.texts.stats.clear_history_title.clone();
+            let body = self.texts.stats.clear_history_body.clone();
+            let confirm_txt = self.texts.theme_editor.dialog_confirm.clone();
+            let cancel_txt = self.texts.theme_editor.cancel.clone();
+            let danger = self.active_theme.app.danger.to_egui();
+            let text_col = self.active_theme.app.text.to_egui();
+            // Same fixed 360x300 dialog: bottom panel pins the centered
+            // button row 20px above the bottom edge; finite height kills
+            // the auto-size growth loop.
+            let dlg_w = 360.0f32;
+            let dlg_h = 96.0f32;
+            let center = ctx.screen_rect().center();
+            let pos = egui::pos2(center.x - dlg_w / 2.0, center.y - dlg_h / 2.0);
+            egui::Window::new(title)
+                .id(egui::Id::new("settings_clear_confirm"))
                 .open(&mut open)
                 .resizable(false)
                 .collapsible(false)
-                .default_pos(screen_center(ctx))
-                .pivot(egui::Align2::CENTER_CENTER)
+                .fixed_pos(pos)
+                .fixed_size([dlg_w, dlg_h])
+                .frame(egui::Frame::window(&ctx.style()).inner_margin(egui::Margin::same(12)))
                 .show(ctx, |ui| {
-                    ui.label(&self.texts.stats.clear_history_body);
-                    ui.add_space(8.0);
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button(&self.texts.password.confirm_button).clicked() {
-                            confirmed = true;
-                        }
-                        if ui.button(&self.texts.password.cancel_button).clicked() {
-                            cancelled = true;
-                        }
-                    });
+                    ui.style_mut().spacing.item_spacing = egui::vec2(6.0, 4.0);
+                    ui.style_mut().spacing.interact_size.y = 24.0;
+                    ui.style_mut().spacing.button_padding = egui::vec2(10.0, 3.0);
+                    egui::TopBottomPanel::bottom("settings_clear_confirm_footer")
+                        .frame(egui::Frame::none())
+                        .exact_height(44.0)
+                        .show_inside(ui, |ui| {
+                            ui.add_space(20.0);
+                            ui.horizontal_centered(|ui| {
+                                if ui
+                                    .add(
+                                        egui::Button::new(
+                                            egui::RichText::new(confirm_txt)
+                                                .strong()
+                                                .color(egui::Color32::WHITE),
+                                        )
+                                        .fill(danger),
+                                    )
+                                    .clicked()
+                                {
+                                    confirmed = true;
+                                }
+                                ui.add_space(16.0);
+                                if ui.button(&cancel_txt).clicked() {
+                                    cancelled = true;
+                                }
+                            });
+                        });
+                    ui.label(egui::RichText::new(body).size(13.0).color(text_col));
                 });
             if cancelled {
                 self.show_clear_history_confirm = false;

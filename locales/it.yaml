@@ -230,6 +230,7 @@ theme_editor:
   edit_title: Modifica tema
   name_label: 'Nome:'
   confirm: Salva
+  dialog_confirm: Conferma
   cancel: Annulla
   system_ui: System UI
   terminal: Terminal
