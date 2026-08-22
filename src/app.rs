@@ -175,6 +175,24 @@ fn default_key_binds() -> HashMap<String, ShortcutBinding> {
         },
     );
     m.insert(
+        "history_favorite".into(),
+        ShortcutBinding {
+            key: "F2".into(),
+            ctrl: false,
+            shift: false,
+            alt: false,
+        },
+    );
+    m.insert(
+        "history_delete".into(),
+        ShortcutBinding {
+            key: "Delete".into(),
+            ctrl: false,
+            shift: false,
+            alt: false,
+        },
+    );
+    m.insert(
         "zoom_out".into(),
         ShortcutBinding {
             key: "Minus".into(),
@@ -233,6 +251,8 @@ fn binding_to_key(b: &ShortcutBinding) -> Option<egui::Key> {
         "Plus" => Some(egui::Key::Plus),
         "Minus" => Some(egui::Key::Minus),
         "Equals" => Some(egui::Key::Equals),
+        "Insert" => Some(egui::Key::Insert),
+        "Delete" => Some(egui::Key::Delete),
         _ => None,
     }
 }
@@ -263,6 +283,8 @@ fn key_display_name(k: &str) -> &str {
         "F10" => "F10",
         "F11" => "F11",
         "F12" => "F12",
+        "Insert" => "Insert",
+        "Delete" => "Delete",
         _ => k,
     }
 }
@@ -285,7 +307,7 @@ fn shortcut_display(b: &ShortcutBinding) -> String {
     s
 }
 
-fn shortcut_hint_ids() -> [&'static str; 13] {
+fn shortcut_hint_ids() -> [&'static str; 15] {
     [
         "new_terminal",
         "close_terminal",
@@ -297,6 +319,8 @@ fn shortcut_hint_ids() -> [&'static str; 13] {
         "history_menu",
         "history_prev",
         "history_next",
+        "history_favorite",
+        "history_delete",
         "toggle_workspace_sidebar",
         "zoom_in",
         "zoom_out",
@@ -315,6 +339,8 @@ fn shortcut_label_for<'a>(texts: &'a crate::i18n::Texts, id: &str) -> &'a str {
         "history_menu" => &texts.shortcut_labels.history_menu,
         "history_prev" => &texts.shortcut_labels.history_prev,
         "history_next" => &texts.shortcut_labels.history_next,
+        "history_favorite" => &texts.shortcut_labels.history_favorite,
+        "history_delete" => &texts.shortcut_labels.history_delete,
         "toggle_workspace_sidebar" => &texts.shortcut_labels.toggle_workspace_sidebar,
         "zoom_in" => &texts.shortcut_labels.zoom_in,
         "zoom_out" => &texts.shortcut_labels.zoom_out,
@@ -3874,8 +3900,10 @@ impl App {
                         if fresp.clicked() {
                             fav_entry_clicked = Some(fi);
                         }
-                        // Hover: delete button on the right edge.
-                        if frow_hovered {
+                        // Delete button on the right edge: shown on hover
+                        // OR on the keyboard-selected (highlighted) row,
+                        // mirroring the main list's row actions.
+                        if frow_hovered || is_fsel {
                             let del_txt = self.texts.terminal.delete.clone();
                             let dg = ui.fonts(|f| {
                                 f.layout_no_wrap(
@@ -4543,20 +4571,24 @@ impl eframe::App for App {
                     .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
             let previous = !close && !confirm && check_shortcut(ctx, &binds, "history_prev");
             let next = !close && !confirm && check_shortcut(ctx, &binds, "history_next");
-            // Delete: remove the row under the keyboard cursor — the
-            // selected history entry, or the selected favorite when the
-            // favorites column holds focus. Manual menu only; consumed
-            // so the shell never receives the DEL escape.
-            let delete_pressed = !close
+            // Row-action shortcuts (manual menu only): Delete removes the
+            // row under the keyboard cursor (history entry, or favorite
+            // when the favorites column holds focus); Insert favorites
+            // the selected HISTORY entry. Consumed so the shell never
+            // receives the raw escapes.
+            let manual_menu = self
+                .focused_terminal
+                .as_ref()
+                .and_then(|tab| self.terminals.get(tab))
+                .and_then(|td| td.instance.history_nav.as_ref())
+                .is_some_and(|nav| nav.auto_word.is_none());
+            let delete_pressed =
+                !close && !confirm && manual_menu && check_shortcut(ctx, &binds, "history_delete");
+            let favorite_pressed = !close
                 && !confirm
-                && self
-                    .focused_terminal
-                    .as_ref()
-                    .and_then(|tab| self.terminals.get(tab))
-                    .and_then(|td| td.instance.history_nav.as_ref())
-                    .is_some_and(|nav| nav.auto_word.is_none())
-                && ctx
-                    .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Delete));
+                && !delete_pressed
+                && manual_menu
+                && check_shortcut(ctx, &binds, "history_favorite");
             // Left/Right: move keyboard focus between the main list and
             // the favorites list — only in the MANUAL (Alt) menu; the
             // auto-match overlay must keep passing arrows to the shell
@@ -4599,7 +4631,8 @@ impl eframe::App for App {
                     || confirm
                     || focus_left
                     || focus_right
-                    || delete_pressed;
+                    || delete_pressed
+                    || favorite_pressed;
                 // Focus toggle: Right → favorites (first item), Left → back
                 // to the main list (selection there is preserved).
                 if focus_left || focus_right {
@@ -4662,6 +4695,23 @@ impl eframe::App for App {
                         }
                     }
                     history_menu_handled = true;
+                }
+                // Favorite the selected HISTORY entry (Insert by default).
+                if favorite_pressed {
+                    let cmd = self
+                        .terminals
+                        .get(&tab)
+                        .and_then(|td| td.instance.history_nav.as_ref())
+                        .filter(|nav| !nav.fav_focused)
+                        .and_then(|nav| nav.entries.get(nav.selected).cloned());
+                    if let Some(cmd) = cmd {
+                        self.history_db.fav_add(&cmd);
+                        if let Some(td) = self.terminals.get_mut(&tab) {
+                            if let Some(nav) = td.instance.history_nav.as_mut() {
+                                nav.favorites = self.history_db.fav_all();
+                            }
+                        }
+                    }
                 }
                 // While the favorites list holds focus, Up/Down navigate
                 // the favorites instead of the main list, and Enter sends
@@ -7071,8 +7121,8 @@ fn format_memory(bytes: Option<u64>) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        default_key_binds, toggle_history_menu, update_alt_key_state, AltKeyState, AppSettings,
-        HistoryNav, ShortcutBinding, TerminalStatePersist,
+        binding_to_key, default_key_binds, toggle_history_menu, update_alt_key_state, AltKeyState,
+        AppSettings, HistoryNav, ShortcutBinding, TerminalStatePersist,
     };
     use egui_dock::DockState;
 
@@ -7332,6 +7382,20 @@ mod tests {
         assert!(binds["history_menu"].alt);
         assert_eq!(binds["history_prev"].key, "ArrowUp");
         assert_eq!(binds["history_next"].key, "ArrowDown");
+        assert_eq!(binds["history_favorite"].key, "F2");
+        assert!(!binds["history_favorite"].ctrl);
+        assert_eq!(binds["history_delete"].key, "Delete");
+        assert!(!binds["history_delete"].ctrl);
+        // Both must resolve through the egui key mapping (settings page
+        // recording and the menu keyboard handler share it).
+        assert_eq!(
+            binding_to_key(&binds["history_favorite"]),
+            Some(egui::Key::F2)
+        );
+        assert_eq!(
+            binding_to_key(&binds["history_delete"]),
+            Some(egui::Key::Delete)
+        );
     }
 
     #[test]
