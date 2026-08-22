@@ -5078,16 +5078,12 @@ impl eframe::App for App {
                     // when a newer release is available).
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let weak = self.active_theme.app.weak_text.to_egui();
-                        ui.label(
-                            egui::RichText::new(format!("v{}", env!("CARGO_PKG_VERSION")))
-                                .color(weak)
-                                .size(11.0),
-                        );
-                        // Update badge to the LEFT of the version label:
-                        // shown only while an update is available (startup
-                        // auto-check or manual check). Clicking opens the
-                        // About window, whose status panel drives the
-                        // download/restart flow.
+                        // Update badge FIRST (right_to_left ⇒ lands RIGHT
+                        // of the version label): shown only while an
+                        // update is available (startup auto-check or
+                        // manual check). Clicking opens the About window,
+                        // whose status panel drives the download/restart
+                        // flow.
                         if let crate::updater::UpdateState::Available(info) = &self.update_state {
                             let label_text = update_button_label(&info.version.clone());
                             let label_color = self.active_theme.app.accent.to_egui();
@@ -5115,6 +5111,11 @@ impl eframe::App for App {
                                 self.show_about = true;
                             }
                         }
+                        ui.label(
+                            egui::RichText::new(format!("v{}", env!("CARGO_PKG_VERSION")))
+                                .color(weak)
+                                .size(11.0),
+                        );
                     });
                 });
             });
@@ -5875,18 +5876,10 @@ impl eframe::App for App {
                             self.update_state = crate::updater::UpdateState::Available(info);
                         }
                     }
-                    StartCheckResult::UpToDate => {
-                        self.update_toast = Some((
-                            "当前已是最新版本".to_string(),
-                            std::time::Instant::now() + std::time::Duration::from_secs(3),
-                        ));
-                    }
-                    StartCheckResult::Error(_) => {
-                        self.update_toast = Some((
-                            "无法连接到更新服务器".to_string(),
-                            std::time::Instant::now() + std::time::Duration::from_secs(3),
-                        ));
-                    }
+                    // UpToDate / Error: silent at startup — the user asked
+                    // for no toast; feedback only comes from the About
+                    // window's MANUAL check button.
+                    StartCheckResult::UpToDate | StartCheckResult::Error(_) => {}
                 }
             }
         }
