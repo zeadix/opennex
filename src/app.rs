@@ -3706,7 +3706,9 @@ impl App {
                         full,
                         menu_fg,
                     );
-                    ui.set_clip_rect(frame_rect);
+                    // Restore with a 1px bleed so the later outer border
+                    // (stroked on the boundary) keeps its outer half.
+                    ui.set_clip_rect(frame_rect.expand(1.0));
                     let resp = ui.interact(
                         row,
                         egui::Id::new(("hist_row", tab.as_str(), i)),
@@ -3820,13 +3822,9 @@ impl App {
                 // ---- Favorites column (manual menu only) ----
                 if show_favs {
                     let fx0 = frame_rect.min.x + list_w;
-                    ui.painter().line_segment(
-                        [
-                            egui::pos2(fx0, frame_rect.min.y),
-                            egui::pos2(fx0, frame_rect.min.y + rows_h),
-                        ],
-                        (1.0, border),
-                    );
+                    // (The separator line is painted AFTER the rows, with
+                    // the outer border — row backgrounds painted over it
+                    // when it was drawn here first.)
                     for fi in fav_scroll..(fav_scroll + max_visible).min(fav_total) {
                         let frow = egui::Rect::from_min_size(
                             egui::pos2(fx0, frame_rect.min.y + (fi - fav_scroll) as f32 * row_h),
@@ -3864,7 +3862,10 @@ impl App {
                             fg,
                             menu_fg,
                         );
-                        ui.set_clip_rect(frame_rect);
+                        // Restore with a 1px bleed so the later outer
+                        // border (stroked on the boundary) is not clipped
+                        // to half thickness.
+                        ui.set_clip_rect(frame_rect.expand(1.0));
                         let fresp = ui.interact(
                             frow,
                             egui::Id::new(("fav_row", tab.as_str(), fi)),
@@ -4055,8 +4056,18 @@ impl App {
                     }
                 }
 
-                // Window border painted LAST: rows, alternating bands,
-                // scrollbars and the footer can never cover it.
+                // Lines painted LAST: rows, alternating bands,
+                // scrollbars and the footer can never cover them.
+                if show_favs {
+                    let fx0 = frame_rect.min.x + list_w;
+                    ui.painter().line_segment(
+                        [
+                            egui::pos2(fx0, frame_rect.min.y),
+                            egui::pos2(fx0, frame_rect.min.y + rows_h),
+                        ],
+                        (1.0, border),
+                    );
+                }
                 ui.painter().rect_stroke(
                     frame_rect,
                     0.0,
