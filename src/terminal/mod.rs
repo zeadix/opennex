@@ -152,6 +152,16 @@ impl TerminalInstance {
             working_directory: Some(std::path::PathBuf::from(cwd)),
             env: vec![],
         };
+        // Explicit terminal capabilities: the app may be (re)started from
+        // environments without TERM (updater helper, .desktop, systemd),
+        // and a shell that sees no/empty TERM disables ANSI colors —
+        // every colored prompt/output collapses to one foreground color.
+        settings
+            .env
+            .push(("TERM".to_string(), "xterm-256color".to_string()));
+        settings
+            .env
+            .push(("COLORTERM".to_string(), "truecolor".to_string()));
         if let Some(dir) = zdotdir {
             settings
                 .env

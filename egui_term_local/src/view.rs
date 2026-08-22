@@ -58,6 +58,10 @@ pub struct TerminalViewState {
     /// Last cols/rows actually applied to the terminal backend.
     last_cols: u16,
     last_rows: u16,
+    /// True while the terminal's own scrollbar is being hovered or
+    /// dragged: pointer events must not leak into text selection behind
+    /// the scrollbar.
+    scrollbar_active: bool,
     /// Pending size while layout is still changing (drag).
     pending_cols: u16,
     pending_rows: u16,
@@ -251,7 +255,21 @@ impl<'a> TerminalView<'a> {
             return self;
         }
 
-        let pointer_inside = layout.contains_pointer();
+        // Pointer events only count when the terminal's own layer is the
+        // topmost at the pointer: floating overlays above it (e.g. the
+        // command-history menu and its scrollbar) must not leak drags
+        // into text selection. Plus the scrollbar guard below.
+        let top_layer = layout
+            .ctx
+            .pointer_interact_pos()
+            .and_then(|p| layout.ctx.layer_id_at(p));
+        let pointer_above_overlay = match top_layer {
+            Some(top) => top == layout.layer_id,
+            None => true,
+        };
+        let pointer_inside = layout.contains_pointer()
+            && pointer_above_overlay
+            && !state.scrollbar_active;
         let modifiers = layout.ctx.input(|i| i.modifiers);
         let events = layout.ctx.input(|i| i.events.clone());
         for event in events {
@@ -377,6 +395,12 @@ impl<'a> TerminalView<'a> {
             egui::Id::new((self.widget_id, "sb_track")),
             egui::Sense::click_and_drag(),
         );
+        // Suppress text-selection behind the scrollbar while the pointer
+        // interacts with it; a grab also cancels any in-flight text drag.
+        state.scrollbar_active = track_resp.hovered() || track_resp.dragged();
+        if state.scrollbar_active {
+            state.is_dragged = false;
+        }
         let thumb_resp = ui.interact(
             thumb.expand(3.0).intersect(track),
             egui::Id::new((self.widget_id, "sb_thumb")),

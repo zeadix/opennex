@@ -1427,6 +1427,18 @@ impl App {
         // list captured above for the system_fonts field.
         app.rebuild_fonts(ctx);
 
+        // Surface a silently-failed self-update from the previous session:
+        // the helper script could not replace the binary (no root), so we
+        // are still the OLD version — tell the user instead of leaving the
+        // "updated" illusion (which also made them think features/themes
+        // were broken).
+        if let Some(reason) = crate::updater::take_last_update_failure() {
+            app.update_toast = Some((
+                format!("上次自动更新失败：{reason}"),
+                std::time::Instant::now() + std::time::Duration::from_secs(10),
+            ));
+        }
+
         let scene_path = scene_path();
         if scene_path.exists() {
             if let Some(scene) = load_scene_file(&scene_path) {
@@ -3453,6 +3465,16 @@ impl App {
     /// theme (menu_bg / menu_alt_bg), wheel scrolling, a footer with the
     /// total entry count and a "clear" button (with confirmation).
     fn render_history_menu(&mut self, ctx: &egui::Context) {
+        // The settings window owns the screen while open: the history
+        // menu must never float above it.
+        if self.show_settings {
+            if let Some(tab) = self.focused_terminal.clone() {
+                if let Some(td) = self.terminals.get_mut(&tab) {
+                    td.instance.history_nav = None;
+                }
+            }
+            return;
+        }
         let Some(tab) = self.focused_terminal.clone() else {
             return;
         };

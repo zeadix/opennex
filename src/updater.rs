@@ -350,16 +350,52 @@ Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
             }
         };
 
+        // Pre-flight: if the install dir is not user-writable AND no
+        // elevation helper exists, fail LOUDLY now (the error is shown
+        // in the update UI) instead of letting the helper script fail
+        // silently after the app has already exited.
+        let install_writable = fs::metadata(&current)
+            .ok()
+            .and_then(|m| {
+                fs::OpenOptions::new()
+                    .append(true)
+                    .open(&current)
+                    .ok()
+                    .map(|_| m)
+            })
+            .is_some();
+        if !install_writable {
+            let has_pkexec = which("pkexec").is_some();
+            let has_sudo = which("sudo").is_some();
+            if !has_pkexec && !has_sudo {
+                let _ = fs::remove_file(&staged);
+                return Err(format!(
+                    "无权替换 {current}，且系统没有 pkexec/sudo 可提权。请下载安装包手动更新。",
+                    current = current.display()
+                ));
+            }
+        }
+
+        // Result marker: the helper writes "ok" or "fail: <reason>" here
+        // AFTER our process has exited, so the next launch can surface
+        // a silent failure instead of the user unknowingly running the
+        // old binary.
+        let status_file = std::env::temp_dir().join("opennex_update.status");
+
         let script_path = std::env::temp_dir().join("opennex_update.sh");
         let script = format!(
             // Try the swap as the user first; if permission denied,
-            // escalate via pkexec (GUI) or sudo. Success is verified by
-            // comparing file sizes before relaunching.
+            // escalate via pkexec (GUI auth prompt) or sudo. Success is
+            // verified by comparing SHA256 (size as fallback) of the
+            // installed file against the staged file BEFORE relaunching.
             r#"#!/bin/bash
+status_file="{status}"
+echo "fail: helper crashed" > "$status_file"
 for i in $(seq 1 30); do
   kill -0 {pid} 2>/dev/null || break
   sleep 1
 done
+want_hash=$(sha256sum "{staged}" 2>/dev/null | awk '{{print $1}}')
 want_size=$(stat -c %s "{staged}" 2>/dev/null || stat -f %z "{staged}")
 if ! mv -f "{staged}" "{current}" 2>>"{log}"; then
   if command -v pkexec >/dev/null 2>&1; then
@@ -368,12 +404,21 @@ if ! mv -f "{staged}" "{current}" 2>>"{log}"; then
     sudo -n mv -f "{staged}" "{current}" >>"{log}" 2>&1
   fi
 fi
+got_hash=$(sha256sum "{current}" 2>/dev/null | awk '{{print $1}}')
 got_size=$(stat -c %s "{current}" 2>/dev/null || stat -f %z "{current}")
-if [ -n "$want_size" ] && [ "$want_size" = "$got_size" ]; then
+replaced=false
+if [ -n "$want_hash" ] && [ "$want_hash" = "$got_hash" ]; then
+  replaced=true
+elif [ -z "$want_hash" ] && [ -n "$want_size" ] && [ "$want_size" = "$got_size" ]; then
+  replaced=true
+fi
+if [ "$replaced" = "true" ]; then
   chmod +x "{current}" 2>>"{log}"
+  echo "ok" > "$status_file"
   nohup "{current}" >/dev/null 2>&1 &
   rm -f -- "$0"
 else
+  echo "fail: 无权替换 {current}（提权失败或被取消），请改用安装包更新" > "$status_file"
   echo "update replace failed (no permission)" >> "{log}"
   rm -f -- "$0"
 fi
@@ -384,6 +429,7 @@ fi
             log = std::env::temp_dir()
                 .join("opennex_update.log")
                 .to_string_lossy(),
+            status = status_file.to_string_lossy(),
         );
 
         fs::write(&script_path, &script).map_err(|e| format!("写入脚本失败: {e}"))?;
@@ -397,6 +443,40 @@ fi
     }
 
     Ok(())
+}
+
+/// Path of the helper script's result marker (Unix). `None` on Windows.
+#[cfg(target_os = "linux")]
+pub fn update_status_path() -> PathBuf {
+    std::env::temp_dir().join("opennex_update.status")
+}
+
+/// Read (and clear) the result marker left by the last update helper.
+/// Returns the failure reason if the previous in-app update failed to
+/// replace the binary — the user would otherwise keep running the old
+/// version with no indication anything went wrong.
+pub fn take_last_update_failure() -> Option<String> {
+    #[cfg(target_os = "linux")]
+    {
+        let path = update_status_path();
+        let content = fs::read_to_string(&path).ok()?;
+        let _ = fs::remove_file(&path);
+        let content = content.trim();
+        if let Some(reason) = content.strip_prefix("fail:") {
+            return Some(reason.trim().to_string());
+        }
+        // "ok" (or garbage) — consumed and ignored.
+        None
+    }
+    #[cfg(not(target_os = "linux"))]
+    None
+}
+
+fn which(program: &str) -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path)
+        .map(|dir| dir.join(program))
+        .find(|candidate| candidate.is_file())
 }
 
 #[cfg(target_os = "windows")]
