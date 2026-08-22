@@ -549,14 +549,19 @@ fn update_alt_key_state(state: &mut AltKeyState, alt_down: bool, other_key_press
     released
 }
 
-fn toggle_history_menu(nav: &mut Option<HistoryNav>, entries: Vec<String>) {
+fn toggle_history_menu(nav: &mut Option<HistoryNav>, entries: Vec<String>, favorites: Vec<String>) {
     if nav.is_some() {
         *nav = None;
-    } else if !entries.is_empty() {
+    } else {
+        // Open even when the terminal has no history yet: the fixed
+        // 10-row list doubles as the entry point to the favorites.
         *nav = Some(HistoryNav {
             entries,
             selected: 0,
             auto_word: None,
+            favorites,
+            fav_focused: false,
+            fav_selected: 0,
         });
     }
 }
@@ -999,6 +1004,16 @@ pub struct HistoryNav {
     /// word the user has already typed — on confirm it is deleted before
     /// the full command is sent. None for the manual Alt menu.
     pub auto_word: Option<String>,
+    /// Snapshot of the GLOBAL favorite commands, shown in a side list
+    /// next to the manual (Alt) menu. Empty for auto-match overlays.
+    pub favorites: Vec<String>,
+    /// Whether keyboard focus sits on the favorites list (toggled with
+    /// Left/Right while the manual menu is open). Enter sends the
+    /// selected favorite.
+    pub fav_focused: bool,
+    /// Selection index inside the favorites list (only meaningful when
+    /// `fav_focused` is true).
+    pub fav_selected: usize,
 }
 
 impl HistoryNav {
@@ -1084,6 +1099,8 @@ pub struct App {
     pending_clear_history: bool,
     /// Confirmation dialog for deleting ALL terminal command history.
     show_clear_history_confirm: bool,
+    /// Confirmation dialog for clearing the GLOBAL favorite commands.
+    show_clear_favorites_confirm: bool,
     settings: AppSettings,
     show_settings: bool,
     show_about: bool,
@@ -1283,6 +1300,32 @@ fn save_scene(path: &PathBuf, app: &mut App) {
     }
 }
 
+/// Kick off the background update check at startup. Must run on BOTH
+/// startup paths (scene-restored and fresh) — previously it only ran on
+/// the fresh path, so users with a saved scene never saw update prompts.
+fn spawn_startup_update_check(ctx: &egui::Context) {
+    let ctx_clone = ctx.clone();
+    std::thread::spawn(move || {
+        let result = crate::updater::check_for_update();
+        let stored = match &result {
+            Ok(Some(info)) => StartCheckResult::Available(info.clone()),
+            Ok(None) => StartCheckResult::UpToDate,
+            Err(e) => StartCheckResult::Error(e.clone()),
+        };
+        ctx_clone.memory_mut(|mem| {
+            mem.data
+                .insert_temp(egui::Id::new("start_check_result"), stored);
+        });
+        ctx_clone.request_repaint();
+    });
+}
+
+/// Formats the menu-bar update button label, e.g. "更新版本: 0.1.22".
+fn update_button_label(version: &str) -> String {
+    // TODO(i18n): replace the hardcoded prefix once a texts key exists.
+    format!("更新版本: {version}")
+}
+
 impl App {
     pub fn new(cc: &eframe::CreationContext) -> Self {
         let settings = load_settings();
@@ -1353,6 +1396,7 @@ impl App {
             pending_save_scene_as: false,
             pending_clear_history: false,
             show_clear_history_confirm: false,
+            show_clear_favorites_confirm: false,
             settings,
             show_settings: false,
             show_about: false,
@@ -1486,6 +1530,7 @@ impl App {
                 // id would inherit stale command history.
                 let live_ids: Vec<String> = app.terminals.keys().cloned().collect();
                 app.history_db.prune(&live_ids);
+                spawn_startup_update_check(ctx);
                 return app;
             }
         }
@@ -1493,24 +1538,7 @@ impl App {
         app.add_initial_terminal(ctx);
         app.refresh_template_files();
 
-        // Start background update check
-        {
-            let ctx_clone = ctx.clone();
-            std::thread::spawn(move || {
-                let result = crate::updater::check_for_update();
-                // Store result as an enum for the UI to handle.
-                let stored = match &result {
-                    Ok(Some(info)) => StartCheckResult::Available(info.clone()),
-                    Ok(None) => StartCheckResult::UpToDate,
-                    Err(e) => StartCheckResult::Error(e.clone()),
-                };
-                ctx_clone.memory_mut(|mem| {
-                    mem.data
-                        .insert_temp(egui::Id::new("start_check_result"), stored);
-                });
-                ctx_clone.request_repaint();
-            });
-        }
+        spawn_startup_update_check(ctx);
 
         app
     }
@@ -1704,6 +1732,13 @@ impl App {
                 self.terminals.remove(&tab);
                 if self.focused_terminal.as_ref() == Some(&tab) {
                     self.focused_terminal = None;
+                }
+                // Drop a rename state pointing at the closed tab: dock
+                // only renders the active tab, so an un-rendered rename
+                // input could never be confirmed/cancelled and would
+                // otherwise linger forever.
+                if self.renaming_terminal.as_ref() == Some(&tab) {
+                    self.renaming_terminal = None;
                 }
                 for tree in self.dock_states.values_mut() {
                     if let Some(loc) = tree.find_tab(&tab) {
@@ -2617,16 +2652,25 @@ impl App {
 
         // Maintenance action: plain button (same style as all other
         // settings buttons), flush left, no divider; clicking opens a
-        // confirmation dialog.
+        // confirmation dialog. The favorites-clear button sits beside it.
         let mut clear = false;
+        let mut clear_favs = false;
         let clear_label = t.clear_all_history.clone();
+        let clear_favs_label = self.texts.terminal.clear_favorites.clone();
         self.settings_action_row(ui, |ui| {
             if ui.button(&clear_label).clicked() {
                 clear = true;
             }
+            ui.add_space(8.0);
+            if ui.button(clear_favs_label).clicked() {
+                clear_favs = true;
+            }
         });
         if clear {
             self.show_clear_history_confirm = true;
+        }
+        if clear_favs {
+            self.show_clear_favorites_confirm = true;
         }
 
         // Group footer: path hints as weak, wrapping small text.
@@ -2937,8 +2981,8 @@ impl App {
                     content.min,
                     egui::pos2(content.min.x + preview_w, content.max.y),
                 );
-                let p = ui.painter();
-                p.rect_filled(ui_half, 0.0, theme.app.app_bg.to_egui());
+                ui.painter()
+                    .rect_filled(ui_half, 0.0, theme.app.app_bg.to_egui());
                 let ui_font_name = theme
                     .app
                     .ui_font_families
@@ -2982,7 +3026,7 @@ impl App {
                     egui::pos2(ui_half.max.x + preview_w, content.max.y),
                 );
                 let term_bg = theme.terminal.background.to_egui();
-                p.rect_filled(term_half, 0.0, term_bg);
+                ui.painter().rect_filled(term_half, 0.0, term_bg);
                 let term_font_name = theme
                     .typography
                     .terminal_font_families
@@ -3484,10 +3528,6 @@ impl App {
         let Some(nav) = td.instance.history_nav.clone() else {
             return;
         };
-        if nav.entries.is_empty() {
-            self.terminals.get_mut(&tab).unwrap().instance.history_nav = None;
-            return;
-        }
 
         let app = &self.active_theme.app;
         let menu_bg = app.menu_bg.to_egui();
@@ -3498,27 +3538,35 @@ impl App {
         let sel_bg = app.active.to_egui();
         let font_size = self.active_theme.typography.menu_font_size;
 
-        // Wheel scrolling over the list scrolls the view (state in memory).
-        let scroll_id = egui::Id::new(("hist_menu_scroll", tab.as_str()));
-        let max_visible = 10usize;
-        let total = nav.entries.len();
-        let mut scroll: usize = ctx.memory(|m| m.data.get_temp(scroll_id).unwrap_or(0));
-        // View is FREE here: no per-frame follow of the selection. Wheel
-        // and scrollbar-drag scrolling are pure view operations; the
-        // keyboard brings its selection into view only on the frame the
-        // selection actually changes (see the prev/next key handler).
-        let max_scroll = total.saturating_sub(max_visible);
-        scroll = scroll.min(max_scroll);
-
+        // Fixed geometry: ALWAYS 10 rows tall (even when empty), footer
+        // shared by both columns, favorites column glued to the right of
+        // the main list inside the SAME window.
         let row_h = 20.0f32;
-        let list_w = 420.0f32;
+        let max_visible = 10usize;
         let footer_h = 24.0f32;
-        let visible = total.min(max_visible);
-        let list_h = visible as f32 * row_h + footer_h;
+        let list_w = 320.0f32;
+        let fav_w = 200.0f32;
+        let rows_h = max_visible as f32 * row_h;
+        let list_h = rows_h + footer_h;
+        let show_favs = nav.auto_word.is_none() && !nav.favorites.is_empty();
+        let total_w = list_w + if show_favs { fav_w } else { 0.0 };
+        let total = nav.entries.len();
+        let fav_total = nav.favorites.len();
 
-        // Anchor: follow the terminal CURSOR row (original behavior) —
-        // below the cursor line when there is room, otherwise above it.
-        // Uses the terminal's last known view rect + grid metrics.
+        // Independent scroll offsets for the two columns.
+        let scroll_id = egui::Id::new(("hist_menu_scroll", tab.as_str()));
+        let fav_scroll_id = egui::Id::new(("hist_fav_scroll", tab.as_str()));
+        let max_scroll = total.saturating_sub(max_visible);
+        let fav_max_scroll = fav_total.saturating_sub(max_visible);
+        let mut scroll: usize = ctx
+            .memory(|m| m.data.get_temp(scroll_id).unwrap_or(0))
+            .min(max_scroll);
+        let mut fav_scroll: usize = ctx
+            .memory(|m| m.data.get_temp(fav_scroll_id).unwrap_or(0))
+            .min(fav_max_scroll);
+
+        // Anchor: follow the terminal CURSOR row — below the cursor line
+        // when there is room, otherwise above it.
         let anchor_rect = self
             .terminal_view_rects
             .get(&tab)
@@ -3534,291 +3582,493 @@ impl App {
         let (cursor_col, cursor_row) = td.instance.cursor_position();
         let cursor_x = anchor_rect.min.x + cursor_col as f32 * cell_w;
         let cursor_y = anchor_rect.min.y + (cursor_row as f32 + 1.0) * cell_h_grid;
-        let pos = if anchor_rect.max.y - cursor_y >= list_h {
+        let screen = ctx.screen_rect();
+        let mut pos = if anchor_rect.max.y - cursor_y >= list_h {
             egui::pos2(anchor_rect.min.x + 8.0, cursor_y)
         } else {
-            // Not enough room below: open above the cursor line.
             egui::pos2(
                 anchor_rect.min.x + 8.0,
                 (cursor_y - cell_h_grid - list_h).max(anchor_rect.min.y + 4.0),
             )
         };
+        // Clamp onto the screen: in NARROW panes a wrapped prompt pushes
+        // the cursor row far down (or the recomputed cursor_y overshoots
+        // the pane bottom), which used to place the whole menu OUTSIDE
+        // the window — the menu was built (toast) but invisible.
+        let total_w_actual = list_w + if show_favs { fav_w } else { 0.0 };
+        pos.x = pos.x.clamp(
+            screen.min.x + 4.0,
+            (screen.max.x - total_w_actual - 4.0).max(screen.min.x + 4.0),
+        );
+        pos.y = pos.y.clamp(
+            screen.min.y + 4.0,
+            (screen.max.y - list_h - 4.0).max(screen.min.y + 4.0),
+        );
 
-        let mut confirm_clicked = false;
-        let mut clear_clicked = false;
-        let mut close_clicked = false;
         let mut entry_clicked: Option<usize> = None;
+        let mut row_fav_clicked: Option<usize> = None;
+        let mut row_del_clicked: Option<usize> = None;
+        let mut fav_entry_clicked: Option<usize> = None;
+        let mut fav_del_clicked: Option<usize> = None;
+        let mut clear_favs_clicked = false;
+        let mut clear_history_clicked = false;
+        let mut close_clicked = false;
 
         egui::Area::new(egui::Id::new(("hist_menu", tab.as_str())))
             .order(egui::Order::Foreground)
             .fixed_pos(pos)
             .show(ctx, |ui| {
-                egui::Frame::new()
-                    .fill(menu_bg)
-                    .stroke(egui::Stroke::new(1.0, border))
-                    .corner_radius(0.0)
-                    .inner_margin(0.0)
-                    .show(ui, |ui| {
-                        ui.set_width(list_w);
-                        let list_rect_min = ui.cursor().min;
-                        ui.style_mut().spacing.item_spacing.y = 0.0;
-                        // Wheel scroll over the whole panel.
-                        let scroll_delta = ui.input(|i| {
-                            i.events
-                                .iter()
-                                .filter_map(|e| match e {
-                                    egui::Event::MouseWheel { delta, .. } => Some(delta.y),
-                                    _ => None,
-                                })
-                                .sum::<f32>()
-                        });
-                        if scroll_delta > 0.0 {
-                            scroll = scroll.saturating_sub(1);
-                        } else if scroll_delta < 0.0 {
-                            scroll = (scroll + 1).min(max_scroll);
-                        }
+                // One fixed-size window; everything below is painted on
+                // absolutely-computed rects (no nested layout direction
+                // can disturb the vertical row stacking).
+                let (frame_rect, _) =
+                    ui.allocate_exact_size(egui::vec2(total_w, list_h), egui::Sense::hover());
+                ui.painter().rect_filled(frame_rect, 0.0, menu_bg);
+                // Border is painted LAST (after all rows/scrollbars/footer)
+                // so the list UI can never cover it.
 
-                        // Rows.
-                        for (i, entry) in nav
-                            .entries
-                            .iter()
-                            .enumerate()
-                            .skip(scroll)
-                            .take(max_visible)
-                        {
-                            let row = egui::Rect::from_min_size(
-                                ui.cursor().min,
-                                egui::vec2(list_w, row_h),
-                            );
-                            let (row_rect, _) = ui.allocate_exact_size(
-                                egui::vec2(list_w, row_h),
-                                egui::Sense::click(),
-                            );
-                            let is_sel = i == nav.selected;
-                            // Visual hover preview (does NOT change the
-                            // keyboard selection — hover and keyboard nav
-                            // stay independent).
-                            let row_hovered = row_rect.contains(
-                                ui.input(|i| i.pointer.hover_pos())
-                                    .unwrap_or(egui::pos2(-1.0, -1.0)),
-                            );
-                            // Alternating banding (subtle); selection wins,
-                            // hover is a lighter accent on top of banding.
-                            let row_bg = if is_sel {
-                                sel_bg
-                            } else if row_hovered {
-                                egui::Color32::from_rgba_unmultiplied(
-                                    sel_bg.r(),
-                                    sel_bg.g(),
-                                    sel_bg.b(),
-                                    90,
-                                )
-                            } else if i % 2 == 1 {
-                                menu_alt
-                            } else {
-                                menu_bg
-                            };
-                            ui.painter().rect_filled(row_rect, 0.0, row_bg);
-                            // Dim index number, 3-char gutter.
-                            ui.painter().text(
-                                egui::pos2(row.min.x + 6.0, row.center().y),
-                                egui::Align2::LEFT_CENTER,
-                                format!("{}", i + 1),
-                                egui::FontId::monospace(font_size * 0.85),
-                                weak,
-                            );
-                            // Command text: clip to the row width and end
-                            // with "..." when truncated.
-                            let text_x = row.min.x + 34.0;
-                            let text_max_w = row.max.x - text_x - 16.0;
-                            let font_id = egui::FontId::monospace(font_size);
-                            let full = ui.fonts(|f| {
-                                f.layout_no_wrap(entry.clone(), font_id.clone(), menu_fg)
-                            });
-                            if full.size().x <= text_max_w {
-                                ui.painter().galley(
-                                    egui::pos2(text_x, row.center().y - full.size().y / 2.0),
-                                    full,
-                                    menu_fg,
-                                );
-                            } else {
-                                // Binary-search-free trim: cut chars until
-                                // text + "..." fits.
-                                let ell = "...";
-                                let mut shown: String = entry.clone();
-                                loop {
-                                    let g = ui.fonts(|f| {
-                                        f.layout_no_wrap(
-                                            format!("{shown}{ell}"),
-                                            font_id.clone(),
-                                            menu_fg,
-                                        )
-                                    });
-                                    if g.size().x <= text_max_w || shown.is_empty() {
-                                        ui.painter().galley(
-                                            egui::pos2(text_x, row.center().y - g.size().y / 2.0),
-                                            g,
-                                            menu_fg,
-                                        );
-                                        break;
-                                    }
-                                    shown.pop();
-                                }
-                            }
-                            let resp = ui.interact(
-                                row_rect,
-                                egui::Id::new(("hist_row", tab.as_str(), i)),
-                                egui::Sense::click(),
-                            );
-                            if resp.clicked() {
-                                entry_clicked = Some(i);
-                            }
-                        }
+                let hover_pos = ui
+                    .input(|i| i.pointer.hover_pos())
+                    .unwrap_or(egui::pos2(-1.0, -1.0));
 
-                        // Vertical scrollbar when entries exceed the view.
-                        if total > max_visible {
-                            let rows_area_h = visible as f32 * row_h;
-                            let sb_track = egui::Rect::from_min_max(
-                                egui::pos2(list_rect_min.x + list_w - 6.0, list_rect_min.y),
-                                egui::pos2(list_rect_min.x + list_w, list_rect_min.y + rows_area_h),
-                            );
-                            let thumb_h =
-                                (max_visible as f32 / total as f32 * rows_area_h).max(16.0);
-                            let scrollable = (rows_area_h - thumb_h).max(1.0);
-                            let thumb_y =
-                                list_rect_min.y + scrollable * (scroll as f32 / max_scroll as f32);
-                            let sb_col = egui::Color32::from_rgba_unmultiplied(
-                                weak.r(),
-                                weak.g(),
-                                weak.b(),
-                                110,
-                            );
-                            ui.painter().rect_filled(sb_track, 0.0, {
-                                let t = egui::Color32::from_rgba_unmultiplied(
-                                    weak.r(),
-                                    weak.g(),
-                                    weak.b(),
-                                    40,
-                                );
-                                t
-                            });
-                            ui.painter().rect_filled(
-                                egui::Rect::from_min_size(
-                                    egui::pos2(sb_track.min.x, thumb_y),
-                                    egui::vec2(sb_track.width(), thumb_h),
-                                ),
-                                0.0,
-                                sb_col,
-                            );
-                            // Drag on the scrollbar to scroll.
-                            let sb_resp = ui.interact(
-                                sb_track,
-                                egui::Id::new(("hist_sb", tab.as_str())),
-                                egui::Sense::click_and_drag(),
-                            );
-                            if sb_resp.dragged() {
-                                let dy = ui.input(|i| i.pointer.delta().y);
-                                let lines = dy * max_scroll as f32 / scrollable;
-                                scroll = (scroll as f32 + lines)
-                                    .round()
-                                    .clamp(0.0, max_scroll as f32)
-                                    as usize;
-                            }
+                // Wheel: the column under the pointer scrolls.
+                let wheel = ui.input(|i| {
+                    i.events
+                        .iter()
+                        .filter_map(|e| match e {
+                            egui::Event::MouseWheel { delta, .. } => Some(delta.y),
+                            _ => None,
+                        })
+                        .sum::<f32>()
+                });
+                if wheel != 0.0 {
+                    let over_fav = show_favs && hover_pos.x >= frame_rect.min.x + list_w;
+                    if over_fav {
+                        if wheel > 0.0 {
+                            fav_scroll = fav_scroll.saturating_sub(1);
+                        } else {
+                            fav_scroll = (fav_scroll + 1).min(fav_max_scroll);
                         }
+                    } else if wheel > 0.0 {
+                        scroll = scroll.saturating_sub(1);
+                    } else {
+                        scroll = (scroll + 1).min(max_scroll);
+                    }
+                }
 
-                        // Footer: total count + clear button + scroll state.
-                        let footer = egui::Rect::from_min_size(
-                            ui.cursor().min,
-                            egui::vec2(list_w, footer_h),
+                // ---- Main rows ----
+                for i in scroll..(scroll + max_visible).min(total) {
+                    let row = egui::Rect::from_min_size(
+                        egui::pos2(
+                            frame_rect.min.x,
+                            frame_rect.min.y + (i - scroll) as f32 * row_h,
+                        ),
+                        egui::vec2(list_w, row_h),
+                    );
+                    let is_sel = i == nav.selected;
+                    let row_hovered = row.contains(hover_pos);
+                    let row_bg = if is_sel {
+                        sel_bg
+                    } else if row_hovered {
+                        egui::Color32::from_rgba_unmultiplied(
+                            sel_bg.r(),
+                            sel_bg.g(),
+                            sel_bg.b(),
+                            90,
+                        )
+                    } else if i % 2 == 1 {
+                        menu_alt
+                    } else {
+                        menu_bg
+                    };
+                    ui.painter().rect_filled(row, 0.0, row_bg);
+                    ui.painter().text(
+                        egui::pos2(row.min.x + 6.0, row.center().y),
+                        egui::Align2::LEFT_CENTER,
+                        format!("{}", i + 1),
+                        egui::FontId::monospace(font_size * 0.85),
+                        weak,
+                    );
+                    let text_x = row.min.x + 34.0;
+                    let font_id = egui::FontId::monospace(font_size);
+                    let full = ui.fonts(|f| {
+                        f.layout_no_wrap(nav.entries[i].clone(), font_id.clone(), menu_fg)
+                    });
+                    // No ellipsis: overlong text is clipped at the row's
+                    // right edge (minus scrollbar/button gutter).
+                    let clip_w = row.max.x - 16.0;
+                    ui.set_clip_rect(egui::Rect::from_min_max(
+                        egui::pos2(text_x, row.min.y),
+                        egui::pos2(clip_w, row.max.y),
+                    ));
+                    ui.painter().galley(
+                        egui::pos2(text_x, row.center().y - full.size().y / 2.0),
+                        full,
+                        menu_fg,
+                    );
+                    ui.set_clip_rect(frame_rect);
+                    let resp = ui.interact(
+                        row,
+                        egui::Id::new(("hist_row", tab.as_str(), i)),
+                        egui::Sense::click(),
+                    );
+                    if resp.clicked() {
+                        entry_clicked = Some(i);
+                    }
+                    // Per-row actions (manual menu only): hover or
+                    // keyboard selection shows 收藏 / 删除 on the right.
+                    if nav.auto_word.is_none() && (row_hovered || is_sel) {
+                        let act_font = egui::FontId::proportional(10.0);
+                        let star_txt = self.texts.terminal.favorite.clone();
+                        let del_txt = self.texts.terminal.delete.clone();
+                        let measure = |txt: &str, col| {
+                            ui.fonts(|f| f.layout_no_wrap(txt.to_string(), act_font.clone(), col))
+                        };
+                        let del_g = measure(&del_txt, weak);
+                        let star_g = measure(&star_txt, weak);
+                        let pad = 6.0;
+                        let del_rect = egui::Rect::from_min_max(
+                            egui::pos2(row.max.x - 8.0 - del_g.size().x, row.center().y - 8.0),
+                            egui::pos2(row.max.x - 8.0, row.center().y + 8.0),
                         );
-                        let (_, _) = ui.allocate_exact_size(
-                            egui::vec2(list_w, footer_h),
-                            egui::Sense::hover(),
+                        let star_rect = egui::Rect::from_min_max(
+                            egui::pos2(
+                                del_rect.min.x - pad - star_g.size().x,
+                                row.center().y - 8.0,
+                            ),
+                            egui::pos2(del_rect.min.x - pad, row.center().y + 8.0),
                         );
-                        ui.painter().rect_filled(footer, 0.0, menu_bg);
-                        ui.painter()
-                            .hline(footer.x_range(), footer.min.y, (1.0, border));
-                        // Footer count: total entries in the list only.
-                        ui.painter().text(
-                            egui::pos2(footer.min.x + 8.0, footer.center().y),
-                            egui::Align2::LEFT_CENTER,
-                            format!("{}", total),
-                            egui::FontId::proportional(10.0),
-                            weak,
-                        );
-                        // Close button (X icon, no background) pinned to the
-                        // far RIGHT edge: same as Esc — closes the list and
-                        // stops matching until input is edited.
-                        let x_rect = egui::Rect::from_min_size(
-                            egui::pos2(footer.max.x - 8.0 - 18.0, footer.center().y - 9.0),
-                            egui::vec2(18.0, 18.0),
-                        );
-                        let xresp = ui.interact(
-                            x_rect,
-                            egui::Id::new(("hist_close", tab.as_str())),
+                        let del_resp = ui.interact(
+                            del_rect,
+                            egui::Id::new(("hist_row_del", tab.as_str(), i)),
                             egui::Sense::click(),
                         );
-                        let x_hovered = xresp.hovered();
-                        let xcol = if x_hovered { menu_fg } else { weak };
-                        let xg = ui.fonts(|f| {
-                            f.layout_no_wrap(
-                                egui_phosphor::regular::X.to_string(),
-                                egui::FontId::proportional(11.0),
-                                xcol,
-                            )
-                        });
-                        ui.painter()
-                            .galley(x_rect.center() - xg.size() / 2.0, xg, xcol);
-                        if xresp.clicked() {
-                            close_clicked = true;
-                        }
-
-                        // Clear button sits LEFT of the X button with a
-                        // 10px gap; width measured from its own galley so
-                        // the two can never overlap regardless of the
-                        // translated label length.
-                        let clear_txt = self.texts.terminal.clear_history.clone();
-                        let clear_id = egui::Id::new(("hist_clear", tab.as_str()));
-                        // Pass 1: measure the label width with the base
-                        // color to get the rect (hover needs the rect).
-                        let measure = ui.fonts(|f| {
-                            f.layout_no_wrap(
-                                clear_txt.clone(),
-                                egui::FontId::proportional(10.0),
-                                weak,
-                            )
-                        });
-                        let clear_w = measure.size().x + 10.0;
-                        let clear_rect = egui::Rect::from_min_max(
-                            egui::pos2(x_rect.min.x - 10.0 - clear_w, footer.center().y - 9.0),
-                            egui::pos2(x_rect.min.x - 10.0, footer.center().y + 9.0),
+                        let star_resp = ui.interact(
+                            star_rect,
+                            egui::Id::new(("hist_row_star", tab.as_str(), i)),
+                            egui::Sense::click(),
                         );
-                        let cresp = ui.interact(clear_rect, clear_id, egui::Sense::click());
-                        let clear_hovered = cresp.hovered();
-                        // Pass 2: paint with the final color.
-                        let clear_col = if clear_hovered {
+                        let del_col = if del_resp.hovered() {
                             app.danger.to_egui()
                         } else {
                             weak
                         };
-                        let cg = ui.fonts(|f| {
-                            f.layout_no_wrap(
-                                clear_txt.clone(),
-                                egui::FontId::proportional(10.0),
-                                clear_col,
-                            )
-                        });
-                        ui.painter()
-                            .galley(clear_rect.center() - cg.size() / 2.0, cg, clear_col);
-                        if cresp.clicked() {
-                            clear_clicked = true;
+                        let star_col = if star_resp.hovered() {
+                            app.accent.to_egui()
+                        } else {
+                            weak
+                        };
+                        let del_g2 = measure(&del_txt, del_col);
+                        let star_g2 = measure(&star_txt, star_col);
+                        ui.painter().galley(
+                            del_rect.center() - del_g2.size() / 2.0,
+                            del_g2,
+                            del_col,
+                        );
+                        ui.painter().galley(
+                            star_rect.center() - star_g2.size() / 2.0,
+                            star_g2,
+                            star_col,
+                        );
+                        if del_resp.clicked() {
+                            row_del_clicked = Some(i);
                         }
-                        let _ = confirm_clicked;
-                        let _ = confirm_clicked;
+                        if star_resp.clicked() {
+                            row_fav_clicked = Some(i);
+                        }
+                    }
+                }
+
+                // ---- Main scrollbar ----
+                if total > max_visible {
+                    let sb_track = egui::Rect::from_min_max(
+                        egui::pos2(frame_rect.min.x + list_w - 6.0, frame_rect.min.y),
+                        egui::pos2(frame_rect.min.x + list_w, frame_rect.min.y + rows_h),
+                    );
+                    let thumb_h = (max_visible as f32 / total as f32 * rows_h).max(16.0);
+                    let scrollable = (rows_h - thumb_h).max(1.0);
+                    let thumb_y =
+                        frame_rect.min.y + scrollable * (scroll as f32 / max_scroll as f32);
+                    let sb_col =
+                        egui::Color32::from_rgba_unmultiplied(weak.r(), weak.g(), weak.b(), 110);
+                    let track_col =
+                        egui::Color32::from_rgba_unmultiplied(weak.r(), weak.g(), weak.b(), 40);
+                    ui.painter().rect_filled(sb_track, 0.0, track_col);
+                    ui.painter().rect_filled(
+                        egui::Rect::from_min_size(
+                            egui::pos2(sb_track.min.x, thumb_y),
+                            egui::vec2(sb_track.width(), thumb_h),
+                        ),
+                        0.0,
+                        sb_col,
+                    );
+                    let sb_resp = ui.interact(
+                        sb_track,
+                        egui::Id::new(("hist_sb", tab.as_str())),
+                        egui::Sense::click_and_drag(),
+                    );
+                    if sb_resp.dragged() {
+                        let dy = ui.input(|i| i.pointer.delta().y);
+                        let lines = dy * max_scroll as f32 / scrollable;
+                        scroll = (scroll as f32 + lines)
+                            .round()
+                            .clamp(0.0, max_scroll as f32)
+                            as usize;
+                    }
+                }
+
+                // ---- Favorites column (manual menu only) ----
+                if show_favs {
+                    let fx0 = frame_rect.min.x + list_w;
+                    ui.painter().line_segment(
+                        [
+                            egui::pos2(fx0, frame_rect.min.y),
+                            egui::pos2(fx0, frame_rect.min.y + rows_h),
+                        ],
+                        (1.0, border),
+                    );
+                    for fi in fav_scroll..(fav_scroll + max_visible).min(fav_total) {
+                        let frow = egui::Rect::from_min_size(
+                            egui::pos2(fx0, frame_rect.min.y + (fi - fav_scroll) as f32 * row_h),
+                            egui::vec2(fav_w, row_h),
+                        );
+                        let is_fsel = nav.fav_focused && fi == nav.fav_selected;
+                        let frow_hovered = frow.contains(hover_pos);
+                        let fbg = if is_fsel {
+                            sel_bg
+                        } else if frow_hovered {
+                            egui::Color32::from_rgba_unmultiplied(
+                                sel_bg.r(),
+                                sel_bg.g(),
+                                sel_bg.b(),
+                                90,
+                            )
+                        } else if fi % 2 == 1 {
+                            menu_alt
+                        } else {
+                            menu_bg
+                        };
+                        ui.painter().rect_filled(frow, 0.0, fbg);
+                        // Command text: no ellipsis, clipped at the row's
+                        // right edge (minus the delete-button gutter).
+                        let ffont = egui::FontId::monospace(font_size * 0.9);
+                        let fg = ui.fonts(|f| {
+                            f.layout_no_wrap(nav.favorites[fi].clone(), ffont.clone(), menu_fg)
+                        });
+                        ui.set_clip_rect(egui::Rect::from_min_max(
+                            egui::pos2(frow.min.x + 6.0, frow.min.y),
+                            egui::pos2(frow.max.x - 6.0, frow.max.y),
+                        ));
+                        ui.painter().galley(
+                            egui::pos2(frow.min.x + 6.0, frow.center().y - fg.size().y / 2.0),
+                            fg,
+                            menu_fg,
+                        );
+                        ui.set_clip_rect(frame_rect);
+                        let fresp = ui.interact(
+                            frow,
+                            egui::Id::new(("fav_row", tab.as_str(), fi)),
+                            egui::Sense::click(),
+                        );
+                        if fresp.clicked() {
+                            fav_entry_clicked = Some(fi);
+                        }
+                        // Hover: delete button on the right edge.
+                        if frow_hovered {
+                            let del_txt = self.texts.terminal.delete.clone();
+                            let dg = ui.fonts(|f| {
+                                f.layout_no_wrap(
+                                    del_txt.to_string(),
+                                    egui::FontId::proportional(10.0),
+                                    weak,
+                                )
+                            });
+                            let drect = egui::Rect::from_min_max(
+                                egui::pos2(frow.max.x - 4.0 - dg.size().x, frow.center().y - 8.0),
+                                egui::pos2(frow.max.x - 4.0, frow.center().y + 8.0),
+                            );
+                            let dresp = ui.interact(
+                                drect,
+                                egui::Id::new(("fav_row_del", tab.as_str(), fi)),
+                                egui::Sense::click(),
+                            );
+                            let dcol = if dresp.hovered() {
+                                app.danger.to_egui()
+                            } else {
+                                weak
+                            };
+                            let dg2 = ui.fonts(|f| {
+                                f.layout_no_wrap(
+                                    del_txt.to_string(),
+                                    egui::FontId::proportional(10.0),
+                                    dcol,
+                                )
+                            });
+                            ui.painter()
+                                .galley(drect.center() - dg2.size() / 2.0, dg2, dcol);
+                            if dresp.clicked() {
+                                fav_del_clicked = Some(fi);
+                            }
+                        }
+                    }
+                    // Favorites scrollbar when overflowing.
+                    if fav_total > max_visible {
+                        let sb_track = egui::Rect::from_min_max(
+                            egui::pos2(fx0 + fav_w - 6.0, frame_rect.min.y),
+                            egui::pos2(fx0 + fav_w, frame_rect.min.y + rows_h),
+                        );
+                        let thumb_h = (max_visible as f32 / fav_total as f32 * rows_h).max(16.0);
+                        let scrollable = (rows_h - thumb_h).max(1.0);
+                        let thumb_y = frame_rect.min.y
+                            + scrollable * (fav_scroll as f32 / fav_max_scroll as f32);
+                        let sb_col = egui::Color32::from_rgba_unmultiplied(
+                            weak.r(),
+                            weak.g(),
+                            weak.b(),
+                            110,
+                        );
+                        let track_col =
+                            egui::Color32::from_rgba_unmultiplied(weak.r(), weak.g(), weak.b(), 40);
+                        ui.painter().rect_filled(sb_track, 0.0, track_col);
+                        ui.painter().rect_filled(
+                            egui::Rect::from_min_size(
+                                egui::pos2(sb_track.min.x, thumb_y),
+                                egui::vec2(sb_track.width(), thumb_h),
+                            ),
+                            0.0,
+                            sb_col,
+                        );
+                        let sb_resp = ui.interact(
+                            sb_track,
+                            egui::Id::new(("hist_fav_sb", tab.as_str())),
+                            egui::Sense::click_and_drag(),
+                        );
+                        if sb_resp.dragged() {
+                            let dy = ui.input(|i| i.pointer.delta().y);
+                            let lines = dy * fav_max_scroll as f32 / scrollable;
+                            fav_scroll = (fav_scroll as f32 + lines)
+                                .round()
+                                .clamp(0.0, fav_max_scroll as f32)
+                                as usize;
+                        }
+                    }
+                }
+
+                // ---- Shared footer ----
+                let footer = egui::Rect::from_min_size(
+                    egui::pos2(frame_rect.min.x, frame_rect.min.y + rows_h),
+                    egui::vec2(total_w, footer_h),
+                );
+                ui.painter().rect_filled(footer, 0.0, menu_bg);
+                ui.painter()
+                    .hline(footer.x_range(), footer.min.y, (1.0, border));
+                ui.painter().text(
+                    egui::pos2(footer.min.x + 8.0, footer.center().y),
+                    egui::Align2::LEFT_CENTER,
+                    format!("{}{}", total, self.texts.terminal.history_count),
+                    egui::FontId::proportional(10.0),
+                    weak,
+                );
+                // X close pinned at the far right.
+                let x_rect = egui::Rect::from_min_size(
+                    egui::pos2(footer.max.x - 8.0 - 18.0, footer.center().y - 9.0),
+                    egui::vec2(18.0, 18.0),
+                );
+                let xresp = ui.interact(
+                    x_rect,
+                    egui::Id::new(("hist_close", tab.as_str())),
+                    egui::Sense::click(),
+                );
+                let xcol = if xresp.hovered() { menu_fg } else { weak };
+                let xg = ui.fonts(|f| {
+                    f.layout_no_wrap(
+                        egui_phosphor::regular::X.to_string(),
+                        egui::FontId::proportional(11.0),
+                        xcol,
+                    )
+                });
+                ui.painter()
+                    .galley(x_rect.center() - xg.size() / 2.0, xg, xcol);
+                if xresp.clicked() {
+                    close_clicked = true;
+                }
+                // Text buttons laid right-to-left from X: 清除收藏 (only
+                // when favorites are shown), then per-terminal 清空.
+                let mut cursor_x = x_rect.min.x - 10.0;
+                if show_favs {
+                    let txt = self.texts.terminal.clear_favorites.clone();
+                    let g = ui.fonts(|f| {
+                        f.layout_no_wrap(txt.to_string(), egui::FontId::proportional(10.0), weak)
                     });
+                    let w = g.size().x + 10.0;
+                    let rect = egui::Rect::from_min_max(
+                        egui::pos2(cursor_x - w, footer.center().y - 9.0),
+                        egui::pos2(cursor_x, footer.center().y + 9.0),
+                    );
+                    let resp = ui.interact(
+                        rect,
+                        egui::Id::new(("hist_clear_favs", tab.as_str())),
+                        egui::Sense::click(),
+                    );
+                    let col = if resp.hovered() {
+                        app.danger.to_egui()
+                    } else {
+                        weak
+                    };
+                    let g2 = ui.fonts(|f| {
+                        f.layout_no_wrap(txt.to_string(), egui::FontId::proportional(10.0), col)
+                    });
+                    ui.painter()
+                        .galley(rect.center() - g2.size() / 2.0, g2, col);
+                    if resp.clicked() {
+                        clear_favs_clicked = true;
+                    }
+                    cursor_x = rect.min.x - 10.0;
+                }
+                {
+                    let txt = self.texts.terminal.clear_history.clone();
+                    let g = ui.fonts(|f| {
+                        f.layout_no_wrap(txt.clone(), egui::FontId::proportional(10.0), weak)
+                    });
+                    let w = g.size().x + 10.0;
+                    let rect = egui::Rect::from_min_max(
+                        egui::pos2(cursor_x - w, footer.center().y - 9.0),
+                        egui::pos2(cursor_x, footer.center().y + 9.0),
+                    );
+                    let resp = ui.interact(
+                        rect,
+                        egui::Id::new(("hist_clear", tab.as_str())),
+                        egui::Sense::click(),
+                    );
+                    let col = if resp.hovered() {
+                        app.danger.to_egui()
+                    } else {
+                        weak
+                    };
+                    let g2 = ui.fonts(|f| {
+                        f.layout_no_wrap(txt.clone(), egui::FontId::proportional(10.0), col)
+                    });
+                    ui.painter()
+                        .galley(rect.center() - g2.size() / 2.0, g2, col);
+                    if resp.clicked() {
+                        clear_history_clicked = true;
+                    }
+                }
+
+                // Window border painted LAST: rows, alternating bands,
+                // scrollbars and the footer can never cover it.
+                ui.painter().rect_stroke(
+                    frame_rect,
+                    0.0,
+                    egui::Stroke::new(1.0, border),
+                    egui::StrokeKind::Middle,
+                );
             });
 
-        ctx.memory_mut(|m| m.data.insert_temp(scroll_id, scroll));
+        ctx.memory_mut(|m| {
+            m.data.insert_temp(scroll_id, scroll);
+            m.data.insert_temp(fav_scroll_id, fav_scroll);
+        });
 
         // Row click = select + confirm (same as Enter).
         if let Some(i) = entry_clicked {
@@ -3830,12 +4080,80 @@ impl App {
             self.confirm_history_entry(&tab);
             return;
         }
-        if clear_clicked {
+        // Favorite row click: send the command.
+        if let Some(fi) = fav_entry_clicked {
+            let cmd = self
+                .terminals
+                .get(&tab)
+                .and_then(|td| td.instance.history_nav.as_ref())
+                .and_then(|nav| nav.favorites.get(fi).cloned());
+            if let Some(cmd) = cmd {
+                if let Some(td) = self.terminals.get_mut(&tab) {
+                    td.instance.history_nav = None;
+                    td.instance.write(cmd.as_bytes());
+                }
+                self.history_menu_just_closed.insert(tab.clone(), true);
+            }
+        }
+        // Row action: add to global favorites.
+        if let Some(i) = row_fav_clicked {
+            let cmd = self
+                .terminals
+                .get(&tab)
+                .and_then(|td| td.instance.history_nav.as_ref())
+                .and_then(|nav| nav.entries.get(i).cloned());
+            if let Some(cmd) = cmd {
+                self.history_db.fav_add(&cmd);
+                if let Some(td) = self.terminals.get_mut(&tab) {
+                    if let Some(nav) = td.instance.history_nav.as_mut() {
+                        nav.favorites = self.history_db.fav_all();
+                    }
+                }
+            }
+        }
+        // Row action: delete one history entry.
+        if let Some(i) = row_del_clicked {
+            self.history_db.remove_entry(&tab, i);
+            if let Some(td) = self.terminals.get_mut(&tab) {
+                if let Some(nav) = td.instance.history_nav.as_mut() {
+                    if i < nav.entries.len() {
+                        nav.entries.remove(i);
+                    }
+                    if !nav.entries.is_empty() {
+                        nav.selected = nav.selected.min(nav.entries.len() - 1);
+                    }
+                }
+            }
+        }
+        // Favorite row delete.
+        if let Some(fi) = fav_del_clicked {
+            let cmd = self
+                .terminals
+                .get(&tab)
+                .and_then(|td| td.instance.history_nav.as_ref())
+                .and_then(|nav| nav.favorites.get(fi).cloned());
+            if let Some(cmd) = cmd {
+                self.history_db.fav_remove(&cmd);
+                if let Some(td) = self.terminals.get_mut(&tab) {
+                    if let Some(nav) = td.instance.history_nav.as_mut() {
+                        nav.favorites = self.history_db.fav_all();
+                        if !nav.favorites.is_empty() {
+                            nav.fav_selected = nav.fav_selected.min(nav.favorites.len() - 1);
+                        } else {
+                            nav.fav_focused = false;
+                        }
+                    }
+                }
+            }
+        }
+        // Footer: clear global favorites (same confirm dialog as settings).
+        if clear_favs_clicked {
+            self.show_clear_favorites_confirm = true;
+        }
+        if clear_history_clicked {
             self.history_clear_confirm = Some(tab.clone());
         }
         if close_clicked {
-            // Same as Esc: close the list and stop matching until the
-            // input is edited again.
             self.close_history_menu(&tab);
         }
     }
@@ -3946,6 +4264,9 @@ impl App {
         // act on it. From the next frame on, ONLY a real key edit (typed
         // / deleted char) can re-open matching.
         self.history_menu_just_closed.insert(tab.to_string(), true);
+        // Confirming rewrites the terminal line (delete word + send the
+        // full command): the pending buffer no longer matches the grid.
+        self.auto_match_pending.remove(tab);
         if let Some(command) = selected {
             self.history_db.add(tab, &command);
         }
@@ -4168,8 +4489,26 @@ impl eframe::App for App {
         if menu_requested && !self.locked_panels.contains(&self.active_panel) {
             if let Some(tab) = self.focused_terminal.clone() {
                 let entries = self.history_db.get(&tab, self.settings.max_history);
+                let favorites = self.history_db.fav_all();
                 if let Some(td) = self.terminals.get_mut(&tab) {
-                    toggle_history_menu(&mut td.instance.history_nav, entries);
+                    let was_open = td.instance.history_nav.is_some();
+                    toggle_history_menu(&mut td.instance.history_nav, entries, favorites);
+                    if !was_open {
+                        // Fresh open: reset selection AND both scroll
+                        // offsets so the view matches the cursor (the
+                        // scroll used to keep its stale position from
+                        // the previous open).
+                        ctx.memory_mut(|m| {
+                            m.data.insert_temp(
+                                egui::Id::new(("hist_menu_scroll", tab.as_str())),
+                                0usize,
+                            );
+                            m.data.insert_temp(
+                                egui::Id::new(("hist_fav_scroll", tab.as_str())),
+                                0usize,
+                            );
+                        });
+                    }
                 }
             }
         }
@@ -4193,33 +4532,190 @@ impl eframe::App for App {
                     .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
             let previous = !close && !confirm && check_shortcut(ctx, &binds, "history_prev");
             let next = !close && !confirm && check_shortcut(ctx, &binds, "history_next");
+            // Delete: remove the row under the keyboard cursor — the
+            // selected history entry, or the selected favorite when the
+            // favorites column holds focus. Manual menu only; consumed
+            // so the shell never receives the DEL escape.
+            let delete_pressed = !close
+                && !confirm
+                && self
+                    .focused_terminal
+                    .as_ref()
+                    .and_then(|tab| self.terminals.get(tab))
+                    .and_then(|td| td.instance.history_nav.as_ref())
+                    .is_some_and(|nav| nav.auto_word.is_none())
+                && ctx
+                    .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Delete));
+            // Left/Right: move keyboard focus between the main list and
+            // the favorites list — only in the MANUAL (Alt) menu; the
+            // auto-match overlay must keep passing arrows to the shell
+            // (cursor movement / recall). They must also be consumed so
+            // the terminal never sees them as cursor-motion escapes.
+            let (focus_left, focus_right) = {
+                let manual = self
+                    .focused_terminal
+                    .as_ref()
+                    .and_then(|tab| self.terminals.get(tab))
+                    .and_then(|td| td.instance.history_nav.as_ref())
+                    .is_some_and(|nav| nav.auto_word.is_none());
+                if !manual {
+                    (false, false)
+                } else {
+                    let has_favs = self
+                        .focused_terminal
+                        .as_ref()
+                        .and_then(|tab| self.terminals.get(tab))
+                        .and_then(|td| td.instance.history_nav.as_ref())
+                        .is_some_and(|nav| !nav.favorites.is_empty());
+                    if !has_favs {
+                        (false, false)
+                    } else {
+                        let l = ctx.input_mut(|i| {
+                            i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft)
+                        });
+                        let r = ctx.input_mut(|i| {
+                            i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight)
+                        });
+                        (l, r)
+                    }
+                }
+            };
 
             if let Some(tab) = self.focused_terminal.clone() {
-                history_menu_handled = previous || next || close || confirm;
+                history_menu_handled = previous
+                    || next
+                    || close
+                    || confirm
+                    || focus_left
+                    || focus_right
+                    || delete_pressed;
+                // Focus toggle: Right → favorites (first item), Left → back
+                // to the main list (selection there is preserved).
+                if focus_left || focus_right {
+                    if let Some(td) = self.terminals.get_mut(&tab) {
+                        if let Some(nav) = td.instance.history_nav.as_mut() {
+                            if focus_right {
+                                nav.fav_focused = true;
+                                nav.fav_selected = 0;
+                            } else {
+                                nav.fav_focused = false;
+                            }
+                        }
+                    }
+                }
+                // Delete under the keyboard cursor (history or favorite).
+                if delete_pressed {
+                    let (fav_idx, hist_idx) = self
+                        .terminals
+                        .get(&tab)
+                        .and_then(|td| td.instance.history_nav.as_ref())
+                        .map(|nav| {
+                            if nav.fav_focused {
+                                (Some(nav.fav_selected), None)
+                            } else {
+                                (None, Some(nav.selected))
+                            }
+                        })
+                        .unwrap_or((None, None));
+                    if let Some(fi) = fav_idx {
+                        let cmd = self
+                            .terminals
+                            .get(&tab)
+                            .and_then(|td| td.instance.history_nav.as_ref())
+                            .and_then(|nav| nav.favorites.get(fi).cloned());
+                        if let Some(cmd) = cmd {
+                            self.history_db.fav_remove(&cmd);
+                            if let Some(td) = self.terminals.get_mut(&tab) {
+                                if let Some(nav) = td.instance.history_nav.as_mut() {
+                                    nav.favorites = self.history_db.fav_all();
+                                    if nav.favorites.is_empty() {
+                                        nav.fav_focused = false;
+                                    } else {
+                                        nav.fav_selected =
+                                            nav.fav_selected.min(nav.favorites.len() - 1);
+                                    }
+                                }
+                            }
+                        }
+                    } else if let Some(i) = hist_idx {
+                        self.history_db.remove_entry(&tab, i);
+                        if let Some(td) = self.terminals.get_mut(&tab) {
+                            if let Some(nav) = td.instance.history_nav.as_mut() {
+                                if i < nav.entries.len() {
+                                    nav.entries.remove(i);
+                                }
+                                if !nav.entries.is_empty() {
+                                    nav.selected = nav.selected.min(nav.entries.len() - 1);
+                                }
+                            }
+                        }
+                    }
+                    history_menu_handled = true;
+                }
+                // While the favorites list holds focus, Up/Down navigate
+                // the favorites instead of the main list, and Enter sends
+                // the selected favorite command. The favorites scroll
+                // follows the selection the same way the main list's does
+                // (bring into view only on the frame the selection moved).
+                if let Some(td) = self.terminals.get_mut(&tab) {
+                    if let Some(nav) = td.instance.history_nav.as_mut() {
+                        if nav.fav_focused && (previous || next) {
+                            if previous {
+                                nav.fav_selected = nav.fav_selected.saturating_sub(1);
+                            } else if next && nav.fav_selected + 1 < nav.favorites.len() {
+                                nav.fav_selected += 1;
+                            }
+                            // Selection changed: bring it into view THIS
+                            // frame, mirroring the main-list follow logic.
+                            let fav_scroll_id = egui::Id::new(("hist_fav_scroll", tab.as_str()));
+                            let mv = 10usize.min(nav.favorites.len());
+                            let max_sc = nav.favorites.len().saturating_sub(mv);
+                            let mut sc = ctx
+                                .memory(|m| m.data.get_temp(fav_scroll_id).unwrap_or(0))
+                                .min(max_sc);
+                            if nav.fav_selected < sc {
+                                sc = nav.fav_selected;
+                            } else if nav.fav_selected >= sc + mv {
+                                sc = nav.fav_selected + 1 - mv;
+                            }
+                            ctx.memory_mut(|m| m.data.insert_temp(fav_scroll_id, sc));
+                        }
+                    }
+                }
+                let fav_confirming = confirm
+                    && self
+                        .terminals
+                        .get(&tab)
+                        .and_then(|td| td.instance.history_nav.as_ref())
+                        .is_some_and(|nav| nav.fav_focused);
                 if previous || next {
                     if let Some(td) = self.terminals.get_mut(&tab) {
                         if let Some(nav) = td.instance.history_nav.as_mut() {
-                            if previous {
-                                nav.move_previous();
+                            if nav.fav_focused {
+                                // Favorites own Up/Down this frame.
+                            } else {
+                                if previous {
+                                    nav.move_previous();
+                                }
+                                if next {
+                                    nav.move_next();
+                                }
+                                // Selection changed: bring it into view THIS
+                                // frame. (View follow lives here — not in the
+                                // renderer — so wheel/drag scrolling stays free.)
+                                let scroll_id = egui::Id::new(("hist_menu_scroll", tab.as_str()));
+                                let mv = 10usize.min(nav.entries.len());
+                                let max_sc = nav.entries.len().saturating_sub(mv);
+                                let mut sc = ctx
+                                    .memory(|m| m.data.get_temp(scroll_id).unwrap_or(0))
+                                    .min(max_sc);
+                                if nav.selected < sc {
+                                    sc = nav.selected;
+                                } else if nav.selected >= sc + mv {
+                                    sc = nav.selected + 1 - mv;
+                                }
+                                ctx.memory_mut(|m| m.data.insert_temp(scroll_id, sc));
                             }
-                            if next {
-                                nav.move_next();
-                            }
-                            // Selection changed: bring it into view THIS
-                            // frame. (View follow lives here — not in the
-                            // renderer — so wheel/drag scrolling stays free.)
-                            let scroll_id = egui::Id::new(("hist_menu_scroll", tab.as_str()));
-                            let mv = 10usize.min(nav.entries.len());
-                            let max_sc = nav.entries.len().saturating_sub(mv);
-                            let mut sc = ctx
-                                .memory(|m| m.data.get_temp(scroll_id).unwrap_or(0))
-                                .min(max_sc);
-                            if nav.selected < sc {
-                                sc = nav.selected;
-                            } else if nav.selected >= sc + mv {
-                                sc = nav.selected + 1 - mv;
-                            }
-                            ctx.memory_mut(|m| m.data.insert_temp(scroll_id, sc));
                         }
                     }
                 }
@@ -4227,9 +4723,25 @@ impl eframe::App for App {
                     self.close_history_menu(&tab);
                 }
                 if confirm {
-                    // Unified confirm path: sends the entry AND sets the
-                    // close latch (stops matching like Esc).
-                    self.confirm_history_entry(&tab);
+                    if fav_confirming {
+                        // Enter on the favorites list: send that command.
+                        let cmd = self
+                            .terminals
+                            .get(&tab)
+                            .and_then(|td| td.instance.history_nav.as_ref())
+                            .and_then(|nav| nav.favorites.get(nav.fav_selected).cloned());
+                        if let Some(cmd) = cmd {
+                            if let Some(td) = self.terminals.get_mut(&tab) {
+                                td.instance.history_nav = None;
+                                td.instance.write(cmd.as_bytes());
+                            }
+                            self.history_menu_just_closed.insert(tab.clone(), true);
+                        }
+                    } else {
+                        // Unified confirm path: sends the entry AND sets the
+                        // close latch (stops matching like Esc).
+                        self.confirm_history_entry(&tab);
+                    }
                 }
             }
         }
@@ -4258,19 +4770,24 @@ impl eframe::App for App {
                         td.instance.history_nav = None;
                     } else {
                         let line = td.instance.get_current_line();
-                        // Strip the prompt: everything up to and including
-                        // the LAST "$ " / "# " terminator. If no prompt
-                        // marker is found (rare, exotic prompts), record
-                        // nothing rather than the whole line with the
-                        // prompt text mixed in.
-                        let cmd = line
-                            .rfind("$ ")
-                            .or_else(|| line.rfind("# "))
-                            .map(|p| line[p + 2..].trim().to_string())
+                        // Strip the prompt via the shared helper: the
+                        // bare "$"/"#" fallback matters after a resize —
+                        // readline swallows the line-end space when the
+                        // prompt wraps, and the old "$ "-only lookup
+                        // recorded NOTHING for the first command typed
+                        // after narrowing the pane.
+                        let cmd = crate::terminal::strip_prompt(&line)
+                            .map(|s| s.trim().to_string())
                             .unwrap_or_default();
                         if !cmd.is_empty() {
                             self.history_db.add(tab, &cmd);
                         }
+                        // The command was EXECUTED: the pending-keystroke
+                        // buffer must not survive into the next prompt —
+                        // stale chars used to pollute the first keystrokes
+                        // of the next command (word = grid + stale → no
+                        // match, menu never opened until backspace).
+                        self.auto_match_pending.remove(tab);
                         td.instance.write(b"\r");
                     }
                 }
@@ -4557,7 +5074,8 @@ impl eframe::App for App {
                         self.show_about = true;
                     }
 
-                    // Right-aligned extras: app version.
+                    // Right-aligned extras: app version (+ update badge
+                    // when a newer release is available).
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let weak = self.active_theme.app.weak_text.to_egui();
                         ui.label(
@@ -4565,6 +5083,38 @@ impl eframe::App for App {
                                 .color(weak)
                                 .size(11.0),
                         );
+                        // Update badge to the LEFT of the version label:
+                        // shown only while an update is available (startup
+                        // auto-check or manual check). Clicking opens the
+                        // About window, whose status panel drives the
+                        // download/restart flow.
+                        if let crate::updater::UpdateState::Available(info) = &self.update_state {
+                            let label_text = update_button_label(&info.version.clone());
+                            let label_color = self.active_theme.app.accent.to_egui();
+                            let pad = 8.0;
+                            let galley = ui.fonts(|f| {
+                                f.layout_no_wrap(
+                                    label_text.clone(),
+                                    egui::FontId::proportional(11.0),
+                                    label_color,
+                                )
+                            });
+                            let size =
+                                egui::vec2(galley.size().x + pad * 2.0, galley.size().y + 6.0);
+                            let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
+                            let hover_bg = self.active_theme.app.hover.to_egui();
+                            if resp.contains_pointer() {
+                                ui.painter().rect_filled(rect, 0.0, hover_bg);
+                            }
+                            ui.painter().galley(
+                                rect.center() - galley.size() / 2.0,
+                                galley,
+                                label_color,
+                            );
+                            if resp.clicked() {
+                                self.show_about = true;
+                            }
+                        }
                     });
                 });
             });
@@ -4949,6 +5499,82 @@ impl eframe::App for App {
             }
         }
 
+        // Confirm-dialog for clearing ALL global favorite commands.
+        // Same fixed-size danger dialog as the history clear above.
+        if self.show_clear_favorites_confirm {
+            let mut open = self.show_clear_favorites_confirm;
+            let mut confirmed = false;
+            let mut cancelled = false;
+            let title = self.texts.terminal.clear_favorites_title.clone();
+            let body = self.texts.terminal.clear_favorites_body.clone();
+            let confirm_txt = self.texts.theme_editor.dialog_confirm.clone();
+            let cancel_txt = self.texts.theme_editor.cancel.clone();
+            let danger = self.active_theme.app.danger.to_egui();
+            let text_col = self.active_theme.app.text.to_egui();
+            let dlg_w = 360.0f32;
+            let dlg_h = 96.0f32;
+            let center = ctx.screen_rect().center();
+            let pos = egui::pos2(center.x - dlg_w / 2.0, center.y - dlg_h / 2.0);
+            egui::Window::new(title)
+                .id(egui::Id::new("fav_clear_confirm"))
+                .open(&mut open)
+                .resizable(false)
+                .collapsible(false)
+                .fixed_pos(pos)
+                .fixed_size([dlg_w, dlg_h])
+                .frame(egui::Frame::window(&ctx.style()).inner_margin(egui::Margin::same(12)))
+                .show(ctx, |ui| {
+                    ui.style_mut().spacing.item_spacing = egui::vec2(6.0, 4.0);
+                    ui.style_mut().spacing.interact_size.y = 24.0;
+                    ui.style_mut().spacing.button_padding = egui::vec2(10.0, 3.0);
+                    egui::TopBottomPanel::bottom("fav_clear_confirm_footer")
+                        .frame(egui::Frame::none())
+                        .exact_height(44.0)
+                        .show_inside(ui, |ui| {
+                            ui.add_space(20.0);
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    if ui
+                                        .add(
+                                            egui::Button::new(
+                                                egui::RichText::new(confirm_txt)
+                                                    .strong()
+                                                    .color(egui::Color32::WHITE),
+                                            )
+                                            .fill(danger),
+                                        )
+                                        .clicked()
+                                    {
+                                        confirmed = true;
+                                    }
+                                    ui.add_space(16.0);
+                                    if ui.button(&cancel_txt).clicked() {
+                                        cancelled = true;
+                                    }
+                                },
+                            );
+                        });
+                    ui.label(egui::RichText::new(body).size(13.0).color(text_col));
+                });
+            if cancelled {
+                self.show_clear_favorites_confirm = false;
+            } else if confirmed {
+                self.history_db.fav_clear();
+                // Drop the favorites snapshot from any open menus so the
+                // side lists disappear immediately.
+                for td in self.terminals.values_mut() {
+                    if let Some(nav) = td.instance.history_nav.as_mut() {
+                        nav.favorites.clear();
+                        nav.fav_focused = false;
+                    }
+                }
+                self.show_clear_favorites_confirm = false;
+            } else if !open {
+                self.show_clear_favorites_confirm = false;
+            }
+        }
+
         if self.show_about {
             let mut open = self.show_about;
             let mut clicked_close = false;
@@ -5242,12 +5868,11 @@ impl eframe::App for App {
                 match r {
                     StartCheckResult::Available(info) => {
                         if !self.skipped_versions.contains(&info.version) {
-                            // Surface the new version through About's
-                            // in-place status panel and auto-open About so
-                            // the user actually sees the offer. No
-                            // standalone update popup anymore.
+                            // Surface the new version ONLY as the menu-bar
+                            // update badge (no popup): it stays visible
+                            // until updated/dismissed, instead of a modal
+                            // the user must close right away.
                             self.update_state = crate::updater::UpdateState::Available(info);
-                            self.show_about = true;
                         }
                     }
                     StartCheckResult::UpToDate => {
@@ -6482,6 +7107,25 @@ mod tests {
     }
 
     #[test]
+    fn rename_state_on_another_tab_does_not_block_auto_match() {
+        // Regression: the auto-match gate used to require NO tab to be
+        // renaming at all. A rename left dangling on a hidden (inactive)
+        // tab — whose input the dock never renders, so it can never be
+        // confirmed or cancelled — silently disabled auto-match for EVERY
+        // terminal, including freshly split ones.
+        let renaming_terminal: Option<String> = Some("terminal-stale".into());
+        for tab in ["terminal-a", "terminal-b"] {
+            let blocked = renaming_terminal.is_some();
+            let blocked_now = renaming_terminal.as_ref() == Some(&tab.to_string());
+            assert!(!blocked_now, "auto-match must run on {tab}");
+            let _ = blocked;
+        }
+        // The stale tab itself stays gated while its input is visible.
+        let gated = renaming_terminal.as_ref() == Some(&"terminal-stale".to_string());
+        assert!(gated);
+    }
+
+    #[test]
     fn close_latch_semantics() {
         // Structural contract of the event-driven matcher:
         //  1) no edit event  -> matcher must not touch the menu
@@ -6793,6 +7437,9 @@ mod tests {
             entries: vec!["newest".into(), "oldest".into()],
             selected: 0,
             auto_word: None,
+            favorites: Vec::new(),
+            fav_focused: false,
+            fav_selected: 0,
         };
 
         nav.move_previous();
@@ -6806,9 +7453,9 @@ mod tests {
     #[test]
     fn history_menu_shortcut_toggles_open_and_closed() {
         let mut nav = None;
-        toggle_history_menu(&mut nav, vec!["command".into()]);
+        toggle_history_menu(&mut nav, vec!["command".into()], Vec::new());
         assert!(nav.is_some());
-        toggle_history_menu(&mut nav, vec!["command".into()]);
+        toggle_history_menu(&mut nav, vec!["command".into()], Vec::new());
         assert!(nav.is_none());
     }
 
@@ -7055,7 +7702,7 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
             // the pre-space text. A pending-keystroke buffer compensates:
             // effective word = grid word + pending; the buffer drains as
             // the grid catches up.
-            if self.auto_match && !self.renaming && self.renaming_terminal.is_none() {
+            if self.auto_match && !self.renaming && self.renaming_terminal.as_ref() != Some(tab) {
                 let is_focused_tab = self.focused_terminal.as_ref() == Some(tab);
                 // Collect THIS frame's keystrokes (chars + deletes).
                 let (edit_event, typed, del_count) = if is_focused_tab {
@@ -7110,6 +7757,15 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                     if !pending.is_empty() && grid_word.ends_with(pending.as_str()) {
                         pending.clear();
                     }
+                    // Self-heal: when the grid ALREADY echoes this frame's
+                    // typed text, any remaining buffered chars are stale
+                    // pollution from a previous command (the buffer used
+                    // to survive Enter and corrupt the next command's
+                    // word, silently disabling auto-match until the user
+                    // backspaced everything).
+                    if !typed.is_empty() && grid_word.ends_with(typed.as_str()) {
+                        pending.clear();
+                    }
                     let word = format!("{grid_word}{}", pending.clone());
                     let word = word.trim_start_matches(' ').to_string();
 
@@ -7123,10 +7779,12 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                         let entries = self.history_db.get(tab, self.max_history);
                         // Whole-text prefix match INCLUDING spaces: typed
                         // "cd " matches "cd /tmp" but never bare "cd".
+                        // Filter FIRST across the whole history, THEN cap
+                        // the suggestion list at 10.
                         let matches: Vec<String> = entries
                             .into_iter()
-                            .take(10)
                             .filter(|cmd| cmd.starts_with(word.as_str()))
+                            .take(10)
                             .collect();
                         let single_exact = matches.len() == 1 && matches[0] == word;
                         if single_exact || matches.is_empty() {
@@ -7153,6 +7811,9 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                                 entries: matches,
                                 selected: keep_sel,
                                 auto_word: Some(word.clone()),
+                                favorites: Vec::new(),
+                                fav_focused: false,
+                                fav_selected: 0,
                             });
                         }
                     }

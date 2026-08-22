@@ -165,6 +165,12 @@ terminal:
   add_tab: + Scheda
   rename_hint: Inserisci nome...
   default_name_prefix: 'Terminale '
+  favorite: Preferito
+  delete: Elimina
+  clear_favorites: Cancella preferiti
+  history_count:  comandi cronologici
+  clear_favorites_title: Cancella tutti i preferiti
+  clear_favorites_body: Cancellare tutti i comandi preferiti? Operazione irreversibile.
 theme:
   light: Chiaro
   dark: Scuro

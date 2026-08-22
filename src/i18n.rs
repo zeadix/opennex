@@ -287,6 +287,17 @@ pub struct TerminalTexts {
     pub add_tab: String,
     pub rename_hint: String,
     pub default_name_prefix: String,
+    /// History-menu row action: add to global favorites.
+    pub favorite: String,
+    /// History-menu / favorites row action: delete the entry.
+    pub delete: String,
+    /// Footer action: clear the GLOBAL favorite commands.
+    pub clear_favorites: String,
+    /// Footer count, e.g. "42 history commands" (number appended by code).
+    pub history_count: String,
+    /// Confirmation dialog for clearing global favorites.
+    pub clear_favorites_title: String,
+    pub clear_favorites_body: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -575,6 +586,12 @@ impl Texts {
                 add_tab: "+ 标签页".into(),
                 rename_hint: "输入名称...".into(),
                 default_name_prefix: "终端 ".into(),
+                favorite: "收藏".into(),
+                delete: "删除".into(),
+                clear_favorites: "清除收藏".into(),
+                history_count: "条历史指令".into(),
+                clear_favorites_title: "清除全部收藏指令".into(),
+                clear_favorites_body: "确认清除全部收藏指令？此操作不可恢复。".into(),
             },
             theme: ThemeTexts {
                 light: "浅色".into(),

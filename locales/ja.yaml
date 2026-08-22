@@ -165,6 +165,12 @@ terminal:
   add_tab: + タブ
   rename_hint: 名前を入力...
   default_name_prefix: 'ターミナル '
+  favorite: お気に入り
+  delete: 削除
+  clear_favorites: お気に入りを消去
+  history_count: 件の履歴コマンド
+  clear_favorites_title: お気に入りコマンドを全消去
+  clear_favorites_body: お気に入りコマンドをすべて消去します？元に戻せません。
 theme:
   light: ライト
   dark: ダーク

@@ -165,6 +165,12 @@ terminal:
   add_tab: + टैब
   rename_hint: नाम दर्ज करें...
   default_name_prefix: 'टर्मिनल '
+  favorite: पसंदीदा
+  delete: हटाएं
+  clear_favorites: पसंदीदा हटाएं
+  history_count:  इतिहास कमांड
+  clear_favorites_title: सभी पसंदीदा कमांड हटाएं
+  clear_favorites_body: सभी पसंदीदा कमांड हटाएं? यह पूर्ववत नहीं हो सकता।
 theme:
   light: हल्का
   dark: गहरा

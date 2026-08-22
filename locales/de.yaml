@@ -165,6 +165,12 @@ terminal:
   add_tab: + Tab
   rename_hint: Name eingeben...
   default_name_prefix: 'Terminal '
+  favorite: Favorit
+  delete: Löschen
+  clear_favorites: Favoriten löschen
+  history_count:  Befehle im Verlauf
+  clear_favorites_title: Alle Favoriten löschen
+  clear_favorites_body: Alle Favoriten löschen? Dies kann nicht rückgängig gemacht werden.
 theme:
   light: Hell
   dark: Dunkel

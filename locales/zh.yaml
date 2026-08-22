@@ -165,6 +165,12 @@ terminal:
   add_tab: + 标签页
   rename_hint: 输入名称...
   default_name_prefix: '终端 '
+  favorite: 收藏
+  delete: 删除
+  clear_favorites: 清除收藏
+  history_count: 条历史指令
+  clear_favorites_title: 清除全部收藏指令
+  clear_favorites_body: 确认清除全部收藏指令？此操作不可恢复。
 theme:
   light: 浅色
   dark: 深色

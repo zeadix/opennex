@@ -165,6 +165,12 @@ terminal:
   add_tab: + 分頁
   rename_hint: 輸入名稱...
   default_name_prefix: '終端機 '
+  favorite: 收藏
+  delete: 刪除
+  clear_favorites: 清除收藏
+  history_count: 條歷史指令
+  clear_favorites_title: 清除全部收藏指令
+  clear_favorites_body: 確認清除全部收藏指令？此操作不可復原。
 theme:
   light: 淺色
   dark: 深色

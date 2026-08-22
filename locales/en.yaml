@@ -165,6 +165,12 @@ terminal:
   add_tab: + Tab
   rename_hint: Enter name...
   default_name_prefix: 'Terminal '
+  favorite: Favorite
+  delete: Delete
+  clear_favorites: Clear Favorites
+  history_count:  history commands
+  clear_favorites_title: Clear All Favorite Commands
+  clear_favorites_body: Clear all favorite commands? This cannot be undone.
 theme:
   light: Light
   dark: Dark

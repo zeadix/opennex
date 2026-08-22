@@ -106,6 +106,22 @@ fn shell_integration_sequence(_shell: &str) -> Vec<u8> {
     Vec::new()
 }
 
+/// Strip the shell prompt from a (possibly wrap-merged) line, returning
+/// the command text after it.
+///
+/// The terminator is "$ " / "# " normally, but readline SWALLOWS a
+/// line-end space when the prompt wraps at a row boundary, so the bare
+/// "$"/"#" is the fallback. Without it, commands typed right after a
+/// resize-induced wrap were never recorded (empty command → skipped).
+pub fn strip_prompt(line: &str) -> Option<&str> {
+    if let Some(p) = line.rfind("$ ").or_else(|| line.rfind("# ")) {
+        return Some(&line[p + 2..]);
+    }
+    line.rfind('$')
+        .or_else(|| line.rfind('#'))
+        .map(|p| &line[p + 1..])
+}
+
 impl TerminalInstance {
     pub fn create(
         ctx: &egui::Context,
@@ -226,6 +242,16 @@ impl TerminalInstance {
     }
 
     pub fn get_current_line(&mut self) -> String {
+        self.get_current_line_with_col().0
+    }
+
+    /// Reassemble the cursor's logical row (wrapped rows joined) AND the
+    /// cursor's column within that logical row. The logical column is the
+    /// physical column offset by the total width of every wrapped row
+    /// above the cursor's physical row — using the raw physical column
+    /// against the joined line chopped the word at the wrong place
+    /// whenever the PROMPT itself wrapped (narrow split panes).
+    pub fn get_current_line_with_col(&mut self) -> (String, usize) {
         use alacritty_terminal::grid::Dimensions;
         self.backend.set_dirty();
         let content = self.backend.sync();
@@ -244,47 +270,100 @@ impl TerminalInstance {
             text
         };
 
-        // A long command wraps across several grid rows. Walk UP from the
-        // cursor row: a row is a wrapped continuation of the row below it
-        // when that lower row was completely filled (the shell only wraps
-        // when it hits the last column) AND the current row doesn't look
-        // like a fresh prompt. This reconstructs the full logical line
-        // instead of just the cursor's physical row (which truncated
-        // wrapped commands to their last visual row).
-        let cols = grid.columns() as i32;
+        // A long line (prompt and/or command) wraps across several grid
+        // rows. Walk UP from the cursor row and merge predecessor rows.
+        // Four merge shapes must all work:
+        //   1. The row above is FULL of content → classic wrap.
+        //   2. The row above (or the current top) ends with the prompt
+        //      terminator ("$"/"#" as the last non-padding char) → the
+        //      prompt was wrapped away from its command. Content spaces
+        //      at a row boundary are indistinguishable from grid padding,
+        //      which defeated cell-counting heuristics.
+        //   3. After a SIGWINCH redraw the cursor can sit on an EMPTY row
+        //      directly below the row that actually holds the text (with
+        //      duplicated prompt rows above it) — merge up whenever the
+        //      current top row has no content at all.
+        //   4. Right after a resize, readline can scatter the typed
+        //      command across MULTIPLE short rows below the prompt row
+        //      (one char per row in the worst case). Every row between
+        //      the prompt-terminator row and the cursor belongs to the
+        //      command: once a terminator row is found, keep merging up
+        //      to (and including) it.
+        let cols_i32 = grid.columns() as i32;
+        let row_content = |line: i32| -> String { read_row(line).trim_end().to_string() };
+        let ends_with_prompt = |s: &str| -> bool { s.ends_with('$') || s.ends_with('#') };
         let mut start_line = cursor_point.line.0;
         let bottom_limit = -(grid.total_lines() as i32 - grid.screen_lines() as i32);
-        while start_line - 1 >= bottom_limit {
-            let row_below = read_row(start_line);
-            let trimmed_end = row_below.trim_end();
-            // The row below must be completely full for a wrap to have
-            // occurred at its end.
-            if trimmed_end.chars().count() as i32 >= cols {
-                // The row above must not be a new prompt line (prompts end
-                // with "$ " / "# " after trimming... a fresh prompt row is
-                // typically short). Only continue merging when the above
-                // row looks like the START of the wrapped text, i.e. it
-                // exists within the live screen region.
-                let above = start_line - 1;
-                if above >= -(grid.screen_lines() as i32 - 1) {
-                    start_line = above;
-                    continue;
+        loop {
+            let above = start_line - 1;
+            if above < bottom_limit || above < -(grid.screen_lines() as i32 - 1) {
+                break;
+            }
+            // Shape 3: current top is empty → take the row above, but
+            // only if IT has content (two consecutive blank rows are
+            // never a wrap; without this guard an all-blank screen would
+            // walk to the top of the scrollback).
+            if row_content(start_line).is_empty() {
+                if row_content(above).is_empty() {
+                    break;
                 }
+                start_line = above;
+                continue;
+            }
+            let above_content = row_content(above);
+            // Shape 4: right after a resize, readline can scatter the
+            // typed command across MULTIPLE short rows below the prompt
+            // row (one char per row in the worst case). Probe a few rows
+            // up for the prompt-terminator row; if found, absorb every
+            // row from there down to the cursor.
+            let mut probe = above;
+            let mut prompt_line: Option<i32> = None;
+            for _ in 0..4 {
+                if probe < bottom_limit || probe < -(grid.screen_lines() as i32 - 1) {
+                    break;
+                }
+                if ends_with_prompt(&row_content(probe)) {
+                    prompt_line = Some(probe);
+                    break;
+                }
+                probe -= 1;
+            }
+            if let Some(pl) = prompt_line {
+                start_line = pl;
+                break;
+            }
+            // Shape 1: the row above is full of content → wrapped.
+            if above_content.chars().count() as i32 >= cols_i32 {
+                start_line = above;
+                continue;
             }
             break;
         }
 
         // Read from the topmost wrapped row down to the cursor row and
-        // concatenate; wrapped rows have no trailing newline in the logical
-        // line, so a plain concatenation of the raw cell text is correct.
+        // concatenate. Trailing spaces of NON-final rows are grid
+        // padding (a wrapped row's content ends at its last column);
+        // trimming them per-row keeps fragment rows like "c" + "d" from
+        // joining as "c<72 spaces>d". The FINAL row keeps its raw text —
+        // a user-typed trailing space ("cd ") must survive — and the
+        // overall result is trim_end'ed once below.
         let mut text = String::new();
         let mut l = start_line;
         while l <= cursor_point.line.0 {
-            text.push_str(&read_row(l));
+            let row = read_row(l);
+            if l < cursor_point.line.0 {
+                text.push_str(row.trim_end());
+            } else {
+                text.push_str(&row);
+            }
             l += 1;
         }
+        // Cursor's LOGICAL column: physical column plus the width of every
+        // visual row above the cursor's row within the wrap group.
+        let rows_above = (cursor_point.line.0 - start_line).max(0) as usize;
+        let logical_col = rows_above * grid.columns() + cursor_point.column.0;
         // Trailing spaces from the cursor row are padding, not content.
-        text.trim_end().to_string()
+        (text.trim_end().to_string(), logical_col)
     }
 
     /// The text the user is currently typing (for the auto-match overlay):
@@ -292,25 +371,19 @@ impl TerminalInstance {
     /// padding stripped. Spaces participate: "cd " (typed space kept)
     /// only matches history entries whose text starts with "cd ".
     pub fn current_input_word(&mut self) -> String {
-        use alacritty_terminal::grid::Dimensions;
-        self.backend.set_dirty();
-        let content = self.backend.sync();
-        let grid = &content.grid;
-        let cursor = content.grid.cursor.point;
+        // Read the cursor's logical row (with wrapped rows joined) and the
+        // cursor's LOGICAL column within it.
+        let (line, logical_col) = self.get_current_line_with_col();
+        let after_prompt = strip_prompt(&line).unwrap_or("");
 
-        // Read the cursor's logical row (with wrapped rows joined).
-        let line = self.get_current_line();
-        let after_prompt = line
-            .rfind("$ ")
-            .or_else(|| line.rfind("# "))
-            .map(|p| &line[p + 2..])
-            .unwrap_or("");
-
-        // Clip to the cursor position: grid padding lives to the RIGHT of
+        // Clip at the logical column: grid padding lives to the RIGHT of
         // the cursor, so this alone removes it. NO trim_end — the user's
         // typed trailing space ("cd ") must survive so it participates in
         // the prefix match (bare "cd"/"cdd" then correctly fail to match).
-        let cursor_col = cursor.column.0;
+        // The prompt length must be counted in CHARS (columns are
+        // char-based), not bytes — prompts may contain multi-byte text.
+        let prompt_chars = line.chars().count() - after_prompt.chars().count();
+        let cursor_col = logical_col.saturating_sub(prompt_chars);
         let chars: Vec<char> = after_prompt.chars().collect();
         if cursor_col < chars.len() {
             chars[..cursor_col].iter().collect()
@@ -460,13 +533,177 @@ mod tests {
     }
 
     #[test]
+    fn current_input_word_returns_full_text_when_command_wraps() {
+        // Auto-match reads the word via current_input_word: it clips the
+        // reassembled logical line at the CURSOR'S PHYSICAL column. When
+        // the command wraps onto a second visual row, that column is a
+        // small number again, chopping the word — auto-match then sees a
+        // bogus prefix and the suggestion list goes empty.
+        let mut instance =
+            TerminalInstance::create(&egui::Context::default(), 3, "/bin/sh", "/tmp", 20, 24)
+                .expect("shell should start");
+
+        let long = "abcdefghijklmnopqrstuvwxy";
+        instance.write(long.as_bytes());
+        for _ in 0..40 {
+            std::thread::sleep(std::time::Duration::from_millis(25));
+            instance.backend.set_dirty();
+            let _ = instance.backend.sync();
+        }
+
+        let word = instance.current_input_word();
+        assert!(
+            word.contains("abcdefghijklmnopqrst"),
+            "wrapped command word must survive the cursor-clip, got: {word:?}"
+        );
+    }
+
+    #[test]
+    fn current_input_word_survives_wrapped_long_prompt() {
+        // Narrow split panes wrap a LONG prompt (user@host:~/long/path$)
+        // onto a second visual row. The word must still come out as the
+        // typed text: the clip has to use the cursor's LOGICAL column,
+        // not its physical column on the wrapped row.
+        let mut instance =
+            TerminalInstance::create(&egui::Context::default(), 4, "bash", "/tmp", 20, 24)
+                .expect("shell should start");
+
+        // Install a 40-char prompt in a 20-col grid → the prompt alone
+        // wraps onto 2+ rows.
+        instance.write(b"export PS1='kunpengwang@test-Victus-by-HP-Gaming-Laptop-16-r0xxx:~/proj/my/open_zoo$ '
+");
+        // Let the shell apply it.
+        for _ in 0..30 {
+            std::thread::sleep(std::time::Duration::from_millis(25));
+            instance.backend.set_dirty();
+            let _ = instance.backend.sync();
+        }
+
+        instance.write(b"cd");
+        for _ in 0..40 {
+            std::thread::sleep(std::time::Duration::from_millis(25));
+            instance.backend.set_dirty();
+            let _ = instance.backend.sync();
+        }
+
+        let word = instance.current_input_word();
+        assert!(
+            word.contains("cd"),
+            "word after a wrapped long prompt must be the typed text, got: {word:?}"
+        );
+    }
+
+    #[test]
+    fn current_input_word_matches_in_wrapped_prompt_narrow_pane() {
+        // REAL geometry of a narrow pane: a 73-char visible prompt (long
+        // hostname + deep cwd). Sweep the grid width across the critical
+        // boundary values (including widths where the prompt ends EXACTLY
+        // at a row boundary — the case that used to defeat the wrap merge
+        // and silently disabled auto-match), each time running the exact
+        // user sequence cd⏎ cdd⏎ c and requiring the word "c" back.
+        for cols in [40u16, 45, 48, 50, 52, 55, 60, 72, 73, 74, 80] {
+            let mut instance =
+                TerminalInstance::create(&egui::Context::default(), 9, "bash", "/tmp", cols, 24)
+                    .expect("shell should start");
+            // create() ignores its cols/rows args (grid starts 80x50), so
+            // resize FIRST like a real pane resize would.
+            instance
+                .backend
+                .process_command(egui_term::BackendCommand::Resize(
+                    egui_term::Size::from(egui::vec2(cols as f32 * 10.0, 400.0)),
+                    egui_term::Size::from(egui::vec2(10.0, 20.0)),
+                ));
+            std::thread::sleep(std::time::Duration::from_millis(400));
+            instance.backend.set_dirty();
+            let _ = instance.backend.sync();
+            instance.write(b"export PS1='kunpengwang@test-Victus-by-HP-Gaming-Laptop-16-r0xxx:~/proj/my/open_zoo$ '\r");
+            for _ in 0..30 {
+                std::thread::sleep(std::time::Duration::from_millis(25));
+                instance.backend.set_dirty();
+                let _ = instance.backend.sync();
+            }
+            for cmd in ["cd\r", "cdd\r"] {
+                instance.write(cmd.as_bytes());
+                for _ in 0..20 {
+                    std::thread::sleep(std::time::Duration::from_millis(25));
+                    instance.backend.set_dirty();
+                    let _ = instance.backend.sync();
+                }
+            }
+            instance.write(b"c");
+            for _ in 0..30 {
+                std::thread::sleep(std::time::Duration::from_millis(25));
+                instance.backend.set_dirty();
+                let _ = instance.backend.sync();
+            }
+            let word = instance.current_input_word();
+            assert_eq!(
+                word, "c",
+                "auto-match word at grid width {cols} (wrapped prompt)"
+            );
+        }
+    }
+
+    #[test]
+    fn current_input_word_after_shrinking_a_wide_pane() {
+        // REAL user sequence: the prompt and history were entered while
+        // the pane was WIDE; the pane is then DRAGGED NARROW (SIGWINCH →
+        // readline redraws the wrapped prompt); typing must still match.
+        // This differs from starting narrow: the redraw leaves a
+        // different grid state than a fresh narrow print.
+        for cols in [40u16, 45, 48, 50, 52, 55, 60, 72, 73, 74] {
+            let mut instance =
+                TerminalInstance::create(&egui::Context::default(), 10, "bash", "/tmp", 80, 24)
+                    .expect("shell should start");
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            instance.backend.set_dirty();
+            let _ = instance.backend.sync();
+            instance.write(b"export PS1='kunpengwang@test-Victus-by-HP-Gaming-Laptop-16-r0xxx:~/proj/my/open_zoo$ '\r");
+            for _ in 0..30 {
+                std::thread::sleep(std::time::Duration::from_millis(25));
+                instance.backend.set_dirty();
+                let _ = instance.backend.sync();
+            }
+            for cmd in ["cd\r", "cdd\r"] {
+                instance.write(cmd.as_bytes());
+                for _ in 0..20 {
+                    std::thread::sleep(std::time::Duration::from_millis(25));
+                    instance.backend.set_dirty();
+                    let _ = instance.backend.sync();
+                }
+            }
+            // NOW shrink the pane (like dragging the splitter).
+            instance
+                .backend
+                .process_command(egui_term::BackendCommand::Resize(
+                    egui_term::Size::from(egui::vec2(cols as f32 * 10.0, 400.0)),
+                    egui_term::Size::from(egui::vec2(10.0, 20.0)),
+                ));
+            // Give readline time to redraw the wrapped prompt.
+            for _ in 0..30 {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                instance.backend.set_dirty();
+                let _ = instance.backend.sync();
+            }
+            instance.write(b"c");
+            for _ in 0..30 {
+                std::thread::sleep(std::time::Duration::from_millis(25));
+                instance.backend.set_dirty();
+                let _ = instance.backend.sync();
+            }
+            let word = instance.current_input_word();
+            let word = instance.current_input_word();
+            assert_eq!(word, "c", "auto-match word after shrinking to width {cols}");
+        }
+    }
+
+    #[test]
     fn prompt_stripping_records_only_the_command() {
         // The recorder keeps only the text AFTER the last "$ "/"# " prompt
         // terminator; a line with no prompt marker records nothing.
         let strip = |line: &str| {
-            line.rfind("$ ")
-                .or_else(|| line.rfind("# "))
-                .map(|p| line[p + 2..].trim().to_string())
+            crate::terminal::strip_prompt(line)
+                .map(|s| s.trim().to_string())
                 .unwrap_or_default()
         };
         assert_eq!(strip("user@host:~/proj$ ls -la"), "ls -la");
@@ -476,5 +713,53 @@ mod tests {
         assert_eq!(strip("user@host:~/very/long/path$ echo done"), "echo done");
         // No prompt marker -> record nothing (never the raw line).
         assert_eq!(strip("just some output text"), "");
+        // Resize-wrap: readline swallows the line-end space after "$";
+        // the bare-terminator fallback must still yield the command.
+        assert_eq!(strip("user@host:~/very/long/path$cd"), "cd");
+        assert_eq!(strip("root#reboot"), "reboot");
+    }
+
+    #[test]
+    fn records_command_typed_right_after_narrowing() {
+        // Regression: narrowing the pane makes the first typed character
+        // wrap onto the next row (readline ate the line-end space), and
+        // the Enter-recorder must STILL record the full command.
+        let mut instance =
+            TerminalInstance::create(&egui::Context::default(), 11, "bash", "/tmp", 80, 24)
+                .expect("shell should start");
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        instance.backend.set_dirty();
+        let _ = instance.backend.sync();
+        instance.write(b"export PS1='kunpengwang@test-Victus-by-HP-Gaming-Laptop-16-r0xxx:~/proj/my/open_zoo$ '\r");
+        for _ in 0..30 {
+            std::thread::sleep(std::time::Duration::from_millis(25));
+            instance.backend.set_dirty();
+            let _ = instance.backend.sync();
+        }
+        // Narrow until the prompt fills a row exactly (73 visible chars).
+        instance
+            .backend
+            .process_command(egui_term::BackendCommand::Resize(
+                egui_term::Size::from(egui::vec2(730.0, 400.0)),
+                egui_term::Size::from(egui::vec2(10.0, 20.0)),
+            ));
+        for _ in 0..20 {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            instance.backend.set_dirty();
+            let _ = instance.backend.sync();
+        }
+        // Type the command; the first char may land on the wrapped row.
+        instance.write(b"cd");
+        for _ in 0..30 {
+            std::thread::sleep(std::time::Duration::from_millis(25));
+            instance.backend.set_dirty();
+            let _ = instance.backend.sync();
+        }
+        // Same extraction the Enter-recorder performs.
+        let line = instance.get_current_line();
+        let cmd = crate::terminal::strip_prompt(&line)
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default();
+        assert_eq!(cmd, "cd", "line was: {line:?}");
     }
 }

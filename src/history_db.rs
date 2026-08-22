@@ -57,7 +57,12 @@ impl HistoryDb {
                 command TEXT NOT NULL,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             );
-            CREATE INDEX IF NOT EXISTS idx_terminal ON command_history(terminal_id);",
+            CREATE INDEX IF NOT EXISTS idx_terminal ON command_history(terminal_id);
+            CREATE TABLE IF NOT EXISTS favorite_commands (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                command TEXT NOT NULL UNIQUE,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );",
         )
         .expect("Failed to create history table");
         Self { conn, max_entries }
@@ -152,5 +157,99 @@ impl HistoryDb {
 
     pub fn set_max_entries(&mut self, max: usize) {
         self.max_entries = max;
+    }
+
+    // ---- Global favorite commands (shared across ALL terminals) ----
+
+    /// Add a command to the global favorites (idempotent, newest-first on
+    /// re-add via delete+insert like the history table).
+    pub fn fav_add(&self, command: &str) {
+        let trimmed = command.trim();
+        if trimmed.is_empty() || trimmed.len() <= 1 {
+            return;
+        }
+        let Ok(tx) = self.conn.unchecked_transaction() else {
+            return;
+        };
+        if tx
+            .execute(
+                "DELETE FROM favorite_commands WHERE command = ?1",
+                params![trimmed],
+            )
+            .is_err()
+            || tx
+                .execute(
+                    "INSERT INTO favorite_commands (command) VALUES (?1)",
+                    params![trimmed],
+                )
+                .is_err()
+        {
+            let _ = tx.rollback();
+            return;
+        }
+        let _ = tx.commit();
+    }
+
+    /// Remove a command from the global favorites.
+    pub fn fav_remove(&self, command: &str) {
+        self.conn
+            .execute(
+                "DELETE FROM favorite_commands WHERE command = ?1",
+                params![command],
+            )
+            .ok();
+    }
+
+    /// All favorite commands, newest first.
+    pub fn fav_all(&self) -> Vec<String> {
+        let Ok(mut stmt) = self
+            .conn
+            .prepare("SELECT command FROM favorite_commands ORDER BY id DESC")
+        else {
+            return Vec::new();
+        };
+        stmt.query_map([], |row| row.get::<_, String>(0))
+            .map(|rows| rows.flatten().collect())
+            .unwrap_or_default()
+    }
+
+    pub fn fav_clear(&self) {
+        self.conn.execute("DELETE FROM favorite_commands", []).ok();
+    }
+
+    /// Delete ONE occurrence of a command from a terminal's history
+    /// (the row currently visible at that position in newest-first order).
+    pub fn remove_entry(&self, terminal_id: &str, index_from_newest: usize) {
+        // Deduplicate in newest-first order, same as `get`, then locate
+        // the unique command at the requested index and delete ALL its
+        // rows (the list shows unique commands).
+        let mut seen = std::collections::HashSet::new();
+        let mut target: Option<String> = None;
+        let commands: Vec<String> = {
+            let Ok(mut stmt) = self.conn.prepare(
+                "SELECT command FROM command_history WHERE terminal_id = ?1 ORDER BY id DESC",
+            ) else {
+                return;
+            };
+            stmt.query_map(params![terminal_id], |row| row.get::<_, String>(0))
+                .map(|rows| rows.flatten().collect())
+                .unwrap_or_default()
+        };
+        for c in commands {
+            if seen.insert(c.clone()) {
+                if seen.len() - 1 == index_from_newest {
+                    target = Some(c);
+                    break;
+                }
+            }
+        }
+        if let Some(cmd) = target {
+            self.conn
+                .execute(
+                    "DELETE FROM command_history WHERE terminal_id = ?1 AND command = ?2",
+                    params![terminal_id, cmd],
+                )
+                .ok();
+        }
     }
 }
