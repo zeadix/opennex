@@ -117,9 +117,22 @@ pub fn strip_prompt(line: &str) -> Option<&str> {
     if let Some(p) = line.rfind("$ ").or_else(|| line.rfind("# ")) {
         return Some(&line[p + 2..]);
     }
-    line.rfind('$')
-        .or_else(|| line.rfind('#'))
-        .map(|p| &line[p + 1..])
+    if let Some(p) = line.rfind('$').or_else(|| line.rfind('#')) {
+        return Some(&line[p + 1..]);
+    }
+    // Windows shells have no "$"/"#": cmd.exe prints "C:\path>" and
+    // PowerShell "PS C:\path>". The PROMPT's ">" is the FIRST one on the
+    // line (the prompt leads the line); any later ">" belongs to the
+    // command (redirection). Scan forward and take the first ">" whose
+    // preceding text carries a drive/path signature ("X:\"), matching
+    // prompt-then-command structure.
+    if let Some(p) = line.find('>') {
+        let before = &line[..p];
+        if before.contains(":\\") || before.contains(":/") || before.ends_with(':') {
+            return Some(&line[p + 1..]);
+        }
+    }
+    None
 }
 
 impl TerminalInstance {
@@ -698,6 +711,23 @@ mod tests {
     }
 
     #[test]
+    fn cmd_exe_prompt_lines_yield_the_typed_word() {
+        // Windows cmd.exe prompt "C:\path>": the word extraction must
+        // return the typed text after the ">" terminator (no "$"/"#"
+        // exists there). Pure string-level check of the same helpers
+        // current_input_word uses.
+        let cases = [
+            (r"C:\Users\kunpengwang>cd", "cd"),
+            (r"C:\Users\kunpengwang>cdd", "cdd"),
+            (r"C:\Users\kunpengwang>", ""),
+        ];
+        for (line, want) in cases {
+            let got = crate::terminal::strip_prompt(line).unwrap_or("");
+            assert_eq!(got, want, "line={line:?}");
+        }
+    }
+
+    #[test]
     fn prompt_stripping_records_only_the_command() {
         // The recorder keeps only the text AFTER the last "$ "/"# " prompt
         // terminator; a line with no prompt marker records nothing.
@@ -717,6 +747,19 @@ mod tests {
         // the bare-terminator fallback must still yield the command.
         assert_eq!(strip("user@host:~/very/long/path$cd"), "cd");
         assert_eq!(strip("root#reboot"), "reboot");
+        // Windows cmd.exe prompt "C:\path>" and PowerShell "PS C:\path>".
+        assert_eq!(strip("C:\\Users\\kunpengwang>dir"), "dir");
+        assert_eq!(
+            strip("PS C:\\Users\\kunpengwang>Get-ChildItem"),
+            "Get-ChildItem"
+        );
+        // ">" WITHOUT a path signature is redirection, not a prompt —
+        // the command must not be cut at it.
+        assert_eq!(strip("echo hi > out.txt"), "");
+        // Prompt followed by a command WITH redirection: the FIRST ">"
+        // (the prompt's) terminates the prompt; the recorded command
+        // keeps its own redirection.
+        assert_eq!(strip("C:\\proj>echo hi > out.txt"), "echo hi > out.txt");
     }
 
     #[test]
