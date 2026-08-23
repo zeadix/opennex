@@ -12,6 +12,7 @@ mod completion;
 mod history_db;
 mod i18n;
 mod proc_stats;
+mod shells;
 mod terminal;
 mod theme;
 mod updater;

@@ -143,6 +143,7 @@ impl TerminalInstance {
         cwd: &str,
         _cols: u16,
         _rows: u16,
+        extra_args: &[String],
     ) -> Option<Self> {
         // Make sure the per-shell init file exists, then point the shell
         // at it. For bash we pass `--rcfile`; for zsh we override
@@ -151,7 +152,11 @@ impl TerminalInstance {
         let init_file = ensure_shell_init_file(shell);
         let mut args: Vec<String> = Vec::new();
         let mut zdotdir: Option<std::path::PathBuf> = None;
-        if let Some(path) = &init_file {
+        // Caller-provided bootstrap args (e.g. cmd /k vcvars64.bat for
+        // the VS developer prompt) take precedence on non-Unix shells.
+        if !extra_args.is_empty() {
+            args = extra_args.to_vec();
+        } else if let Some(path) = &init_file {
             if shell.contains("bash") {
                 // bash: --rcfile must precede -i; with this ordering the
                 // shell starts, shows the user prompt (the rcfile chains
@@ -501,7 +506,7 @@ mod tests {
     #[test]
     fn poll_cwd_reads_the_shell_process_directory() {
         let mut instance =
-            TerminalInstance::create(&egui::Context::default(), 1, "/bin/sh", "/tmp", 80, 24)
+            TerminalInstance::create(&egui::Context::default(), 1, "/bin/sh", "/tmp", 80, 24, &[])
                 .expect("shell should start");
 
         instance.write(b"cd /\r");
@@ -522,7 +527,7 @@ mod tests {
         // recorded command must contain the FULL text, not just the last
         // visual row.
         let mut instance =
-            TerminalInstance::create(&egui::Context::default(), 2, "/bin/sh", "/tmp", 20, 24)
+            TerminalInstance::create(&egui::Context::default(), 2, "/bin/sh", "/tmp", 20, 24, &[])
                 .expect("shell should start");
 
         // Long word: wraps across at least two 20-col rows. Type it but do
@@ -553,7 +558,7 @@ mod tests {
         // small number again, chopping the word — auto-match then sees a
         // bogus prefix and the suggestion list goes empty.
         let mut instance =
-            TerminalInstance::create(&egui::Context::default(), 3, "/bin/sh", "/tmp", 20, 24)
+            TerminalInstance::create(&egui::Context::default(), 3, "/bin/sh", "/tmp", 20, 24, &[])
                 .expect("shell should start");
 
         let long = "abcdefghijklmnopqrstuvwxy";
@@ -578,7 +583,7 @@ mod tests {
         // typed text: the clip has to use the cursor's LOGICAL column,
         // not its physical column on the wrapped row.
         let mut instance =
-            TerminalInstance::create(&egui::Context::default(), 4, "bash", "/tmp", 20, 24)
+            TerminalInstance::create(&egui::Context::default(), 4, "bash", "/tmp", 20, 24, &[])
                 .expect("shell should start");
 
         // Install a 40-char prompt in a 20-col grid → the prompt alone
@@ -615,9 +620,16 @@ mod tests {
         // and silently disabled auto-match), each time running the exact
         // user sequence cd⏎ cdd⏎ c and requiring the word "c" back.
         for cols in [40u16, 45, 48, 50, 52, 55, 60, 72, 73, 74, 80] {
-            let mut instance =
-                TerminalInstance::create(&egui::Context::default(), 9, "bash", "/tmp", cols, 24)
-                    .expect("shell should start");
+            let mut instance = TerminalInstance::create(
+                &egui::Context::default(),
+                9,
+                "bash",
+                "/tmp",
+                cols,
+                24,
+                &[],
+            )
+            .expect("shell should start");
             // create() ignores its cols/rows args (grid starts 80x50), so
             // resize FIRST like a real pane resize would.
             instance
@@ -665,9 +677,16 @@ mod tests {
         // This differs from starting narrow: the redraw leaves a
         // different grid state than a fresh narrow print.
         for cols in [40u16, 45, 48, 50, 52, 55, 60, 72, 73, 74] {
-            let mut instance =
-                TerminalInstance::create(&egui::Context::default(), 10, "bash", "/tmp", 80, 24)
-                    .expect("shell should start");
+            let mut instance = TerminalInstance::create(
+                &egui::Context::default(),
+                10,
+                "bash",
+                "/tmp",
+                80,
+                24,
+                &[],
+            )
+            .expect("shell should start");
             std::thread::sleep(std::time::Duration::from_millis(300));
             instance.backend.set_dirty();
             let _ = instance.backend.sync();
@@ -768,7 +787,7 @@ mod tests {
         // wrap onto the next row (readline ate the line-end space), and
         // the Enter-recorder must STILL record the full command.
         let mut instance =
-            TerminalInstance::create(&egui::Context::default(), 11, "bash", "/tmp", 80, 24)
+            TerminalInstance::create(&egui::Context::default(), 11, "bash", "/tmp", 80, 24, &[])
                 .expect("shell should start");
         std::thread::sleep(std::time::Duration::from_millis(300));
         instance.backend.set_dirty();

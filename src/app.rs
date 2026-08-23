@@ -5,6 +5,8 @@ use std::path::PathBuf;
 
 use crate::terminal::TerminalInstance;
 
+static DEFAULT_SHELL_ID: std::sync::RwLock<String> = std::sync::RwLock::new(String::new());
+
 const DEFAULT_FONT_SIZE: f32 = 14.0;
 const MIN_FONT_SIZE: f32 = 8.0;
 const MAX_FONT_SIZE: f32 = 32.0;
@@ -34,6 +36,14 @@ struct AppSettings {
     auto_copy_selection: bool,
     #[serde(default = "default_true")]
     auto_match_command: bool,
+    /// Preferred shell for NEW terminals (id into the detected shell
+    /// list; only meaningful on Windows where multiple shells exist).
+    #[serde(default = "default_shell_pref")]
+    default_shell: String,
+}
+
+fn default_shell_pref() -> String {
+    "cmd".into()
 }
 
 fn default_theme_id() -> String {
@@ -936,6 +946,7 @@ impl Default for AppSettings {
             apply_theme_typography: true,
             auto_copy_selection: true,
             auto_match_command: true,
+            default_shell: default_shell_pref(),
         }
     }
 }
@@ -1003,6 +1014,9 @@ struct TerminalStatePersist {
     name: String,
     font_size: f32,
     working_directory: String,
+    /// Shell id the terminal was spawned with (restored on scene load).
+    #[serde(default)]
+    shell: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1198,6 +1212,14 @@ pub struct App {
     /// The grid lags the keypress by ≥1 frame, so the matcher matches
     /// grid_word + pending; entries are consumed as the grid catches up.
     auto_match_pending: std::collections::HashMap<String, String>,
+    /// Shell choice for the NEXT created terminal (set by the new-terminal
+    /// dropdown; cleared once consumed).
+    pending_shell: Option<crate::shells::ShellOption>,
+    /// Shell id consumed by the last create_terminal_inner call (used to
+    /// stamp TerminalData.shell_id for scene persistence).
+    pending_shell_last: Option<String>,
+    /// Shells detected at startup (Windows: cmd/powershell/pwsh/vs/wsl).
+    detected_shells: Vec<crate::shells::ShellOption>,
     show_update_dialog: bool,
     update_dialog_info: Option<crate::updater::UpdateInfo>,
     skipped_versions: std::collections::HashSet<String>,
@@ -1226,19 +1248,48 @@ struct TerminalData {
     instance: TerminalInstance,
     name: String,
     font_size: f32,
+    /// Shell id this terminal was spawned with (scene persistence).
+    shell_id: String,
 }
 
 fn create_terminal(
     ctx: &egui::Context,
     working_dir: &str,
     id_counter: &mut u64,
+    shell: Option<&crate::shells::ShellOption>,
 ) -> Option<TerminalInstance> {
-    #[cfg(target_os = "windows")]
-    let shell = std::env::var("COMSPEC").unwrap_or_else(|_| "powershell.exe".to_string());
-    #[cfg(target_os = "macos")]
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
-    #[cfg(all(unix, not(target_os = "macos")))]
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
+    // Explicit shell choice (new-terminal menu / scene restore) wins;
+    // otherwise the platform default (Unix: $SHELL, Windows: the
+    // settings' default shell resolved against the detected list).
+    let detected = crate::shells::detect_shells();
+    let default_id = match DEFAULT_SHELL_ID.read() {
+        Ok(g) if !g.is_empty() => g.clone(),
+        _ => "cmd".to_string(),
+    };
+    let shell = shell
+        .cloned()
+        .or_else(|| {
+            detected
+                .iter()
+                .find(|s| s.id == default_id)
+                .or_else(|| detected.first())
+                .cloned()
+        })
+        .or_else(|| {
+            #[cfg(target_os = "windows")]
+            {
+                Some(crate::shells::ShellOption {
+                    id: "cmd",
+                    name_key: "cmd",
+                    program: std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".into()),
+                    args: vec![],
+                })
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                None
+            }
+        })?;
 
     let cwd_str = if std::path::PathBuf::from(working_dir).exists() {
         working_dir.to_string()
@@ -1251,7 +1302,7 @@ fn create_terminal(
     *id_counter += 1;
     let id = *id_counter;
 
-    TerminalInstance::create(ctx, id, &shell, &cwd_str, 80, 24)
+    TerminalInstance::create(ctx, id, &shell.program, &cwd_str, 80, 24, &shell.args)
 }
 
 fn build_panel_state(app: &mut App, panel_idx: usize) -> Option<WorkspaceState> {
@@ -1266,6 +1317,7 @@ fn build_panel_state(app: &mut App, panel_idx: usize) -> Option<WorkspaceState> 
                 name: data.name.clone(),
                 font_size: data.font_size,
                 working_directory: data.instance.cwd.clone(),
+                shell: data.shell_id.clone(),
             },
         );
     }
@@ -1307,6 +1359,7 @@ fn build_scene_state(app: &mut App) -> SceneState {
                     name: data.name.clone(),
                     font_size: data.font_size,
                     working_directory: data.instance.cwd.clone(),
+                    shell: data.shell_id.clone(),
                 },
             );
         }
@@ -1356,6 +1409,14 @@ impl App {
     pub fn new(cc: &eframe::CreationContext) -> Self {
         let settings = load_settings();
         let ctx = &cc.egui_ctx.clone();
+        // Shell discovery (Windows multi-shell support) + publish the
+        // settings' default for create_terminal's fallback path.
+        let detected_shells = crate::shells::detect_shells();
+        if let Ok(mut guard) = DEFAULT_SHELL_ID.write() {
+            if guard.is_empty() {
+                *guard = settings.default_shell.clone();
+            }
+        }
 
         ensure_data_dir();
         migrate_file("settings.json");
@@ -1476,6 +1537,9 @@ impl App {
             history_clear_confirm: None,
             history_menu_just_closed: Default::default(),
             auto_match_pending: Default::default(),
+            pending_shell: None,
+            pending_shell_last: None,
+            detected_shells,
             show_update_dialog: false,
             update_dialog_info: None,
             skipped_versions: std::collections::HashSet::new(),
@@ -1520,6 +1584,7 @@ impl App {
                             ctx,
                             &tstate.working_directory,
                             &mut app.terminal_id_counter,
+                            None,
                         ) else {
                             continue;
                         };
@@ -1529,6 +1594,7 @@ impl App {
                                 instance,
                                 name: tstate.name.clone(),
                                 font_size: tstate.font_size,
+                                shell_id: tstate.shell.clone(),
                             },
                         );
                         if let Some(n) = _id
@@ -1660,6 +1726,7 @@ impl App {
                     ctx,
                     &tstate.working_directory,
                     &mut self.terminal_id_counter,
+                    None,
                 ) else {
                     continue;
                 };
@@ -1669,6 +1736,7 @@ impl App {
                         instance,
                         name: tstate.name.clone(),
                         font_size: tstate.font_size,
+                        shell_id: tstate.shell.clone(),
                     },
                 );
             }
@@ -1690,17 +1758,32 @@ impl App {
         let cwd = std::env::current_dir()
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_default();
-        let instance = create_terminal(ctx, &cwd, &mut self.terminal_id_counter)?;
+        // Remember which shell id this terminal uses (scene persistence);
+        // create_terminal consumes the option.
+        self.pending_shell_last = self.pending_shell.as_ref().map(|s| s.id.to_string());
+        let instance = create_terminal(
+            ctx,
+            &cwd,
+            &mut self.terminal_id_counter,
+            self.pending_shell.take().as_ref(),
+        )?;
         let random_suffix: String = uuid::Uuid::new_v4().as_bytes()[0..3]
             .iter()
             .map(|b| format!("{:02x}", b))
             .collect();
+        let shell_id_used = self.pending_shell_last.take().unwrap_or_else(|| {
+            DEFAULT_SHELL_ID
+                .read()
+                .map(|g| g.clone())
+                .unwrap_or_default()
+        });
         self.terminals.insert(
             id.clone(),
             TerminalData {
                 instance,
                 name: format!("terminal-{random_suffix}"),
                 font_size: DEFAULT_FONT_SIZE,
+                shell_id: shell_id_used,
             },
         );
         if self.focused_terminal.is_none() {
@@ -1793,6 +1876,7 @@ impl App {
                                 ctx,
                                 &tstate.working_directory,
                                 &mut self.terminal_id_counter,
+                                None,
                             ) {
                                 self.terminals.insert(
                                     _id.clone(),
@@ -1800,6 +1884,7 @@ impl App {
                                         instance,
                                         name: tstate.name.clone(),
                                         font_size: tstate.font_size,
+                                        shell_id: tstate.shell.clone(),
                                     },
                                 );
                             }
@@ -2675,6 +2760,30 @@ impl App {
         });
         self.settings_edit.max_history = max_h;
         self.settings_edit.scrollback = sb;
+
+        // Default shell for NEW terminals (Windows multi-shell support;
+        // a single detected shell hides the row on other platforms).
+        if self.detected_shells.len() > 1 {
+            let mut shell_id = self.settings_edit.default_shell.clone();
+            let shells = self.detected_shells.clone();
+            self.settings_row(ui, "默认 Shell", |ui| {
+                let selected = shells.iter().position(|s| s.id == shell_id).unwrap_or(0);
+                let names: Vec<String> = shells.iter().map(shell_display_name).collect();
+                let mut chosen = selected;
+                egui::ComboBox::from_id_salt("default_shell")
+                    .selected_text(&names[selected])
+                    .width(180.0)
+                    .show_ui(ui, |ui| {
+                        for (i, name) in names.iter().enumerate() {
+                            ui.selectable_value(&mut chosen, i, name.clone());
+                        }
+                    });
+                if chosen != selected {
+                    shell_id = shells[chosen].id.to_string();
+                }
+            });
+            self.settings_edit.default_shell = shell_id;
+        }
 
         // Maintenance action: plain button (same style as all other
         // settings buttons), flush left, no divider; clicking opens a
@@ -5475,6 +5584,11 @@ impl eframe::App for App {
                 let _ = save_settings(&self.settings);
             }
 
+            // Keep the create_terminal fallback in sync with the chosen
+            // default shell (instant-apply pipeline).
+            if let Ok(mut guard) = DEFAULT_SHELL_ID.write() {
+                *guard = self.settings_edit.default_shell.clone();
+            }
             // Instant-apply: commit any changed settings every frame.
             if self.settings_edit != self.settings {
                 self.settings = self.settings_edit.clone();
@@ -7060,6 +7174,8 @@ impl eframe::App for App {
                                 terminal_view_rects: &mut self.terminal_view_rects,
                                 history_menu_just_closed: &mut self.history_menu_just_closed,
                                 auto_match_pending: &mut self.auto_match_pending,
+                                detected_shells: &self.detected_shells,
+                                pending_shell: &mut self.pending_shell,
                                 theme: if self.show_settings {
                                     &self.theme_edit
                                 } else {
@@ -7340,6 +7456,7 @@ mod tests {
                             name: "Terminal 2".into(),
                             font_size: 14.0,
                             working_directory: ".".into(),
+                            shell: String::new(),
                         },
                     )]
                     .into_iter()
@@ -7354,6 +7471,7 @@ mod tests {
                             name: "Terminal 1".into(),
                             font_size: 14.0,
                             working_directory: ".".into(),
+                            shell: String::new(),
                         },
                     )]
                     .into_iter()
@@ -7533,6 +7651,7 @@ mod tests {
             name: "Terminal 1".into(),
             font_size: 14.0,
             working_directory: "/tmp".into(),
+            shell: String::new(),
         };
 
         let value = serde_json::to_value(state).unwrap();
@@ -7584,6 +7703,18 @@ mod tests {
     }
 }
 
+/// Localized display name for a detected shell option.
+fn shell_display_name(s: &crate::shells::ShellOption) -> String {
+    match s.id {
+        "cmd" => "cmd".to_string(),
+        "powershell" => "Windows PowerShell".to_string(),
+        "pwsh" => "PowerShell 7".to_string(),
+        "vs-dev" => "VS 开发人员命令提示符".to_string(),
+        "wsl" => "WSL".to_string(),
+        _ => "Shell".to_string(),
+    }
+}
+
 struct TerminalTabViewer<'a> {
     terminals: &'a mut HashMap<String, TerminalData>,
     completion: &'a crate::completion::CompletionEngine,
@@ -7609,6 +7740,8 @@ struct TerminalTabViewer<'a> {
     terminal_view_rects: &'a mut std::collections::HashMap<String, egui::Rect>,
     history_menu_just_closed: &'a mut std::collections::HashMap<String, bool>,
     auto_match_pending: &'a mut std::collections::HashMap<String, String>,
+    detected_shells: &'a [crate::shells::ShellOption],
+    pending_shell: &'a mut Option<crate::shells::ShellOption>,
     theme: &'a crate::theme::ThemeDefinition,
     texts: &'a crate::i18n::Texts,
 }
@@ -7930,12 +8063,24 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
     }
 
     fn add_popup(&mut self, ui: &mut egui::Ui, surface: SurfaceIndex, node: NodeIndex) {
-        ui.horizontal(|ui| {
-            if ui.button(&self.texts.terminal.add_tab).clicked() {
-                *self.pending_new_terminal = Some((self.active_panel, surface, node));
-                ui.close_menu();
+        // Default entry (settings' default shell) first, then one entry
+        // per detected shell — Windows exposes cmd / PowerShell / pwsh /
+        // VS developer / WSL; other platforms show a single default.
+        let shells = self.detected_shells.to_vec();
+        if ui.button(&self.texts.terminal.add_tab).clicked() {
+            *self.pending_new_terminal = Some((self.active_panel, surface, node));
+            ui.close_menu();
+        }
+        if shells.len() > 1 {
+            ui.separator();
+            for s in &shells {
+                if ui.button(shell_display_name(s)).clicked() {
+                    *self.pending_shell = Some(s.clone());
+                    *self.pending_new_terminal = Some((self.active_panel, surface, node));
+                    ui.close_menu();
+                }
             }
-        });
+        }
     }
 
     fn context_menu(
