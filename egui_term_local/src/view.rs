@@ -47,6 +47,11 @@ pub struct TerminalViewState {
     is_dragged: bool,
     scroll_pixels: f32,
     /// Scrollbar thumb drag: (lines-per-pixel, offset at drag start).
+    /// In-flight scrollbar drag: (pointer Y at press, display_offset at
+    /// press). The target is computed from the TOTAL pointer travel
+    /// since the press — a per-frame delta recomputed against the
+    /// press-time offset discarded all accumulated movement and made
+    /// the thumb snap back every frame.
     scrollbar_drag: Option<(f32, usize)>,
     /// Target absolute display offset requested by the scrollbar; applied
     /// to the backend right after drawing.
@@ -62,6 +67,12 @@ pub struct TerminalViewState {
     /// dragged: pointer events must not leak into text selection behind
     /// the scrollbar.
     scrollbar_active: bool,
+    /// Latched while a scrollbar drag session is in flight (press →
+    /// release): even when the pointer LEAVES the track during the drag
+    /// (egui then reports hovered/dragged=false for the track), the
+    /// terminal must keep ignoring pointer events or the movement
+    /// re-arms text selection mid-drag.
+    scrollbar_session: bool,
     /// Pending size while layout is still changing (drag).
     pending_cols: u16,
     pending_rows: u16,
@@ -395,37 +406,72 @@ impl<'a> TerminalView<'a> {
             egui::Id::new((self.widget_id, "sb_track")),
             egui::Sense::click_and_drag(),
         );
-        // Suppress text-selection behind the scrollbar while the pointer
-        // interacts with it; a grab also cancels any in-flight text drag.
-        state.scrollbar_active = track_resp.hovered() || track_resp.dragged();
-        if state.scrollbar_active {
-            state.is_dragged = false;
-        }
         let thumb_resp = ui.interact(
             thumb.expand(3.0).intersect(track),
             egui::Id::new((self.widget_id, "sb_thumb")),
             egui::Sense::click_and_drag(),
         );
+        // Suppress text-selection behind the scrollbar while the pointer
+        // interacts with it; a grab also cancels any in-flight text drag.
+        // The SESSION latch covers the whole press→release span: while
+        // dragging, the pointer may leave the track rect (egui then
+        // reports hovered=false), and without the latch the terminal
+        // would re-arm text selection mid-drag.
+        if track_resp.drag_started() || thumb_resp.drag_started() {
+            state.scrollbar_session = true;
+        }
+        if state.scrollbar_session {
+            // Release anywhere ends the session (primary button up).
+            let released = ui.input(|i| !i.pointer.primary_down());
+            if released && !track_resp.dragged() && !thumb_resp.dragged() {
+                state.scrollbar_session = false;
+            }
+        }
+        state.scrollbar_active = track_resp.hovered()
+            || track_resp.dragged()
+            || thumb_resp.hovered()
+            || thumb_resp.dragged()
+            || state.scrollbar_session;
+        if state.scrollbar_active {
+            state.is_dragged = false;
+        }
         let hovered = thumb_resp.hovered() || track_resp.hovered();
         let dragging = state.scrollbar_drag.is_some();
 
+        // Drag handling: a press ON THE THUMB starts a drag session; the
+        // target offset is derived from the TOTAL pointer travel since
+        // the press (absolute positioning), so the thumb follows the
+        // pointer however far it moves — including outside the track.
+        // A press on empty track pages the view (click), guarded not to
+        // fire while a drag is in flight.
         if thumb_resp.drag_started() {
-            let lines_per_px = max_offset as f32 / scrollable;
-            state.scrollbar_drag = Some((lines_per_px, display_offset));
+            let start_y = thumb_resp
+                .interact_pointer_pos()
+                .or_else(|| ui.input(|i| i.pointer.interact_pos()))
+                .map(|p| p.y)
+                .unwrap_or(thumb.min.y);
+            state.scrollbar_drag = Some((start_y, display_offset));
         }
-        if let Some((lines_per_px, start_offset)) = state.scrollbar_drag {
-            if thumb_resp.dragged() {
-                let dy = ui.input(|i| i.pointer.delta().y);
-                // Thumb DOWN → offset toward 0 (newer); UP → older.
-                let delta_lines = -(dy * lines_per_px);
-                let target = (start_offset as f32 + delta_lines)
-                    .round()
-                    .clamp(0.0, max_offset as f32);
-                state.pending_scroll_to = Some(target as usize);
-            } else {
-                state.scrollbar_drag = None;
+        if state.scrollbar_session {
+            if let Some((start_y, start_offset)) = state.scrollbar_drag {
+                if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
+                    let lines_per_px = max_offset as f32 / scrollable;
+                    // Thumb DOWN → offset toward 0 (newer); UP → older.
+                    let total_dy = pos.y - start_y;
+                    let delta_lines = -(total_dy * lines_per_px);
+                    let target = (start_offset as f32 + delta_lines)
+                        .round()
+                        .clamp(0.0, max_offset as f32);
+                    state.pending_scroll_to = Some(target as usize);
+                }
             }
-        } else if track_resp.clicked() {
+        } else {
+            state.scrollbar_drag = None;
+        }
+        if !thumb_resp.drag_started()
+            && state.scrollbar_drag.is_none()
+            && track_resp.clicked()
+        {
             if let Some(p) = track_resp.interact_pointer_pos() {
                 let page = screen_lines as f32;
                 let delta = if p.y < thumb.min.y { page } else { -page };
@@ -623,7 +669,13 @@ impl<'a> TerminalView<'a> {
         painter.extend(shapes);
 
         // Scrollbar (deferred from draw_scrollbar): painted after the
-        // background/content shapes so it stays visible.
+        // background/content shapes so it stays visible. It must stay on
+        // the widget's OWN layer — painting it on a separate Foreground
+        // layer made egui's hit test resolve pointer events to that
+        // paint-only layer, silently stealing the drag from the
+        // track/thumb widgets (thumb snapped back on every drag).
+        // Selection-leak prevention is handled by the scrollbar_session
+        // latch instead.
         if let Some((track, thumb, bar_bg, thumb_col)) =
             state.pending_scrollbar.take()
         {
