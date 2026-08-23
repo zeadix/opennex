@@ -589,9 +589,14 @@ impl<Tab> DockArea<'_, Tab> {
 
         if response.clicked() {
             if self.show_add_popup {
+                // Popup mode: the click only toggles the shell-selection
+                // menu; creating the terminal is the menu's job (its
+                // default entry). Calling on_add here as well created a
+                // terminal AND opened the menu on the same click.
                 ui.memory_mut(|mem| mem.toggle_popup(popup_id));
+            } else {
+                tab_viewer.on_add(surface_index, node_index);
             }
-            tab_viewer.on_add(surface_index, node_index);
         }
     }
 

@@ -106,6 +106,7 @@ shortcut_labels:
   lock_workspace: Lock Workspace
   history_menu: History Menu
   history_prev: History Previous
+  next_terminal: Next Terminal
   history_favorite: Favorite Command
   history_delete: Delete Command
   history_next: History Next

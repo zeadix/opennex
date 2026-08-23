@@ -135,8 +135,49 @@ mod imp {
 mod imp {
     use super::*;
 
+    /// Fixed candidate locations per shell id (system paths first, then
+    /// Homebrew/Linuxbrew local prefixes).
+    const CANDIDATES: &[(&str, &[&str])] = &[
+        (
+            "bash",
+            &[
+                "/bin/bash",
+                "/usr/bin/bash",
+                "/usr/local/bin/bash",
+                "/opt/homebrew/bin/bash",
+            ],
+        ),
+        (
+            "zsh",
+            &[
+                "/bin/zsh",
+                "/usr/bin/zsh",
+                "/usr/local/bin/zsh",
+                "/opt/homebrew/bin/zsh",
+            ],
+        ),
+        (
+            "fish",
+            &[
+                "/usr/bin/fish",
+                "/usr/local/bin/fish",
+                "/opt/homebrew/bin/fish",
+            ],
+        ),
+        ("nu", &["/usr/local/bin/nu", "/opt/homebrew/bin/nu"]),
+        ("sh", &["/bin/sh", "/usr/bin/sh"]),
+    ];
+
+    fn which_on_path(program: &str) -> Option<PathBuf> {
+        let path = std::env::var_os("PATH")?;
+        std::env::split_paths(&path)
+            .map(|dir| dir.join(program))
+            .find(|candidate| candidate.is_file())
+    }
+
     pub fn detect_shells() -> Vec<ShellOption> {
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| {
+        // The login shell ($SHELL) always leads the list as "default".
+        let login = std::env::var("SHELL").unwrap_or_else(|_| {
             #[cfg(target_os = "macos")]
             {
                 "/bin/zsh".into()
@@ -146,12 +187,61 @@ mod imp {
                 "/bin/bash".into()
             }
         });
-        vec![ShellOption {
+        let mut shells = vec![ShellOption {
             id: "default",
             name_key: "default",
-            program: shell,
+            program: login.clone(),
             args: vec![],
-        }]
+        }];
+
+        // Union of /etc/shells entries, fixed candidate paths and PATH
+        // lookups — Homebrew shells are not always registered in
+        // /etc/shells, so the fixed list catches them.
+        let mut known: std::collections::HashSet<String> = std::fs::read_to_string("/etc/shells")
+            .map(|content| {
+                content
+                    .lines()
+                    .map(|l| l.trim().to_string())
+                    .filter(|l| !l.is_empty() && !l.starts_with('#'))
+                    .collect()
+            })
+            .unwrap_or_default();
+        for (_, paths) in CANDIDATES {
+            for p in *paths {
+                known.insert((*p).to_string());
+            }
+        }
+
+        for (id, paths) in CANDIDATES {
+            // First existing candidate wins: fixed path, /etc/shells
+            // entry of the same name, then PATH.
+            let found = paths
+                .iter()
+                .find(|p| PathBuf::from(p).is_file())
+                .map(|p| p.to_string())
+                .or_else(|| {
+                    // /etc/shells may list alternative locations.
+                    known
+                        .iter()
+                        .find(|p| PathBuf::from(p).file_name().is_some_and(|n| n == *id))
+                        .filter(|p| PathBuf::from(p).is_file())
+                        .cloned()
+                })
+                .or_else(|| which_on_path(id).map(|p| p.to_string_lossy().to_string()));
+            let Some(program) = found else { continue };
+            // Skip when the login shell already IS this shell (the
+            // "default" entry covers it).
+            if program == login {
+                continue;
+            }
+            shells.push(ShellOption {
+                id,
+                name_key: id,
+                program,
+                args: vec![],
+            });
+        }
+        shells
     }
 }
 
@@ -196,9 +286,34 @@ mod tests {
 
     #[cfg(not(target_os = "windows"))]
     #[test]
-    fn unix_reports_the_login_shell_only() {
+    fn unix_leads_with_login_shell_and_lists_alternatives() {
         let shells = detect_shells();
-        assert_eq!(shells.len(), 1);
+        // The login shell is always the first, "default" entry.
         assert_eq!(shells[0].id, "default");
+        assert!(!shells[0].program.is_empty());
+        // POSIX systems always have sh and (nearly always) bash around.
+        assert!(shells.iter().any(|s| s.id == "sh"));
+        // The default shell must not be duplicated as a concrete entry.
+        let login = &shells[0].program;
+        assert!(
+            !shells[1..].iter().any(|s| s.program == *login),
+            "login shell listed twice"
+        );
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn unix_default_shell_survives_when_sHELL_is_exotic() {
+        // Whatever $SHELL is, the list must keep the default entry and
+        // only add shells that actually exist on disk.
+        let shells = detect_shells();
+        for s in &shells[1..] {
+            assert!(
+                std::path::Path::new(&s.program).is_file(),
+                "{} ({}) does not exist",
+                s.id,
+                s.program
+            );
+        }
     }
 }

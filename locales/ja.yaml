@@ -106,6 +106,7 @@ shortcut_labels:
   lock_workspace: ワークスペースをロック
   history_menu: 履歴メニュー
   history_prev: 前の履歴
+  next_terminal: 次のターミナルへ切替
   history_favorite: コマンドをお気に入り
   history_delete: コマンドを削除
   history_next: 次の履歴

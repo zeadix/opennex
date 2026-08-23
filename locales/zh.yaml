@@ -106,6 +106,7 @@ shortcut_labels:
   lock_workspace: 锁定工作区
   history_menu: 历史菜单
   history_prev: 历史上一条
+  next_terminal: 切换下一个终端
   history_favorite: 收藏指令
   history_delete: 删除指令
   history_next: 历史下一条

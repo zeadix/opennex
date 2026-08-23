@@ -106,6 +106,7 @@ shortcut_labels:
   lock_workspace: कार्यक्षेत्र लॉक करें
   history_menu: इतिहास मेनू
   history_prev: पिछला इतिहास
+  next_terminal: अगला टर्मिनल
   history_favorite: कमांड पसंदीदा
   history_delete: कमांड हटाएं
   history_next: अगला इतिहास

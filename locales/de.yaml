@@ -106,6 +106,7 @@ shortcut_labels:
   lock_workspace: Arbeitsbereich sperren
   history_menu: Verlaufsmenü
   history_prev: Vorheriger Verlauf
+  next_terminal: Nächstes Terminal
   history_favorite: Befehl favorisieren
   history_delete: Befehl löschen
   history_next: Nächster Verlauf

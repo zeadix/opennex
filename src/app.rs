@@ -81,7 +81,16 @@ fn default_key_binds() -> HashMap<String, ShortcutBinding> {
         ShortcutBinding {
             key: "N".into(),
             ctrl: true,
-            shift: true,
+            shift: false,
+            alt: false,
+        },
+    );
+    m.insert(
+        "next_terminal".into(),
+        ShortcutBinding {
+            key: "Tab".into(),
+            ctrl: true,
+            shift: false,
             alt: false,
         },
     );
@@ -317,7 +326,7 @@ fn shortcut_display(b: &ShortcutBinding) -> String {
     s
 }
 
-fn shortcut_hint_ids() -> [&'static str; 15] {
+fn shortcut_hint_ids() -> [&'static str; 16] {
     [
         "new_terminal",
         "close_terminal",
@@ -331,6 +340,7 @@ fn shortcut_hint_ids() -> [&'static str; 15] {
         "history_next",
         "history_favorite",
         "history_delete",
+        "next_terminal",
         "toggle_workspace_sidebar",
         "zoom_in",
         "zoom_out",
@@ -351,6 +361,7 @@ fn shortcut_label_for<'a>(texts: &'a crate::i18n::Texts, id: &str) -> &'a str {
         "history_next" => &texts.shortcut_labels.history_next,
         "history_favorite" => &texts.shortcut_labels.history_favorite,
         "history_delete" => &texts.shortcut_labels.history_delete,
+        "next_terminal" => &texts.shortcut_labels.next_terminal,
         "toggle_workspace_sidebar" => &texts.shortcut_labels.toggle_workspace_sidebar,
         "zoom_in" => &texts.shortcut_labels.zoom_in,
         "zoom_out" => &texts.shortcut_labels.zoom_out,
@@ -5031,9 +5042,41 @@ impl eframe::App for App {
                 }
             }
         }
+        // Cycle to the next terminal tab within the CURRENT panel's
+        // focused leaf (wraps from the last back to the first).
+        if !workspace_renaming && check_shortcut(ctx, &binds, "next_terminal") {
+            if let Some(tree) = self.dock_states.get_mut(&self.active_panel) {
+                if let Some((surface, node)) = tree.focused_leaf() {
+                    let tabs: Vec<String> = tree
+                        .iter_all_tabs()
+                        .filter(|((s, _), _)| *s == surface)
+                        .filter(|((_, n), _)| *n == node)
+                        .map(|(_, t)| t.clone())
+                        .collect();
+                    if tabs.len() > 1 {
+                        let current = tree.find_active_focused().map(|(_, t)| t.clone());
+                        let next = current
+                            .and_then(|cur| {
+                                let idx = tabs.iter().position(|t| *t == cur)?;
+                                Some(tabs[(idx + 1) % tabs.len()].clone())
+                            })
+                            .unwrap_or_else(|| tabs[0].clone());
+                        if let Some(loc) = tree.find_tab(&next) {
+                            tree.set_active_tab(loc);
+                        }
+                        tree.set_focused_node_and_surface((surface, node));
+                        self.focused_terminal = Some(next);
+                    }
+                }
+            }
+        }
         if !workspace_renaming && check_shortcut(ctx, &binds, "close_terminal") {
+            // Same confirmation dialog as the mouse-close path (on_close):
+            // the shortcut must not bypass it.
             if let Some(tab) = &self.focused_terminal.clone() {
-                self.pending_close = Some(tab.clone());
+                if self.pending_close_confirm.is_none() {
+                    self.pending_close_confirm = Some(tab.clone());
+                }
             }
         }
         if !workspace_renaming && check_shortcut(ctx, &binds, "workspace_up") {
@@ -6072,7 +6115,14 @@ impl eframe::App for App {
             let mut confirmed = false;
             let mut cancelled = false;
             let tab_id = tab_id.clone();
+            // Keyboard focus model: CANCEL is the safe default (a stray
+            // Enter must not kill the terminal). Left/Right move the
+            // focus between the two buttons; Enter activates whichever
+            // holds it.
+            let cancel_btn_id = egui::Id::new("close_confirm_cancel");
+            let confirm_btn_id = egui::Id::new("close_confirm_confirm");
             egui::Window::new(&self.texts.close_confirm.terminal_title)
+                .id(egui::Id::new("close_confirm_window"))
                 .open(&mut open)
                 .resizable(false)
                 .collapsible(false)
@@ -6081,14 +6131,88 @@ impl eframe::App for App {
                 .show(ctx, |ui| {
                     ui.label(&self.texts.close_confirm.terminal_message);
                     ui.add_space(10.0);
+                    // Keyboard focus model: CANCEL is the safe default
+                    // (a stray Enter must not kill the terminal).
+                    // Left/Right toggle focus between the two buttons;
+                    // Enter activates the focused one. Buttons are drawn
+                    // manually with STABLE interact ids so focus requests
+                    // land on exactly them.
+                    let focused_now = ui.ctx().memory(|m| m.focused());
+                    let target_is_cancel = focused_now != Some(confirm_btn_id);
+                    if focused_now != Some(confirm_btn_id) && focused_now != Some(cancel_btn_id) {
+                        ui.ctx().memory_mut(|m| m.request_focus(cancel_btn_id));
+                    }
+                    let left = ui
+                        .input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft));
+                    let right = ui
+                        .input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight));
+                    if left || right {
+                        let to = if focused_now == Some(confirm_btn_id) {
+                            cancel_btn_id
+                        } else {
+                            confirm_btn_id
+                        };
+                        ui.ctx().memory_mut(|m| m.request_focus(to));
+                    }
+                    // Enter activates the focused button (interact()
+                    // clicks need the key consumed against the terminal).
+                    let enter =
+                        ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+
+                    let draw_btn = |ui: &mut egui::Ui,
+                                    id: egui::Id,
+                                    label: &str,
+                                    focus_hint: bool|
+                     -> bool {
+                        let font = egui::FontId::proportional(14.0);
+                        let galley = ui.fonts(|f| {
+                            f.layout_no_wrap(label.to_string(), font, ui.visuals().text_color())
+                        });
+                        let size = egui::vec2(90.0, 24.0);
+                        let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+                        // Register the widget under our stable id so
+                        // memory focus calls address it.
+                        let resp = ui.interact(rect, id, egui::Sense::click());
+                        let visuals = if resp.contains_pointer() || focus_hint {
+                            &ui.style().visuals.widgets.hovered
+                        } else {
+                            &ui.style().visuals.widgets.inactive
+                        };
+                        ui.painter()
+                            .rect_filled(rect, visuals.corner_radius, visuals.weak_bg_fill);
+                        ui.painter().rect_stroke(
+                            rect,
+                            visuals.corner_radius,
+                            visuals.bg_stroke,
+                            egui::StrokeKind::Middle,
+                        );
+                        ui.painter().galley(
+                            rect.center() - galley.size() / 2.0,
+                            galley,
+                            ui.visuals().text_color(),
+                        );
+                        resp.clicked() || (enter && ui.ctx().memory(|m| m.has_focus(id)))
+                    };
+
                     ui.horizontal(|ui| {
-                        if ui.button(&self.texts.close_confirm.confirm).clicked() {
+                        if draw_btn(
+                            ui,
+                            confirm_btn_id,
+                            &self.texts.close_confirm.confirm,
+                            focused_now == Some(confirm_btn_id),
+                        ) {
                             confirmed = true;
                         }
-                        if ui.button(&self.texts.close_confirm.cancel).clicked() {
+                        if draw_btn(
+                            ui,
+                            cancel_btn_id,
+                            &self.texts.close_confirm.cancel,
+                            focused_now == Some(cancel_btn_id),
+                        ) {
                             cancelled = true;
                         }
                     });
+                    let _ = target_is_cancel;
                 });
             if confirmed {
                 self.pending_close_confirm = None;
@@ -7143,7 +7267,11 @@ impl eframe::App for App {
                     DockArea::new(tree)
                         .style(dock_style)
                         .show_add_buttons(true)
-                        .show_add_popup(false)
+                        // The '+' popup hosts the shell selection menu
+                        // (default shell + alternatives). It only exists
+                        // when there IS a choice: single-shell systems
+                        // create directly on click (old behavior).
+                        .show_add_popup(self.detected_shells.len() > 1)
                         .show_close_buttons(true)
                         .show_leaf_close_all_buttons(false)
                         .show_leaf_collapse_buttons(true)
@@ -7176,6 +7304,7 @@ impl eframe::App for App {
                                 auto_match_pending: &mut self.auto_match_pending,
                                 detected_shells: &self.detected_shells,
                                 pending_shell: &mut self.pending_shell,
+                                default_shell_id: self.settings.default_shell.clone(),
                                 theme: if self.show_settings {
                                     &self.theme_edit
                                 } else {
@@ -7517,6 +7646,21 @@ mod tests {
     }
 
     #[test]
+    fn next_terminal_wraps_from_last_back_to_first() {
+        // Pure index math of the cycle used by the next_terminal
+        // shortcut: current → (i+1) % len.
+        let tabs = ["t1".to_string(), "t2".to_string(), "t3".to_string()];
+        let next_of = |cur: &str| -> String {
+            let idx = tabs.iter().position(|t| t == cur).unwrap();
+            tabs[(idx + 1) % tabs.len()].clone()
+        };
+        assert_eq!(next_of("t1"), "t2");
+        assert_eq!(next_of("t2"), "t3");
+        // Last wraps to first.
+        assert_eq!(next_of("t3"), "t1");
+    }
+
+    #[test]
     fn workspace_sidebar_defaults_to_f1() {
         let binds = default_key_binds();
         let binding = &binds["toggle_workspace_sidebar"];
@@ -7711,8 +7855,19 @@ fn shell_display_name(s: &crate::shells::ShellOption) -> String {
         "pwsh" => "PowerShell 7".to_string(),
         "vs-dev" => "VS 开发人员命令提示符".to_string(),
         "wsl" => "WSL".to_string(),
+        "default" => format!("默认 ({})", shell_short_name(&s.program)),
+        "bash" => "bash".to_string(),
+        "zsh" => "zsh".to_string(),
+        "fish" => "fish".to_string(),
+        "nu" => "nushell".to_string(),
+        "sh" => "sh".to_string(),
         _ => "Shell".to_string(),
     }
+}
+
+/// Last path component of a shell program, for the default-shell label.
+fn shell_short_name(program: &str) -> &str {
+    program.rsplit('/').next().unwrap_or(program)
 }
 
 struct TerminalTabViewer<'a> {
@@ -7742,6 +7897,9 @@ struct TerminalTabViewer<'a> {
     auto_match_pending: &'a mut std::collections::HashMap<String, String>,
     detected_shells: &'a [crate::shells::ShellOption],
     pending_shell: &'a mut Option<crate::shells::ShellOption>,
+    /// Shell id chosen as default in settings (labels the menu's
+    /// default entry; the actual spawn resolves in create_terminal).
+    default_shell_id: String,
     theme: &'a crate::theme::ThemeDefinition,
     texts: &'a crate::i18n::Texts,
 }
@@ -8063,22 +8221,62 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
     }
 
     fn add_popup(&mut self, ui: &mut egui::Ui, surface: SurfaceIndex, node: NodeIndex) {
-        // Default entry (settings' default shell) first, then one entry
-        // per detected shell — Windows exposes cmd / PowerShell / pwsh /
-        // VS developer / WSL; other platforms show a single default.
+        // Shell selection menu: the default (settings') shell leads the
+        // list, then every other detected shell. The popup is only
+        // enabled at all when there IS a choice (single-shell systems
+        // create directly via on_add). No separate "+ tab" entry — it
+        // duplicated the default-shell entry.
         let shells = self.detected_shells.to_vec();
-        if ui.button(&self.texts.terminal.add_tab).clicked() {
-            *self.pending_new_terminal = Some((self.active_panel, surface, node));
-            ui.close_menu();
-        }
-        if shells.len() > 1 {
-            ui.separator();
-            for s in &shells {
-                if ui.button(shell_display_name(s)).clicked() {
-                    *self.pending_shell = Some(s.clone());
-                    *self.pending_new_terminal = Some((self.active_panel, surface, node));
-                    ui.close_menu();
+        // Widen the popup to the LONGEST label so shell names never wrap
+        // (the popup defaults to the narrow '+' button width and the
+        // labels like "VS 开发人员命令提示符" folded onto several lines).
+        let resolved_default = crate::shells::resolve_shell(&shells, &self.default_shell_id);
+        let longest = shells
+            .iter()
+            .map(|s| {
+                if s.id == "default" {
+                    format!("默认 ({})", shell_short_name(&resolved_default.program))
+                } else if s.id == resolved_default.id {
+                    format!("{}（默认）", shell_display_name(s))
+                } else {
+                    shell_display_name(s)
                 }
+            })
+            .map(|name| {
+                ui.fonts(|f| {
+                    f.layout_no_wrap(
+                        name,
+                        egui::FontId::proportional(14.0),
+                        egui::Color32::PLACEHOLDER,
+                    )
+                    .size()
+                    .x
+                })
+            })
+            .fold(0.0f32, f32::max);
+        // Button padding both sides + a little slack for the hover frame.
+        ui.set_min_width(longest + 24.0);
+        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+        for s in &shells {
+            // The entry matching the SETTINGS default gets the 默认
+            // marker and spawns via the default-resolution path (no
+            // explicit pending_shell) — identical semantics on every
+            // platform: Unix's "default" entry and Windows' concrete
+            // cmd/powershell/... entry alike.
+            let is_default_entry = s.id == "default" || s.id == resolved_default.id;
+            let label = if s.id == "default" {
+                format!("默认 ({})", shell_short_name(&resolved_default.program))
+            } else if is_default_entry {
+                format!("{}（默认）", shell_display_name(s))
+            } else {
+                shell_display_name(s)
+            };
+            if ui.button(label).clicked() {
+                if !is_default_entry {
+                    *self.pending_shell = Some(s.clone());
+                }
+                *self.pending_new_terminal = Some((self.active_panel, surface, node));
+                ui.close_menu();
             }
         }
     }
