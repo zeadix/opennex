@@ -287,46 +287,100 @@ pub fn replace_and_restart(new_binary: &Path) -> Result<(), String> {
         // (No chmod on Windows: executables extracted from the zip are
         // runnable as-is; the Unix PermissionsExt API doesn't exist here.)
 
+        // Status marker in %TEMP% (same contract as the Unix helper):
+        // the helper writes "ok" or "fail: <reason>" AFTER our process
+        // exits, and the NEXT launch surfaces failures via
+        // take_last_update_failure(). The old design wrote the marker
+        // into Program Files (unwritable for the fallback paths) and the
+        // app never read it — a declined UAC prompt or a failed copy
+        // died completely silently.
+        let status_file = std::env::temp_dir().join("opennex_update.status");
+
+        // Two-stage helper:
+        //   launcher (unelevated): waits for exit → tries the copy as the
+        //     user (portable/zip installs) → only on denial elevates a
+        //     minimal copier via UAC (-Wait, cancellation is catchable) →
+        //     verifies the swap by hash → relaunches UNELEVATED via
+        //     explorer.exe → writes the status marker.
+        //   copier (elevated): copy + hash only.
         let script_path = std::env::temp_dir().join("opennex_update.ps1");
+        let copier_path = std::env::temp_dir().join("opennex_update_copier.ps1");
         let script = r#"$ErrorActionPreference = 'Stop'
 $cur = '@CUR@'
 $new = '@NEW@'
-$failMarker = '@FAIL@'
+$status = '@STATUS@'
 $procName = [IO.Path]::GetFileNameWithoutExtension($cur)
+"fail: helper crashed" | Out-File -FilePath $status -Encoding ascii
 for ($i = 0; $i -lt 30; $i++) {
     $p = Get-Process -Name $procName -ErrorAction SilentlyContinue
     if (-not $p) { break }
     Start-Sleep -Seconds 1
 }
+function Test-SameFile($a, $b) {
+    $ha = (Get-FileHash -LiteralPath $a -Algorithm SHA256).Hash
+    $hb = (Get-FileHash -LiteralPath $b -Algorithm SHA256).Hash
+    return ($ha -eq $hb)
+}
+$replaced = $false
+$reason = ''
 try {
     Copy-Item -LiteralPath $new -Destination $cur -Force
+    if (Test-SameFile $new $cur) { $replaced = $true } else { $reason = 'user copy hash mismatch' }
 } catch {
-    [IO.File]::WriteAllText($failMarker, 'replace failed: ' + $_.Exception.Message)
-    exit 1
+    $reason = $_.Exception.Message
+}
+if (-not $replaced) {
+    # Needs admin (Program Files). -Wait lets us catch a DECLINED UAC
+    # prompt as an exception instead of dying silently.
+    try {
+        $p = Start-Process powershell -Verb RunAs -WindowStyle Hidden -PassThru -Wait -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-WindowStyle','Hidden','-File','@COPIER@'
+        if ($p.ExitCode -eq 0 -and (Test-SameFile $new $cur)) { $replaced = $true }
+        else { $reason = "elevated copy failed (exit=$($p.ExitCode))" }
+    } catch {
+        $reason = 'UAC declined: ' + $_.Exception.Message
+    }
+}
+if ($replaced) {
+    # Relaunch UNELEVATED: explorer.exe spawns the target with the
+    # shell's normal token (running the new version as admin caused
+    # drag-drop and inherited-shell issues).
+    Start-Process -FilePath explorer.exe -ArgumentList $cur
+    'ok' | Out-File -FilePath $status -Encoding ascii
+} else {
+    ("fail: " + $reason) | Out-File -FilePath $status -Encoding ascii
 }
 Remove-Item -LiteralPath $new -Force -ErrorAction SilentlyContinue
-Start-Process -FilePath $cur
 Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath '@COPIER@' -Force -ErrorAction SilentlyContinue
 "#
         .replace("@CUR@", &current.to_string_lossy())
         .replace("@NEW@", &new_binary.to_string_lossy())
-        .replace(
-            "@FAIL@",
-            &parent
-                .join("opennex_update_failed.txt")
-                .to_string_lossy()
-                .replace('\\', "/"),
-        );
-        fs::write(&script_path, script).map_err(|e| format!("写入脚本失败: {e}"))?;
+        .replace("@STATUS@", &status_file.to_string_lossy())
+        .replace("@COPIER@", &copier_path.to_string_lossy());
 
-        // Launch elevated (UAC): Program Files requires admin to write.
-        // '-Verb RunAs' shows the standard elevation prompt.
-        let launcher = format!(
-            "Start-Process powershell -Verb RunAs -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-WindowStyle','Hidden','-File','{}'",
-            script_path.to_string_lossy()
-        );
+        let copier = r#"$ErrorActionPreference = 'Stop'
+$cur = '@CUR@'
+$new = '@NEW@'
+Copy-Item -LiteralPath $new -Destination $cur -Force
+exit 0
+"#
+        .replace("@CUR@", &current.to_string_lossy())
+        .replace("@NEW@", &new_binary.to_string_lossy());
+
+        fs::write(&script_path, script).map_err(|e| format!("写入脚本失败: {e}"))?;
+        fs::write(&copier_path, copier).map_err(|e| format!("写入脚本失败: {e}"))?;
+
+        // The launcher itself must stay unelevated and windowless.
         std::process::Command::new("powershell")
-            .args(["-NoProfile", "-Command", &launcher])
+            .args([
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-WindowStyle",
+                "Hidden",
+                "-File",
+            ])
+            .arg(&script_path)
             .creation_flags_windows()
             .spawn()
             .map_err(|e| format!("启动更新脚本失败: {e}"))?;
@@ -445,8 +499,8 @@ fi
     Ok(())
 }
 
-/// Path of the helper script's result marker (Unix). `None` on Windows.
-#[cfg(target_os = "linux")]
+/// Path of the helper script's result marker (Unix + Windows).
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 pub fn update_status_path() -> PathBuf {
     std::env::temp_dir().join("opennex_update.status")
 }
@@ -456,7 +510,7 @@ pub fn update_status_path() -> PathBuf {
 /// replace the binary — the user would otherwise keep running the old
 /// version with no indication anything went wrong.
 pub fn take_last_update_failure() -> Option<String> {
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
     {
         let path = update_status_path();
         let content = fs::read_to_string(&path).ok()?;
@@ -468,7 +522,7 @@ pub fn take_last_update_failure() -> Option<String> {
         // "ok" (or garbage) — consumed and ignored.
         None
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
     None
 }
 

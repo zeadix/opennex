@@ -2841,7 +2841,7 @@ dependencies = [
 
 [[package]]
 name = "opennex"
-version = "0.1.26"
+version = "0.1.27"
 dependencies = [
  "ab_glyph",
  "alacritty_terminal",
