@@ -40,6 +40,19 @@ struct AppSettings {
     /// list; only meaningful on Windows where multiple shells exist).
     #[serde(default = "default_shell_pref")]
     default_shell: String,
+    /// Edge-smoothing (feathering) master switch. Off = hard edges on
+    /// shapes/lines/borders (crisper, terminal-like); text glyph AA is
+    /// built into the font atlas and unaffected.
+    #[serde(default = "default_true")]
+    smooth_rendering: bool,
+    /// Feathering width in PHYSICAL pixels when smooth_rendering is on.
+    /// 1.0 is the epaint default; larger = blurrier edges.
+    #[serde(default = "default_smooth_level")]
+    smooth_level: f32,
+}
+
+fn default_smooth_level() -> f32 {
+    1.0
 }
 
 fn default_shell_pref() -> String {
@@ -958,6 +971,8 @@ impl Default for AppSettings {
             auto_copy_selection: true,
             auto_match_command: true,
             default_shell: default_shell_pref(),
+            smooth_rendering: true,
+            smooth_level: default_smooth_level(),
         }
     }
 }
@@ -968,6 +983,39 @@ impl Default for AppSettings {
 /// egui/epaint panics when parsing those at first use, crashing startup.
 fn is_valid_font_data(data: &[u8]) -> bool {
     ab_glyph::FontRef::try_from_slice(data).is_ok()
+}
+
+/// Symbol/dingbat/ornament fonts (OpenSymbol, Standard Symbols PS,
+/// Wingdings-like collections, decorative families). Their cmaps often
+/// cover plain Latin codepoints with circled/overlined glyph variants,
+/// so when they leak into a fallback chain, ordinary words render with
+/// stray overlines, ticks and torn letter spacing — while COPY stays
+/// fine because only the glyphs, not the text, are wrong.
+fn is_symbol_font_name(name: &str) -> bool {
+    const SYMBOL_PATTERNS: &[&str] = &[
+        "symbol",
+        "dingbat",
+        "wingding",
+        "webdings",
+        "ornament",
+        "dejavusansmonoextra", // -Extra variants ship symbol ranges
+        "icon",
+        "emoji",
+        "webfont",
+        "opens__",
+    ];
+    let lower = name.to_lowercase();
+    SYMBOL_PATTERNS.iter().any(|p| lower.contains(p))
+        || name.starts_with("open") && lower.ends_with("symbol")
+}
+
+/// Whether a scanned family name plausibly belongs in a MONOSPACE
+/// fallback chain. Only genuinely monospaced faces advance cells
+/// uniformly; proportional faces in the chain tear the terminal grid's
+/// column math (half-width Latin alternating with wide fallbacks).
+fn is_monospace_family_name(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    lower.contains("mono") || lower.contains("consol") || lower.contains("courier")
 }
 
 fn scan_system_fonts() -> Vec<(String, String)> {
@@ -1463,9 +1511,22 @@ impl App {
         // Scan system monospace fonts; registration happens later in
         // App::rebuild_fonts once the active theme's font choices are known.
         let system_fonts = scan_system_fonts();
-        let font_names: Vec<String> = system_fonts.iter().map(|(name, _)| name.clone()).collect();
+        let font_names: Vec<String> = system_fonts
+            .iter()
+            .map(|(name, _)| name.clone())
+            .filter(|name| !is_symbol_font_name(name))
+            .collect();
 
         crate::theme::apply_theme_definition(ctx, &active_theme);
+        // Edge-smoothing preference from the saved settings.
+        ctx.tessellation_options_mut(|t| {
+            t.feathering = settings.smooth_rendering;
+            t.feathering_size_in_pixels = if settings.smooth_rendering {
+                settings.smooth_level.clamp(0.0, 2.0)
+            } else {
+                0.0
+            };
+        });
 
         let db_path = app_data_dir().join("history.db");
         let language = settings.language.clone();
@@ -2754,6 +2815,26 @@ impl App {
         });
         self.settings_edit.auto_match_command = auto_match;
 
+        // Edge-smoothing (feathering) switch + level. Off = hard,
+        // terminal-crisp edges; the level scales the feathering width in
+        // physical pixels (1.0 = default; text glyph AA is unaffected).
+        let mut smooth = self.settings_edit.smooth_rendering;
+        self.settings_row(ui, &t.smooth_rendering, |ui| {
+            ui.checkbox(&mut smooth, "");
+        });
+        self.settings_edit.smooth_rendering = smooth;
+        if smooth {
+            let mut level = self.settings_edit.smooth_level;
+            self.settings_row(ui, &t.smooth_level, |ui| {
+                ui.add(
+                    egui::Slider::new(&mut level, 0.0..=2.0)
+                        .show_value(true)
+                        .text("px"),
+                );
+            });
+            self.settings_edit.smooth_level = level;
+        }
+
         self.settings_group(ui, &b.data_section);
         let mut max_h = self.settings_edit.max_history;
         let mut sb = self.settings_edit.scrollback;
@@ -3334,13 +3415,27 @@ impl App {
                     name.clone(),
                     std::sync::Arc::new(egui::FontData::from_owned(data)),
                 );
-                registered_names.push(name.clone());
+                // Symbol/decorative fonts stay REGISTERED (a theme or
+                // preview referencing FontFamily::Name("NotoColorEmoji")
+                // must stay bound — epaint PANICS on unbound names), but
+                // they never enter registered_names: no generic fallback
+                // chains, no font pickers. Their glyph pollution is thus
+                // impossible unless a user explicitly picks one.
+                if !is_symbol_font_name(name) {
+                    registered_names.push(name.clone());
+                }
             }
         }
         load_multilingual_fonts(&mut fonts);
+        // Monospace generic fallback: ONLY monospace-class families.
+        // Proportional faces here tear the terminal's cell grid; symbol
+        // faces substitute decorated glyphs for plain ASCII (the stray
+        // overlines/ticks seen between words in some themes).
         if let Some(mono_family) = fonts.families.get_mut(&egui::FontFamily::Monospace) {
             for name in &registered_names {
-                mono_family.push(name.clone());
+                if is_monospace_family_name(name) {
+                    mono_family.push(name.clone());
+                }
             }
         }
         // Also register every scanned font under its OWN named family so
@@ -3385,6 +3480,31 @@ impl App {
                 chain,
             );
         }
+        // Symbol fonts are excluded from registered_names (no chains, no
+        // pickers) but any theme/preview may still reference them by
+        // name, and epaint PANICS on an unbound FontFamily::Name. Bind
+        // them to their own named family with the clean stack as
+        // fallback — safe because nothing routes text through them
+        // unless explicitly chosen (and the theme-font injector above
+        // refuses symbol heads).
+        let symbol_names: Vec<String> = fonts
+            .font_data
+            .keys()
+            .filter(|n| is_symbol_font_name(n))
+            .cloned()
+            .collect();
+        for name in symbol_names {
+            let mut chain = vec![name.clone()];
+            for fallback in clean_prop.iter() {
+                if !chain.contains(fallback) {
+                    chain.push(fallback.clone());
+                }
+            }
+            fonts.families.insert(
+                egui::FontFamily::Name(std::sync::Arc::from(name.as_str())),
+                chain,
+            );
+        }
 
         // Theme font choices: UI font goes first in Proportional, terminal
         // font first in Monospace. Generic families ("system-ui",
@@ -3403,7 +3523,14 @@ impl App {
             .first()
             .cloned()
             .unwrap_or_default();
-        if !ui_font.is_empty() && ui_font != "system-ui" && fonts.font_data.contains_key(&ui_font) {
+        // Symbol fonts must never head a generic family (a user theme
+        // saved with e.g. NotoColorEmoji selected rendered decorated
+        // glyphs across the whole UI); fall back to the default stack.
+        if !ui_font.is_empty()
+            && ui_font != "system-ui"
+            && !is_symbol_font_name(&ui_font)
+            && fonts.font_data.contains_key(&ui_font)
+        {
             if let Some(family) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
                 family.insert(0, ui_font);
             }
@@ -3416,6 +3543,7 @@ impl App {
             .unwrap_or_default();
         if !term_font.is_empty()
             && term_font != "monospace"
+            && !is_symbol_font_name(&term_font)
             && fonts.font_data.contains_key(&term_font)
         {
             if let Some(family) = fonts.families.get_mut(&egui::FontFamily::Monospace) {
@@ -5632,6 +5760,17 @@ impl eframe::App for App {
             if let Ok(mut guard) = DEFAULT_SHELL_ID.write() {
                 *guard = self.settings_edit.default_shell.clone();
             }
+            // Edge-smoothing (feathering): off = hard edges, on = the
+            // configured width in physical pixels. Text glyph AA lives in
+            // the font atlas and is unaffected by this.
+            ctx.tessellation_options_mut(|t| {
+                t.feathering = self.settings_edit.smooth_rendering;
+                t.feathering_size_in_pixels = if self.settings_edit.smooth_rendering {
+                    self.settings_edit.smooth_level.clamp(0.0, 2.0)
+                } else {
+                    0.0
+                };
+            });
             // Instant-apply: commit any changed settings every frame.
             if self.settings_edit != self.settings {
                 self.settings = self.settings_edit.clone();
@@ -7366,8 +7505,9 @@ fn format_memory(bytes: Option<u64>) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        binding_to_key, default_key_binds, toggle_history_menu, update_alt_key_state, AltKeyState,
-        AppSettings, HistoryNav, ShortcutBinding, TerminalStatePersist,
+        binding_to_key, default_key_binds, is_monospace_family_name, is_symbol_font_name,
+        toggle_history_menu, update_alt_key_state, AltKeyState, AppSettings, HistoryNav,
+        ShortcutBinding, TerminalStatePersist,
     };
     use egui_dock::DockState;
 
@@ -7440,6 +7580,40 @@ mod tests {
         // design rests on: only key presses do.
         let echo_creates_event = false;
         assert!(!echo_creates_event);
+    }
+
+    #[test]
+    fn symbol_fonts_are_recognized_and_excluded_from_chains() {
+        // The renderer must never fall back to symbol/decorative faces:
+        // their Latin coverage draws circled/overlined variants between
+        // ordinary words (stray marks + torn spacing), while copy stays
+        // correct — glyph-only corruption.
+        for name in [
+            "OpenSymbol",
+            "opens___",
+            "StandardSymbolsPS",
+            "Dingbats",
+            "Wingdings",
+            "Noto Color Emoji",
+            "SomeIconPack",
+        ] {
+            assert!(is_symbol_font_name(name), "{name} should be filtered");
+        }
+        for name in [
+            "Ubuntu Mono",
+            "mononoki",
+            "Liberation Mono",
+            "Ubuntu",
+            "Noto Sans",
+        ] {
+            assert!(!is_symbol_font_name(name), "{name} must stay");
+        }
+        // Monospace chains only take genuinely monospaced families.
+        assert!(is_monospace_family_name("Ubuntu Mono"));
+        assert!(is_monospace_family_name("jetbrains-mono"));
+        assert!(is_monospace_family_name("LiberationMono-Regular"));
+        assert!(!is_monospace_family_name("Ubuntu"));
+        assert!(!is_monospace_family_name("DejaVu Sans"));
     }
 
     #[test]

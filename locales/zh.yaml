@@ -43,6 +43,10 @@ settings:
     clear_all_history: 删除所有指令记录
     auto_copy: 选中字符自动复制
     auto_match: 自动匹配指令
+
+    smooth_rendering: 边缘平滑
+
+    smooth_level: 平滑等级
   appearance:
     heading: 外观
     terminal_section: 终端外观

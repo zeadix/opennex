@@ -43,6 +43,10 @@ settings:
     clear_all_history: Delete All Command History
     auto_copy: Auto-copy selected text
     auto_match: Auto-match commands
+
+    smooth_rendering: Edge Smoothing
+
+    smooth_level: Smoothing Level
   appearance:
     heading: Appearance
     terminal_section: Terminal Appearance

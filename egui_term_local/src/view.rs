@@ -262,9 +262,12 @@ impl<'a> TerminalView<'a> {
         layout: &Response,
         state: &mut TerminalViewState,
     ) -> Self {
-        if !layout.has_focus() {
-            return self;
-        }
+        // Keyboard events require FOCUS (only the focused terminal may
+        // receive typing). Pointer events do NOT: a click-drag text
+        // selection must work in an INACTIVE split pane without first
+        // activating its tab — the pointer's position inside the pane is
+        // the only gate (checked per-event below).
+        let has_focus = layout.has_focus();
 
         // Pointer events only count when the terminal's own layer is the
         // topmost at the pointer: floating overlays above it (e.g. the
@@ -287,10 +290,26 @@ impl<'a> TerminalView<'a> {
             let mut input_actions = vec![];
 
             match event {
+                // IME composition: forward committed text to the PTY;
+                // preedit (uncommitted candidates) is intentionally NOT
+                // forwarded — the terminal grid can't render inline
+                // composition, and sending partial pinyin would corrupt
+                // the command line. The IME candidate window shows the
+                // preedit above the cursor instead.
+                egui::Event::Ime(egui::ImeEvent::Commit(text)) if has_focus => {
+                    input_actions.push(InputAction::BackendCall(
+                        BackendCommand::Write(text.into_bytes()),
+                    ))
+                },
+                egui::Event::Ime(egui::ImeEvent::Preedit(_))
+                | egui::Event::Ime(egui::ImeEvent::Enabled)
+                | egui::Event::Ime(egui::ImeEvent::Disabled) => {},
                 egui::Event::Text(_)
                 | egui::Event::Key { .. }
                 | egui::Event::Copy
-                | egui::Event::Paste(_) => {
+                | egui::Event::Paste(_)
+                    if has_focus =>
+                {
                     input_actions.push(process_keyboard_event(
                         event,
                         self.backend,
@@ -663,6 +682,35 @@ impl<'a> TerminalView<'a> {
                         self.theme.cursor_color(),
                     )));
                 }
+            }
+        }
+
+        // IME enablement: winit only allows the input method while the
+        // egui output carries an IME area. TextEdit does this
+        // automatically; a custom widget must report it itself or every
+        // IME keystroke is swallowed at the window level (Chinese/Japanese
+        // input silently did nothing). Anchor the candidate window at the
+        // terminal cursor.
+        if self.has_focus {
+            if let Some(vp) =
+                point_to_viewport(display_offset, content.grid.cursor.point)
+            {
+                let cx = layout_min.x + (cell_width * vp.column.0 as f32);
+                let cy = layout_min.y + (cell_height * vp.line as f32);
+                let cursor_rect = egui::Rect::from_min_size(
+                    egui::Pos2::new(cx, cy),
+                    egui::Vec2::new(cell_width, cell_height),
+                );
+                let to_global = painter
+                    .ctx()
+                    .layer_transform_to_global(painter.layer_id())
+                    .unwrap_or_default();
+                painter.ctx().output_mut(|o| {
+                    o.ime = Some(egui::output::IMEOutput {
+                        rect: to_global * cursor_rect,
+                        cursor_rect: to_global * cursor_rect,
+                    });
+                });
             }
         }
 

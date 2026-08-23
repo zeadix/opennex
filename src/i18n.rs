@@ -99,6 +99,8 @@ pub struct SettingsGeneralTexts {
     #[serde(default)]
     pub auto_copy: String,
     pub auto_match: String,
+    pub smooth_rendering: String,
+    pub smooth_level: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -455,6 +457,8 @@ impl Texts {
                     clear_all_history: "删除所有指令记录".into(),
                     auto_copy: "选中字符自动复制".into(),
                 auto_match: "自动匹配指令".into(),
+                smooth_rendering: "边缘平滑".into(),
+                smooth_level: "平滑等级".into(),
                 },
                 appearance: SettingsAppearanceTexts {
                     heading: "外观".into(),

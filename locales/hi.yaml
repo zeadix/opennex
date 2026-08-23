@@ -43,6 +43,10 @@ settings:
     clear_all_history: सारा इतिहास मिटाएँ
     auto_copy: चयनित पाठ स्वतः कॉपी करें
     auto_match: कमांड ऑटो-मैच
+
+    smooth_rendering: किनारा स्मूदिंग
+
+    smooth_level: स्मूदिंग स्तर
   appearance:
     heading: रूप
     terminal_section: टर्मिनल रूप

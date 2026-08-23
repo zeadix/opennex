@@ -43,6 +43,10 @@ settings:
     clear_all_history: Elimina tutta la cronologia
     auto_copy: Copia automatica del testo selezionato
     auto_match: Completamento automatico
+
+    smooth_rendering: Smussatura bordi
+
+    smooth_level: Livello smussatura
   appearance:
     heading: Aspetto
     terminal_section: Aspetto terminale

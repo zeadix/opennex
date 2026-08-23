@@ -43,6 +43,10 @@ settings:
     clear_all_history: すべての履歴を削除
     auto_copy: 選択したテキストを自動コピー
     auto_match: コマンド自動補完
+
+    smooth_rendering: エッジ平滑
+
+    smooth_level: 平滑レベル
   appearance:
     heading: 外観
     terminal_section: ターミナル外観
