@@ -113,6 +113,10 @@ shortcut_labels:
   next_panel: 切换下一个分屏
   next_workspace: 切换下一个工作区
   save_scene: 保存当前布局
+  terminal_interrupt: 终端中断 (^C)
+  terminal_copy: 终端复制
+  terminal_paste: 终端粘贴
+  terminal_cut: 终端剪切
   next_terminal: 切换下一个终端
   history_favorite: 收藏指令
   history_delete: 删除指令

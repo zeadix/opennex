@@ -113,6 +113,10 @@ shortcut_labels:
   next_panel: 次の分割ペインへ切替
   next_workspace: 次のワークスペースへ切替
   save_scene: レイアウトを保存
+  terminal_interrupt: 端末中断 (^C)
+  terminal_copy: 端末コピー
+  terminal_paste: 端末貼り付け
+  terminal_cut: 端末切り取り
   next_terminal: 次のターミナルへ切替
   history_favorite: コマンドをお気に入り
   history_delete: コマンドを削除

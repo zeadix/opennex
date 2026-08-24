@@ -311,6 +311,7 @@ impl<'a> TerminalView<'a> {
                     if has_focus =>
                 {
                     input_actions.push(process_keyboard_event(
+                        &layout.ctx,
                         event,
                         self.backend,
                         &self.bindings_layout,
@@ -760,6 +761,7 @@ fn resolved_cell_colors(
 }
 
 fn process_keyboard_event(
+    ctx: &egui::Context,
     event: egui::Event,
     backend: &TerminalBackend,
     bindings_layout: &BindingsLayout,
@@ -770,30 +772,31 @@ fn process_keyboard_event(
             process_text_event(&text, modifiers, backend, bindings_layout)
         },
         egui::Event::Paste(text) => InputAction::BackendCall(
-            #[cfg(not(any(target_os = "ios", target_os = "macos")))]
-            if modifiers.contains(Modifiers::COMMAND | Modifiers::SHIFT) {
-                BackendCommand::Write(text.as_bytes().to_vec())
-            } else {
-                // Hotfix - Send ^V when there's not selection on view.
-                BackendCommand::Write([0x16].to_vec())
-            },
-            #[cfg(any(target_os = "ios", target_os = "macos"))]
-            {
-                BackendCommand::Write(text.as_bytes().to_vec())
-            },
+            // Unconditional paste: the app layer routes which KEY opens
+            // the paste (configurable Ctrl+V by default) and egui turns
+            // that into this event; the old Ctrl+Shift-only check sent
+            // ^V instead, confusing shells.
+            BackendCommand::Write(text.as_bytes().to_vec()),
         ),
-        egui::Event::Copy => {
-            #[cfg(not(any(target_os = "ios", target_os = "macos")))]
-            if modifiers.contains(Modifiers::COMMAND | Modifiers::SHIFT) {
-                let content = backend.selectable_content();
-                InputAction::WriteToClipboard(content)
+        // Terminal "cut": copy the selection (terminals have no
+        // delete-selection semantic; the text stays on screen).
+        egui::Event::Cut => {
+            let content = backend.selectable_content();
+            if content.is_empty() {
+                InputAction::Ignore
             } else {
-                // Hotfix - Send ^C when there's not selection on view.
-                InputAction::BackendCall(BackendCommand::Write([0x3].to_vec()))
+                InputAction::WriteToClipboard(content)
             }
-            #[cfg(any(target_os = "ios", target_os = "macos"))]
-            {
-                let content = backend.selectable_content();
+        },
+        egui::Event::Copy => {
+            // Unconditional copy of the live selection. The ^C-interrupt
+            // fallback moved to its own configurable binding
+            // (terminal_interrupt); with none selected this copies an
+            // empty string (no-op).
+            let content = backend.selectable_content();
+            if content.is_empty() {
+                InputAction::Ignore
+            } else {
                 InputAction::WriteToClipboard(content)
             }
         },
@@ -803,6 +806,7 @@ fn process_keyboard_event(
             modifiers,
             ..
         } => process_keyboard_key(
+            ctx,
             backend,
             bindings_layout,
             key,
@@ -840,6 +844,7 @@ fn process_text_event(
 }
 
 fn process_keyboard_key(
+    ctx: &egui::Context,
     backend: &TerminalBackend,
     bindings_layout: &BindingsLayout,
     key: Key,
@@ -868,6 +873,25 @@ fn process_keyboard_key(
         BindingAction::Esc(seq) => InputAction::BackendCall(
             BackendCommand::Write(seq.as_bytes().to_vec()),
         ),
+        // Configurable clipboard actions (app-injected bindings). Copy
+        // takes the live selection; Paste pulls the system clipboard
+        // into the PTY.
+        BindingAction::Copy => {
+            let content = backend.selectable_content();
+            if content.is_empty() {
+                InputAction::Ignore
+            } else {
+                InputAction::WriteToClipboard(content)
+            }
+        },
+        // Paste needs the clipboard CONTENT which egui only delivers via
+        // Event::Paste; the app layer intercepts the configured key and
+        // sends a synthetic paste event instead.
+        BindingAction::Paste => InputAction::Ignore,
+        // ^C interrupt, unconditionally.
+        BindingAction::Interrupt => {
+            InputAction::BackendCall(BackendCommand::Write([0x03].to_vec()))
+        },
         _ => InputAction::Ignore,
     }
 }

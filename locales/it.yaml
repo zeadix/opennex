@@ -113,6 +113,10 @@ shortcut_labels:
   next_panel: Pannello diviso successivo
   next_workspace: Area di lavoro successiva
   save_scene: Salva layout
+  terminal_interrupt: Interrompi terminale (^C)
+  terminal_copy: Copia terminale
+  terminal_paste: Incolla terminale
+  terminal_cut: Taglia terminale
   next_terminal: Terminale successivo
   history_favorite: Comando preferito
   history_delete: Elimina comando

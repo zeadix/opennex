@@ -113,6 +113,10 @@ shortcut_labels:
   next_panel: 다음 분할 창 전환
   next_workspace: 다음 워크스페이스 전환
   save_scene: 레이아웃 저장
+  terminal_interrupt: 터미널 중단 (^C)
+  terminal_copy: 터미널 복사
+  terminal_paste: 터미널 붙여넣기
+  terminal_cut: 터미널 잘라내기
   next_terminal: 다음 터미널 전환
   history_favorite: 명령 즐겨찾기
   history_delete: 명령 삭제

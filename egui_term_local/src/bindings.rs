@@ -5,6 +5,8 @@ use egui::{Key, Modifiers, PointerButton};
 pub enum BindingAction {
     Copy,
     Paste,
+    /// Send ^C (SIGINT) to the PTY unconditionally.
+    Interrupt,
     Char(char),
     Esc(String),
     LinkOpen,

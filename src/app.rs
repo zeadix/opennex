@@ -135,6 +135,42 @@ fn default_key_binds() -> HashMap<String, ShortcutBinding> {
         },
     );
     m.insert(
+        "terminal_interrupt".into(),
+        ShortcutBinding {
+            key: "C".into(),
+            ctrl: true,
+            shift: true,
+            alt: false,
+        },
+    );
+    m.insert(
+        "terminal_copy".into(),
+        ShortcutBinding {
+            key: "C".into(),
+            ctrl: true,
+            shift: false,
+            alt: false,
+        },
+    );
+    m.insert(
+        "terminal_paste".into(),
+        ShortcutBinding {
+            key: "V".into(),
+            ctrl: true,
+            shift: false,
+            alt: false,
+        },
+    );
+    m.insert(
+        "terminal_cut".into(),
+        ShortcutBinding {
+            key: "X".into(),
+            ctrl: true,
+            shift: false,
+            alt: false,
+        },
+    );
+    m.insert(
         "close_terminal".into(),
         ShortcutBinding {
             key: "E".into(),
@@ -372,7 +408,7 @@ fn shortcut_display(b: &ShortcutBinding) -> String {
     s
 }
 
-fn shortcut_hint_ids() -> [&'static str; 19] {
+fn shortcut_hint_ids() -> [&'static str; 23] {
     [
         "new_terminal",
         "close_terminal",
@@ -390,6 +426,10 @@ fn shortcut_hint_ids() -> [&'static str; 19] {
         "next_panel",
         "next_workspace",
         "save_scene",
+        "terminal_interrupt",
+        "terminal_copy",
+        "terminal_paste",
+        "terminal_cut",
         "toggle_workspace_sidebar",
         "zoom_in",
         "zoom_out",
@@ -414,6 +454,10 @@ fn shortcut_label_for<'a>(texts: &'a crate::i18n::Texts, id: &str) -> &'a str {
         "next_panel" => &texts.shortcut_labels.next_panel,
         "next_workspace" => &texts.shortcut_labels.next_workspace,
         "save_scene" => &texts.shortcut_labels.save_scene,
+        "terminal_interrupt" => &texts.shortcut_labels.terminal_interrupt,
+        "terminal_copy" => &texts.shortcut_labels.terminal_copy,
+        "terminal_paste" => &texts.shortcut_labels.terminal_paste,
+        "terminal_cut" => &texts.shortcut_labels.terminal_cut,
         "toggle_workspace_sidebar" => &texts.shortcut_labels.toggle_workspace_sidebar,
         "zoom_in" => &texts.shortcut_labels.zoom_in,
         "zoom_out" => &texts.shortcut_labels.zoom_out,
@@ -1292,6 +1336,10 @@ pub struct App {
     /// Theme id the editor popup is editing (None = closed).
     theme_edit_origin: Option<String>,
     theme_editor_subtab: crate::theme::ui::ThemeEditorSubtab,
+    /// Mirror of the clipboard content we last wrote/read, so a
+    /// REMAPPED paste key can still paste (egui only exposes clipboard
+    /// READ via its built-in Ctrl+V channel).
+    clipboard_mirror: String,
     /// Last known screen rect of each terminal's view (for the global
     /// history-menu overlay anchoring).
     terminal_view_rects: std::collections::HashMap<String, egui::Rect>,
@@ -1639,6 +1687,7 @@ impl App {
             theme_editor_open: false,
             theme_edit_origin: None,
             theme_editor_subtab: Default::default(),
+            clipboard_mirror: String::new(),
             terminal_view_rects: Default::default(),
             history_clear_confirm: None,
             history_menu_just_closed: Default::default(),
@@ -7566,6 +7615,8 @@ impl eframe::App for App {
                                 history_menu_just_closed: &mut self.history_menu_just_closed,
                                 auto_match_pending: &mut self.auto_match_pending,
                                 detected_shells: &self.detected_shells,
+                                clipboard_binds: self.settings.key_binds.clone(),
+                                clipboard_mirror: &mut self.clipboard_mirror,
                                 pending_shell: &mut self.pending_shell,
                                 default_shell_id: self.settings.default_shell.clone(),
                                 theme: if self.show_settings {
@@ -7934,6 +7985,14 @@ mod tests {
         assert_eq!(binds["next_workspace"].key, "W");
         assert_eq!(binds["close_terminal"].key, "E");
         assert_eq!(binds["save_scene"].key, "S");
+        assert_eq!(binds["terminal_interrupt"].key, "C");
+        assert!(binds["terminal_interrupt"].ctrl);
+        assert!(binds["terminal_interrupt"].shift);
+        assert_eq!(binds["terminal_copy"].key, "C");
+        assert!(binds["terminal_copy"].ctrl);
+        assert!(!binds["terminal_copy"].shift);
+        assert_eq!(binds["terminal_paste"].key, "V");
+        assert_eq!(binds["terminal_cut"].key, "X");
         assert!(!binds["history_favorite"].ctrl);
         assert_eq!(binds["history_delete"].key, "Delete");
         assert!(!binds["history_delete"].ctrl);
@@ -8200,6 +8259,10 @@ struct TerminalTabViewer<'a> {
     history_menu_just_closed: &'a mut std::collections::HashMap<String, bool>,
     auto_match_pending: &'a mut std::collections::HashMap<String, String>,
     detected_shells: &'a [crate::shells::ShellOption],
+    /// Terminal clipboard/interrupt shortcut bindings (settings).
+    clipboard_binds: HashMap<String, ShortcutBinding>,
+    /// Clipboard mirror for remapped paste.
+    clipboard_mirror: &'a mut String,
     pending_shell: &'a mut Option<crate::shells::ShellOption>,
     /// Shell id chosen as default in settings (labels the menu's
     /// default entry; the actual spawn resolves in create_terminal).
@@ -8299,6 +8362,92 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
             // Close menu when terminal loses focus
             if !is_focused {
                 td.instance.history_nav = None;
+            }
+
+            // Configurable terminal clipboard/interrupt shortcuts.
+            // Interrupt writes ^C to the PTY; copy/cut copy the live
+            // selection (cut keeps the text: terminals have no
+            // delete-selection); paste writes the clipboard mirror (kept
+            // in sync on every copy/paste event) or falls back to ^V.
+            // The DEFAULT keys (Ctrl+C/V/X) are handled natively by egui
+            // (Copy/Cut/Paste events) — this interceptor covers REMAPPED
+            // keys, plus terminal_interrupt in every configuration.
+            {
+                let mk = |b: &ShortcutBinding| -> Option<(egui::Key, egui::Modifiers)> {
+                    binding_to_key(b).map(|k| {
+                        (
+                            k,
+                            egui::Modifiers {
+                                ctrl: b.ctrl,
+                                shift: b.shift,
+                                alt: b.alt,
+                                ..Default::default()
+                            },
+                        )
+                    })
+                };
+                // A binding sitting on egui's BUILT-IN clipboard keys
+                // (Ctrl+C/V/X) must NOT be intercepted here: egui's own
+                // channel handles those with the real system clipboard;
+                // interception would downgrade paste to the mirror.
+                let is_builtin_clipboard_key = |b: &ShortcutBinding| -> bool {
+                    mk(b).is_some_and(|(key, mods)| {
+                        mods == egui::Modifiers::CTRL
+                            && matches!(key, egui::Key::C | egui::Key::V | egui::Key::X)
+                    })
+                };
+                let hit = |ui: &egui::Ui, b: &ShortcutBinding| -> bool {
+                    mk(b).is_some_and(|(key, mods)| ui.input_mut(|i| i.consume_key(mods, key)))
+                };
+                if is_focused && !self.show_settings && !self.pw_popup_open {
+                    if let Some(b) = self.clipboard_binds.get("terminal_interrupt") {
+                        if hit(ui, b) {
+                            td.instance.write(&[0x03]);
+                        }
+                    }
+                    if let Some(b) = self
+                        .clipboard_binds
+                        .get("terminal_copy")
+                        .filter(|b| !is_builtin_clipboard_key(b))
+                    {
+                        if hit(ui, b) {
+                            let content = td.instance.backend.selectable_content();
+                            if !content.is_empty() {
+                                ui.ctx().copy_text(content.clone());
+                                *self.clipboard_mirror = content;
+                            }
+                        }
+                    }
+                    if let Some(b) = self
+                        .clipboard_binds
+                        .get("terminal_cut")
+                        .filter(|b| !is_builtin_clipboard_key(b))
+                    {
+                        if hit(ui, b) {
+                            let content = td.instance.backend.selectable_content();
+                            if !content.is_empty() {
+                                ui.ctx().copy_text(content.clone());
+                                *self.clipboard_mirror = content;
+                            }
+                        }
+                    }
+                    if let Some(b) = self
+                        .clipboard_binds
+                        .get("terminal_paste")
+                        .filter(|b| !is_builtin_clipboard_key(b))
+                    {
+                        if hit(ui, b) {
+                            if self.clipboard_mirror.is_empty() {
+                                // Mirror cold: fall back to the shell's ^V
+                                // paste (readline-level).
+                                td.instance.write(&[0x16]);
+                            } else {
+                                let text = self.clipboard_mirror.clone();
+                                td.instance.write(text.as_bytes());
+                            }
+                        }
+                    }
+                }
             }
 
             let terminal_view = {

@@ -113,6 +113,10 @@ shortcut_labels:
   next_panel: अगला स्प्लिट पेन
   next_workspace: अगला वर्कस्पेस
   save_scene: लेआउट सहेजें
+  terminal_interrupt: टर्मिनल इंटरप्ट (^C)
+  terminal_copy: टर्मिनल कॉपी
+  terminal_paste: टर्मिनल पेस्ट
+  terminal_cut: टर्मिनल कट
   next_terminal: अगला टर्मिनल
   history_favorite: कमांड पसंदीदा
   history_delete: कमांड हटाएं
