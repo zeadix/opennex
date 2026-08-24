@@ -110,6 +110,9 @@ shortcut_labels:
   lock_workspace: Blocca area di lavoro
   history_menu: Menu cronologia
   history_prev: Cronologia precedente
+  next_panel: Pannello diviso successivo
+  next_workspace: Area di lavoro successiva
+  save_scene: Salva layout
   next_terminal: Terminale successivo
   history_favorite: Comando preferito
   history_delete: Elimina comando

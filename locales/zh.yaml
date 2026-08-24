@@ -110,6 +110,9 @@ shortcut_labels:
   lock_workspace: 锁定工作区
   history_menu: 历史菜单
   history_prev: 历史上一条
+  next_panel: 切换下一个分屏
+  next_workspace: 切换下一个工作区
+  save_scene: 保存当前布局
   next_terminal: 切换下一个终端
   history_favorite: 收藏指令
   history_delete: 删除指令

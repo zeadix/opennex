@@ -110,6 +110,9 @@ shortcut_labels:
   lock_workspace: Lock Workspace
   history_menu: History Menu
   history_prev: History Previous
+  next_panel: Next Split Pane
+  next_workspace: Next Workspace
+  save_scene: Save Layout
   next_terminal: Next Terminal
   history_favorite: Favorite Command
   history_delete: Delete Command

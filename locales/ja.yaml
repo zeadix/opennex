@@ -110,6 +110,9 @@ shortcut_labels:
   lock_workspace: ワークスペースをロック
   history_menu: 履歴メニュー
   history_prev: 前の履歴
+  next_panel: 次の分割ペインへ切替
+  next_workspace: 次のワークスペースへ切替
+  save_scene: レイアウトを保存
   next_terminal: 次のターミナルへ切替
   history_favorite: コマンドをお気に入り
   history_delete: コマンドを削除

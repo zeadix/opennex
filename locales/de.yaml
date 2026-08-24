@@ -110,6 +110,9 @@ shortcut_labels:
   lock_workspace: Arbeitsbereich sperren
   history_menu: Verlaufsmenü
   history_prev: Vorheriger Verlauf
+  next_panel: Nächster Split-Bereich
+  next_workspace: Nächster Arbeitsbereich
+  save_scene: Layout speichern
   next_terminal: Nächstes Terminal
   history_favorite: Befehl favorisieren
   history_delete: Befehl löschen

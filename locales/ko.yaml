@@ -110,6 +110,9 @@ shortcut_labels:
   lock_workspace: 작업공간 잠금
   history_menu: 기록 메뉴
   history_prev: 이전 기록
+  next_panel: 다음 분할 창 전환
+  next_workspace: 다음 워크스페이스 전환
+  save_scene: 레이아웃 저장
   next_terminal: 다음 터미널 전환
   history_favorite: 명령 즐겨찾기
   history_delete: 명령 삭제

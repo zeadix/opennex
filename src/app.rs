@@ -108,9 +108,36 @@ fn default_key_binds() -> HashMap<String, ShortcutBinding> {
         },
     );
     m.insert(
-        "close_terminal".into(),
+        "next_panel".into(),
+        ShortcutBinding {
+            key: "Q".into(),
+            ctrl: true,
+            shift: false,
+            alt: false,
+        },
+    );
+    m.insert(
+        "next_workspace".into(),
         ShortcutBinding {
             key: "W".into(),
+            ctrl: true,
+            shift: false,
+            alt: false,
+        },
+    );
+    m.insert(
+        "save_scene".into(),
+        ShortcutBinding {
+            key: "S".into(),
+            ctrl: true,
+            shift: false,
+            alt: false,
+        },
+    );
+    m.insert(
+        "close_terminal".into(),
+        ShortcutBinding {
+            key: "E".into(),
             ctrl: true,
             shift: false,
             alt: false,
@@ -258,6 +285,9 @@ fn binding_to_key(b: &ShortcutBinding) -> Option<egui::Key> {
         "N" => Some(egui::Key::N),
         "W" => Some(egui::Key::W),
         "L" => Some(egui::Key::L),
+        "Q" => Some(egui::Key::Q),
+        "E" => Some(egui::Key::E),
+        "S" => Some(egui::Key::S),
         "ArrowUp" => Some(egui::Key::ArrowUp),
         "ArrowDown" => Some(egui::Key::ArrowDown),
         "ArrowLeft" => Some(egui::Key::ArrowLeft),
@@ -299,6 +329,9 @@ fn key_display_name(k: &str) -> &str {
         "PageDown" => "PageDown",
         "N" => "N",
         "W" => "W",
+        "Q" => "Q",
+        "E" => "E",
+        "S" => "S",
         "Tab" => "Tab",
         "Escape" => "Esc",
         "Enter" => "Enter",
@@ -339,7 +372,7 @@ fn shortcut_display(b: &ShortcutBinding) -> String {
     s
 }
 
-fn shortcut_hint_ids() -> [&'static str; 16] {
+fn shortcut_hint_ids() -> [&'static str; 19] {
     [
         "new_terminal",
         "close_terminal",
@@ -354,6 +387,9 @@ fn shortcut_hint_ids() -> [&'static str; 16] {
         "history_favorite",
         "history_delete",
         "next_terminal",
+        "next_panel",
+        "next_workspace",
+        "save_scene",
         "toggle_workspace_sidebar",
         "zoom_in",
         "zoom_out",
@@ -375,6 +411,9 @@ fn shortcut_label_for<'a>(texts: &'a crate::i18n::Texts, id: &str) -> &'a str {
         "history_favorite" => &texts.shortcut_labels.history_favorite,
         "history_delete" => &texts.shortcut_labels.history_delete,
         "next_terminal" => &texts.shortcut_labels.next_terminal,
+        "next_panel" => &texts.shortcut_labels.next_panel,
+        "next_workspace" => &texts.shortcut_labels.next_workspace,
+        "save_scene" => &texts.shortcut_labels.save_scene,
         "toggle_workspace_sidebar" => &texts.shortcut_labels.toggle_workspace_sidebar,
         "zoom_in" => &texts.shortcut_labels.zoom_in,
         "zoom_out" => &texts.shortcut_labels.zoom_out,
@@ -1253,9 +1292,6 @@ pub struct App {
     /// Theme id the editor popup is editing (None = closed).
     theme_edit_origin: Option<String>,
     theme_editor_subtab: crate::theme::ui::ThemeEditorSubtab,
-    auto_copy_selection: bool,
-    /// Whether typing auto-matches commands from history (settings toggle).
-    auto_match_command: bool,
     /// Last known screen rect of each terminal's view (for the global
     /// history-menu overlay anchoring).
     terminal_view_rects: std::collections::HashMap<String, egui::Rect>,
@@ -1603,8 +1639,6 @@ impl App {
             theme_editor_open: false,
             theme_edit_origin: None,
             theme_editor_subtab: Default::default(),
-            auto_copy_selection: true,
-            auto_match_command: true,
             terminal_view_rects: Default::default(),
             history_clear_confirm: None,
             history_menu_just_closed: Default::default(),
@@ -3677,6 +3711,112 @@ impl App {
         // line + the restart popup cover all states.
     }
 
+    /// Fixed sidebar bottom cluster: divider + quick toggles + divider +
+    /// stats footer. Rendered inside a reserved bottom panel so the
+    /// workspace list (a ScrollArea above) can never squeeze it out.
+    fn render_sidebar_bottom_cluster(&mut self, ui: &mut egui::Ui) {
+        let weak = self.active_theme.app.weak_text.to_egui();
+        let fg = self.active_theme.app.button_fg.to_egui();
+        let footer_h = 96.0;
+        let line_h = 16.0;
+
+        // Divider between the (scrolling) workspace list and the fixed
+        // quick toggles. It lives INSIDE the bottom panel, so it stays
+        // put no matter how far the list scrolls.
+        ui.separator();
+
+        // Quick toggles - they write the SAME state as the settings page
+        // (both the live settings and the settings_edit draft), so
+        // checking either side keeps the other in sync instantly.
+
+        let mut auto_copy = self.settings.auto_copy_selection;
+        let mut auto_match = self.settings.auto_match_command;
+        ui.style_mut().visuals.widgets.inactive.fg_stroke.color = weak;
+        ui.with_layout(egui::Layout::top_down(egui::Align::LEFT), |ui| {
+            ui.checkbox(&mut auto_copy, &self.texts.settings.general.auto_copy);
+            ui.checkbox(&mut auto_match, &self.texts.settings.general.auto_match);
+        });
+        if auto_copy != self.settings.auto_copy_selection {
+            self.settings.auto_copy_selection = auto_copy;
+            self.settings_edit.auto_copy_selection = auto_copy;
+            let _ = save_settings(&self.settings);
+        }
+        if auto_match != self.settings.auto_match_command {
+            self.settings.auto_match_command = auto_match;
+            self.settings_edit.auto_match_command = auto_match;
+            let _ = save_settings(&self.settings);
+        }
+        ui.separator();
+
+        let (footer_rect, _) = ui.allocate_exact_size(
+            egui::vec2(ui.available_width(), footer_h),
+            egui::Sense::hover(),
+        );
+        let x = footer_rect.min.x + 10.0;
+        let title_font = egui::FontId::proportional(10.0);
+        let data_font = egui::FontId::proportional(11.0);
+        let line = |i: usize| footer_rect.min.y + line_h * i as f32 + line_h / 2.0;
+
+        ui.painter().text(
+            egui::pos2(x, line(0)),
+            egui::Align2::LEFT_CENTER,
+            self.texts.stats.focused.as_str(),
+            title_font.clone(),
+            fg,
+        );
+        ui.painter().text(
+            egui::pos2(x, line(1)),
+            egui::Align2::LEFT_CENTER,
+            format!(
+                "{} | {}",
+                format_cpu(self.focused_cpu),
+                format_memory(self.focused_mem)
+            ),
+            data_font.clone(),
+            weak,
+        );
+        ui.painter().text(
+            egui::pos2(x, line(2)),
+            egui::Align2::LEFT_CENTER,
+            self.texts.stats.workspace.as_str(),
+            title_font.clone(),
+            fg,
+        );
+        ui.painter().text(
+            egui::pos2(x, line(3)),
+            egui::Align2::LEFT_CENTER,
+            format!(
+                "{} {} | {} | {}",
+                format_active_ws_terminal_count(self),
+                self.texts.stats.terminals,
+                format_cpu(self.workspace_cpu),
+                format_memory(self.workspace_mem)
+            ),
+            data_font.clone(),
+            weak,
+        );
+        ui.painter().text(
+            egui::pos2(x, line(4)),
+            egui::Align2::LEFT_CENTER,
+            self.texts.stats.global.as_str(),
+            title_font,
+            fg,
+        );
+        ui.painter().text(
+            egui::pos2(x, line(5)),
+            egui::Align2::LEFT_CENTER,
+            format!(
+                "{} {} | {} | {}",
+                format_ws_terminal_count(self),
+                self.texts.stats.terminals,
+                format_cpu(self.terminal_cpu),
+                format_memory(self.terminal_mem)
+            ),
+            data_font,
+            weak,
+        );
+    }
+
     fn focus_adjacent_panel(&mut self, direction: i32) {
         use egui_dock::{Node, Surface};
         let Some(tree) = self.dock_states.get_mut(&self.active_panel) else {
@@ -3743,7 +3883,7 @@ impl App {
     /// mouse button over a terminal, copy the current selection to
     /// the system clipboard.
     fn handle_selection_auto_copy(&mut self, ctx: &egui::Context) {
-        if !self.auto_copy_selection {
+        if !self.settings.auto_copy_selection {
             return;
         }
         let mut released = false;
@@ -5197,6 +5337,22 @@ impl eframe::App for App {
                     }
                 }
             }
+        }
+        // Cycle the SPLIT PANES (leaves) inside the current workspace.
+        if !workspace_renaming && check_shortcut(ctx, &binds, "next_panel") {
+            self.focus_adjacent_panel(1);
+        }
+        // Cycle FOCUS across workspaces (wraps last → first) and focus
+        // the workspace's active terminal.
+        if !workspace_renaming && check_shortcut(ctx, &binds, "next_workspace") {
+            if self.panels.len() > 1 {
+                self.active_panel = (self.active_panel + 1) % self.panels.len();
+                self.restore_workspace_focus(self.active_panel);
+            }
+        }
+        // Save the current layout (menu Workspace > Save).
+        if !workspace_renaming && check_shortcut(ctx, &binds, "save_scene") {
+            self.save_scene();
         }
         if !workspace_renaming && check_shortcut(ctx, &binds, "close_terminal") {
             // Same confirmation dialog as the mouse-close path (on_close):
@@ -6718,6 +6874,20 @@ impl eframe::App for App {
                         bar_state.store(ui.ctx(), bar_id);
                         let _ = tpl_resp.on_hover_text(&self.texts.workspace.templates);
                     });
+                    // Fixed bottom cluster FIRST: a bottom panel inside
+                    // the sidebar reserves its height up front, so the
+                    // workspace list below can NEVER squeeze it out of
+                    // the window - no matter how many workspaces exist.
+                    egui::TopBottomPanel::bottom("sidebar_bottom_cluster")
+                        .frame(egui::Frame::none())
+                        // The panel's built-in separator line is OFF: the
+                        // cluster draws its own divider at the right
+                        // spacing; both lines together read as duplicates.
+                        .show_separator_line(false)
+                        .show_inside(ui, |ui| {
+                            self.render_sidebar_bottom_cluster(ui);
+                        });
+
                     ui.add_space(4.0);
                     // Remove the default vertical spacing between workspace
                     // items so the list reads as one continuous block.
@@ -6728,426 +6898,380 @@ impl eframe::App for App {
                     self.panel_rects.clear();
                     self.panel_rects.resize(panel_count, egui::Rect::NOTHING);
 
-                    // Detect drag state from pointer
-                    let pointer_down = ui.input(|i| i.pointer.primary_down());
-                    let pointer_pos = ui.input(|i| i.pointer.interact_pos());
-                    let pointer_released = ui.input(|i| i.pointer.primary_released());
+                    // The workspace list scrolls when it outgrows the
+                    // space left by the fixed bottom cluster.
+                    egui::ScrollArea::vertical()
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            // Detect drag state from pointer
+                            let pointer_down = ui.input(|i| i.pointer.primary_down());
+                            let pointer_pos = ui.input(|i| i.pointer.interact_pos());
+                            let pointer_released = ui.input(|i| i.pointer.primary_released());
 
-                    for i in 0..panel_count {
-                        let is_active = i == self.active_panel;
-                        if self.renaming_panel == Some(i) {
-                            let mut confirm = false;
-                            let mut cancel = false;
-                            let response = ui
-                                .horizontal(|ui| {
-                                    let response = ui.add(
-                                        egui::TextEdit::singleline(&mut self.rename_buffer)
-                                            .font(egui::FontId::monospace(14.0))
-                                            .desired_width((ui.available_width() - 112.0).max(80.0))
-                                            .id_source("workspace_rename"),
-                                    );
-                                    response.request_focus();
-                                    confirm =
-                                        ui.button(&self.texts.workspace.rename_confirm).clicked();
-                                    cancel =
-                                        ui.button(&self.texts.workspace.rename_cancel).clicked();
-                                    response
-                                })
-                                .response;
-                            self.panel_rects[i] = response.rect;
-                            let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
-                            let escape = ui.input_mut(|i| {
-                                i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
-                            });
-                            if confirm || enter {
-                                apply_panel_rename(&mut self.panels[i], &self.rename_buffer);
-                                self.renaming_panel = None;
-                            } else if cancel || escape {
-                                cancel_workspace_rename(&mut self.renaming_panel, true);
-                            }
-                        } else {
-                            let panel_name = self.panels[i].name.clone();
-                            let is_locked = self.locked_panels.contains(&i);
-                            let row_h = ui.spacing().interact_size.y;
-                            // Reserve the full row width up front so we can
-                            // detect hover across the whole row, not just on
-                            // the selectable label.
-                            let (row_rect, row_resp) = ui.allocate_exact_size(
-                                egui::vec2(ui.available_width(), row_h),
-                                egui::Sense::click_and_drag(),
-                            );
-                            // `on_hover_text` consumes the Response; bind
-                            // back to the original so we can still use it
-                            // below.
-                            let is_row_hovered = row_resp.hovered();
-                            let _row_resp =
-                                row_resp.on_hover_text(&self.texts.workspace.drag_handle_hint);
-                            // Background: whole row uses button_bg so every
-                            // click target inside the row shares one
-                            // continuous surface. The selected row fills
-                            // with the theme's active color instead of
-                            // button_bg to indicate the active workspace.
-                            ui.painter().rect_filled(
-                                row_rect,
-                                0.0,
-                                if is_active {
-                                    self.active_theme.app.active.to_egui()
+                            for i in 0..panel_count {
+                                let is_active = i == self.active_panel;
+                                if self.renaming_panel == Some(i) {
+                                    let mut confirm = false;
+                                    let mut cancel = false;
+                                    let response = ui
+                                        .horizontal(|ui| {
+                                            let response = ui.add(
+                                                egui::TextEdit::singleline(&mut self.rename_buffer)
+                                                    .font(egui::FontId::monospace(14.0))
+                                                    .desired_width(
+                                                        (ui.available_width() - 112.0).max(80.0),
+                                                    )
+                                                    .id_source("workspace_rename"),
+                                            );
+                                            response.request_focus();
+                                            confirm = ui
+                                                .button(&self.texts.workspace.rename_confirm)
+                                                .clicked();
+                                            cancel = ui
+                                                .button(&self.texts.workspace.rename_cancel)
+                                                .clicked();
+                                            response
+                                        })
+                                        .response;
+                                    self.panel_rects[i] = response.rect;
+                                    let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
+                                    let escape = ui.input_mut(|i| {
+                                        i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
+                                    });
+                                    if confirm || enter {
+                                        apply_panel_rename(
+                                            &mut self.panels[i],
+                                            &self.rename_buffer,
+                                        );
+                                        self.renaming_panel = None;
+                                    } else if cancel || escape {
+                                        cancel_workspace_rename(&mut self.renaming_panel, true);
+                                    }
                                 } else {
-                                    self.active_theme.app.button_bg.to_egui()
-                                },
-                            );
-                            self.panel_rects[i] = row_rect;
+                                    let panel_name = self.panels[i].name.clone();
+                                    let is_locked = self.locked_panels.contains(&i);
+                                    let row_h = ui.spacing().interact_size.y;
+                                    // Reserve the full row width up front so we can
+                                    // detect hover across the whole row, not just on
+                                    // the selectable label.
+                                    let (row_rect, row_resp) = ui.allocate_exact_size(
+                                        egui::vec2(ui.available_width(), row_h),
+                                        egui::Sense::click_and_drag(),
+                                    );
+                                    // `on_hover_text` consumes the Response; bind
+                                    // back to the original so we can still use it
+                                    // below.
+                                    let is_row_hovered = row_resp.hovered();
+                                    let _row_resp = row_resp
+                                        .on_hover_text(&self.texts.workspace.drag_handle_hint);
+                                    // Background: whole row uses button_bg so every
+                                    // click target inside the row shares one
+                                    // continuous surface. The selected row fills
+                                    // with the theme's active color instead of
+                                    // button_bg to indicate the active workspace.
+                                    ui.painter().rect_filled(
+                                        row_rect,
+                                        0.0,
+                                        if is_active {
+                                            self.active_theme.app.active.to_egui()
+                                        } else {
+                                            self.active_theme.app.button_bg.to_egui()
+                                        },
+                                    );
+                                    self.panel_rects[i] = row_rect;
 
-                            // Layout: [≡ drag icon] [name (flex)] [lock btn | three-dot]
-                            // Use a child Ui inside row_rect so we can place
-                            // items by their own rect, not via add_sized.
-                            let mut child = ui.new_child(
-                                egui::UiBuilder::new()
-                                    .max_rect(row_rect)
-                                    .layout(egui::Layout::left_to_right(egui::Align::Center)),
-                            );
-                            // Drag handle on the left — always visible
-                            // (brighter when hovered).
-                            let drag_w = 14.0;
-                            let (handle_rect, handle_resp) = child.allocate_exact_size(
-                                egui::vec2(drag_w, row_h - 4.0),
-                                egui::Sense::drag(),
-                            );
-                            let handle_color = if handle_resp.hovered() {
-                                self.active_theme.app.text.to_egui()
-                            } else {
-                                self.active_theme.app.weak_text.to_egui()
-                            };
-                            child.painter().text(
-                                handle_rect.center(),
-                                egui::Align2::CENTER_CENTER,
-                                egui_phosphor::regular::DOTS_SIX_VERTICAL,
-                                egui::FontId::proportional(12.0),
-                                handle_color,
-                            );
-                            if handle_resp.drag_started() {
-                                self.drag_src_panel = Some(i);
+                                    // Layout: [≡ drag icon] [name (flex)] [lock btn | three-dot]
+                                    // Use a child Ui inside row_rect so we can place
+                                    // items by their own rect, not via add_sized.
+                                    let mut child = ui.new_child(
+                                        egui::UiBuilder::new().max_rect(row_rect).layout(
+                                            egui::Layout::left_to_right(egui::Align::Center),
+                                        ),
+                                    );
+                                    // Drag handle on the left — always visible
+                                    // (brighter when hovered).
+                                    let drag_w = 14.0;
+                                    let (handle_rect, handle_resp) = child.allocate_exact_size(
+                                        egui::vec2(drag_w, row_h - 4.0),
+                                        egui::Sense::drag(),
+                                    );
+                                    let handle_color = if handle_resp.hovered() {
+                                        self.active_theme.app.text.to_egui()
+                                    } else {
+                                        self.active_theme.app.weak_text.to_egui()
+                                    };
+                                    child.painter().text(
+                                        handle_rect.center(),
+                                        egui::Align2::CENTER_CENTER,
+                                        egui_phosphor::regular::DOTS_SIX_VERTICAL,
+                                        egui::FontId::proportional(12.0),
+                                        handle_color,
+                                    );
+                                    if handle_resp.drag_started() {
+                                        self.drag_src_panel = Some(i);
+                                        self.drag_dst_panel = None;
+                                    }
+                                    let _ = handle_rect;
+
+                                    // Name (clickable, fills middle). Flat text drawn
+                                    // directly on the row's shared button_bg — no
+                                    // SelectableLabel so hover never paints its own
+                                    // background over the row surface. Active state
+                                    // is shown via the text color; the row's accent
+                                    // border already marks the active workspace.
+                                    let (name_rect, response) = child.allocate_exact_size(
+                                        egui::vec2(child.available_width(), row_h),
+                                        egui::Sense::click_and_drag(),
+                                    );
+                                    let name_color = if is_active {
+                                        self.active_theme.app.text.to_egui()
+                                    } else if response.hovered() {
+                                        self.active_theme.app.text.to_egui()
+                                    } else {
+                                        self.active_theme.app.button_fg.to_egui()
+                                    };
+                                    let name_galley = child.fonts(|f| {
+                                        f.layout_no_wrap(
+                                            panel_name.to_string(),
+                                            egui::FontId::proportional(14.0),
+                                            name_color,
+                                        )
+                                    });
+                                    child.painter().galley(
+                                        egui::pos2(
+                                            name_rect.min.x + 2.0,
+                                            name_rect.center().y - name_galley.size().y / 2.0,
+                                        ),
+                                        name_galley,
+                                        name_color,
+                                    );
+                                    let _ = name_rect;
+                                    if response.double_clicked() && !renaming {
+                                        self.renaming_panel = Some(i);
+                                        self.rename_buffer = panel_name;
+                                        self.rename_frame_count = 0;
+                                        to_select = None;
+                                    } else if response.clicked() && !renaming {
+                                        to_select = Some(i);
+                                    }
+                                    response.context_menu(|ui| {
+                                        if ui.button(&self.texts.workspace.rename).clicked() {
+                                            self.renaming_panel = Some(i);
+                                            self.rename_buffer = self.panels[i].name.clone();
+                                            self.rename_frame_count = 0;
+                                            ui.close_menu();
+                                        }
+                                        if ui
+                                            .button(&self.texts.workspace.save_as_template)
+                                            .clicked()
+                                        {
+                                            self.save_as_template(i);
+                                            ui.close_menu();
+                                        }
+                                        ui.separator();
+                                        if ui
+                                            .button(if is_locked { "解锁" } else { "锁定" })
+                                            .clicked()
+                                        {
+                                            if is_locked {
+                                                self.active_panel = i;
+                                                self.lock_password_input.clear();
+                                                self.pw_message.clear();
+                                            } else {
+                                                self.locked_panels.insert(i);
+                                                self.lock_password_input.clear();
+                                                self.pw_message.clear();
+                                            }
+                                            ui.close_menu();
+                                        }
+                                        ui.separator();
+                                        if ui.button(&self.texts.settings.buttons.close).clicked() {
+                                            self.close_confirm_panel = Some(i);
+                                            ui.close_menu();
+                                        }
+                                    });
+
+                                    // Right-side action cluster, anchored to the
+                                    // right edge with right-to-left layout. The lock
+                                    // and three-dot icons are always rendered and
+                                    // sit flush against each other (no divider, no
+                                    // item spacing inside the cluster). Lock is the
+                                    // rightmost target; the three-dot menu button
+                                    // sits to its left.
+                                    let btn_w = 17.0;
+                                    let btn_h = row_h;
+                                    let action_cluster_w = btn_w;
+                                    let mut actions_ui = ui.new_child(
+                                        egui::UiBuilder::new()
+                                            .max_rect(egui::Rect::from_min_size(
+                                                egui::pos2(
+                                                    row_rect.max.x - action_cluster_w,
+                                                    row_rect.min.y,
+                                                ),
+                                                egui::vec2(action_cluster_w, row_rect.height()),
+                                            ))
+                                            .layout(egui::Layout::right_to_left(
+                                                egui::Align::Center,
+                                            )),
+                                    );
+                                    actions_ui.style_mut().spacing.item_spacing =
+                                        egui::vec2(0.0, 0.0);
+                                    let button_fg = self.active_theme.app.button_fg.to_egui();
+                                    let icon_active = self.active_theme.app.text.to_egui();
+
+                                    // Lock / unlock button (rightmost, the only action). Always painted so the
+                                    let (lock_rect, lock_resp) = actions_ui.allocate_exact_size(
+                                        egui::vec2(btn_w, btn_h),
+                                        egui::Sense::click(),
+                                    );
+                                    let lock_color = if is_locked {
+                                        self.active_theme.app.lock.to_egui()
+                                    } else if lock_resp.hovered() {
+                                        icon_active
+                                    } else {
+                                        button_fg
+                                    };
+                                    let lock_galley = actions_ui.fonts(|f| {
+                                        f.layout_no_wrap(
+                                            workspace_lock_icon(is_locked).to_string(),
+                                            egui::FontId::proportional(13.0),
+                                            lock_color,
+                                        )
+                                    });
+                                    actions_ui.painter().galley(
+                                        lock_rect.center()
+                                            - egui::vec2(
+                                                lock_galley.size().x / 2.0,
+                                                lock_galley.size().y / 2.0,
+                                            ),
+                                        lock_galley,
+                                        lock_color,
+                                    );
+                                    if lock_resp.clicked() {
+                                        if is_locked {
+                                            self.active_panel = i;
+                                        } else {
+                                            self.locked_panels.insert(i);
+                                        }
+                                        self.lock_password_input.clear();
+                                        self.pw_message.clear();
+                                    }
+                                    let _ = lock_resp.on_hover_text(if is_locked {
+                                        &self.texts.workspace.locked_hint
+                                    } else {
+                                        &self.texts.workspace.unlocked_hint
+                                    });
+                                }
+                            }
+
+                            // Handle drag target detection after all rects are known
+                            if let Some(src) = self.drag_src_panel {
+                                if pointer_down || pointer_released {
+                                    self.drag_dst_panel = None;
+                                    if let Some(pos) = pointer_pos {
+                                        for j in (0..panel_count).rev() {
+                                            if j == src {
+                                                continue;
+                                            }
+                                            if j < self.panel_rects.len()
+                                                && self.panel_rects[j].contains(pos)
+                                            {
+                                                self.drag_dst_panel = Some(j);
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+
+                                if pointer_down || pointer_released {
+                                    ui.ctx().request_repaint();
+                                    let painter = ui.painter();
+                                    let source_fill =
+                                        ui.visuals().faint_bg_color.linear_multiply(0.65);
+                                    let target_stroke =
+                                        egui::Stroke::new(1.5, ui.visuals().selection.stroke.color);
+
+                                    if drag_row_is_source(src, self.drag_src_panel) {
+                                        let source_rect = self.panel_rects[src];
+                                        if source_rect.is_positive() {
+                                            painter.rect_filled(source_rect, 3.0, source_fill);
+                                        }
+                                    }
+
+                                    if let Some(dst) = self.drag_dst_panel {
+                                        if drag_row_is_target(dst, self.drag_dst_panel) {
+                                            let target_rect = self.panel_rects[dst];
+                                            if target_rect.is_positive() {
+                                                painter.rect_stroke(
+                                                    target_rect.expand(1.0),
+                                                    3.0,
+                                                    target_stroke,
+                                                    egui::StrokeKind::Outside,
+                                                );
+                                                if let Some(pos) = pointer_pos {
+                                                    let insertion_y =
+                                                        drag_insertion_y(target_rect, pos.y);
+                                                    painter.line_segment(
+                                                        [
+                                                            egui::pos2(
+                                                                target_rect.left(),
+                                                                insertion_y,
+                                                            ),
+                                                            egui::pos2(
+                                                                target_rect.right(),
+                                                                insertion_y,
+                                                            ),
+                                                        ],
+                                                        egui::Stroke::new(2.0, target_stroke.color),
+                                                    );
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                if pointer_released {
+                                    reorder = self.drag_dst_panel.take().map(|target| {
+                                        let after_target = pointer_pos.is_some_and(|pos| {
+                                            self.panel_rects
+                                                .get(target)
+                                                .is_some_and(|rect| pos.y > rect.center().y)
+                                        });
+                                        (
+                                            src,
+                                            drag_drop_destination(
+                                                src,
+                                                target,
+                                                after_target,
+                                                panel_count,
+                                            ),
+                                        )
+                                    });
+                                    self.drag_src_panel = None;
+                                }
+                            } else if pointer_released {
+                                self.drag_src_panel = None;
                                 self.drag_dst_panel = None;
                             }
-                            let _ = handle_rect;
 
-                            // Name (clickable, fills middle). Flat text drawn
-                            // directly on the row's shared button_bg — no
-                            // SelectableLabel so hover never paints its own
-                            // background over the row surface. Active state
-                            // is shown via the text color; the row's accent
-                            // border already marks the active workspace.
-                            let (name_rect, response) = child.allocate_exact_size(
-                                egui::vec2(child.available_width(), row_h),
-                                egui::Sense::click_and_drag(),
-                            );
-                            let name_color = if is_active {
-                                self.active_theme.app.text.to_egui()
-                            } else if response.hovered() {
-                                self.active_theme.app.text.to_egui()
-                            } else {
-                                self.active_theme.app.button_fg.to_egui()
-                            };
-                            let name_galley = child.fonts(|f| {
-                                f.layout_no_wrap(
-                                    panel_name.to_string(),
-                                    egui::FontId::proportional(14.0),
-                                    name_color,
-                                )
-                            });
-                            child.painter().galley(
-                                egui::pos2(
-                                    name_rect.min.x + 2.0,
-                                    name_rect.center().y - name_galley.size().y / 2.0,
-                                ),
-                                name_galley,
-                                name_color,
-                            );
-                            let _ = name_rect;
-                            if response.double_clicked() && !renaming {
-                                self.renaming_panel = Some(i);
-                                self.rename_buffer = panel_name;
-                                self.rename_frame_count = 0;
-                                to_select = None;
-                            } else if response.clicked() && !renaming {
-                                to_select = Some(i);
+                            // Perform reorder
+                            if let Some((src, dst)) = reorder {
+                                self.reorder_panel(src, dst);
                             }
-                            response.context_menu(|ui| {
-                                if ui.button(&self.texts.workspace.rename).clicked() {
-                                    self.renaming_panel = Some(i);
-                                    self.rename_buffer = self.panels[i].name.clone();
-                                    self.rename_frame_count = 0;
-                                    ui.close_menu();
-                                }
-                                if ui.button(&self.texts.workspace.save_as_template).clicked() {
-                                    self.save_as_template(i);
-                                    ui.close_menu();
-                                }
-                                ui.separator();
-                                if ui.button(if is_locked { "解锁" } else { "锁定" }).clicked()
-                                {
-                                    if is_locked {
-                                        self.active_panel = i;
-                                        self.lock_password_input.clear();
-                                        self.pw_message.clear();
-                                    } else {
-                                        self.locked_panels.insert(i);
-                                        self.lock_password_input.clear();
-                                        self.pw_message.clear();
-                                    }
-                                    ui.close_menu();
-                                }
-                                ui.separator();
-                                if ui.button(&self.texts.settings.buttons.close).clicked() {
-                                    self.close_confirm_panel = Some(i);
-                                    ui.close_menu();
-                                }
-                            });
-
-                            // Right-side action cluster, anchored to the
-                            // right edge with right-to-left layout. The lock
-                            // and three-dot icons are always rendered and
-                            // sit flush against each other (no divider, no
-                            // item spacing inside the cluster). Lock is the
-                            // rightmost target; the three-dot menu button
-                            // sits to its left.
-                            let btn_w = 17.0;
-                            let btn_h = row_h;
-                            let action_cluster_w = btn_w;
-                            let mut actions_ui = ui.new_child(
-                                egui::UiBuilder::new()
-                                    .max_rect(egui::Rect::from_min_size(
-                                        egui::pos2(
-                                            row_rect.max.x - action_cluster_w,
-                                            row_rect.min.y,
-                                        ),
-                                        egui::vec2(action_cluster_w, row_rect.height()),
-                                    ))
-                                    .layout(egui::Layout::right_to_left(egui::Align::Center)),
-                            );
-                            actions_ui.style_mut().spacing.item_spacing = egui::vec2(0.0, 0.0);
-                            let button_fg = self.active_theme.app.button_fg.to_egui();
-                            let icon_active = self.active_theme.app.text.to_egui();
-
-                            // Lock / unlock button (rightmost, the only action). Always painted so the
-                            let (lock_rect, lock_resp) = actions_ui.allocate_exact_size(
-                                egui::vec2(btn_w, btn_h),
-                                egui::Sense::click(),
-                            );
-                            let lock_color = if is_locked {
-                                self.active_theme.app.lock.to_egui()
-                            } else if lock_resp.hovered() {
-                                icon_active
-                            } else {
-                                button_fg
-                            };
-                            let lock_galley = actions_ui.fonts(|f| {
-                                f.layout_no_wrap(
-                                    workspace_lock_icon(is_locked).to_string(),
-                                    egui::FontId::proportional(13.0),
-                                    lock_color,
-                                )
-                            });
-                            actions_ui.painter().galley(
-                                lock_rect.center()
-                                    - egui::vec2(
-                                        lock_galley.size().x / 2.0,
-                                        lock_galley.size().y / 2.0,
-                                    ),
-                                lock_galley,
-                                lock_color,
-                            );
-                            if lock_resp.clicked() {
-                                if is_locked {
+                            if let Some(i) = to_select {
+                                if self.active_panel != i {
                                     self.active_panel = i;
-                                } else {
-                                    self.locked_panels.insert(i);
-                                }
-                                self.lock_password_input.clear();
-                                self.pw_message.clear();
-                            }
-                            let _ = lock_resp.on_hover_text(if is_locked {
-                                &self.texts.workspace.locked_hint
-                            } else {
-                                &self.texts.workspace.unlocked_hint
-                            });
-                        }
-                    }
-
-                    // Handle drag target detection after all rects are known
-                    if let Some(src) = self.drag_src_panel {
-                        if pointer_down || pointer_released {
-                            self.drag_dst_panel = None;
-                            if let Some(pos) = pointer_pos {
-                                for j in (0..panel_count).rev() {
-                                    if j == src {
-                                        continue;
-                                    }
-                                    if j < self.panel_rects.len()
-                                        && self.panel_rects[j].contains(pos)
-                                    {
-                                        self.drag_dst_panel = Some(j);
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-
-                        if pointer_down || pointer_released {
-                            ui.ctx().request_repaint();
-                            let painter = ui.painter();
-                            let source_fill = ui.visuals().faint_bg_color.linear_multiply(0.65);
-                            let target_stroke =
-                                egui::Stroke::new(1.5, ui.visuals().selection.stroke.color);
-
-                            if drag_row_is_source(src, self.drag_src_panel) {
-                                let source_rect = self.panel_rects[src];
-                                if source_rect.is_positive() {
-                                    painter.rect_filled(source_rect, 3.0, source_fill);
-                                }
-                            }
-
-                            if let Some(dst) = self.drag_dst_panel {
-                                if drag_row_is_target(dst, self.drag_dst_panel) {
-                                    let target_rect = self.panel_rects[dst];
-                                    if target_rect.is_positive() {
-                                        painter.rect_stroke(
-                                            target_rect.expand(1.0),
-                                            3.0,
-                                            target_stroke,
-                                            egui::StrokeKind::Outside,
-                                        );
-                                        if let Some(pos) = pointer_pos {
-                                            let insertion_y = drag_insertion_y(target_rect, pos.y);
-                                            painter.line_segment(
-                                                [
-                                                    egui::pos2(target_rect.left(), insertion_y),
-                                                    egui::pos2(target_rect.right(), insertion_y),
-                                                ],
-                                                egui::Stroke::new(2.0, target_stroke.color),
-                                            );
+                                    // Restore the workspace's last focused terminal
+                                    // (the dock tree keeps it as its active tab).
+                                    if let Some(tree) = self.dock_states.get_mut(&i) {
+                                        if let Some((_, tab)) = tree.find_active_focused() {
+                                            self.focused_terminal = Some(tab.clone());
                                         }
                                     }
                                 }
                             }
-                        }
-
-                        if pointer_released {
-                            reorder = self.drag_dst_panel.take().map(|target| {
-                                let after_target = pointer_pos.is_some_and(|pos| {
-                                    self.panel_rects
-                                        .get(target)
-                                        .is_some_and(|rect| pos.y > rect.center().y)
-                                });
-                                (
-                                    src,
-                                    drag_drop_destination(src, target, after_target, panel_count),
-                                )
-                            });
-                            self.drag_src_panel = None;
-                        }
-                    } else if pointer_released {
-                        self.drag_src_panel = None;
-                        self.drag_dst_panel = None;
-                    }
-
-                    // Perform reorder
-                    if let Some((src, dst)) = reorder {
-                        self.reorder_panel(src, dst);
-                    }
-                    if let Some(i) = to_select {
-                        if self.active_panel != i {
-                            self.active_panel = i;
-                            // Restore the workspace's last focused terminal
-                            // (the dock tree keeps it as its active tab).
-                            if let Some(tree) = self.dock_states.get_mut(&i) {
-                                if let Some((_, tab)) = tree.find_active_focused() {
-                                    self.focused_terminal = Some(tab.clone());
-                                }
-                            }
-                        }
-                    }
-                    // Sidebar footer pinned 40px above the bottom: let the
-                    // workspace list take all remaining space first, then
-                    // allocate the gap and the fixed-height footer.
-                    let weak = self.active_theme.app.weak_text.to_egui();
-                    let fg = self.active_theme.app.button_fg.to_egui();
-                    let footer_h = 96.0;
-                    let line_h = 16.0;
-                    let bottom_gap = 10.0;
-                    let avail_h = ui.available_height();
-                    let flex_h = (avail_h - footer_h - bottom_gap).max(0.0);
-                    if flex_h > 0.0 {
-                        ui.add_space(flex_h);
-                    }
-                    let (footer_rect, _) = ui.allocate_exact_size(
-                        egui::vec2(ui.available_width(), footer_h),
-                        egui::Sense::hover(),
-                    );
-                    let x = footer_rect.min.x + 10.0;
-                    let title_font = egui::FontId::proportional(10.0);
-                    let data_font = egui::FontId::proportional(11.0);
-                    let line = |i: usize| footer_rect.min.y + line_h * i as f32 + line_h / 2.0;
-
-                    ui.painter().text(
-                        egui::pos2(x, line(0)),
-                        egui::Align2::LEFT_CENTER,
-                        self.texts.stats.focused.as_str(),
-                        title_font.clone(),
-                        fg,
-                    );
-                    ui.painter().text(
-                        egui::pos2(x, line(1)),
-                        egui::Align2::LEFT_CENTER,
-                        format!(
-                            "{} │ {}",
-                            format_cpu(self.focused_cpu),
-                            format_memory(self.focused_mem)
-                        ),
-                        data_font.clone(),
-                        weak,
-                    );
-                    ui.painter().text(
-                        egui::pos2(x, line(2)),
-                        egui::Align2::LEFT_CENTER,
-                        self.texts.stats.workspace.as_str(),
-                        title_font.clone(),
-                        fg,
-                    );
-                    ui.painter().text(
-                        egui::pos2(x, line(3)),
-                        egui::Align2::LEFT_CENTER,
-                        format!(
-                            "{} {} │ {} │ {}",
-                            format_active_ws_terminal_count(self),
-                            self.texts.stats.terminals,
-                            format_cpu(self.workspace_cpu),
-                            format_memory(self.workspace_mem)
-                        ),
-                        data_font.clone(),
-                        weak,
-                    );
-                    ui.painter().text(
-                        egui::pos2(x, line(4)),
-                        egui::Align2::LEFT_CENTER,
-                        self.texts.stats.global.as_str(),
-                        title_font,
-                        fg,
-                    );
-                    ui.painter().text(
-                        egui::pos2(x, line(5)),
-                        egui::Align2::LEFT_CENTER,
-                        format!(
-                            "{} {} │ {} │ {}",
-                            format_ws_terminal_count(self),
-                            self.texts.stats.terminals,
-                            format_cpu(self.terminal_cpu),
-                            format_memory(self.terminal_mem)
-                        ),
-                        data_font,
-                        weak,
-                    );
-                });
+                        }); // ScrollArea (workspace list)
+                }); // sidebar SidePanel show
         }
 
         // The sidebar can enter rename mode during this frame. Read the state again so the
@@ -7804,6 +7928,12 @@ mod tests {
         assert_eq!(binds["history_prev"].key, "ArrowUp");
         assert_eq!(binds["history_next"].key, "ArrowDown");
         assert_eq!(binds["history_favorite"].key, "F2");
+        assert_eq!(binds["next_terminal"].key, "Tab");
+        assert!(binds["next_terminal"].ctrl);
+        assert_eq!(binds["next_panel"].key, "Q");
+        assert_eq!(binds["next_workspace"].key, "W");
+        assert_eq!(binds["close_terminal"].key, "E");
+        assert_eq!(binds["save_scene"].key, "S");
         assert!(!binds["history_favorite"].ctrl);
         assert_eq!(binds["history_delete"].key, "Delete");
         assert!(!binds["history_delete"].ctrl);

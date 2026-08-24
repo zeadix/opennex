@@ -110,6 +110,9 @@ shortcut_labels:
   lock_workspace: Verrouiller espace
   history_menu: Menu historique
   history_prev: Historique précédent
+  next_panel: Panneau divisé suivant
+  next_workspace: Espace de travail suivant
+  save_scene: Enregistrer la disposition
   next_terminal: Terminal suivant
   history_favorite: Commande en favori
   history_delete: Supprimer la commande
