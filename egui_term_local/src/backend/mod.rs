@@ -622,6 +622,7 @@ mod tests {
                 shell: "/bin/sh".into(),
                 args: vec!["-c".into(), "printf startup; sleep 1".into()],
                 working_directory: Some(PathBuf::from("/tmp")),
+                env: vec![],
             },
         )
         .expect("terminal backend should start");

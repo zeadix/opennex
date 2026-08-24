@@ -317,15 +317,19 @@ impl<'a> TerminalView<'a> {
                         modifiers,
                     ))
                 },
-                egui::Event::MouseWheel { unit, delta, .. }
-                    if pointer_inside =>
-                {
-                    input_actions.push(process_mouse_wheel(
+                egui::Event::MouseWheel {
+                    unit,
+                    delta,
+                    modifiers: wheel_modifiers,
+                } if pointer_inside => {
+                    input_actions.extend(process_mouse_wheel(
                         state,
+                        self.backend,
                         self.font.font_type().size,
                         unit,
                         delta,
-                    ))
+                        &wheel_modifiers,
+                    ));
                 },
                 egui::Event::PointerButton {
                     button,
@@ -870,26 +874,74 @@ fn process_keyboard_key(
 
 fn process_mouse_wheel(
     state: &mut TerminalViewState,
+    backend: &TerminalBackend,
     font_size: f32,
     unit: MouseWheelUnit,
     delta: Vec2,
-) -> InputAction {
+    modifiers: &Modifiers,
+) -> Vec<InputAction> {
+    // When the application ENABLED MOUSE REPORTING (TUI programs like
+    // vim/less/opencode), the wheel belongs to the APPLICATION: report
+    // it as button-64/65 press+release (xterm SGR convention) instead of
+    // scrolling our own scrollback — the app has no scrollback view of
+    // ours to scroll and the old behavior corrupted its input stream.
+    let terminal_mode = backend.last_content().terminal_mode;
+    if terminal_mode.intersects(TermMode::MOUSE_MODE) {
+        let (button, presses) = if delta.y > 0.0 {
+            (
+                MouseButton::ScrollUp,
+                delta.y.abs().ceil().max(1.0) as usize,
+            )
+        } else if delta.y < 0.0 {
+            (
+                MouseButton::ScrollDown,
+                delta.y.abs().ceil().max(1.0) as usize,
+            )
+        } else {
+            return Vec::new();
+        };
+        let mut actions = Vec::with_capacity(presses * 2);
+        for _ in 0..presses {
+            actions.push(InputAction::BackendCall(
+                BackendCommand::MouseReport(
+                    button.clone(),
+                    *modifiers,
+                    state.current_mouse_position_on_grid,
+                    true,
+                ),
+            ));
+            actions.push(InputAction::BackendCall(
+                BackendCommand::MouseReport(
+                    button.clone(),
+                    *modifiers,
+                    state.current_mouse_position_on_grid,
+                    false,
+                ),
+            ));
+        }
+        return actions;
+    }
+    // No mouse reporting: scroll our own scrollback as before.
     match unit {
         MouseWheelUnit::Line => {
             let lines = delta.y.signum() * delta.y.abs().ceil();
-            InputAction::BackendCall(BackendCommand::Scroll(lines as i32))
+            vec![InputAction::BackendCall(BackendCommand::Scroll(
+                lines as i32,
+            ))]
         },
         MouseWheelUnit::Point => {
             state.scroll_pixels -= delta.y;
             let lines = (state.scroll_pixels / font_size).trunc();
             state.scroll_pixels %= font_size;
             if lines != 0.0 {
-                InputAction::BackendCall(BackendCommand::Scroll(-lines as i32))
+                vec![InputAction::BackendCall(BackendCommand::Scroll(
+                    -lines as i32,
+                ))]
             } else {
-                InputAction::Ignore
+                Vec::new()
             }
         },
-        MouseWheelUnit::Page => InputAction::Ignore,
+        MouseWheelUnit::Page => Vec::new(),
     }
 }
 
@@ -1082,5 +1134,111 @@ mod tests {
         assert!(filter.horizontal_arrows);
         assert!(filter.vertical_arrows);
         assert!(filter.escape);
+    }
+}
+
+#[cfg(test)]
+mod wheel_tests {
+    use super::*;
+    use crate::backend::TerminalBackend;
+    use crate::BackendSettings;
+
+    #[test]
+    fn wheel_reports_to_app_when_mouse_mode_enabled() {
+        // TUI apps (less/vim/opencode) enable mouse reporting; the wheel
+        // must go to the APP (button 64/65 SGR reports), not our
+        // scrollback.
+        let mut backend = TerminalBackend::new(
+            77,
+            egui::Context::default(),
+            BackendSettings {
+                shell: "/bin/sh".into(),
+                args: vec![
+                    "-c".into(),
+                    "printf '\\e[?1000h\\e[?1006h'; sleep 3".into(),
+                ],
+                working_directory: Some("/tmp".into()),
+                env: vec![],
+            },
+        )
+        .expect("backend");
+        // Let the escape sequences land in the grid/mode.
+        for _ in 0..40 {
+            std::thread::sleep(std::time::Duration::from_millis(25));
+            backend.set_dirty();
+            let _ = backend.sync();
+        }
+        assert!(
+            backend
+                .last_content()
+                .terminal_mode
+                .intersects(TermMode::MOUSE_MODE),
+            "test setup: mouse mode not enabled"
+        );
+        let mut state = TerminalViewState::default();
+        let actions = process_mouse_wheel(
+            &mut state,
+            &backend,
+            14.0,
+            egui::MouseWheelUnit::Line,
+            egui::vec2(0.0, 3.0),
+            &egui::Modifiers::NONE,
+        );
+        assert!(
+            actions.iter().all(|a| matches!(
+                a,
+                InputAction::BackendCall(BackendCommand::MouseReport(
+                    MouseButton::ScrollUp | MouseButton::ScrollDown,
+                    _,
+                    _,
+                    _
+                ))
+            )),
+            "wheel in mouse-mode must be MouseReport actions, got {actions:?}"
+        );
+        // press+release pairs per notch
+        assert_eq!(actions.len(), 6);
+    }
+
+    #[test]
+    fn wheel_scrolls_scrollback_without_mouse_mode() {
+        // Plain shell: no mouse reporting — the wheel scrolls OUR
+        // scrollback (Scroll command) as before.
+        let mut backend = TerminalBackend::new(
+            78,
+            egui::Context::default(),
+            BackendSettings {
+                shell: "/bin/sh".into(),
+                args: vec!["-c".into(), "sleep 3".into()],
+                working_directory: Some("/tmp".into()),
+                env: vec![],
+            },
+        )
+        .expect("backend");
+        for _ in 0..20 {
+            std::thread::sleep(std::time::Duration::from_millis(25));
+            backend.set_dirty();
+            let _ = backend.sync();
+        }
+        assert!(!backend
+            .last_content()
+            .terminal_mode
+            .intersects(TermMode::MOUSE_MODE));
+        let mut state = TerminalViewState::default();
+        let actions = process_mouse_wheel(
+            &mut state,
+            &backend,
+            14.0,
+            egui::MouseWheelUnit::Line,
+            egui::vec2(0.0, 3.0),
+            &egui::Modifiers::NONE,
+        );
+        assert!(
+            actions.iter().all(|a| matches!(
+                a,
+                InputAction::BackendCall(BackendCommand::Scroll(_))
+            )),
+            "wheel without mouse-mode must scroll scrollback, got {actions:?}"
+        );
     }
 }

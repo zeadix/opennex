@@ -336,8 +336,33 @@ fn show_ui_appearance_editor(
                     .max_height(240.0)
                     .auto_shrink([false; 2])
                     .show(ui, |ui| {
+                        // Each CONCRETE entry renders in its own font
+                        // (the named family registered in rebuild_fonts)
+                        // so the list doubles as a live preview. Generic
+                        // names have no named family — rendering them
+                        // with FontFamily::Name would panic (unbound), so
+                        // they use the default font.
+                        let generic_entry =
+                            |ui: &mut egui::Ui, name: &str, current: &str| -> bool {
+                                ui.selectable_label(current == name, name).clicked()
+                            };
+                        let font_entry = |ui: &mut egui::Ui, font: &str, current: &str| -> bool {
+                            let rich = egui::RichText::new(font)
+                                .family(egui::FontFamily::Name(std::sync::Arc::from(font)));
+                            ui.selectable_label(current == font, rich).clicked()
+                        };
+                        // Generic default first.
+                        if generic_entry(ui, "system-ui", &current) {
+                            draft.app.ui_font_families = vec!["system-ui".into()];
+                            actions.push(ThemeAction::DraftModified);
+                        }
                         for font in available_fonts {
-                            if ui.selectable_label(current == *font, font).clicked() {
+                            // The caller prepends the generic names; skip
+                            // them here so they are not listed twice.
+                            if font == "system-ui" || font == "monospace" {
+                                continue;
+                            }
+                            if font_entry(ui, font, &current) {
                                 draft.app.ui_font_families = vec![font.clone()];
                                 actions.push(ThemeAction::DraftModified);
                             }
@@ -428,8 +453,26 @@ fn show_terminal_section_editor(
                     .max_height(240.0)
                     .auto_shrink([false; 2])
                     .show(ui, |ui| {
+                        // Live preview per CONCRETE entry (own font);
+                        // the generic default renders with the default font.
+                        let generic_entry =
+                            |ui: &mut egui::Ui, name: &str, current: &str| -> bool {
+                                ui.selectable_label(current == name, name).clicked()
+                            };
+                        let font_entry = |ui: &mut egui::Ui, font: &str, current: &str| -> bool {
+                            let rich = egui::RichText::new(font)
+                                .family(egui::FontFamily::Name(std::sync::Arc::from(font)));
+                            ui.selectable_label(current == font, rich).clicked()
+                        };
+                        if generic_entry(ui, "monospace", &current) {
+                            draft.typography.terminal_font_families = vec!["monospace".into()];
+                            actions.push(ThemeAction::DraftModified);
+                        }
                         for font in available_fonts {
-                            if ui.selectable_label(current == *font, font).clicked() {
+                            if font == "system-ui" || font == "monospace" {
+                                continue;
+                            }
+                            if font_entry(ui, font, &current) {
                                 draft.typography.terminal_font_families = vec![font.clone()];
                                 actions.push(ThemeAction::DraftModified);
                             }
