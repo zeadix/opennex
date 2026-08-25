@@ -687,6 +687,55 @@ mod tests {
         );
     }
 
+    /// Wait until the shell has gone QUIET: the screen text stops
+    /// changing for ~250ms after having changed at least once. This is
+    /// the robust readiness signal for real-shell tests — at narrow
+    /// widths both the echoed command AND the prompt wrap, so string
+    /// matching is unreliable; quiescence works at any geometry.
+    #[cfg(unix)]
+    fn pump_until_quiet(instance: &mut TerminalInstance, deadline_ms: u64) -> bool {
+        let start = std::time::Instant::now();
+        let mut last = screen_text_of(instance);
+        let mut stable_for = 0u64;
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            instance.backend.set_dirty();
+            let _ = instance.backend.sync();
+            let now = screen_text_of(instance);
+            if now != last {
+                last = now;
+                stable_for = 0;
+            } else {
+                stable_for += 50;
+                if stable_for >= 250 {
+                    return true;
+                }
+            }
+            if start.elapsed().as_millis() as u64 >= deadline_ms {
+                return false;
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    fn screen_text_of(instance: &mut TerminalInstance) -> String {
+        let content = instance.backend.sync();
+        use alacritty_terminal::grid::Dimensions;
+        let grid = &content.grid;
+        let mut text = String::new();
+        for row in 0..grid.screen_lines() {
+            for col in 0..grid.columns() {
+                let point = alacritty_terminal::index::Point {
+                    line: alacritty_terminal::index::Line(row as i32),
+                    column: alacritty_terminal::index::Column(col),
+                };
+                text.push(grid[point].c);
+            }
+            text.push('\n');
+        }
+        text
+    }
+
     #[cfg(unix)]
     #[test]
     fn current_input_word_matches_in_wrapped_prompt_narrow_pane() {
@@ -716,29 +765,30 @@ mod tests {
                     egui_term::Size::from(egui::vec2(cols as f32 * 10.0, 400.0)),
                     egui_term::Size::from(egui::vec2(10.0, 20.0)),
                 ));
-            std::thread::sleep(std::time::Duration::from_millis(400));
+            std::thread::sleep(std::time::Duration::from_millis(200));
             instance.backend.set_dirty();
             let _ = instance.backend.sync();
             instance.write(b"export PS1='kunpengwang@test-Victus-by-HP-Gaming-Laptop-16-r0xxx:~/proj/my/open_zoo$ '\r");
-            for _ in 0..30 {
-                std::thread::sleep(std::time::Duration::from_millis(25));
-                instance.backend.set_dirty();
-                let _ = instance.backend.sync();
-            }
-            for cmd in ["cd\r", "cdd\r"] {
-                instance.write(cmd.as_bytes());
-                for _ in 0..20 {
-                    std::thread::sleep(std::time::Duration::from_millis(25));
-                    instance.backend.set_dirty();
-                    let _ = instance.backend.sync();
-                }
+            assert!(
+                pump_until_quiet(&mut instance, 8_000),
+                "PS1 not applied at width {cols}"
+            );
+            for cmd in ["cd", "cdd"] {
+                instance.write(format!("{cmd}\r").as_bytes());
+                // At narrow widths the echoed command WRAPS (e.g. "cdd"
+                // splits across rows), so waiting for the command text
+                // is unreliable. The robust readiness signal is the
+                // NEXT prompt terminator after execution.
+                assert!(
+                    pump_until_quiet(&mut instance, 8_000),
+                    "shell did not settle after {cmd} at width {cols}"
+                );
             }
             instance.write(b"c");
-            for _ in 0..30 {
-                std::thread::sleep(std::time::Duration::from_millis(25));
-                instance.backend.set_dirty();
-                let _ = instance.backend.sync();
-            }
+            assert!(
+                pump_until_quiet(&mut instance, 8_000),
+                "typed 'c' not echoed at width {cols}"
+            );
             let word = instance.current_input_word();
             assert_eq!(
                 word, "c",
@@ -767,22 +817,17 @@ mod tests {
                 100,
             )
             .expect("shell should start");
-            std::thread::sleep(std::time::Duration::from_millis(300));
+            std::thread::sleep(std::time::Duration::from_millis(200));
             instance.backend.set_dirty();
             let _ = instance.backend.sync();
             instance.write(b"export PS1='kunpengwang@test-Victus-by-HP-Gaming-Laptop-16-r0xxx:~/proj/my/open_zoo$ '\r");
-            for _ in 0..30 {
-                std::thread::sleep(std::time::Duration::from_millis(25));
-                instance.backend.set_dirty();
-                let _ = instance.backend.sync();
-            }
-            for cmd in ["cd\r", "cdd\r"] {
-                instance.write(cmd.as_bytes());
-                for _ in 0..20 {
-                    std::thread::sleep(std::time::Duration::from_millis(25));
-                    instance.backend.set_dirty();
-                    let _ = instance.backend.sync();
-                }
+            assert!(pump_until_quiet(&mut instance, 8_000), "PS1 not applied");
+            for cmd in ["cd", "cdd"] {
+                instance.write(format!("{cmd}\r").as_bytes());
+                assert!(
+                    pump_until_quiet(&mut instance, 8_000),
+                    "shell did not settle after {cmd}"
+                );
             }
             // NOW shrink the pane (like dragging the splitter).
             instance
@@ -791,18 +836,17 @@ mod tests {
                     egui_term::Size::from(egui::vec2(cols as f32 * 10.0, 400.0)),
                     egui_term::Size::from(egui::vec2(10.0, 20.0)),
                 ));
-            // Give readline time to redraw the wrapped prompt.
-            for _ in 0..30 {
-                std::thread::sleep(std::time::Duration::from_millis(50));
-                instance.backend.set_dirty();
-                let _ = instance.backend.sync();
-            }
+            // Give readline time to redraw the wrapped prompt: wait for
+            // the prompt terminator to be on screen again at the new width.
+            assert!(
+                pump_until_quiet(&mut instance, 8_000),
+                "prompt not redrawn after shrink to width {cols}"
+            );
             instance.write(b"c");
-            for _ in 0..30 {
-                std::thread::sleep(std::time::Duration::from_millis(25));
-                instance.backend.set_dirty();
-                let _ = instance.backend.sync();
-            }
+            assert!(
+                pump_until_quiet(&mut instance, 8_000),
+                "typed 'c' not echoed after shrink to width {cols}"
+            );
             let _word = instance.current_input_word();
             let word = instance.current_input_word();
             assert_eq!(word, "c", "auto-match word after shrinking to width {cols}");
