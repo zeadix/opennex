@@ -934,7 +934,7 @@ impl Default for SettingsWindowState {
     }
 }
 
-fn app_data_dir() -> PathBuf {
+pub(crate) fn app_data_dir() -> PathBuf {
     let base = dirs::config_dir().unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
     base.join("opennex")
 }
@@ -1049,6 +1049,15 @@ fn migrate_legacy_terminal_theme(name: &str) -> String {
 }
 
 fn normalize_settings(mut settings: AppSettings) -> (AppSettings, bool) {
+    // One-time upgrade: releases before hashing kept the workspace-lock
+    // secret as plaintext in settings.json. Re-hash whatever we loaded
+    // so plaintext never survives past the first start of a hashed build.
+    let mut changed = false;
+    if !settings.lock_password.is_empty() && !lock_password_is_hashed(&settings.lock_password) {
+        settings.lock_password = hash_lock_password(&settings.lock_password);
+        changed = true;
+    }
+
     #[cfg(debug_assertions)]
     {
         let original = settings.key_binds.clone();
@@ -1058,13 +1067,14 @@ fn normalize_settings(mut settings: AppSettings) -> (AppSettings, bool) {
                 .key_binds
                 .insert(key.clone(), default_binding.clone());
         }
-        let changed = settings.key_binds != original;
-        return (settings, changed);
+        let binds_changed = settings.key_binds != original;
+        return (settings, changed || binds_changed);
     }
 
     #[cfg(not(debug_assertions))]
     {
-        normalize_settings_release_impl(settings)
+        let (settings, binds_changed) = normalize_settings_release_impl(settings);
+        (settings, changed || binds_changed)
     }
 }
 
@@ -1108,6 +1118,81 @@ fn normalize_settings_release_impl(mut settings: AppSettings) -> (AppSettings, b
 #[cfg(test)]
 fn normalize_history_bindings(settings: AppSettings) -> AppSettings {
     normalize_settings_release_impl(settings).0
+}
+
+const ARGON2_HASH_PREFIX: &str = "$argon2";
+
+/// Hash a workspace-lock password into a PHC string (argon2id, random
+/// salt). Plaintext never touches disk from a fresh install onwards.
+fn hash_lock_password(password: &str) -> String {
+    use argon2::password_hash::{rand_core::OsRng, PasswordHasher, SaltString};
+    let salt = SaltString::generate(&mut OsRng);
+    argon2::Argon2::default()
+        .hash_password(password.as_bytes(), &salt)
+        .map(|hash| hash.to_string())
+        .unwrap_or_default()
+}
+
+/// Verify an entered password against the stored value. Legacy stores
+/// (releases before hashing) keep plaintext on disk; those still verify
+/// and are upgraded to a hash by the caller after a successful entry.
+fn verify_lock_password(password: &str, stored: &str) -> bool {
+    if stored.starts_with(ARGON2_HASH_PREFIX) {
+        use argon2::password_hash::PasswordVerifier;
+        match argon2::password_hash::PasswordHash::new(stored) {
+            Ok(parsed) => argon2::Argon2::default()
+                .verify_password(password.as_bytes(), &parsed)
+                .is_ok(),
+            Err(_) => false,
+        }
+    } else {
+        password == stored
+    }
+}
+
+fn lock_password_is_hashed(stored: &str) -> bool {
+    stored.starts_with(ARGON2_HASH_PREFIX)
+}
+
+#[cfg(test)]
+mod lock_password_tests {
+    use super::*;
+
+    #[test]
+    fn hashed_secret_roundtrips_and_rejects_wrong_input() {
+        let stored = hash_lock_password("hunter2");
+        assert!(lock_password_is_hashed(&stored));
+        assert_ne!(stored, "hunter2");
+        assert!(verify_lock_password("hunter2", &stored));
+        assert!(!verify_lock_password("hunter3", &stored));
+    }
+
+    #[test]
+    fn legacy_plaintext_verifies_and_migration_flags_it() {
+        assert!(verify_lock_password("old-secret", "old-secret"));
+        assert!(!lock_password_is_hashed("old-secret"));
+        // The load-time migration re-hashes any plaintext it finds.
+        let migrated = hash_lock_password("old-secret");
+        assert!(lock_password_is_hashed(&migrated));
+        assert!(verify_lock_password("old-secret", &migrated));
+    }
+
+    #[test]
+    fn empty_stored_secret_only_matches_empty_input() {
+        assert!(verify_lock_password("", ""));
+        assert!(!verify_lock_password("x", ""));
+    }
+}
+
+/// Store a new lock secret as an argon2id hash (set/change flows).
+fn store_lock_password(
+    settings: &mut AppSettings,
+    settings_edit: &mut AppSettings,
+    password: &str,
+) {
+    let hashed = hash_lock_password(password);
+    settings.lock_password = hashed.clone();
+    settings_edit.lock_password = hashed;
 }
 
 fn save_settings(settings: &AppSettings) -> Result<(), anyhow::Error> {
@@ -2882,20 +2967,6 @@ impl App {
     /// Restart the application to apply the downloaded update.
     /// Used by both the in-place About button and the standalone popup.
     fn apply_update_and_restart(&mut self, ctx: &egui::Context, path: std::path::PathBuf) {
-        // Surface a previous failed replacement (the Windows helper writes
-        // this marker when the swap did not succeed).
-        if let Ok(exe) = std::env::current_exe() {
-            if let Some(dir) = exe.parent() {
-                let marker = dir.join("opennex_update_failed.txt");
-                if marker.exists() {
-                    let _ = std::fs::remove_file(&marker);
-                    self.update_state = crate::updater::UpdateState::Error(
-                        "上次更新替换失败，已保留旧版本。请手动下载安装包更新。".into(),
-                    );
-                    return;
-                }
-            }
-        }
         // Persist the layout before the restart so the post-update
         // session restores exactly what the user was working on.
         save_scene(&scene_path(), self);
@@ -6828,8 +6899,11 @@ impl eframe::App for App {
                                         self.pw_message =
                                             self.texts.password.mismatch_error.clone();
                                     } else {
-                                        self.settings_edit.lock_password = self.pw_set1.clone();
-                                        self.settings.lock_password = self.pw_set1.clone();
+                                        store_lock_password(
+                                            &mut self.settings,
+                                            &mut self.settings_edit,
+                                            &self.pw_set1,
+                                        );
                                         let _ = save_settings(&self.settings);
                                         self.pw_set1.clear();
                                         self.pw_set2.clear();
@@ -6901,7 +6975,10 @@ impl eframe::App for App {
                             }
                             ui.horizontal(|ui| {
                                 if ui.button(&self.texts.password.confirm_button).clicked() {
-                                    if self.pw_old != self.settings.lock_password {
+                                    if !verify_lock_password(
+                                        &self.pw_old,
+                                        &self.settings.lock_password,
+                                    ) {
                                         self.pw_message = self.texts.password.wrong_error.clone();
                                     } else if self.pw_new1.is_empty() {
                                         self.pw_message = self.texts.password.empty_error.clone();
@@ -6909,8 +6986,11 @@ impl eframe::App for App {
                                         self.pw_message =
                                             self.texts.password.mismatch_error.clone();
                                     } else {
-                                        self.settings_edit.lock_password = self.pw_new1.clone();
-                                        self.settings.lock_password = self.pw_new1.clone();
+                                        store_lock_password(
+                                            &mut self.settings,
+                                            &mut self.settings_edit,
+                                            &self.pw_new1,
+                                        );
                                         let _ = save_settings(&self.settings);
                                         self.pw_old.clear();
                                         self.pw_new1.clear();
@@ -6955,7 +7035,10 @@ impl eframe::App for App {
                                 if confirmed
                                     || ui.button(&self.texts.password.confirm_button).clicked()
                                 {
-                                    if self.pw_clear != self.settings.lock_password {
+                                    if !verify_lock_password(
+                                        &self.pw_clear,
+                                        &self.settings.lock_password,
+                                    ) {
                                         self.pw_message =
                                             self.texts.password.wrong_password.clone();
                                         self.pw_clear.clear();
@@ -7651,7 +7734,10 @@ impl eframe::App for App {
                                         .clicked()
                                 {
                                     if self.settings.lock_password.is_empty()
-                                        || self.lock_password_input == self.settings.lock_password
+                                        || verify_lock_password(
+                                            &self.lock_password_input.clone(),
+                                            &self.settings.lock_password.clone(),
+                                        )
                                     {
                                         self.locked_panels.remove(&self.active_panel);
                                         self.lock_password_input.clear();

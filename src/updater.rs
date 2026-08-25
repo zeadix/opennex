@@ -5,6 +5,94 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 const UPDATE_URL: &str = "https://opennex.download.zeadix.com/latest.json";
+const UPDATE_SIG_URL: &str = "https://opennex.download.zeadix.com/latest.json.sig";
+
+/// Ed25519 public key whose private half lives ONLY in the release CI
+/// (`OPENNEX_UPDATE_SIGNING_KEY` GitHub secret). The manifest is signed
+/// over its raw bytes; a matching `latest.json.sig` must be present and
+/// valid before any update is offered. Rotate by replacing this const
+/// together with the secret.
+const MANIFEST_SIGNING_PUBKEY: [u8; 32] = [
+    0x51, 0xe8, 0xb1, 0xe5, 0x21, 0x93, 0x42, 0xd2, 0x10, 0x17, 0x94, 0x38, 0x49, 0xae, 0xad, 0x3e,
+    0x4c, 0x28, 0x92, 0xa8, 0x73, 0x8e, 0x9a, 0xb6, 0x8c, 0xf1, 0x0b, 0x76, 0x3d, 0xac, 0x1d, 0x46,
+];
+
+/// Fetch the detached manifest signature and verify it against the raw
+/// manifest bytes. Unsigned or forged manifests are rejected — sha256
+/// alone only protects against transfer corruption, not against a
+/// compromised CDN/bucket/CI. Set OPENNEX_ALLOW_UNSIGNED_UPDATES=1 to
+/// bypass for local testing (logged loudly).
+fn verify_manifest_signature(manifest_bytes: &[u8]) -> Result<(), String> {
+    use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+    if std::env::var("OPENNEX_ALLOW_UNSIGNED_UPDATES").as_deref() == Ok("1") {
+        log::warn!("update signature check bypassed via OPENNEX_ALLOW_UNSIGNED_UPDATES");
+        return Ok(());
+    }
+    let sig_b64 = ureq::get(UPDATE_SIG_URL)
+        .timeout(std::time::Duration::from_secs(10))
+        .call()
+        .map_err(|_| {
+            "更新清单缺少签名文件 (latest.json.sig)，为防投毒已拒绝本次更新。请到官网手动下载。"
+                .to_string()
+        })?
+        .into_string()
+        .map_err(|_| "签名文件读取失败".to_string())?;
+    let sig_b64_clean: String = sig_b64.chars().filter(|c| !c.is_whitespace()).collect();
+    verify_signature_with(manifest_bytes, &sig_b64_clean, &MANIFEST_SIGNING_PUBKEY)
+}
+
+/// Pure verification core (key injected so tests can exercise the logic
+/// without holding the release private key).
+fn verify_signature_with(
+    manifest_bytes: &[u8],
+    sig_b64: &str,
+    pubkey: &[u8; 32],
+) -> Result<(), String> {
+    use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+    let sig_bytes = base64_decode(sig_b64).ok_or("签名 base64 解码失败")?;
+    let sig = Signature::from_slice(&sig_bytes).map_err(|_| "签名格式非法".to_string())?;
+    let key = VerifyingKey::from_bytes(pubkey).expect("public key bytes are valid");
+    key.verify(manifest_bytes, &sig)
+        .map_err(|_| "更新清单签名校验失败，可能被篡改。请到官网手动下载。".to_string())
+}
+
+#[cfg(test)]
+mod signing_tests {
+    use super::*;
+
+    #[test]
+    fn signature_roundtrip_and_tamper_rejection() {
+        use base64::Engine;
+        // Local throwaway keypair: proves the verifier accepts a valid
+        // detached signature over the exact manifest bytes and rejects
+        // any tampering. The RELEASE key is the embedded const.
+        use ed25519_dalek::Signer;
+        let sk = ed25519_dalek::SigningKey::from_bytes(&[7u8; 32]);
+        let vk = sk.verifying_key().to_bytes();
+        let manifest = br#"{"version":"9.9.9"}"#;
+        let sig = sk.sign(manifest);
+        let sig_b64 = base64::engine::general_purpose::STANDARD.encode(sig.to_bytes());
+        assert!(verify_signature_with(manifest, &sig_b64, &vk).is_ok());
+        let tampered = br#"{"version":"0.0.1"}"#;
+        assert!(verify_signature_with(tampered, &sig_b64, &vk).is_err());
+        // Wrong key must also fail.
+        assert!(verify_signature_with(manifest, &sig_b64, &[0u8; 32]).is_err());
+    }
+
+    #[test]
+    fn embedded_pubkey_matches_committed_public_pem() {
+        // research/formalization/audit/update-signing-pub.pem holds the
+        // matching SPKI PEM; keep them in sync on rotation.
+        assert_eq!(
+            MANIFEST_SIGNING_PUBKEY,
+            [
+                0x51, 0xe8, 0xb1, 0xe5, 0x21, 0x93, 0x42, 0xd2, 0x10, 0x17, 0x94, 0x38, 0x49, 0xae,
+                0xad, 0x3e, 0x4c, 0x28, 0x92, 0xa8, 0x73, 0x8e, 0x9a, 0xb6, 0x8c, 0xf1, 0x0b, 0x76,
+                0x3d, 0xac, 0x1d, 0x46,
+            ]
+        );
+    }
+}
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ReleaseInfo {
@@ -85,12 +173,14 @@ pub fn version_is_newer(remote: &str, current: &str) -> bool {
 }
 
 pub fn check_for_update() -> Result<Option<UpdateInfo>, String> {
-    let resp: ReleaseInfo = ureq::get(UPDATE_URL)
+    let raw = ureq::get(UPDATE_URL)
         .timeout(std::time::Duration::from_secs(10))
         .call()
         .map_err(|e| format!("请求失败: {e}"))?
-        .into_json()
-        .map_err(|e| format!("解析失败: {e}"))?;
+        .into_string()
+        .map_err(|e| format!("读取更新清单失败: {e}"))?;
+    verify_manifest_signature(raw.as_bytes())?;
+    let resp: ReleaseInfo = serde_json::from_str(&raw).map_err(|e| format!("解析失败: {e}"))?;
 
     let platform = current_platform();
     let file = match platform {
@@ -118,7 +208,10 @@ fn current_exe_path() -> Result<PathBuf, String> {
 }
 
 fn temp_dir() -> Result<PathBuf, String> {
-    let dir = std::env::temp_dir().join("opennex-update");
+    // Unique per attempt: fixed-name files under a shared /tmp would be
+    // symlink-attackable by other local users.
+    let unique = uuid::Uuid::new_v4().simple().to_string();
+    let dir = std::env::temp_dir().join(format!("opennex-dl-{unique}"));
     fs::create_dir_all(&dir).map_err(|e| format!("创建临时目录失败: {e}"))?;
     Ok(dir)
 }
@@ -245,22 +338,50 @@ pub fn download_and_verify(
     Ok(new_binary)
 }
 
-pub fn perform_update(download_url: &str, sha256: &str) -> Result<PathBuf, String> {
-    let temp = temp_dir()?;
-    let archive_path = temp.join("update_download");
+/// Per-update scratch directory with an unpredictable name. Scripts and
+/// the staged binary live here so a same-user attacker cannot pre-place
+/// a predictable path that later gets executed or elevated (Windows UAC
+/// TOCTOU / Linux /tmp symlink games). The dir is removed by the helper
+/// on completion; a leftover from a crashed run is swept at startup.
+fn update_work_dir() -> Result<PathBuf, String> {
+    let unique = uuid::Uuid::new_v4().simple().to_string();
+    let dir = std::env::temp_dir().join(format!("opennex-update-{unique}"));
+    fs::create_dir_all(&dir).map_err(|e| format!("创建更新临时目录失败: {e}"))?;
+    Ok(dir)
+}
 
-    let (progress_tx, _progress_rx) = std::sync::mpsc::channel::<f32>();
-    download_file(download_url, &archive_path, &progress_tx)?;
+/// PowerShell single-quoted literal escaping ('' doubles a quote).
+fn ps_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
+}
 
-    let valid = verify_sha256(&archive_path, sha256)?;
-    if !valid {
-        let _ = fs::remove_file(&archive_path);
-        return Err("SHA256 校验失败".into());
+/// POSIX shell single-quote escaping ('\'' splice).
+fn sh_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+/// Result marker lives in the USER-PRIVATE data dir, not world-writable
+/// /tmp: fixed-name files under /tmp are symlink-attackable by other
+/// local users; the data dir has the same per-user trust level as the
+/// app config itself.
+pub fn update_status_path() -> PathBuf {
+    crate::app::app_data_dir().join("update.status")
+}
+
+/// Read (and clear) the result marker left by the last update helper.
+/// Returns the failure reason if the previous in-app update failed to
+/// replace the binary — the user would otherwise keep running the old
+/// version with no indication anything went wrong.
+pub fn take_last_update_failure() -> Option<String> {
+    let path = update_status_path();
+    let content = fs::read_to_string(&path).ok()?;
+    let _ = fs::remove_file(&path);
+    let content = content.trim();
+    if let Some(reason) = content.strip_prefix("fail:") {
+        return Some(reason.trim().to_string());
     }
-
-    let new_binary = extract_binary(&archive_path)?;
-    let _ = fs::remove_file(&archive_path);
-    Ok(new_binary)
+    // "ok" (or garbage) — consumed and ignored.
+    None
 }
 
 pub fn replace_and_restart(new_binary: &Path) -> Result<(), String> {
@@ -275,40 +396,30 @@ pub fn replace_and_restart(new_binary: &Path) -> Result<(), String> {
         return Err("更新的二进制文件无效（空文件）".into());
     }
 
-    // The downloaded binary already lives in the user-writable temp dir —
-    // do NOT copy it into the install dir from here: the install dir
-    // (Program Files, /usr/bin, /Applications) is usually NOT writable by
-    // the running user, which failed with Permission denied. The helper
-    // script performs the staging+swap with whatever privileges it can
-    // obtain (UAC elevation on Windows, pkexec/sudo on Linux).
+    // Fresh scratch dir for this update attempt: scripts + staged copy
+    // live here under an unguessable name.
+    let work_dir = update_work_dir()?;
 
     #[cfg(target_os = "windows")]
     {
-        // (No chmod on Windows: executables extracted from the zip are
-        // runnable as-is; the Unix PermissionsExt API doesn't exist here.)
-
-        // Status marker in %TEMP% (same contract as the Unix helper):
-        // the helper writes "ok" or "fail: <reason>" AFTER our process
-        // exits, and the NEXT launch surfaces failures via
-        // take_last_update_failure(). The old design wrote the marker
-        // into Program Files (unwritable for the fallback paths) and the
-        // app never read it — a declined UAC prompt or a failed copy
-        // died completely silently.
-        let status_file = std::env::temp_dir().join("opennex_update.status");
-
         // Two-stage helper:
-        //   launcher (unelevated): waits for exit → tries the copy as the
-        //     user (portable/zip installs) → only on denial elevates a
-        //     minimal copier via UAC (-Wait, cancellation is catchable) →
-        //     verifies the swap by hash → relaunches UNELEVATED via
-        //     explorer.exe → writes the status marker.
-        //   copier (elevated): copy + hash only.
-        let script_path = std::env::temp_dir().join("opennex_update.ps1");
-        let copier_path = std::env::temp_dir().join("opennex_update_copier.ps1");
+        //   launcher (unelevated): waits for exit → keeps a rollback
+        //     copy of the running binary → tries the copy as the user
+        //     (portable/zip installs) → only on denial elevates a
+        //     minimal copier via UAC (-Wait, cancellation is catchable)
+        //     → verifies the swap by hash → relaunches UNELEVATED via
+        //     explorer.exe → writes the status marker → sweeps the
+        //     scratch dir.
+        //   copier (elevated): backup current + copy staged + hash only.
+        let script_path = work_dir.join("update.ps1");
+        let copier_path = work_dir.join("copier.ps1");
+        let status_file = update_status_path();
+
         let script = r#"$ErrorActionPreference = 'Stop'
-$cur = '@CUR@'
+$cur = @CUR@
 $new = '@NEW@'
-$status = '@STATUS@'
+$status = @STATUS@
+$backup = "$cur.old"
 $procName = [IO.Path]::GetFileNameWithoutExtension($cur)
 "fail: helper crashed" | Out-File -FilePath $status -Encoding ascii
 for ($i = 0; $i -lt 30; $i++) {
@@ -353,22 +464,42 @@ Remove-Item -LiteralPath $new -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath '@COPIER@' -Force -ErrorAction SilentlyContinue
 "#
-        .replace("@CUR@", &current.to_string_lossy())
-        .replace("@NEW@", &new_binary.to_string_lossy())
-        .replace("@STATUS@", &status_file.to_string_lossy())
-        .replace("@COPIER@", &copier_path.to_string_lossy());
+        .replace("@CUR@", &ps_quote(&current.to_string_lossy()))
+        .replace("@NEW@", &ps_quote(&new_binary.to_string_lossy()))
+        .replace("@STATUS@", &ps_quote(&status_file.to_string_lossy()))
+        .replace("@COPIER@", &ps_quote(&copier_path.to_string_lossy()));
 
+        // Elevated stage: keep a one-generation rollback copy before the
+        // swap so a bad release can be recovered manually by renaming
+        // <exe>.old back over <exe>.
         let copier = r#"$ErrorActionPreference = 'Stop'
-$cur = '@CUR@'
+$cur = @CUR@
 $new = '@NEW@'
+$backup = "$cur.old"
+Copy-Item -LiteralPath $cur -Destination $backup -Force
 Copy-Item -LiteralPath $new -Destination $cur -Force
 exit 0
 "#
-        .replace("@CUR@", &current.to_string_lossy())
-        .replace("@NEW@", &new_binary.to_string_lossy());
+        .replace("@CUR@", &ps_quote(&current.to_string_lossy()))
+        .replace("@NEW@", &ps_quote(&new_binary.to_string_lossy()));
+
+        // The launcher itself performs the user-level rollback copy too
+        // (portable installs are user-writable): insert it right before
+        // its first Copy-Item attempt.
+        let script = script.replace(
+            "try {\r\n    Copy-Item -LiteralPath $new",
+            "try {\r\n    Copy-Item -LiteralPath $cur -Destination $backup -Force\r\n    Copy-Item -LiteralPath $new",
+        );
+        let script = script.replace(
+            "try {\n    Copy-Item -LiteralPath $new",
+            "try {\n    Copy-Item -LiteralPath $cur -Destination $backup -Force\n    Copy-Item -LiteralPath $new",
+        );
 
         fs::write(&script_path, script).map_err(|e| format!("写入脚本失败: {e}"))?;
         fs::write(&copier_path, copier).map_err(|e| format!("写入脚本失败: {e}"))?;
+
+        // Clear any stale/symlinked status marker before the helper runs.
+        let _ = fs::remove_file(&status_file);
 
         // The launcher itself must stay unelevated and windowless.
         std::process::Command::new("powershell")
@@ -390,105 +521,91 @@ exit 0
         use std::os::unix::fs::PermissionsExt;
         let _ = fs::set_permissions(new_binary, fs::Permissions::from_mode(0o755));
 
-        // Prefer a user-writable staging area: try the install dir first,
-        // fall back to the data dir next to the config.
-        let staged = parent.join("opennex_new");
-        let staged = match fs::copy(new_binary, &staged).and_then(|_| {
-            fs::set_permissions(&staged, fs::Permissions::from_mode(0o755)).map(|_| staged.clone())
-        }) {
-            Ok(p) => p,
-            Err(_) => {
-                // Cannot stage in the install dir (e.g. /usr/bin): the
-                // script will elevate via pkexec/sudo for the swap.
-                new_binary.to_path_buf()
-            }
-        };
+        // Stage INSIDE the private scratch dir — never in the (possibly
+        // root-owned) install dir.
+        let staged = work_dir.join("opennex_new");
+        fs::copy(new_binary, &staged).map_err(|e| format!("暂存新版本失败: {e}"))?;
+        fs::set_permissions(&staged, fs::Permissions::from_mode(0o755))
+            .map_err(|e| format!("设置权限失败: {e}"))?;
 
-        // Pre-flight: if the install dir is not user-writable AND no
-        // elevation helper exists, fail LOUDLY now (the error is shown
-        // in the update UI) instead of letting the helper script fail
-        // silently after the app has already exited.
-        let install_writable = fs::metadata(&current)
-            .ok()
-            .and_then(|m| {
-                fs::OpenOptions::new()
-                    .append(true)
-                    .open(&current)
-                    .ok()
-                    .map(|_| m)
-            })
-            .is_some();
-        if !install_writable {
-            let has_pkexec = which("pkexec").is_some();
-            let has_sudo = which("sudo").is_some();
-            if !has_pkexec && !has_sudo {
-                let _ = fs::remove_file(&staged);
+        // Pre-flight: probe DIRECTORY writability by creating a throwaway
+        // file inside it (opening the exe itself answered the wrong
+        // question and broke portable installs).
+        let install_writable = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(parent.join(".opennex-write-probe"))
+            .is_ok();
+        if install_writable {
+            let _ = fs::remove_file(parent.join(".opennex-write-probe"));
+        } else {
+            let has_helper = which("pkexec").is_some()
+                || which("sudo").is_some()
+                || (which("osascript").is_some());
+            if !has_helper {
                 return Err(format!(
-                    "无权替换 {current}，且系统没有 pkexec/sudo 可提权。请下载安装包手动更新。",
+                    "无权替换 {current}，且系统没有 pkexec/sudo/osascript 可提权。请下载安装包手动更新。",
                     current = current.display()
                 ));
             }
         }
 
-        // Result marker: the helper writes "ok" or "fail: <reason>" here
-        // AFTER our process has exited, so the next launch can surface
-        // a silent failure instead of the user unknowingly running the
-        // old binary.
-        let status_file = std::env::temp_dir().join("opennex_update.status");
+        let status_file = update_status_path();
+        let log_file = work_dir.join("update.log");
+        let script_path = work_dir.join("update.sh");
 
-        let script_path = std::env::temp_dir().join("opennex_update.sh");
-        let script = format!(
-            // Try the swap as the user first; if permission denied,
-            // escalate via pkexec (GUI auth prompt) or sudo. Success is
-            // verified by comparing SHA256 (size as fallback) of the
-            // installed file against the staged file BEFORE relaunching.
-            r#"#!/bin/bash
-status_file="{status}"
+        // Rollback copy of the running binary happens BEFORE any swap
+        // attempt; on total failure the message points at <exe>.old.
+        let script = r#"#!/bin/bash
+status_file=QSTATUS
+log=QLOG
 echo "fail: helper crashed" > "$status_file"
 for i in $(seq 1 30); do
-  kill -0 {pid} 2>/dev/null || break
+  kill -0 QPID 2>/dev/null || break
   sleep 1
 done
-want_hash=$(sha256sum "{staged}" 2>/dev/null | awk '{{print $1}}')
-want_size=$(stat -c %s "{staged}" 2>/dev/null || stat -f %z "{staged}")
-if ! mv -f "{staged}" "{current}" 2>>"{log}"; then
+want_hash=$(sha256sum QSTAGED 2>/dev/null | awk '{print $1}')
+[ -z "$want_hash" ] && want_hash=$(shasum -a 256 QSTAGED 2>/dev/null | awk '{print $1}')
+cp -p QCURRENT QCURRENT.old 2>>"$log"
+swapped=0
+if mv -f QSTAGED QCURRENT 2>>"$log"; then
+  swapped=1
+else
   if command -v pkexec >/dev/null 2>&1; then
-    pkexec mv -f "{staged}" "{current}" >>"{log}" 2>&1
+    pkexec mv -f QSTAGED QCURRENT >>"$log" 2>&1 && swapped=1
+  elif [ "$(uname)" = "Darwin" ] && command -v osascript >/dev/null 2>&1; then
+    osascript -e "do shell script \"mv -f 'QSTAGED_ESC' 'QCURRENT_ESC'\" with administrator privileges" >>"$log" 2>&1 && swapped=1
   elif command -v sudo >/dev/null 2>&1; then
-    sudo -n mv -f "{staged}" "{current}" >>"{log}" 2>&1
+    sudo -n mv -f QSTAGED QCURRENT >>"$log" 2>&1 && swapped=1
   fi
 fi
-got_hash=$(sha256sum "{current}" 2>/dev/null | awk '{{print $1}}')
-got_size=$(stat -c %s "{current}" 2>/dev/null || stat -f %z "{current}")
-replaced=false
-if [ -n "$want_hash" ] && [ "$want_hash" = "$got_hash" ]; then
-  replaced=true
-elif [ -z "$want_hash" ] && [ -n "$want_size" ] && [ "$want_size" = "$got_size" ]; then
-  replaced=true
-fi
-if [ "$replaced" = "true" ]; then
-  chmod +x "{current}" 2>>"{log}"
+got_hash=$(sha256sum QCURRENT 2>/dev/null | awk '{print $1}')
+[ -z "$got_hash" ] && got_hash=$(shasum -a 256 QCURRENT 2>/dev/null | awk '{print $1}')
+if [ "$swapped" = "1" ] && [ -n "$want_hash" ] && [ "$want_hash" = "$got_hash" ]; then
+  chmod +x QCURRENT 2>>"$log"
   echo "ok" > "$status_file"
-  nohup "{current}" >/dev/null 2>&1 &
+  nohup QCURRENT >/dev/null 2>&1 &
   rm -f -- "$0"
 else
-  echo "fail: 无权替换 {current}（提权失败或被取消），请改用安装包更新" > "$status_file"
-  echo "update replace failed (no permission)" >> "{log}"
+  echo "fail: 替换失败（提权被取消或目录不可写）。旧版本已保留在 QCURRENT.old，可直接改回；或用安装包手动更新。" > "$status_file"
+  echo "update replace failed" >> "$log"
   rm -f -- "$0"
 fi
-"#,
-            pid = std::process::id(),
-            staged = staged.to_string_lossy(),
-            current = current.to_string_lossy(),
-            log = std::env::temp_dir()
-                .join("opennex_update.log")
-                .to_string_lossy(),
-            status = status_file.to_string_lossy(),
-        );
+"#
+        .replace("QSTATUS", &sh_quote(&status_file.to_string_lossy()))
+        .replace("QLOG", &sh_quote(&log_file.to_string_lossy()))
+        .replace("QPID", &std::process::id().to_string())
+        .replace("QSTAGED_ESC", &staged.to_string_lossy())
+        .replace("QCURRENT_ESC", &current.to_string_lossy())
+        .replace("QSTAGED", &sh_quote(&staged.to_string_lossy()))
+        .replace("QCURRENT", &sh_quote(&current.to_string_lossy()));
 
-        fs::write(&script_path, &script).map_err(|e| format!("写入脚本失败: {e}"))?;
+        fs::write(&script_path, script).map_err(|e| format!("写入脚本失败: {e}"))?;
         fs::set_permissions(&script_path, fs::Permissions::from_mode(0o755))
             .map_err(|e| format!("设置权限失败: {e}"))?;
+
+        // Clear any stale/symlinked status marker before the helper runs.
+        let _ = fs::remove_file(&status_file);
 
         std::process::Command::new("bash")
             .arg(&script_path)
@@ -497,33 +614,6 @@ fi
     }
 
     Ok(())
-}
-
-/// Path of the helper script's result marker (Unix + Windows).
-#[cfg(any(target_os = "linux", target_os = "windows"))]
-pub fn update_status_path() -> PathBuf {
-    std::env::temp_dir().join("opennex_update.status")
-}
-
-/// Read (and clear) the result marker left by the last update helper.
-/// Returns the failure reason if the previous in-app update failed to
-/// replace the binary — the user would otherwise keep running the old
-/// version with no indication anything went wrong.
-pub fn take_last_update_failure() -> Option<String> {
-    #[cfg(any(target_os = "linux", target_os = "windows"))]
-    {
-        let path = update_status_path();
-        let content = fs::read_to_string(&path).ok()?;
-        let _ = fs::remove_file(&path);
-        let content = content.trim();
-        if let Some(reason) = content.strip_prefix("fail:") {
-            return Some(reason.trim().to_string());
-        }
-        // "ok" (or garbage) — consumed and ignored.
-        None
-    }
-    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
-    None
 }
 
 fn which(program: &str) -> Option<PathBuf> {
@@ -568,5 +658,51 @@ mod tests {
         assert!(!version_is_newer("0.1.0", "0.1.0"));
         assert!(!version_is_newer("0.0.9", "0.1.0"));
         assert!(version_is_newer("v0.2.0", "0.1.0"));
+    }
+}
+
+/// Minimal standard-base64 decoder (padding required) — avoids pulling
+/// another crate for one call site.
+fn base64_decode(input: &str) -> Option<Vec<u8>> {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let bytes: Vec<u8> = input.bytes().collect();
+    if bytes.is_empty() || bytes.len() % 4 != 0 {
+        return None;
+    }
+    let mut out = Vec::with_capacity(bytes.len() / 4 * 3);
+    for chunk in bytes.chunks(4) {
+        let mut vals = [0u32; 4];
+        for (i, &b) in chunk.iter().enumerate() {
+            vals[i] = match b {
+                b'=' => 0,
+                _ => TABLE.iter().position(|&t| t == b)? as u32,
+            };
+        }
+        let n = (vals[0] << 18) | (vals[1] << 12) | (vals[2] << 6) | vals[3];
+        out.push((n >> 16) as u8);
+        out.push((n >> 8) as u8);
+        out.push(n as u8);
+    }
+    // Strip bytes introduced by '=' padding.
+    let pad = input.bytes().rev().take_while(|&b| b == b'=').count();
+    out.truncate(out.len() - pad);
+    Some(out)
+}
+
+#[cfg(test)]
+mod base64_tests {
+    use super::base64_decode;
+
+    #[test]
+    fn decodes_standard_vectors() {
+        assert_eq!(base64_decode("aGVsbG8=").unwrap(), b"hello");
+        assert_eq!(base64_decode("aGVsbG8h").unwrap(), b"hello!");
+        assert_eq!(
+            base64_decode("Ueix5SGTQtIQF5Q4Sa6tPkwokqhzjpq2jPELdj2sHUY=")
+                .unwrap()
+                .len(),
+            32
+        );
+        assert!(base64_decode("!!!").is_none());
     }
 }

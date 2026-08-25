@@ -1190,6 +1190,7 @@ mod wheel_tests {
                 ],
                 working_directory: Some("/tmp".into()),
                 env: vec![],
+                scrollback: 100,
             },
         )
         .expect("backend");
@@ -1243,6 +1244,7 @@ mod wheel_tests {
                 args: vec!["-c".into(), "sleep 3".into()],
                 working_directory: Some("/tmp".into()),
                 env: vec![],
+                scrollback: 100,
             },
         )
         .expect("backend");

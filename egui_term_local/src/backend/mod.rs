@@ -626,6 +626,7 @@ mod tests {
                 args: vec!["-c".into(), "printf startup; sleep 1".into()],
                 working_directory: Some(PathBuf::from("/tmp")),
                 env: vec![],
+                scrollback: 100,
             },
         )
         .expect("terminal backend should start");
