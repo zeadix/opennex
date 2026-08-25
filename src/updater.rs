@@ -56,6 +56,66 @@ fn verify_signature_with(
 }
 
 #[cfg(test)]
+mod windows_script_tests {
+    use super::*;
+
+    /// The v0.1.38 regression: placeholders whose template already had
+    /// surrounding quotes produced doubled quotes (''C:\path'') that
+    /// PowerShell cannot parse — the helper died instantly, the app
+    /// closed without restarting and the swap never happened.
+    #[test]
+    fn generated_scripts_have_no_doubled_quotes() {
+        let (launcher, copier) = build_windows_update_scripts(
+            Path::new("C:\\Program Files\\OpenNex\\opennex.exe"),
+            Path::new("C:\\Users\\alice\\AppData\\Local\\Temp\\opennex-update-ab12\\opennex_new"),
+            Path::new("C:\\Users\\alice\\AppData\\Roaming\\opennex\\update.status"),
+            Path::new("C:\\Users\\alice\\AppData\\Local\\Temp\\opennex-update-ab12\\copier.ps1"),
+        );
+        for (name, script) in [("launcher", &launcher), ("copier", &copier)] {
+            for line in script.lines() {
+                // Legit PS: empty-string literals ('' as a VALUE) are
+                // fine; the bug pattern is a quoted PATH wrapped in
+                // doubled quotes (''C:\...'' ) around a colon/backslash.
+                if line.contains("''") && !line.trim_end().ends_with("= ''") {
+                    panic!("{name} script contains doubled single-quotes: {line}");
+                }
+            }
+            // Quote parity per line (PS strings on one line in these
+            // templates): count of ' must be even outside of comments.
+            for line in script.lines() {
+                let code = line.split('#').next().unwrap_or("");
+                let quotes = code.matches('\'').count();
+                assert_eq!(quotes % 2, 0, "{name} unbalanced quotes: {line:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn generated_scripts_inject_all_paths() {
+        let (launcher, copier) = build_windows_update_scripts(
+            Path::new("C:\\app\\opennex.exe"),
+            Path::new("C:\\tmp\\new.exe"),
+            Path::new("C:\\status\\update.status"),
+            Path::new("C:\\tmp\\copier.ps1"),
+        );
+        assert!(launcher.contains("'C:\\app\\opennex.exe'"));
+        assert!(launcher.contains("'C:\\tmp\\new.exe'"));
+        assert!(launcher.contains("'C:\\status\\update.status'"));
+        assert!(launcher.contains("'C:\\tmp\\copier.ps1'"));
+        assert!(launcher.contains("Start-Process -FilePath $cur"));
+        assert!(copier.contains("'C:\\app\\opennex.exe'"));
+        assert!(copier.contains("'C:\\tmp\\new.exe'"));
+        // No un-substituted placeholders remain.
+        for script in [&launcher, &copier] {
+            assert!(!script.contains("@CUR@"), "placeholder leak");
+            assert!(!script.contains("@NEW@"), "placeholder leak");
+            assert!(!script.contains("@STATUS@"), "placeholder leak");
+            assert!(!script.contains("@COPIER@"), "placeholder leak");
+        }
+    }
+}
+
+#[cfg(test)]
 mod signing_tests {
     use super::*;
 
@@ -444,23 +504,20 @@ pub fn take_last_update_failure() -> Option<String> {
     None
 }
 
-pub fn replace_and_restart(new_binary: &Path) -> Result<(), String> {
-    let current = current_exe_path()?;
-    let parent = current.parent().ok_or("无法获取父目录")?.to_path_buf();
-
-    // Sanity check BEFORE spawning any helper: the staged binary must
-    // exist and be non-empty, otherwise we'd "restart" straight into the
-    // old version with no diagnostics.
-    let staged_len = fs::metadata(new_binary).map(|m| m.len()).unwrap_or(0);
-    if staged_len == 0 {
-        return Err("更新的二进制文件无效（空文件）".into());
-    }
-
-    // Fresh scratch dir for this update attempt: scripts + staged copy
-    // live here under an unguessable name.
-    let work_dir = update_work_dir()?;
-
-    #[cfg(target_os = "windows")]
+/// Assemble the two PowerShell helper scripts for the Windows swap.
+/// Pure and cross-platform so unit tests can validate the OUTPUT on any
+/// OS: the v0.1.38 scripts shipped with doubled quotes from
+/// placeholder/template quoting collisions — PowerShell refused to
+/// parse them, so the app closed, never restarted, and the swap never
+/// happened.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub(crate) fn build_windows_update_scripts(
+    current: &Path,
+    new_binary: &Path,
+    status_file: &Path,
+    copier_path: &Path,
+) -> (String, String) {
+    let _ = (current, new_binary, status_file, copier_path);
     {
         // Two-stage helper:
         //   launcher (unelevated): waits for exit → keeps a rollback
@@ -471,13 +528,9 @@ pub fn replace_and_restart(new_binary: &Path) -> Result<(), String> {
         //     explorer.exe → writes the status marker → sweeps the
         //     scratch dir.
         //   copier (elevated): backup current + copy staged + hash only.
-        let script_path = work_dir.join("update.ps1");
-        let copier_path = work_dir.join("copier.ps1");
-        let status_file = update_status_path();
-
         let script = r#"$ErrorActionPreference = 'Stop'
 $cur = @CUR@
-$new = '@NEW@'
+$new = @NEW@
 $status = @STATUS@
 $backup = "$cur.old"
 $procName = [IO.Path]::GetFileNameWithoutExtension($cur)
@@ -504,7 +557,7 @@ if (-not $replaced) {
     # Needs admin (Program Files). -Wait lets us catch a DECLINED UAC
     # prompt as an exception instead of dying silently.
     try {
-        $p = Start-Process powershell -Verb RunAs -WindowStyle Hidden -PassThru -Wait -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-WindowStyle','Hidden','-File','@COPIER@'
+        $p = Start-Process powershell -Verb RunAs -WindowStyle Hidden -PassThru -Wait -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-WindowStyle','Hidden','-File',@COPIER@
         if ($p.ExitCode -eq 0 -and (Test-SameFile $new $cur)) { $replaced = $true }
         else { $reason = "elevated copy failed (exit=$($p.ExitCode))" }
     } catch {
@@ -512,17 +565,18 @@ if (-not $replaced) {
     }
 }
 if ($replaced) {
-    # Relaunch UNELEVATED: explorer.exe spawns the target with the
-    # shell's normal token (running the new version as admin caused
-    # drag-drop and inherited-shell issues).
-    Start-Process -FilePath explorer.exe -ArgumentList $cur
+    # Relaunch: the launcher itself runs with the user's normal token,
+    # so a direct spawn is equivalent and safer than going through
+    # explorer.exe (whose argument handling turns spacey paths into
+    # "open this folder" instead of running the file).
+    Start-Process -FilePath $cur
     'ok' | Out-File -FilePath $status -Encoding ascii
 } else {
     ("fail: " + $reason) | Out-File -FilePath $status -Encoding ascii
 }
 Remove-Item -LiteralPath $new -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
-Remove-Item -LiteralPath '@COPIER@' -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath @COPIER@ -Force -ErrorAction SilentlyContinue
 "#
         .replace("@CUR@", &ps_quote(&current.to_string_lossy()))
         .replace("@NEW@", &ps_quote(&new_binary.to_string_lossy()))
@@ -534,7 +588,7 @@ Remove-Item -LiteralPath '@COPIER@' -Force -ErrorAction SilentlyContinue
         // <exe>.old back over <exe>.
         let copier = r#"$ErrorActionPreference = 'Stop'
 $cur = @CUR@
-$new = '@NEW@'
+$new = @NEW@
 $backup = "$cur.old"
 Copy-Item -LiteralPath $cur -Destination $backup -Force
 Copy-Item -LiteralPath $new -Destination $cur -Force
@@ -555,6 +609,33 @@ exit 0
             "try {\n    Copy-Item -LiteralPath $cur -Destination $backup -Force\n    Copy-Item -LiteralPath $new",
         );
 
+        (script, copier)
+    }
+}
+
+pub fn replace_and_restart(new_binary: &Path) -> Result<(), String> {
+    let current = current_exe_path()?;
+    let parent = current.parent().ok_or("无法获取父目录")?.to_path_buf();
+
+    // Sanity check BEFORE spawning any helper: the staged binary must
+    // exist and be non-empty, otherwise we'd "restart" straight into the
+    // old version with no diagnostics.
+    let staged_len = fs::metadata(new_binary).map(|m| m.len()).unwrap_or(0);
+    if staged_len == 0 {
+        return Err("更新的二进制文件无效（空文件）".into());
+    }
+
+    // Fresh scratch dir for this update attempt: scripts + staged copy
+    // live here under an unguessable name.
+    let work_dir = update_work_dir()?;
+
+    #[cfg(target_os = "windows")]
+    {
+        let script_path = work_dir.join("update.ps1");
+        let copier_path = work_dir.join("copier.ps1");
+        let status_file = update_status_path();
+        let (script, copier) =
+            build_windows_update_scripts(&current, new_binary, &status_file, &copier_path);
         fs::write(&script_path, script).map_err(|e| format!("写入脚本失败: {e}"))?;
         fs::write(&copier_path, copier).map_err(|e| format!("写入脚本失败: {e}"))?;
 
