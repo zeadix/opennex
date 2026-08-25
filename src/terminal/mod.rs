@@ -687,6 +687,35 @@ mod tests {
         );
     }
 
+    /// Re-read current_input_word until it equals `want` (or fail with
+    /// `context` after the deadline). The read is pure; retrying it just
+    /// absorbs echo/repaint races on slow machines without sending more
+    /// input into the shell.
+    #[cfg(unix)]
+    fn pump_word_until(
+        instance: &mut TerminalInstance,
+        want: &str,
+        deadline_ms: u64,
+        context: &str,
+    ) -> String {
+        let start = std::time::Instant::now();
+        loop {
+            instance.backend.set_dirty();
+            let _ = instance.backend.sync();
+            let word = instance.current_input_word();
+            if word == want {
+                return word;
+            }
+            if start.elapsed().as_millis() as u64 >= deadline_ms {
+                // Dump the screen so CI failures are diagnosable instead
+                // of guesswork: which redraw state was readline in?
+                let screen = screen_text_of(instance);
+                panic!("{context}: got {word:?}, want {want:?}\n--- screen ---\n{screen}");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    }
+
     /// Wait until the shell has gone QUIET: the screen text stops
     /// changing for ~250ms after having changed at least once. This is
     /// the robust readiness signal for real-shell tests — at narrow
@@ -784,16 +813,26 @@ mod tests {
                     "shell did not settle after {cmd} at width {cols}"
                 );
             }
-            instance.write(b"c");
+            // Double-quiescence before typing: on slow CI runners a
+            // single quiet window can land BETWEEN readline redraw
+            // stages; a second one confirms the prompt is fully live.
             assert!(
                 pump_until_quiet(&mut instance, 8_000),
-                "typed 'c' not echoed at width {cols}"
+                "prompt unstable before typing at width {cols}"
             );
-            let word = instance.current_input_word();
-            assert_eq!(
-                word, "c",
-                "auto-match word at grid width {cols} (wrapped prompt)"
+            instance.write(b"c");
+            // Final read is RETRIED: on loaded CI runners the quiescence
+            // detector can fire between readline redraw stages, and the
+            // first read then races the echo. Retrying the read (not the
+            // input!) until the word appears keeps the test deterministic
+            // without ever sending a second 'c' into the shell.
+            let word = pump_word_until(
+                &mut instance,
+                "c",
+                8_000,
+                "auto-match word at grid width {cols} (wrapped prompt)",
             );
+            assert_eq!(word, "c");
         }
     }
 
@@ -842,14 +881,18 @@ mod tests {
                 pump_until_quiet(&mut instance, 8_000),
                 "prompt not redrawn after shrink to width {cols}"
             );
-            instance.write(b"c");
             assert!(
                 pump_until_quiet(&mut instance, 8_000),
-                "typed 'c' not echoed after shrink to width {cols}"
+                "prompt unstable before typing after shrink to width {cols}"
             );
-            let _word = instance.current_input_word();
-            let word = instance.current_input_word();
-            assert_eq!(word, "c", "auto-match word after shrinking to width {cols}");
+            instance.write(b"c");
+            let word = pump_word_until(
+                &mut instance,
+                "c",
+                8_000,
+                &format!("auto-match word after shrinking to width {cols}"),
+            );
+            assert_eq!(word, "c");
         }
     }
 
