@@ -371,6 +371,14 @@ impl TerminalBackend {
         point: Point,
         pressed: bool,
     ) {
+        // xterm semantics: wheel buttons are press-only. A stray release
+        // (e.g. from an older caller) would be synthesized into a click
+        // by TUI frameworks.
+        if !pressed
+            && matches!(button, MouseButton::ScrollUp | MouseButton::ScrollDown)
+        {
+            return;
+        }
         let mut mods = 0;
         if modifiers.contains(Modifiers::SHIFT) {
             mods += 4;
@@ -624,6 +632,75 @@ pub struct RenderableContent {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn wheel_releases_are_dropped_defensively() {
+        let mut backend = TerminalBackend::new(
+            88,
+            egui::Context::default(),
+            BackendSettings {
+                shell: "/bin/sh".into(),
+                args: vec!["-c".into(), "sleep 3".into()],
+                working_directory: Some("/tmp".into()),
+                env: vec![],
+                scrollback: 100,
+            },
+        )
+        .expect("backend");
+        // Even if a caller synthesizes a wheel release (old behavior),
+        // the backend must not emit anything for it.
+        let before = backend.tx_bytes.load(Ordering::Relaxed);
+        backend.process_command(BackendCommand::MouseReport(
+            MouseButton::ScrollUp,
+            egui::Modifiers::NONE,
+            Point::new(
+                alacritty_terminal::index::Line(0),
+                alacritty_terminal::index::Column(0),
+            ),
+            false,
+        ));
+        backend.process_command(BackendCommand::MouseReport(
+            MouseButton::ScrollDown,
+            egui::Modifiers::NONE,
+            Point::new(
+                alacritty_terminal::index::Line(1),
+                alacritty_terminal::index::Column(1),
+            ),
+            false,
+        ));
+        let after = backend.tx_bytes.load(Ordering::Relaxed);
+        assert_eq!(after, before, "wheel release must produce zero bytes");
+    }
+
+    #[test]
+    fn sgr_wheel_press_emits_single_press_only() {
+        let mut backend = TerminalBackend::new(
+            89,
+            egui::Context::default(),
+            BackendSettings {
+                shell: "/bin/sh".into(),
+                args: vec!["-c".into(), "sleep 3".into()],
+                working_directory: Some("/tmp".into()),
+                env: vec![],
+                scrollback: 100,
+            },
+        )
+        .expect("backend");
+        let before = backend.tx_bytes.load(Ordering::Relaxed);
+        backend.process_command(BackendCommand::MouseReport(
+            MouseButton::ScrollDown,
+            egui::Modifiers::NONE,
+            Point::new(
+                alacritty_terminal::index::Line(2),
+                alacritty_terminal::index::Column(3),
+            ),
+            true,
+        ));
+        let after = backend.tx_bytes.load(Ordering::Relaxed);
+        assert!(after > before, "press must emit bytes");
+    }
+
     use super::*;
     use std::path::PathBuf;
     use std::thread;

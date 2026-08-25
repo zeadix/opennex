@@ -73,6 +73,12 @@ pub struct TerminalViewState {
     /// terminal must keep ignoring pointer events or the movement
     /// re-arms text selection mid-drag.
     scrollbar_session: bool,
+    /// Held-back left press inside mouse-reporting TUIs. The gesture is
+    /// ambiguous until the pointer moves: an in-place release is a CLICK
+    /// (forwarded to the app as press+release), movement of >= 1 cell
+    /// resolves to a LOCAL text-selection drag (normal-terminal drag
+    /// select). See process_left_button / process_mouse_move.
+    pending_press: Option<(egui::Pos2, TerminalGridPoint)>,
     /// Pending size while layout is still changing (drag).
     pending_cols: u16,
     pending_rows: u16,
@@ -344,7 +350,7 @@ impl<'a> TerminalView<'a> {
                     state.is_dragged,
                 ) =>
                 {
-                    input_actions.push(process_button_click(
+                    input_actions.extend(process_button_click(
                         state,
                         layout,
                         self.backend,
@@ -911,46 +917,44 @@ fn process_mouse_wheel(
     delta: Vec2,
     modifiers: &Modifiers,
 ) -> Vec<InputAction> {
-    // When the application ENABLED MOUSE REPORTING (TUI programs like
-    // vim/less/opencode), the wheel belongs to the APPLICATION: report
-    // it as button-64/65 press+release (xterm SGR convention) instead of
-    // scrolling our own scrollback — the app has no scrollback view of
-    // ours to scroll and the old behavior corrupted its input stream.
-    let terminal_mode = backend.last_content().terminal_mode;
-    if terminal_mode.intersects(TermMode::MOUSE_MODE) {
-        let (button, presses) = if delta.y > 0.0 {
-            (
-                MouseButton::ScrollUp,
-                delta.y.abs().ceil().max(1.0) as usize,
-            )
-        } else if delta.y < 0.0 {
-            (
-                MouseButton::ScrollDown,
-                delta.y.abs().ceil().max(1.0) as usize,
-            )
-        } else {
-            return Vec::new();
-        };
-        let mut actions = Vec::with_capacity(presses * 2);
-        for _ in 0..presses {
-            actions.push(InputAction::BackendCall(
-                BackendCommand::MouseReport(
-                    button.clone(),
-                    *modifiers,
-                    state.current_mouse_position_on_grid,
-                    true,
-                ),
-            ));
-            actions.push(InputAction::BackendCall(
-                BackendCommand::MouseReport(
-                    button.clone(),
-                    *modifiers,
-                    state.current_mouse_position_on_grid,
-                    false,
-                ),
-            ));
+    // Shift is the industry-standard escape hatch (Alacritty/kitty/WT):
+    // it forces LOCAL scrollback scrolling even when the app owns the
+    // mouse or the alternate screen.
+    if !modifiers.shift {
+        // When the application ENABLED MOUSE REPORTING (TUI programs like
+        // vim/less/opencode), the wheel belongs to the APPLICATION: report
+        // it as button-64/65 presses instead of scrolling our own
+        // scrollback. xterm semantics: wheel buttons are PRESS-ONLY —
+        // synthesizing a release made TUI frameworks synthesize clicks
+        // from it (scrolling collapsed sections in opencode).
+        let terminal_mode = backend.last_content().terminal_mode;
+        if terminal_mode.intersects(TermMode::MOUSE_MODE) {
+            let (button, presses) = if delta.y > 0.0 {
+                (
+                    MouseButton::ScrollUp,
+                    delta.y.abs().ceil().max(1.0) as usize,
+                )
+            } else if delta.y < 0.0 {
+                (
+                    MouseButton::ScrollDown,
+                    delta.y.abs().ceil().max(1.0) as usize,
+                )
+            } else {
+                return Vec::new();
+            };
+            let mut actions = Vec::with_capacity(presses);
+            for _ in 0..presses {
+                actions.push(InputAction::BackendCall(
+                    BackendCommand::MouseReport(
+                        button.clone(),
+                        *modifiers,
+                        state.current_mouse_position_on_grid,
+                        true,
+                    ),
+                ));
+            }
+            return actions;
         }
-        return actions;
     }
     // No mouse reporting: scroll our own scrollback as before.
     match unit {
@@ -985,7 +989,7 @@ fn process_button_click(
     position: Pos2,
     modifiers: &Modifiers,
     pressed: bool,
-) -> InputAction {
+) -> Vec<InputAction> {
     match button {
         PointerButton::Primary => process_left_button(
             state,
@@ -996,7 +1000,7 @@ fn process_button_click(
             modifiers,
             pressed,
         ),
-        _ => InputAction::Ignore,
+        _ => Vec::new(),
     }
 }
 
@@ -1016,26 +1020,51 @@ fn process_left_button(
     position: Pos2,
     modifiers: &Modifiers,
     pressed: bool,
-) -> InputAction {
+) -> Vec<InputAction> {
     let terminal_mode = backend.last_content().terminal_mode;
     if terminal_mode.intersects(TermMode::MOUSE_MODE) {
-        InputAction::BackendCall(BackendCommand::MouseReport(
-            MouseButton::LeftButton,
-            *modifiers,
-            state.current_mouse_position_on_grid,
-            pressed,
-        ))
-    } else if pressed {
-        process_left_button_pressed(state, layout, position)
+        if pressed {
+            // Hold the press back: click vs drag-select is decided by
+            // whether the pointer leaves its cell (see process_mouse_move).
+            state.pending_press =
+                Some((position, state.current_mouse_position_on_grid));
+            return Vec::new();
+        }
+        // Release inside mouse mode.
+        if let Some((_, start_grid)) = state.pending_press.take() {
+            if start_grid == state.current_mouse_position_on_grid {
+                // In-place release = a CLICK: hand press+release to the
+                // app so TUI buttons/toggles keep working.
+                return vec![
+                    InputAction::BackendCall(BackendCommand::MouseReport(
+                        MouseButton::LeftButton,
+                        *modifiers,
+                        start_grid,
+                        true,
+                    )),
+                    InputAction::BackendCall(BackendCommand::MouseReport(
+                        MouseButton::LeftButton,
+                        *modifiers,
+                        start_grid,
+                        false,
+                    )),
+                ];
+            }
+            // A resolved local-selection drag falls through to the normal
+            // local release handling below (selection finish/copy).
+        }
+    }
+    if pressed {
+        vec![process_left_button_pressed(state, layout, position)]
     } else {
-        process_left_button_released(
+        vec![process_left_button_released(
             state,
             layout,
             backend,
             bindings_layout,
             position,
             modifiers,
-        )
+        )]
     }
 }
 
@@ -1115,25 +1144,38 @@ fn process_mouse_move(
     );
 
     let mut actions = vec![];
-    // Handle command or selection update based on terminal mode and modifiers
-    if state.is_dragged {
-        let terminal_mode = terminal_content.terminal_mode;
-        let cmd = if terminal_mode.contains(TermMode::MOUSE_MOTION)
-            && modifiers.is_none()
-        {
-            InputAction::BackendCall(BackendCommand::MouseReport(
-                MouseButton::LeftMove,
-                *modifiers,
-                state.current_mouse_position_on_grid,
-                true,
-            ))
-        } else {
-            InputAction::BackendCall(BackendCommand::SelectUpdate(
-                cursor_x, cursor_y,
-            ))
-        };
 
-        actions.push(cmd);
+    // A held-back press (mouse-mode TUI): resolve click vs drag-select.
+    // Any movement of >= 1 cell turns the gesture into a LOCAL text
+    // selection that starts at the ORIGINAL press point — this is what
+    // makes drag-select feel like a normal terminal inside TUI apps.
+    if let Some((start_px, start_grid)) = state.pending_press {
+        if start_grid != state.current_mouse_position_on_grid {
+            state.pending_press = None;
+            state.is_dragged = true;
+            return vec![
+                InputAction::BackendCall(BackendCommand::SelectStart(
+                    SelectionType::Simple,
+                    start_px.x - layout.rect.min.x,
+                    start_px.y - layout.rect.min.y,
+                )),
+                InputAction::BackendCall(BackendCommand::SelectUpdate(
+                    cursor_x, cursor_y,
+                )),
+            ];
+        }
+        // Same cell: keep holding the gesture (also swallows hover
+        // motion reports mid-click so the app sees no jitter).
+        return vec![];
+    }
+
+    // While a LOCAL selection drag is in flight it owns the pointer:
+    // motion must update the selection, never leak to the app as drag
+    // reports.
+    if state.is_dragged {
+        actions.push(InputAction::BackendCall(BackendCommand::SelectUpdate(
+            cursor_x, cursor_y,
+        )));
     }
 
     // Handle link hover if applicable
@@ -1228,8 +1270,62 @@ mod wheel_tests {
             )),
             "wheel in mouse-mode must be MouseReport actions, got {actions:?}"
         );
-        // press+release pairs per notch
-        assert_eq!(actions.len(), 6);
+        // xterm wheel semantics: PRESS-ONLY, one report per notch — no
+        // synthetic releases (they made TUI frameworks synthesize clicks).
+        assert_eq!(actions.len(), 3);
+        assert!(actions.iter().all(|a| matches!(
+            a,
+            InputAction::BackendCall(BackendCommand::MouseReport(
+                _,
+                _,
+                _,
+                true
+            ))
+        )));
+    }
+
+    #[test]
+    fn shift_wheel_scrolls_scrollback_even_in_mouse_mode() {
+        let mut backend = TerminalBackend::new(
+            79,
+            egui::Context::default(),
+            BackendSettings {
+                shell: "/bin/sh".into(),
+                args: vec![
+                    "-c".into(),
+                    "printf '\\e[?1000h\\e[?1006h'; sleep 3".into(),
+                ],
+                working_directory: Some("/tmp".into()),
+                env: vec![],
+                scrollback: 100,
+            },
+        )
+        .expect("backend");
+        for _ in 0..40 {
+            std::thread::sleep(std::time::Duration::from_millis(25));
+            backend.set_dirty();
+            let _ = backend.sync();
+        }
+        assert!(backend
+            .last_content()
+            .terminal_mode
+            .intersects(TermMode::MOUSE_MODE));
+        let mut state = TerminalViewState::default();
+        let actions = process_mouse_wheel(
+            &mut state,
+            &backend,
+            14.0,
+            egui::MouseWheelUnit::Line,
+            egui::vec2(0.0, 2.0),
+            &egui::Modifiers::SHIFT,
+        );
+        assert!(
+            actions.iter().all(|a| matches!(
+                a,
+                InputAction::BackendCall(BackendCommand::Scroll(_))
+            )),
+            "shift+wheel must scroll LOCALLY even in mouse mode, got {actions:?}"
+        );
     }
 
     #[test]
