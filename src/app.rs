@@ -1100,7 +1100,7 @@ fn hash_lock_password(password: &str) -> String {
         uuid::Uuid::new_v4().simple(),
         uuid::Uuid::new_v4().simple()
     );
-    let Ok(salt) = SaltString::new(&salt_hex) else {
+    let Ok(salt) = SaltString::from_b64(&salt_hex) else {
         return String::new();
     };
     argon2::Argon2::default()

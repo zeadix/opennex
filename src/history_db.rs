@@ -331,7 +331,11 @@ mod tests {
 
     #[test]
     fn corrupt_database_is_quarantined_and_rebuilt() {
+        // Drop the FIRST connection before touching the file: Windows
+        // refuses renames of files with open handles (the quarantine
+        // inside HistoryDb::new would hit a sharing violation).
         let (_db, path) = test_db();
+        drop(_db);
         let _ = std::fs::remove_file(&path);
         std::fs::write(&path, b"this is not sqlite").unwrap();
 
@@ -348,8 +352,9 @@ mod tests {
             quarantined.exists(),
             "broken db file must be preserved for inspection"
         );
+        // Drop before cleanup renames for the same Windows reason.
+        drop(recovered);
         let _ = std::fs::remove_file(quarantined);
         let _ = std::fs::remove_file(path);
-        let _ = recovered;
     }
 }

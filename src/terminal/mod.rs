@@ -541,6 +541,7 @@ impl TerminalInstance {
 mod tests {
     use super::TerminalInstance;
 
+    #[cfg(unix)]
     #[test]
     fn poll_cwd_reads_the_shell_process_directory() {
         let mut instance = TerminalInstance::create(
@@ -567,6 +568,7 @@ mod tests {
         assert_eq!(instance.cwd, "/");
     }
 
+    #[cfg(unix)]
     #[test]
     fn get_current_line_reassembles_wrapped_commands() {
         // A command longer than the grid width wraps across rows; the
@@ -604,6 +606,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn current_input_word_returns_full_text_when_command_wraps() {
         // Auto-match reads the word via current_input_word: it clips the
@@ -638,6 +641,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn current_input_word_survives_wrapped_long_prompt() {
         // Narrow split panes wrap a LONG prompt (user@host:~/long/path$)
@@ -681,6 +685,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn current_input_word_matches_in_wrapped_prompt_narrow_pane() {
         // REAL geometry of a narrow pane: a 73-char visible prompt (long
@@ -740,6 +745,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn current_input_word_after_shrinking_a_wide_pane() {
         // REAL user sequence: the prompt and history were entered while
@@ -801,6 +807,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn cmd_exe_prompt_lines_yield_the_typed_word() {
         // Windows cmd.exe prompt "C:\path>": the word extraction must
@@ -818,6 +825,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn prompt_stripping_records_only_the_command() {
         // The recorder keeps only the text AFTER the last "$ "/"# " prompt
@@ -853,6 +861,7 @@ mod tests {
         assert_eq!(strip("C:\\proj>echo hi > out.txt"), "echo hi > out.txt");
     }
 
+    #[cfg(unix)]
     #[test]
     fn records_command_typed_right_after_narrowing() {
         // Regression: narrowing the pane makes the first typed character
