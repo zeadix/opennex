@@ -101,7 +101,15 @@ jobs:
             windows-msi.sha256
 
   build-macos:
-    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: aarch64
+            os: macos-latest
+          - arch: x86_64
+            os: macos-13
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
@@ -118,7 +126,7 @@ jobs:
       - name: Create portable tar.gz
         run: |
           cd target/release
-          tar czf "../../opennex-${{ steps.version.outputs.VERSION }}-macos-x86_64.tar.gz" opennex
+          tar czf "../../opennex-${{ steps.version.outputs.VERSION }}-macos-${{ matrix.arch }}.tar.gz" opennex
 
       - name: Install cargo-bundle
         id: install_bundle
@@ -141,24 +149,24 @@ jobs:
         if: steps.bundle.outcome == 'success'
         run: |
           hdiutil create \
-            "opennex-${{ steps.version.outputs.VERSION }}-macos.dmg" \
+            "opennex-${{ steps.version.outputs.VERSION }}-macos-${{ matrix.arch }}.dmg" \
             -srcfolder target/release/bundle/osx/OpenNex.app \
             -ov -fs HFS+
 
       - name: Compute SHA256
         run: |
-          shasum -a 256 "opennex-${{ steps.version.outputs.VERSION }}-macos-x86_64.tar.gz" | awk '{print $1}' > macos-tar.sha256
-          if [ -f "opennex-${{ steps.version.outputs.VERSION }}-macos.dmg" ]; then
-            shasum -a 256 "opennex-${{ steps.version.outputs.VERSION }}-macos.dmg" | awk '{print $1}' > macos-dmg.sha256
+          shasum -a 256 "opennex-${{ steps.version.outputs.VERSION }}-macos-${{ matrix.arch }}.tar.gz" | awk '{print $1}' > macos-tar.sha256
+          if [ -f "opennex-${{ steps.version.outputs.VERSION }}-macos-${{ matrix.arch }}.dmg" ]; then
+            shasum -a 256 "opennex-${{ steps.version.outputs.VERSION }}-macos-${{ matrix.arch }}.dmg" | awk '{print $1}' > macos-dmg.sha256
           fi
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: macos-build
+          name: macos-build-${{ matrix.arch }}
           path: |
-            opennex-${{ steps.version.outputs.VERSION }}-macos-x86_64.tar.gz
-            opennex-${{ steps.version.outputs.VERSION }}-macos.dmg
+            opennex-${{ steps.version.outputs.VERSION }}-macos-${{ matrix.arch }}.tar.gz
+            opennex-${{ steps.version.outputs.VERSION }}-macos-${{ matrix.arch }}.dmg
             macos-tar.sha256
             macos-dmg.sha256
 
@@ -225,11 +233,17 @@ jobs:
           name: windows-build
           path: artifacts/windows
 
-      - name: Download macOS artifacts
+      - name: Download macOS artifacts (aarch64)
         uses: actions/download-artifact@v4
         with:
-          name: macos-build
-          path: artifacts/macos
+          name: macos-build-aarch64
+          path: artifacts/macos-aarch64
+
+      - name: Download macOS artifacts (x86_64)
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-build-x86_64
+          path: artifacts/macos-x86_64
 
       - name: Download Linux artifacts
         uses: actions/download-artifact@v4
@@ -250,7 +264,7 @@ jobs:
           VERSION: ${{ steps.version.outputs.VERSION }}
         run: |
           cd artifacts
-          for dir in windows macos linux; do
+          for dir in windows macos-aarch64 macos-x86_64 linux; do
             for file in "$dir"/*; do
               [ -f "$file" ] || continue
               filename=$(basename "$file")
@@ -292,8 +306,12 @@ jobs:
           # Read SHA256 values
           WIN_ZIP_SHA=$(cat artifacts/windows/windows-zip.sha256 2>/dev/null || echo "")
           WIN_MSI_SHA=$(cat artifacts/windows/windows-msi.sha256 2>/dev/null || echo "")
-          MAC_TAR_SHA=$(cat artifacts/macos/macos-tar.sha256 2>/dev/null || echo "")
-          MAC_DMG_SHA=$(cat artifacts/macos/macos-dmg.sha256 2>/dev/null || echo "")
+          MAC_ARM_TAR_SHA=$(cat artifacts/macos-aarch64/macos-tar.sha256 2>/dev/null || echo "")
+          MAC_ARM_DMG_SHA=$(cat artifacts/macos-aarch64/macos-dmg.sha256 2>/dev/null || echo "")
+          MAC_X64_TAR_SHA=$(cat artifacts/macos-x86_64/macos-tar.sha256 2>/dev/null || echo "")
+          MAC_X64_DMG_SHA=$(cat artifacts/macos-x86_64/macos-dmg.sha256 2>/dev/null || echo "")
+          if [ -z "$MAC_X64_TAR_SHA" ]; then MAC_X64_TAR_SHA="$MAC_ARM_TAR_SHA"; fi
+          if [ -z "$MAC_X64_DMG_SHA" ]; then MAC_X64_DMG_SHA="$MAC_ARM_DMG_SHA"; fi
           LIN_TAR_SHA=$(cat artifacts/linux/linux-tar.sha256 2>/dev/null || echo "")
           LIN_DEB_SHA=$(cat artifacts/linux/linux-deb.sha256 2>/dev/null || echo "")
 
@@ -311,9 +329,17 @@ jobs:
               },
               "macos": {
                 "portable": "${R2_PUBLIC_URL}/${VERSION}/opennex-${VERSION}-macos-x86_64.tar.gz",
-                "sha256": "${MAC_TAR_SHA}",
-                "installer": "${R2_PUBLIC_URL}/${VERSION}/opennex-${VERSION}-macos.dmg",
-                "installer_sha256": "${MAC_DMG_SHA}"
+                "sha256": "${MAC_X64_TAR_SHA}",
+                "installer": "${R2_PUBLIC_URL}/${VERSION}/opennex-${VERSION}-macos-x86_64.dmg",
+                "installer_sha256": "${MAC_X64_DMG_SHA}",
+                "portable_aarch64": "${R2_PUBLIC_URL}/${VERSION}/opennex-${VERSION}-macos-aarch64.tar.gz",
+                "sha256_aarch64": "${MAC_ARM_TAR_SHA}",
+                "installer_aarch64": "${R2_PUBLIC_URL}/${VERSION}/opennex-${VERSION}-macos-aarch64.dmg",
+                "installer_sha256_aarch64": "${MAC_ARM_DMG_SHA}",
+                "portable_x86_64": "${R2_PUBLIC_URL}/${VERSION}/opennex-${VERSION}-macos-x86_64.tar.gz",
+                "sha256_x86_64": "${MAC_X64_TAR_SHA}",
+                "installer_x86_64": "${R2_PUBLIC_URL}/${VERSION}/opennex-${VERSION}-macos-x86_64.dmg",
+                "installer_sha256_x86_64": "${MAC_X64_DMG_SHA}"
               },
               "linux": {
                 "portable": "${R2_PUBLIC_URL}/${VERSION}/opennex-${VERSION}-linux-x86_64.tar.gz",

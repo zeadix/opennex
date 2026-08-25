@@ -171,6 +171,7 @@ pub fn strip_prompt(line: &str) -> Option<&str> {
 }
 
 impl TerminalInstance {
+    #[allow(clippy::too_many_arguments)]
     pub fn create(
         ctx: &egui::Context,
         id: u64,
@@ -186,7 +187,7 @@ impl TerminalInstance {
         // `ZDOTDIR` so the init file is sourced. PowerShell and cmd
         // currently have no silent integration path.
         let init_file = ensure_shell_init_file(shell);
-        let mut args: Vec<String> = Vec::new();
+        let args: Vec<String>;
         let mut zdotdir: Option<std::path::PathBuf> = None;
         // Caller-provided bootstrap args (e.g. cmd /k vcvars64.bat for
         // the VS developer prompt) take precedence on non-Unix shells.
@@ -252,7 +253,7 @@ impl TerminalInstance {
             *cwd_guard = cwd.to_string();
         }
 
-        let mut instance = TerminalInstance {
+        let instance = TerminalInstance {
             backend,
             cwd: cwd.to_string(),
             shell_info,
@@ -287,7 +288,7 @@ impl TerminalInstance {
     pub fn cursor_position(&self) -> (usize, usize) {
         let content = self.backend.last_content();
         let cursor = &content.grid.cursor;
-        (cursor.point.column.0 as usize, cursor.point.line.0 as usize)
+        (cursor.point.column.0, cursor.point.line.0 as usize)
     }
 
     pub fn size(&self) -> (usize, usize) {
@@ -480,17 +481,14 @@ impl TerminalInstance {
         // Try to extract cwd from OSC 9; sequences.
         // OSC sequences are pure ASCII, but the buffer may contain multi-byte
         // UTF-8 from terminal output. We must only slice at char boundaries.
-        loop {
-            let Some(start) = self.osc_buffer.find("9;") else {
-                break;
-            };
+        while let Some(start) = self.osc_buffer.find("9;") {
             let after_start = start + 2;
             if after_start >= self.osc_buffer.len() {
                 break;
             }
             // Find end: BEL (\x07) or ESC (\x1b)
             let rest = &self.osc_buffer[after_start..];
-            let end = rest.find(|c| c == '\x07' || c == '\x1b');
+            let end = rest.find(['\x07', '\x1b']);
             if let Some(end_pos) = end {
                 let path = &rest[..end_pos];
                 if !path.is_empty() {
@@ -797,7 +795,7 @@ mod tests {
                 instance.backend.set_dirty();
                 let _ = instance.backend.sync();
             }
-            let word = instance.current_input_word();
+            let _word = instance.current_input_word();
             let word = instance.current_input_word();
             assert_eq!(word, "c", "auto-match word after shrinking to width {cols}");
         }

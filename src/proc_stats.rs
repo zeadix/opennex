@@ -435,7 +435,7 @@ mod tests {
 
     #[test]
     fn sampler_first_refresh_sets_memory_baseline_only() {
-        let mut sampler = ProcSampler::new();
+        let sampler = ProcSampler::new();
         // Can't portably read the live table in a unit test; drive the
         // pure half instead.
         let s = sample_from(&[(1, 0, 42, 4096)]);

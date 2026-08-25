@@ -215,6 +215,7 @@ update:
   ready: Update ready to install
   failed: 'Update failed: {}'
   available: New version v{} found — ready to download
+  badge: 'New v{}'
   up_to_date: You are up to date
   check: Check for Updates
   update_now: Update Now

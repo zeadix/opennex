@@ -215,6 +215,7 @@ update:
   ready: Aggiornamento pronto
   failed: 'Aggiornamento fallito: {}'
   available: Nuova versione v{} trovata — pronto al download
+  badge: 'Nuova v{}'
   up_to_date: Già aggiornato
   check: Cerca aggiornamenti
   update_now: Aggiorna ora

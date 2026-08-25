@@ -1018,6 +1018,7 @@ impl<Tab> DockArea<'_, Tab> {
             pos2(ui.cursor().min.x, ui.max_rect().min.y),
             vec2(tab_width, ui.max_rect().height()),
         );
+        #[allow(unused_assignments)]
         let mut response = ui.allocate_rect(tab_rect, Sense::click_and_drag());
         // Re-register the interaction under the tab's own id: drag detection
         // (`is_being_dragged(id)`) and click handling key off this id, and

@@ -30,6 +30,9 @@ repository = "https://github.com/Harzu/egui_term"
 name = "egui_term"
 path = "src/lib.rs"
 
+[dependencies.log]
+version = "0.4"
+
 [dependencies.alacritty_terminal]
 version = "0.25.0"
 
@@ -41,3 +44,6 @@ version = "0.31.0"
 
 [dependencies.open]
 version = "5.3.2"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

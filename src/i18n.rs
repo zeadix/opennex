@@ -340,6 +340,7 @@ pub struct UpdateTexts {
     pub verifying: String,
     pub ready: String,
     pub failed: String,
+    pub badge: String,
     pub available: String,
     pub up_to_date: String,
     pub check: String,
@@ -639,6 +640,7 @@ impl Texts {
                 verifying: "正在校验文件完整性...".into(),
                 ready: "更新已准备就绪".into(),
                 failed: "更新失败: {}".into(),
+                badge: "新版本 v{}".into(),
                 available: "发现新版本 v{} — 准备下载".into(),
                 up_to_date: "当前已是最新版本".into(),
                 check: "检查更新".into(),
@@ -814,6 +816,60 @@ mod tests {
         assert_eq!(parsed.display_name, texts.display_name);
         assert_eq!(parsed.menu.workspace, texts.menu.workspace);
         assert_eq!(parsed.workspace.heading, texts.workspace.heading);
+    }
+
+    /// Collect every leaf-key path ("settings.general.language") of a
+    /// YAML document so locales can be compared structurally.
+    fn leaf_paths(value: &serde_yaml::Value, prefix: &str, out: &mut Vec<String>) {
+        match value {
+            serde_yaml::Value::Mapping(map) => {
+                for (k, v) in map {
+                    let key = k.as_str().unwrap_or_default().to_string();
+                    let path = if prefix.is_empty() {
+                        key
+                    } else {
+                        format!("{prefix}.{key}")
+                    };
+                    leaf_paths(v, &path, out);
+                }
+            }
+            _ => out.push(prefix.to_string()),
+        }
+    }
+
+    /// serde(default) fields silently degrade to empty strings when a
+    /// locale file misses a key — this test makes any drift LOUD by
+    /// requiring all embedded locales to expose exactly the same leaf
+    /// keys as the English reference.
+    #[test]
+    fn all_locales_have_identical_key_sets_as_english() {
+        let reference = serde_yaml::from_str::<serde_yaml::Value>(embedded_locale("en").unwrap())
+            .expect("en.yaml parses");
+        let mut expected = Vec::new();
+        leaf_paths(&reference, "", &mut expected);
+        assert!(
+            expected.len() > 100,
+            "reference extraction broke ({} keys)",
+            expected.len()
+        );
+        expected.sort();
+
+        for code in known_locale_codes() {
+            if code == "en" {
+                continue;
+            }
+            let doc: serde_yaml::Value =
+                serde_yaml::from_str(embedded_locale(code).unwrap()).unwrap();
+            let mut actual = Vec::new();
+            leaf_paths(&doc, "", &mut actual);
+            actual.sort();
+            let missing: Vec<&String> = expected.iter().filter(|k| !actual.contains(k)).collect();
+            let extra: Vec<&String> = actual.iter().filter(|k| !expected.contains(k)).collect();
+            assert!(
+                missing.is_empty() && extra.is_empty(),
+                "locale {code} drift — missing: {missing:?} extra: {extra:?}"
+            );
+        }
     }
 
     #[test]

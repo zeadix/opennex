@@ -6,6 +6,12 @@ pub struct ShellInfo {
     pub last_command: Arc<Mutex<String>>,
 }
 
+impl Default for ShellInfo {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ShellInfo {
     pub fn new() -> Self {
         ShellInfo {

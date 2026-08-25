@@ -214,6 +214,7 @@ update:
   ready: 업데이트 준비 완료
   failed: '업데이트 실패: {}'
   available: 새 버전 v{} 발견 — 다운로드 준비됨
+  badge: '새 버전 v{}'
   up_to_date: 최신 버전입니다
   check: 업데이트 확인
   update_now: 지금 업데이트

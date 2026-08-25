@@ -1,5 +1,4 @@
 use crate::theme::model::{AnsiColors, ThemeColor, ThemeDefinition};
-use crate::theme::store;
 use egui::Color32;
 
 /// Actions returned by the theme editor UI, handled by `app.rs`.
@@ -95,6 +94,7 @@ pub struct ThemeEditorLabels {
     pub colors: ColorLabels,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn show_theme_editor_body(
     ui: &mut egui::Ui,
     draft: &mut ThemeDefinition,
@@ -131,6 +131,7 @@ pub fn show_theme_editor_body(
 
 /// Render the full theme management section.
 #[allow(dead_code)]
+#[allow(clippy::too_many_arguments)]
 pub fn show_theme_section(
     ui: &mut egui::Ui,
     draft: &mut ThemeDefinition,
@@ -240,12 +241,7 @@ fn show_theme_selector(
             )
             .show_ui(ui, |ui| {
                 for theme in available {
-                    let suffix = if store::is_embedded_id(&theme.id) {
-                        ""
-                    } else {
-                        ""
-                    };
-                    let label = format!("{}{}", theme.name, suffix);
+                    let label = theme.name.clone();
                     if ui
                         .selectable_label(theme.id == current_id, &label)
                         .clicked()
@@ -270,7 +266,7 @@ fn show_theme_buttons(
     is_builtin: bool,
     dialog: &mut ThemeDialogState,
 ) -> Vec<ThemeAction> {
-    let mut actions = Vec::new();
+    let actions = Vec::new();
     ui.horizontal(|ui| {
         if ui.button(crate::theme::new_theme_text()).clicked() {
             dialog.show_new_dialog = true;
@@ -310,7 +306,7 @@ fn show_ui_appearance_editor(
     ui: &mut egui::Ui,
     draft: &mut ThemeDefinition,
     available_fonts: &[String],
-    is_builtin: bool,
+    _is_builtin: bool,
     actions: &mut Vec<ThemeAction>,
     labels: &ThemeEditorLabels,
 ) {
@@ -382,7 +378,7 @@ fn show_ui_appearance_editor(
     // Color grid: 3 columns × ~6 rows of compact color cells.
     // Each row: 3 swatch+hex combos using minimal vertical space.
     let c = &labels.colors;
-    let mut pairs: [(&mut ThemeColor, &str, &'static str); 17] = [
+    let pairs: [(&mut ThemeColor, &str, &'static str); 17] = [
         (&mut draft.app.app_bg, c.app_bg.as_str(), "app_bg"),
         (&mut draft.app.sidebar, c.sidebar.as_str(), "sidebar"),
         (&mut draft.app.panel, c.panel.as_str(), "panel"),
@@ -427,7 +423,7 @@ fn show_terminal_section_editor(
     ui: &mut egui::Ui,
     draft: &mut ThemeDefinition,
     available_fonts: &[String],
-    is_builtin: bool,
+    _is_builtin: bool,
     actions: &mut Vec<ThemeAction>,
     labels: &ThemeEditorLabels,
 ) {
@@ -502,7 +498,7 @@ fn show_terminal_section_editor(
 
     // Base colors in 3-column grid.
     let c = &labels.colors;
-    let mut pairs: [(&mut ThemeColor, &str, &'static str); 6] = [
+    let pairs: [(&mut ThemeColor, &str, &'static str); 6] = [
         (&mut draft.terminal.foreground, c.fg.as_str(), "term_fg"),
         (&mut draft.terminal.background, c.bg.as_str(), "term_bg"),
         (&mut draft.terminal.cursor, c.cursor.as_str(), "term_cursor"),
@@ -527,7 +523,7 @@ fn show_terminal_section_editor(
 fn show_ansi_palette_editor(
     ui: &mut egui::Ui,
     draft: &mut ThemeDefinition,
-    is_builtin: bool,
+    _is_builtin: bool,
     actions: &mut Vec<ThemeAction>,
 ) {
     let mut groups: [(&str, &mut AnsiColors); 3] = [
@@ -559,60 +555,12 @@ fn show_ansi_palette_editor(
                 (white, "白"),
             ];
             for (color, name) in slots.iter_mut() {
-                let _ = compact_color_cell(ui, color, name, true, actions, "ansi");
+                compact_color_cell(ui, color, name, true, actions, "ansi");
             }
         });
         ui.add_space(4.0);
     }
     let _ = color_dragvalue_row; // suppress unused warning
-}
-
-fn ansi_palette_grid(
-    ui: &mut egui::Ui,
-    colors: &mut AnsiColors,
-    label: String,
-    is_builtin: bool,
-    actions: &mut Vec<ThemeAction>,
-) {
-    ui.label(&label);
-    ui.horizontal(|ui| {
-        let slots: [(&mut ThemeColor, &str); 8] = [
-            (&mut colors.black, crate::theme::black_label()),
-            (&mut colors.red, crate::theme::red_label()),
-            (&mut colors.green, crate::theme::green_label()),
-            (&mut colors.yellow, crate::theme::yellow_label()),
-            (&mut colors.blue, crate::theme::blue_label()),
-            (&mut colors.magenta, crate::theme::magenta_label()),
-            (&mut colors.cyan, crate::theme::cyan_label()),
-            (&mut colors.white, crate::theme::white_label()),
-        ];
-        for (color, _) in slots {
-            let _ = label;
-            color_swatch(ui, color, is_builtin, actions);
-        }
-    });
-    ui.add_space(2.0);
-}
-
-fn color_swatch(
-    ui: &mut egui::Ui,
-    color: &mut ThemeColor,
-    is_builtin: bool,
-    actions: &mut Vec<ThemeAction>,
-) {
-    let mut srgb = [
-        color.to_array()[0],
-        color.to_array()[1],
-        color.to_array()[2],
-    ];
-    let prev = srgb;
-    ui.add_enabled_ui(!is_builtin, |ui| {
-        egui::widgets::color_picker::color_edit_button_srgb(ui, &mut srgb);
-    });
-    if srgb != prev {
-        *color = ThemeColor::from_rgb_opaque(srgb[0], srgb[1], srgb[2]);
-        actions.push(ThemeAction::DraftModified);
-    }
 }
 
 /// Compact color cell as a two-column table row: the label column and the

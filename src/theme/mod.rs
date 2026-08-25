@@ -136,28 +136,6 @@ pub fn terminal_theme(theme: &ThemeDefinition) -> egui_term::TerminalTheme {
     egui_term::TerminalTheme::new(palette, visual)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn embedded_default_theme_applies_without_error() {
-        let theme = store::default_theme().unwrap();
-        let ctx = egui::Context::default();
-        apply_theme_definition(&ctx, &theme);
-        let visuals = &ctx.style().visuals;
-        assert_eq!(visuals.panel_fill, theme.app.app_bg.to_egui());
-    }
-
-    #[test]
-    fn terminal_theme_maps_all_palette_colors() {
-        let theme = store::default_theme().unwrap();
-        let tt = terminal_theme(&theme);
-        assert_eq!(tt.cursor_color(), theme.terminal.cursor.to_egui());
-        assert_eq!(tt.link_color(), theme.terminal.link.to_egui());
-    }
-}
-
 // Text accessors that delegate to `ui::texts`, used by app.rs.
 // These are kept here so app.rs doesn't need to know the internal module layout.
 pub fn ui_appearance_text() -> String {
@@ -360,4 +338,26 @@ pub fn edit_theme_text() -> String {
 }
 pub fn name_label_text() -> String {
     ui::texts::name_label()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn embedded_default_theme_applies_without_error() {
+        let theme = store::default_theme().unwrap();
+        let ctx = egui::Context::default();
+        apply_theme_definition(&ctx, &theme);
+        let visuals = &ctx.style().visuals;
+        assert_eq!(visuals.panel_fill, theme.app.app_bg.to_egui());
+    }
+
+    #[test]
+    fn terminal_theme_maps_all_palette_colors() {
+        let theme = store::default_theme().unwrap();
+        let tt = terminal_theme(&theme);
+        assert_eq!(tt.cursor_color(), theme.terminal.cursor.to_egui());
+        assert_eq!(tt.link_color(), theme.terminal.link.to_egui());
+    }
 }

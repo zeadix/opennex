@@ -141,6 +141,9 @@ pub struct TerminalBackend {
     notifier: Notifier,
     last_content: RenderableContent,
     dirty: Arc<AtomicBool>,
+    /// Set by the event subscription when the child reported Exit; lets
+    /// Drop skip the SIGTERM nudge for already-dead children.
+    child_exited: Arc<AtomicBool>,
     /// Cumulative bytes written TO the pty (keyboard input, pastes, mouse
     /// reports). Exposed so the app can compute per-terminal uplink rates.
     pub tx_bytes: std::sync::Arc<AtomicU64>,
@@ -199,10 +202,17 @@ impl TerminalBackend {
         let _pty_event_loop_thread = pty_event_loop.spawn();
         let dirty = Arc::new(AtomicBool::new(true));
         let dirty_thread = dirty.clone();
+        let child_exited = Arc::new(AtomicBool::new(false));
+        let exited_thread = child_exited.clone();
         let _pty_event_subscription = std::thread::Builder::new()
             .name(format!("pty_event_subscription_{}", id))
             .spawn(move || {
-                receive_events(event_receiver, dirty_thread, app_context)
+                receive_events(
+                    event_receiver,
+                    dirty_thread,
+                    exited_thread,
+                    app_context,
+                )
             })?;
 
         Ok(Self {
@@ -214,6 +224,7 @@ impl TerminalBackend {
             notifier,
             last_content: initial_content,
             dirty,
+            child_exited,
             tx_bytes: std::sync::Arc::new(AtomicU64::new(0)),
         })
     }
@@ -345,9 +356,11 @@ impl TerminalBackend {
                 }
             }
 
-            open::that(url).unwrap_or_else(|_| {
-                panic!("link opening is failed");
-            })
+            if let Err(err) = open::that(&url) {
+                // A remote text plus one click must NEVER be able to
+                // crash the app (was: panic!).
+                log::error!("failed to open link {url:?}: {err}");
+            }
         }
     }
 
@@ -647,6 +660,7 @@ mod tests {
         receive_events(
             receiver,
             Arc::new(AtomicBool::new(false)),
+            Arc::new(AtomicBool::new(false)),
             egui::Context::default(),
         );
     }
@@ -667,6 +681,16 @@ impl Default for RenderableContent {
 
 impl Drop for TerminalBackend {
     fn drop(&mut self) {
+        // Nudge a still-running child so the blocking wait() inside
+        // alacritty's own Pty drop (on the reader thread) cannot strand
+        // this terminal's subscription thread forever when the shell
+        // ignores SIGHUP. Already-exited children are skipped.
+        #[cfg(unix)]
+        if !self.child_exited.load(Ordering::Relaxed) && self.child_pid != 0 {
+            unsafe {
+                libc::kill(self.child_pid as libc::pid_t, libc::SIGTERM);
+            }
+        }
         let _ = self.notifier.0.send(Msg::Shutdown);
     }
 }
@@ -674,12 +698,14 @@ impl Drop for TerminalBackend {
 fn receive_events(
     event_receiver: mpsc::Receiver<Event>,
     dirty: Arc<AtomicBool>,
+    child_exited: Arc<AtomicBool>,
     app_context: egui::Context,
 ) {
     while let Ok(event) = event_receiver.recv() {
         dirty.store(true, Ordering::Relaxed);
         app_context.request_repaint();
         if matches!(event, Event::Exit) {
+            child_exited.store(true, Ordering::Relaxed);
             break;
         }
     }

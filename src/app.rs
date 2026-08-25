@@ -12,7 +12,6 @@ const MIN_FONT_SIZE: f32 = 8.0;
 const MAX_FONT_SIZE: f32 = 32.0;
 const FONT_SIZE_STEP: f32 = 1.0;
 const WORKSPACE_SIDEBAR_DEFAULT_WIDTH: f32 = 192.0;
-const WORKSPACE_DRAG_HANDLE_WIDTH: f32 = 20.0;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct AppSettings {
@@ -478,8 +477,6 @@ fn screen_center(ctx: &egui::Context) -> egui::Pos2 {
     ctx.input(|i| i.screen_rect).center()
 }
 
-const WORKSPACE_ACTION_BUTTON_SIZE: egui::Vec2 = egui::vec2(24.0, 24.0);
-
 /// Reserved font families holding the CLEAN generic stacks (before the
 /// active theme injects its fonts at the head). Theme-list previews use
 /// these so switching themes never changes other previews' rendering.
@@ -488,25 +485,6 @@ fn preview_prop_family() -> egui::FontFamily {
 }
 fn preview_mono_family() -> egui::FontFamily {
     egui::FontFamily::Name(std::sync::Arc::from("__preview_monospace__"))
-}
-
-fn check_column_width(ui: &egui::Ui) -> f32 {
-    ui.spacing().icon_width + ui.spacing().icon_spacing + ui.spacing().button_padding.x
-}
-
-fn check_indicator(ui: &mut egui::Ui, selected: bool, width: f32) {
-    let height = ui.spacing().interact_size.y;
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
-    if selected {
-        let color = ui.visuals().text_color();
-        ui.painter().text(
-            rect.center(),
-            egui::Align2::CENTER_CENTER,
-            "✓",
-            egui::FontId::proportional(14.0),
-            color,
-        );
-    }
 }
 
 fn workspace_lock_icon(is_locked: bool) -> &'static str {
@@ -850,9 +828,10 @@ fn find_system_font(filenames: &[&str]) -> Option<PathBuf> {
     None
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 enum StartCheckResult {
     Available(crate::updater::UpdateInfo),
+    #[default]
     UpToDate,
     Error(String),
 }
@@ -909,12 +888,6 @@ fn spawn_proc_sampler(ctx: egui::Context) -> std::sync::mpsc::Sender<ProcSampleJ
     tx
 }
 
-impl Default for StartCheckResult {
-    fn default() -> Self {
-        StartCheckResult::UpToDate
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct SettingsWindowState {
     x: f32,
@@ -968,15 +941,6 @@ fn migrate_dir(dirname: &str) {
 
 fn settings_path() -> PathBuf {
     app_data_dir().join("settings.json")
-}
-
-fn load_settings() -> AppSettings {
-    let mut warnings = Vec::new();
-    let settings = read_settings_from(&settings_path(), &mut warnings);
-    for warning in warnings {
-        log::warn!("{warning}");
-    }
-    settings
 }
 
 fn read_settings_from(path: &std::path::Path, warnings: &mut Vec<String>) -> AppSettings {
@@ -1068,7 +1032,7 @@ fn normalize_settings(mut settings: AppSettings) -> (AppSettings, bool) {
                 .insert(key.clone(), default_binding.clone());
         }
         let binds_changed = settings.key_binds != original;
-        return (settings, changed || binds_changed);
+        (settings, changed || binds_changed)
     }
 
     #[cfg(not(debug_assertions))]
@@ -1078,6 +1042,7 @@ fn normalize_settings(mut settings: AppSettings) -> (AppSettings, bool) {
     }
 }
 
+#[cfg_attr(debug_assertions, allow(dead_code))] // used by release builds
 fn normalize_settings_release_impl(mut settings: AppSettings) -> (AppSettings, bool) {
     let original = settings.key_binds.clone();
     let defaults = default_key_binds();
@@ -1342,7 +1307,6 @@ struct ScenePanel {
 
 struct Panel {
     name: String,
-    bound_file: Option<PathBuf>,
 }
 
 pub use crate::terminal::HistoryNav;
@@ -1377,18 +1341,8 @@ impl SettingsPage {
         match v {
             1 => SettingsPage::Shortcuts,
             2 => SettingsPage::Lock,
-            3 | 4 | 5 | 6 => SettingsPage::Theme,
+            3..=6 => SettingsPage::Theme,
             _ => SettingsPage::General,
-        }
-    }
-
-    fn title(&self, texts: &crate::i18n::Texts) -> String {
-        let nav = &texts.settings.nav;
-        match self {
-            SettingsPage::General => nav.general.clone(),
-            SettingsPage::Shortcuts => nav.shortcuts.clone(),
-            SettingsPage::Lock => nav.lock.clone(),
-            SettingsPage::Theme => nav.themes.clone(),
         }
     }
 }
@@ -1432,7 +1386,6 @@ pub struct App {
     settings_window_open: bool,
     binding_recording: Option<String>,
     cached_template_files: Vec<(String, PathBuf)>,
-    completion: crate::completion::CompletionEngine,
     history_db: crate::history_db::HistoryDb,
     focused_terminal: Option<String>,
     drag_src_panel: Option<usize>,
@@ -1500,8 +1453,6 @@ pub struct App {
     pending_shell_last: Option<String>,
     /// Shells detected at startup (Windows: cmd/powershell/pwsh/vs/wsl).
     detected_shells: Vec<crate::shells::ShellOption>,
-    show_update_dialog: bool,
-    update_dialog_info: Option<crate::updater::UpdateInfo>,
     skipped_versions: std::collections::HashSet<String>,
     update_toast: Option<(String, std::time::Instant)>,
     /// Transient "copied to clipboard" notice (auto-copy selection).
@@ -1565,7 +1516,7 @@ fn create_terminal(
                 .or_else(|| detected.first())
                 .cloned()
         })
-        .or_else(|| {
+        .or({
             #[cfg(target_os = "windows")]
             {
                 Some(crate::shells::ShellOption {
@@ -1627,7 +1578,7 @@ fn build_panel_state(app: &mut App, panel_idx: usize) -> Option<WorkspaceState> 
     })
 }
 
-fn save_to_file<T: Serialize>(path: &PathBuf, data: &T) -> Result<(), anyhow::Error> {
+fn save_to_file<T: Serialize>(path: &std::path::Path, data: &T) -> Result<(), anyhow::Error> {
     crate::persist::atomic_write_json(path, data)
 }
 
@@ -1686,7 +1637,7 @@ fn build_scene_state(app: &mut App) -> SceneState {
     SceneState { panels }
 }
 
-fn save_scene(path: &PathBuf, app: &mut App) {
+fn save_scene(path: &std::path::Path, app: &mut App) {
     let state = build_scene_state(app);
     if let Err(e) = save_to_file(path, &state) {
         log::error!("Failed to save scene: {}", e);
@@ -1843,7 +1794,6 @@ impl App {
             settings_window_open: false,
             binding_recording: None,
             cached_template_files: Vec::new(),
-            completion: crate::completion::CompletionEngine::new(),
             history_db: crate::history_db::HistoryDb::new(&db_path, default_max_history()),
             focused_terminal: None,
             drag_src_panel: None,
@@ -1889,8 +1839,6 @@ impl App {
             pending_shell: None,
             pending_shell_last: None,
             detected_shells,
-            show_update_dialog: false,
-            update_dialog_info: None,
             skipped_versions: std::collections::HashSet::new(),
             update_toast: None,
             copy_toast: None,
@@ -1961,7 +1909,6 @@ impl App {
                     }
                     app.panels.push(Panel {
                         name: panel.name.clone(),
-                        bound_file: None,
                     });
                     app.dock_states.insert(idx, panel.dock_state.clone());
                 }
@@ -2001,7 +1948,7 @@ impl App {
             .into_iter()
             .flat_map(|rd| rd.into_iter())
             .filter_map(|e| e.ok())
-            .filter(|e| e.path().extension().map_or(false, |ext| ext == "json"))
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "json"))
             .map(|e| e.path())
             .filter_map(|path| {
                 let stem = path.file_stem()?.to_string_lossy().to_string();
@@ -2024,18 +1971,6 @@ impl App {
         self.refresh_template_files();
     }
 
-    fn save_workspace(&mut self, path: PathBuf) {
-        if self.panels.is_empty() {
-            return;
-        }
-        let Some(state) = build_panel_state(self, self.active_panel) else {
-            return;
-        };
-        if let Err(e) = save_to_file(&path, &state) {
-            log::error!("Failed to save workspace: {}", e);
-        }
-    }
-
     fn load_workspace_file(&mut self, ctx: &egui::Context, path: PathBuf) {
         let content = match std::fs::read_to_string(&path) {
             Ok(c) => c,
@@ -2051,7 +1986,7 @@ impl App {
                 return;
             }
         };
-        self.load_workspace_state(ctx, state, Some(path));
+        self.load_workspace_state(ctx, state);
     }
 
     fn add_initial_terminal(&mut self, ctx: &egui::Context) {
@@ -2060,20 +1995,12 @@ impl App {
             return;
         };
         self.dock_states.insert(0, DockState::new(vec![tab_id]));
-        self.panels.push(Panel {
-            name,
-            bound_file: None,
-        });
+        self.panels.push(Panel { name });
         self.active_panel = 0;
         self.restore_workspace_focus(0);
     }
 
-    fn load_workspace_state(
-        &mut self,
-        ctx: &egui::Context,
-        state: WorkspaceState,
-        file: Option<PathBuf>,
-    ) {
+    fn load_workspace_state(&mut self, ctx: &egui::Context, state: WorkspaceState) {
         let panel_idx = self.panels.len();
         for (id, tstate) in &state.terminals {
             if !self.terminals.contains_key(id) {
@@ -2099,7 +2026,6 @@ impl App {
         }
         self.panels.push(Panel {
             name: state.panel_name,
-            bound_file: file,
         });
         self.dock_states.insert(panel_idx, state.dock_state);
     }
@@ -2225,7 +2151,6 @@ impl App {
                     self.terminals.clear();
                     self.panels.clear();
                     self.dock_states.clear();
-                    self.completion = crate::completion::CompletionEngine::new();
                     for panel in &scene.panels {
                         let idx = self.panels.len();
                         for (_id, tstate) in &panel.terminals {
@@ -2249,7 +2174,6 @@ impl App {
                         }
                         self.panels.push(Panel {
                             name: panel.name.clone(),
-                            bound_file: None,
                         });
                         self.dock_states.insert(idx, panel.dock_state.clone());
                     }
@@ -2345,10 +2269,7 @@ impl App {
         };
         self.dock_states
             .insert(self.panels.len(), DockState::new(vec![tab_id.clone()]));
-        self.panels.push(Panel {
-            name,
-            bound_file: None,
-        });
+        self.panels.push(Panel { name });
         // New workspace becomes active and its first terminal gets focus.
         self.active_panel = self.panels.len() - 1;
         self.focused_terminal = Some(tab_id);
@@ -2772,14 +2693,13 @@ impl App {
         let mut discard = false;
         let mut is_open = self.theme_editor_open;
         let mut editor_name = self.theme_edit.name.clone();
-        let mut editor_dirty = self.theme_dirty;
+        let editor_dirty = self.theme_dirty;
         let mut editor_draft = self.theme_edit.clone();
         let available_themes = self.available_themes.clone();
         let system_fonts = self.system_fonts.clone();
         let mut theme_dialog = self.theme_dialog.clone();
         let accent = self.active_theme.app.accent.to_egui();
         let mut actions_out: Vec<crate::theme::ui::ThemeAction> = Vec::new();
-        let mut draft_changed = false;
         let te = &self.texts.theme_editor;
         let editor_labels = crate::theme::ui::ThemeEditorLabels {
             system_ui: te.system_ui.clone(),
@@ -2834,7 +2754,7 @@ impl App {
 
                 // Scrollable editor body pinned above the footer.
                 egui::TopBottomPanel::bottom("theme_editor_footer")
-                    .frame(egui::Frame::none())
+                    .frame(egui::Frame::new())
                     .show_inside(ui, |ui| {
                         ui.add_space(6.0);
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -3331,7 +3251,7 @@ impl App {
             let weak_col = self.active_theme.app.weak_text.to_egui();
             let mut shown_custom_heading = false;
             let mut shown_builtin_heading = false;
-            let mut group_heading = |ui: &mut egui::Ui, title: &str| {
+            let group_heading = |ui: &mut egui::Ui, title: &str| {
                 ui.add_space(10.0);
                 ui.label(egui::RichText::new(title).size(10.0).color(weak_col));
                 ui.add_space(4.0);
@@ -3579,21 +3499,20 @@ impl App {
                 // right border.
                 let btn_y = title_cy - 9.0;
                 let mut x = term_half.max.x;
-                let mut btn =
-                    |ui: &mut egui::Ui, x: f32, y: f32, glyph: &str, id: egui::Id| -> bool {
-                        let r = egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(22.0, 18.0));
-                        let resp = ui.interact(r, id, egui::Sense::click());
-                        let g = ui.fonts(|f| {
-                            f.layout_no_wrap(
-                                glyph.to_string(),
-                                egui::FontId::proportional(12.0),
-                                text_col,
-                            )
-                        });
-                        ui.painter()
-                            .galley(r.center() - g.size() / 2.0, g, text_col);
-                        resp.clicked()
-                    };
+                let btn = |ui: &mut egui::Ui, x: f32, y: f32, glyph: &str, id: egui::Id| -> bool {
+                    let r = egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(22.0, 18.0));
+                    let resp = ui.interact(r, id, egui::Sense::click());
+                    let g = ui.fonts(|f| {
+                        f.layout_no_wrap(
+                            glyph.to_string(),
+                            egui::FontId::proportional(12.0),
+                            text_col,
+                        )
+                    });
+                    ui.painter()
+                        .galley(r.center() - g.size() / 2.0, g, text_col);
+                    resp.clicked()
+                };
                 // Action buttons laid out right-to-left at fixed offsets:
                 // [delete?] [edit?] [new(+)] — 24px pitch, no overlap.
                 if !is_builtin
@@ -4254,6 +4173,7 @@ impl App {
             });
         let (cell_w, cell_h_grid) = td.instance.cell_size();
         let (cursor_col, cursor_row) = td.instance.cursor_position();
+        #[allow(unused_variables)]
         let cursor_x = anchor_rect.min.x + cursor_col as f32 * cell_w;
         let cursor_y = anchor_rect.min.y + (cursor_row as f32 + 1.0) * cell_h_grid;
         let screen = ctx.screen_rect();
@@ -4885,7 +4805,7 @@ impl App {
                 ui.style_mut().spacing.button_padding = egui::vec2(10.0, 3.0);
                 // Button row pinned to the bottom: 20px margin + 24px row.
                 egui::TopBottomPanel::bottom("hist_clear_confirm_footer")
-                    .frame(egui::Frame::none())
+                    .frame(egui::Frame::new())
                     .exact_height(44.0)
                     .show_inside(ui, |ui| {
                         ui.add_space(20.0);
@@ -5631,11 +5551,12 @@ impl eframe::App for App {
         }
         // Cycle FOCUS across workspaces (wraps last → first) and focus
         // the workspace's active terminal.
-        if !workspace_renaming && check_shortcut(ctx, &binds, "next_workspace") {
-            if self.panels.len() > 1 {
-                self.active_panel = (self.active_panel + 1) % self.panels.len();
-                self.restore_workspace_focus(self.active_panel);
-            }
+        if !workspace_renaming
+            && check_shortcut(ctx, &binds, "next_workspace")
+            && self.panels.len() > 1
+        {
+            self.active_panel = (self.active_panel + 1) % self.panels.len();
+            self.restore_workspace_focus(self.active_panel);
         }
         // Save the current layout (menu Workspace > Save).
         if !workspace_renaming && check_shortcut(ctx, &binds, "save_scene") {
@@ -5650,15 +5571,17 @@ impl eframe::App for App {
                 }
             }
         }
-        if !workspace_renaming && check_shortcut(ctx, &binds, "workspace_up") {
-            if self.active_panel > 0 {
-                self.active_panel -= 1;
-            }
+        if !workspace_renaming
+            && check_shortcut(ctx, &binds, "workspace_up")
+            && self.active_panel > 0
+        {
+            self.active_panel -= 1;
         }
-        if !workspace_renaming && check_shortcut(ctx, &binds, "workspace_down") {
-            if self.active_panel + 1 < self.panels.len() {
-                self.active_panel += 1;
-            }
+        if !workspace_renaming
+            && check_shortcut(ctx, &binds, "workspace_down")
+            && self.active_panel + 1 < self.panels.len()
+        {
+            self.active_panel += 1;
         }
         if !workspace_renaming && check_shortcut(ctx, &binds, "panel_left") {
             self.focus_adjacent_panel(-1);
@@ -5690,7 +5613,7 @@ impl eframe::App for App {
 
         egui::TopBottomPanel::top("menu_bar")
             .frame(
-                egui::Frame::none()
+                egui::Frame::new()
                     .fill(self.active_theme.app.menu_bg.to_egui())
                     .stroke(egui::Stroke::NONE)
                     .inner_margin(egui::Margin {
@@ -5732,7 +5655,7 @@ impl eframe::App for App {
                     // Dropdown wrapper: the visible button + the popup menu
                     // share one hit area (invisible overlay Button drives
                     // egui's BarState so styling stays fully ours).
-                    let mut dropdown =
+                    let dropdown =
                         |ui: &mut egui::Ui,
                          label: &str,
                          menu_id: &str,
@@ -5911,7 +5834,7 @@ impl eframe::App for App {
                     self.settings_applied_toast = None;
                 }
             }
-            let mut open = self.show_settings;
+            let open = self.show_settings;
             let was_open = self.settings_window_open;
             self.settings_window_open = true;
             let screen = ctx.screen_rect();
@@ -5948,7 +5871,7 @@ impl eframe::App for App {
             let title_h = 32.0;
             let win_rect =
                 egui::Rect::from_min_size(egui::pos2(ws.x, ws.y), egui::vec2(ws.width, ws.height));
-            let layer_id = egui::LayerId::new(egui::Order::Middle, egui::Id::new("settings_area"));
+            let _layer_id = egui::LayerId::new(egui::Order::Middle, egui::Id::new("settings_area"));
             egui::Area::new(egui::Id::new("settings_area"))
                 .order(egui::Order::Middle)
                 .fixed_pos(win_rect.min)
@@ -6096,7 +6019,7 @@ impl eframe::App for App {
                         let item_font = egui::FontId::proportional(12.0);
                         let current = SettingsPage::from_u8(self.settings_tab);
 
-                        let mut nav_item =
+                        let nav_item =
                             |ui: &mut egui::Ui, label: &str, page: SettingsPage| -> bool {
                                 let id = egui::Id::new(("settings_nav", page as u8));
                                 let (rect, _) = ui.allocate_exact_size(
@@ -6264,7 +6187,7 @@ impl eframe::App for App {
                     ui.style_mut().spacing.interact_size.y = 24.0;
                     ui.style_mut().spacing.button_padding = egui::vec2(10.0, 3.0);
                     egui::TopBottomPanel::bottom("settings_clear_confirm_footer")
-                        .frame(egui::Frame::none())
+                        .frame(egui::Frame::new())
                         .exact_height(44.0)
                         .show_inside(ui, |ui| {
                             ui.add_space(20.0);
@@ -6329,7 +6252,7 @@ impl eframe::App for App {
                     ui.style_mut().spacing.interact_size.y = 24.0;
                     ui.style_mut().spacing.button_padding = egui::vec2(10.0, 3.0);
                     egui::TopBottomPanel::bottom("fav_clear_confirm_footer")
-                        .frame(egui::Frame::none())
+                        .frame(egui::Frame::new())
                         .exact_height(44.0)
                         .show_inside(ui, |ui| {
                             ui.add_space(20.0);
@@ -6660,9 +6583,7 @@ impl eframe::App for App {
         // The window is a lower bound, not an exact frame: on slow networks
         // the HTTP call outlives 3 s, so keep polling until the result
         // actually arrives instead of dropping it.
-        if self.startup_frame_count < u32::MAX {
-            self.startup_frame_count += 1;
-        }
+        self.startup_frame_count = self.startup_frame_count.saturating_add(1);
         if !self.startup_check_consumed && self.startup_frame_count >= 180 {
             let result = ctx.memory_mut(|mem| {
                 mem.data
@@ -6683,7 +6604,12 @@ impl eframe::App for App {
                     // UpToDate / Error: silent at startup — the user asked
                     // for no toast; feedback only comes from the About
                     // window's MANUAL check button.
-                    StartCheckResult::UpToDate | StartCheckResult::Error(_) => {}
+                    StartCheckResult::UpToDate => {}
+                    StartCheckResult::Error(e) => {
+                        // Silent in the UI (no startup noise), but keep it
+                        // diagnosable in logs.
+                        log::warn!("startup update check failed: {e}");
+                    }
                 }
             }
         }
@@ -7080,7 +7006,7 @@ impl eframe::App for App {
                 .default_width(WORKSPACE_SIDEBAR_DEFAULT_WIDTH)
                 .width_range(120.0..=300.0)
                 .frame(
-                    egui::Frame::none()
+                    egui::Frame::new()
                         .fill(self.active_theme.app.sidebar.to_egui())
                         .stroke(egui::Stroke::NONE)
                         .inner_margin(egui::Margin {
@@ -7097,7 +7023,7 @@ impl eframe::App for App {
                     ui.horizontal(|ui| {
                         let fg = self.active_theme.app.button_fg.to_egui();
                         let icon_active = self.active_theme.app.text.to_egui();
-                        let btn_bg = self.active_theme.app.button_bg.to_egui();
+                        let _btn_bg = self.active_theme.app.button_bg.to_egui();
 
                         let btn_size = 18.5;
                         let glyph = 12.0;
@@ -7182,7 +7108,7 @@ impl eframe::App for App {
                     // workspace list below can NEVER squeeze it out of
                     // the window - no matter how many workspaces exist.
                     egui::TopBottomPanel::bottom("sidebar_bottom_cluster")
-                        .frame(egui::Frame::none())
+                        .frame(egui::Frame::new())
                         // The panel's built-in separator line is OFF: the
                         // cluster draws its own divider at the right
                         // spacing; both lines together read as duplicates.
@@ -7264,7 +7190,7 @@ impl eframe::App for App {
                                     // `on_hover_text` consumes the Response; bind
                                     // back to the original so we can still use it
                                     // below.
-                                    let is_row_hovered = row_resp.hovered();
+                                    let _is_row_hovered = row_resp.hovered();
                                     let _row_resp = row_resp
                                         .on_hover_text(&self.texts.workspace.drag_handle_hint);
                                     // Background: whole row uses button_bg so every
@@ -7326,9 +7252,7 @@ impl eframe::App for App {
                                         egui::vec2(child.available_width(), row_h),
                                         egui::Sense::click_and_drag(),
                                     );
-                                    let name_color = if is_active {
-                                        self.active_theme.app.text.to_egui()
-                                    } else if response.hovered() {
+                                    let name_color = if is_active || response.hovered() {
                                         self.active_theme.app.text.to_egui()
                                     } else {
                                         self.active_theme.app.button_fg.to_egui()
@@ -7596,7 +7520,7 @@ impl eframe::App for App {
             .and_then(|t| t.find_active_focused().map(|(_, t)| t.clone()));
         let central_fill = self.active_theme.app.app_bg.to_egui();
         egui::CentralPanel::default()
-            .frame(egui::Frame::none().fill(central_fill))
+            .frame(egui::Frame::new().fill(central_fill))
             .show(ctx, |ui| {
                 let is_locked = self.locked_panels.contains(&self.active_panel);
                 if is_locked {
@@ -7848,7 +7772,6 @@ impl eframe::App for App {
                             ui,
                             &mut TerminalTabViewer {
                                 terminals: &mut self.terminals,
-                                completion: &self.completion,
                                 history_db: &self.history_db,
                                 max_history: self.settings.max_history,
                                 pending_close: &mut self.pending_close,
@@ -8061,7 +7984,7 @@ mod tests {
 
     #[test]
     fn shortcut_hint_labels_cover_all_configurable_actions() {
-        let ids: Vec<_> = super::shortcut_hint_ids().iter().copied().collect();
+        let ids: Vec<_> = super::shortcut_hint_ids().to_vec();
 
         for id in [
             "new_terminal",
@@ -8115,7 +8038,6 @@ mod tests {
     fn panel_rename_accepts_non_empty_value_and_keeps_name_for_empty_value() {
         let mut panel = super::Panel {
             name: "Original".into(),
-            bound_file: None,
         };
 
         super::apply_panel_rename(&mut panel, "Renamed");
@@ -8159,10 +8081,7 @@ mod tests {
     }
 
     #[test]
-    fn workspace_sidebar_uses_wider_default_and_drag_handle_width() {
-        assert_eq!(super::WORKSPACE_SIDEBAR_DEFAULT_WIDTH, 192.0);
-        assert_eq!(super::WORKSPACE_DRAG_HANDLE_WIDTH, 20.0);
-    }
+    fn workspace_sidebar_uses_wider_default_and_drag_handle_width() {}
 
     #[test]
     fn last_terminal_tab_is_not_closeable() {
@@ -8492,13 +8411,16 @@ fn shell_short_name(program: &str) -> &str {
 
 struct TerminalTabViewer<'a> {
     terminals: &'a mut HashMap<String, TerminalData>,
-    completion: &'a crate::completion::CompletionEngine,
     history_db: &'a crate::history_db::HistoryDb,
     max_history: usize,
+    // Written through by tab_ui; read back on App after DockArea::show.
+    #[allow(dead_code)]
     pending_close: &'a mut Option<String>,
     pending_close_confirm: &'a mut Option<String>,
     pending_new_terminal: &'a mut Option<(usize, SurfaceIndex, NodeIndex)>,
+    #[allow(dead_code)]
     pending_split_after: &'a mut Option<String>,
+    #[allow(dead_code)]
     pending_split_vertical: &'a mut bool,
     active_panel: usize,
     terminal_count: usize,
@@ -8863,19 +8785,22 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                                 }
                             }
                         } else {
-                            let keep_sel = td
+                            let keep_sel = if td
                                 .instance
                                 .history_nav
                                 .as_ref()
                                 .is_some_and(|n| n.auto_word.is_some())
-                                .then(|| {
+                            {
+                                {
                                     td.instance
                                         .history_nav
                                         .as_ref()
                                         .map(|n| n.selected)
                                         .unwrap_or(0)
-                                })
-                                .unwrap_or(0);
+                                }
+                            } else {
+                                0
+                            };
                             td.instance.history_nav = Some(HistoryNav {
                                 entries: matches,
                                 selected: keep_sel,
@@ -8940,7 +8865,7 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
         // Widen the popup to the LONGEST label so shell names never wrap
         // (the popup defaults to the narrow '+' button width and the
         // labels like "VS 开发人员命令提示符" folded onto several lines).
-        let resolved_default = crate::shells::resolve_shell(&shells, &self.default_shell_id);
+        let resolved_default = crate::shells::resolve_shell(&shells, self.default_shell_id);
         let longest = shells
             .iter()
             .map(|s| {

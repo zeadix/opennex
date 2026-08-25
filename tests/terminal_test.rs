@@ -76,5 +76,7 @@ fn test_grid_display_iter() {
 fn test_term_config_default() {
     use alacritty_terminal::term::Config;
     let config = Config::default();
-    assert!(config.scrolling_history > 0 || config.scrolling_history == 0);
+    // The app wires its scrollback setting into this field; the default
+    // must stay non-zero or fresh terminals lose all history.
+    assert!(config.scrolling_history > 0);
 }

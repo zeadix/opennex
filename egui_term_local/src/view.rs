@@ -607,7 +607,7 @@ impl<'a> TerminalView<'a> {
             let y = layout_min.y + (cell_height * vp.line as f32);
 
             let mut fg = self.theme.get_color(indexed.fg);
-            let mut bg = self.theme.get_color(indexed.bg);
+            let bg = self.theme.get_color(indexed.bg);
             let draw_w = if is_wide_char {
                 cell_width * 2.0
             } else {
@@ -851,7 +851,7 @@ fn process_text_event(
 }
 
 fn process_keyboard_key(
-    ctx: &egui::Context,
+    _ctx: &egui::Context,
     backend: &TerminalBackend,
     bindings_layout: &BindingsLayout,
     key: Key,

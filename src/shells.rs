@@ -303,7 +303,7 @@ mod tests {
 
     #[cfg(not(target_os = "windows"))]
     #[test]
-    fn unix_default_shell_survives_when_sHELL_is_exotic() {
+    fn unix_default_shell_survives_when_shell_is_exotic() {
         // Whatever $SHELL is, the list must keep the default entry and
         // only add shells that actually exist on disk.
         let shells = detect_shells();

@@ -1,0 +1,66 @@
+# Continuous integration: runs on every push and PR so breakage is
+# caught BEFORE a release tag, not by users afterwards. The release
+# workflow (release.yml) stays tag-only.
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  lint:
+    # Fast static gates. --cap-lints=warn keeps third-party/fork crates
+    # from failing our `-D warnings` gate while OUR code must stay clean.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: Format check
+        run: cargo fmt --all -- --check
+      - name: Clippy (deny warnings in our code)
+        env:
+          RUSTFLAGS: --cap-lints=warn
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+  test-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run tests
+        run: cargo test --workspace
+
+  test-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Full suite includes PTY integration tests that assume a Unix
+      # shell; the lib tests cover everything platform-independent.
+      - name: Run tests
+        run: cargo test --lib
+
+  test-macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+          - os: macos-13
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run tests
+        run: cargo test --workspace

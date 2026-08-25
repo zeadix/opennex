@@ -23,7 +23,6 @@ const MANIFEST_SIGNING_PUBKEY: [u8; 32] = [
 /// compromised CDN/bucket/CI. Set OPENNEX_ALLOW_UNSIGNED_UPDATES=1 to
 /// bypass for local testing (logged loudly).
 fn verify_manifest_signature(manifest_bytes: &[u8]) -> Result<(), String> {
-    use ed25519_dalek::{Signature, Verifier, VerifyingKey};
     if std::env::var("OPENNEX_ALLOW_UNSIGNED_UPDATES").as_deref() == Ok("1") {
         log::warn!("update signature check bypassed via OPENNEX_ALLOW_UNSIGNED_UPDATES");
         return Ok(());
@@ -111,8 +110,47 @@ pub struct ReleaseFiles {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct PlatformFile {
+    /// Legacy single-arch fields (historically x86_64); still required so
+    /// old manifests keep parsing.
     pub portable: String,
     pub sha256: String,
+    /// Arch-keyed entries (macOS universal manifests). Optional so the
+    /// Windows/Linux variants and old manifests deserialize unchanged.
+    #[serde(default)]
+    pub portable_aarch64: Option<String>,
+    #[serde(default)]
+    pub sha256_aarch64: Option<String>,
+    #[serde(default)]
+    pub portable_x86_64: Option<String>,
+    #[serde(default)]
+    pub sha256_x86_64: Option<String>,
+}
+
+impl PlatformFile {
+    /// Pick the artifact matching the RUNNING architecture (macOS ships
+    /// both builds; the legacy `portable` field is the x86_64 fallback).
+    pub fn pick_for_running_arch(&self) -> (&str, &str) {
+        match std::env::consts::ARCH {
+            "aarch64" => {
+                if let (Some(url), Some(sha)) = (
+                    self.portable_aarch64.as_deref(),
+                    self.sha256_aarch64.as_deref(),
+                ) {
+                    return (url, sha);
+                }
+            }
+            "x86_64" => {
+                if let (Some(url), Some(sha)) = (
+                    self.portable_x86_64.as_deref(),
+                    self.sha256_x86_64.as_deref(),
+                ) {
+                    return (url, sha);
+                }
+            }
+            _ => {}
+        }
+        (&self.portable, &self.sha256)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -151,6 +189,11 @@ fn current_platform() -> &'static str {
 }
 
 pub fn version_is_newer(remote: &str, current: &str) -> bool {
+    // Pre-releases (0.2.0-rc1, 1.0.0+build) never go out to the stable
+    // update channel.
+    if remote.contains('-') || remote.contains('+') {
+        return false;
+    }
     let parse = |s: &str| -> Vec<u64> {
         s.trim_start_matches('v')
             .split('.')
@@ -190,12 +233,13 @@ pub fn check_for_update() -> Result<Option<UpdateInfo>, String> {
         _ => return Err("不支持的平台".into()),
     }
     .ok_or("当前平台没有对应的下载文件")?;
+    let (download_url, sha256) = file.pick_for_running_arch();
 
     if version_is_newer(&resp.version, env!("CARGO_PKG_VERSION")) {
         Ok(Some(UpdateInfo {
             version: resp.version,
-            download_url: file.portable.clone(),
-            sha256: file.sha256.clone(),
+            download_url: download_url.to_string(),
+            sha256: sha256.to_string(),
             changelog: resp.changelog.unwrap_or_default(),
         }))
     } else {
@@ -275,6 +319,10 @@ fn verify_sha256(path: &Path, expected: &str) -> Result<bool, String> {
 
 fn extract_binary(archive_path: &Path) -> Result<PathBuf, String> {
     let temp = temp_dir()?;
+    /// Hard ceiling on any single extracted file (512 MiB): a malicious
+    /// or corrupted archive must not be able to exhaust the disk.
+    const MAX_ENTRY_BYTES: u64 = 512 * 1024 * 1024;
+
     #[cfg(target_os = "windows")]
     {
         // Windows: extract exe from zip
@@ -288,6 +336,14 @@ fn extract_binary(archive_path: &Path) -> Result<PathBuf, String> {
                 .by_index(i)
                 .map_err(|e| format!("读取zip条目失败: {e}"))?;
             let name = entry.name().to_string();
+            // Only the app binary is expected — no path traversal, no
+            // arbitrary first-.exe pick from a forged archive.
+            if !name.eq_ignore_ascii_case("opennex.exe") && !name.ends_with("/opennex.exe") {
+                continue;
+            }
+            if entry.size() > MAX_ENTRY_BYTES {
+                return Err("压缩包内文件过大，已拒绝解压".into());
+            }
             if name.ends_with(".exe") {
                 let out = temp.join("opennex_new.exe");
                 let mut f = fs::File::create(&out).map_err(|e| format!("创建文件失败: {e}"))?;
@@ -308,6 +364,9 @@ fn extract_binary(archive_path: &Path) -> Result<PathBuf, String> {
             let path = entry.path().map_err(|e| format!("路径失败: {e}"))?;
             let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
             if name == "opennex" {
+                if entry.size() > MAX_ENTRY_BYTES {
+                    return Err("压缩包内文件过大，已拒绝解压".into());
+                }
                 let out = temp.join("opennex_new");
                 entry.unpack(&out).map_err(|e| format!("解压失败: {e}"))?;
                 return Ok(out);
@@ -350,6 +409,7 @@ fn update_work_dir() -> Result<PathBuf, String> {
     Ok(dir)
 }
 
+#[allow(dead_code)] // Windows-only helper; compiled everywhere for tests
 /// PowerShell single-quoted literal escaping ('' doubles a quote).
 fn ps_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "''"))
@@ -639,6 +699,7 @@ impl CreateFlagsWindows for std::process::Command {
     }
 }
 #[cfg(not(target_os = "windows"))]
+#[allow(dead_code)]
 trait CreateFlagsWindows {
     fn creation_flags_windows(&mut self) -> &mut Self {
         self
@@ -666,7 +727,7 @@ mod tests {
 fn base64_decode(input: &str) -> Option<Vec<u8>> {
     const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let bytes: Vec<u8> = input.bytes().collect();
-    if bytes.is_empty() || bytes.len() % 4 != 0 {
+    if bytes.is_empty() || !bytes.len().is_multiple_of(4) {
         return None;
     }
     let mut out = Vec::with_capacity(bytes.len() / 4 * 3);

@@ -215,6 +215,7 @@ update:
   ready: अपडेट तैयार
   failed: 'अपडेट विफल: {}'
   available: नया संस्करण v{} मिला — डाउनलोड तैयार
+  badge: 'नया v{}'
   up_to_date: आप अद्यतित हैं
   check: अपडेट देखें
   update_now: अभी अपडेट करें

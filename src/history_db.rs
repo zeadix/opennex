@@ -24,92 +24,6 @@ pub struct HistoryDb {
     max_entries: usize,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::HistoryDb;
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    fn test_db() -> (HistoryDb, std::path::PathBuf) {
-        let path = std::env::temp_dir().join(format!(
-            "opennex_history_{}-{}.db",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        (HistoryDb::new(&path, 10), path)
-    }
-
-    #[test]
-    fn prune_removes_aged_history_of_unknown_terminal_ids() {
-        let (db, path) = test_db();
-        db.add("terminal-1", "ls");
-        db.add("terminal-2", "cd");
-        // Age terminal-1's rows past the prune cutoff; terminal-2 stays fresh.
-        db.conn
-            .execute(
-                "UPDATE command_history SET created_at = datetime('now', '-30 days')
-                 WHERE terminal_id = 'terminal-1'",
-                [],
-            )
-            .unwrap();
-        db.prune(&["terminal-1".to_string()]);
-        assert_eq!(
-            db.get("terminal-1", 10),
-            vec!["ls".to_string()],
-            "live ids are never pruned regardless of row age"
-        );
-        db.prune(&["terminal-2".to_string()]);
-        assert!(
-            db.get("terminal-1", 10).is_empty(),
-            "aged orphan rows must be pruned"
-        );
-        assert_eq!(
-            db.get("terminal-2", 10),
-            vec!["cd".to_string()],
-            "fresh rows of unknown ids must survive (another instance may own them)"
-        );
-        let _ = std::fs::remove_file(path);
-    }
-
-    #[test]
-    fn adding_existing_command_moves_it_to_the_front_without_duplicates() {
-        let (db, path) = test_db();
-
-        db.add("terminal", "first");
-        db.add("terminal", "second");
-        db.add("terminal", "first");
-
-        assert_eq!(db.get("terminal", 10), vec!["first", "second"]);
-        let _ = std::fs::remove_file(path);
-    }
-
-    #[test]
-    fn corrupt_database_is_quarantined_and_rebuilt() {
-        let (db, path) = test_db();
-        let _ = std::fs::remove_file(&path);
-        std::fs::write(&path, b"this is not sqlite").unwrap();
-
-        let recovered = HistoryDb::new(&path, 10);
-        recovered.add("terminal", "after-crash");
-        assert_eq!(
-            recovered.get("terminal", 10),
-            vec!["after-crash".to_string()]
-        );
-
-        let name = path.file_name().unwrap().to_string_lossy().into_owned();
-        let quarantined = path.with_file_name(format!("{name}.corrupt"));
-        assert!(
-            quarantined.exists(),
-            "broken db file must be preserved for inspection"
-        );
-        let _ = std::fs::remove_file(quarantined);
-        let _ = std::fs::remove_file(path);
-        let _ = recovered;
-    }
-}
-
 impl HistoryDb {
     pub fn new(path: &Path, max_entries: usize) -> Self {
         let conn = Self::open_resilient(path);
@@ -338,11 +252,9 @@ impl HistoryDb {
                 .unwrap_or_default()
         };
         for c in commands {
-            if seen.insert(c.clone()) {
-                if seen.len() - 1 == index_from_newest {
-                    target = Some(c);
-                    break;
-                }
+            if seen.insert(c.clone()) && seen.len() - 1 == index_from_newest {
+                target = Some(c);
+                break;
             }
         }
         if let Some(cmd) = target {
@@ -353,5 +265,91 @@ impl HistoryDb {
                 )
                 .ok();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::HistoryDb;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn test_db() -> (HistoryDb, std::path::PathBuf) {
+        let path = std::env::temp_dir().join(format!(
+            "opennex_history_{}-{}.db",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        (HistoryDb::new(&path, 10), path)
+    }
+
+    #[test]
+    fn prune_removes_aged_history_of_unknown_terminal_ids() {
+        let (db, path) = test_db();
+        db.add("terminal-1", "ls");
+        db.add("terminal-2", "cd");
+        // Age terminal-1's rows past the prune cutoff; terminal-2 stays fresh.
+        db.conn
+            .execute(
+                "UPDATE command_history SET created_at = datetime('now', '-30 days')
+                 WHERE terminal_id = 'terminal-1'",
+                [],
+            )
+            .unwrap();
+        db.prune(&["terminal-1".to_string()]);
+        assert_eq!(
+            db.get("terminal-1", 10),
+            vec!["ls".to_string()],
+            "live ids are never pruned regardless of row age"
+        );
+        db.prune(&["terminal-2".to_string()]);
+        assert!(
+            db.get("terminal-1", 10).is_empty(),
+            "aged orphan rows must be pruned"
+        );
+        assert_eq!(
+            db.get("terminal-2", 10),
+            vec!["cd".to_string()],
+            "fresh rows of unknown ids must survive (another instance may own them)"
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn adding_existing_command_moves_it_to_the_front_without_duplicates() {
+        let (db, path) = test_db();
+
+        db.add("terminal", "first");
+        db.add("terminal", "second");
+        db.add("terminal", "first");
+
+        assert_eq!(db.get("terminal", 10), vec!["first", "second"]);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn corrupt_database_is_quarantined_and_rebuilt() {
+        let (_db, path) = test_db();
+        let _ = std::fs::remove_file(&path);
+        std::fs::write(&path, b"this is not sqlite").unwrap();
+
+        let recovered = HistoryDb::new(&path, 10);
+        recovered.add("terminal", "after-crash");
+        assert_eq!(
+            recovered.get("terminal", 10),
+            vec!["after-crash".to_string()]
+        );
+
+        let name = path.file_name().unwrap().to_string_lossy().into_owned();
+        let quarantined = path.with_file_name(format!("{name}.corrupt"));
+        assert!(
+            quarantined.exists(),
+            "broken db file must be preserved for inspection"
+        );
+        let _ = std::fs::remove_file(quarantined);
+        let _ = std::fs::remove_file(path);
+        let _ = recovered;
     }
 }

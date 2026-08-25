@@ -214,6 +214,7 @@ update:
   ready: 更新已準備就緒
   failed: '更新失敗: {}'
   available: 發現新版本 v{} — 準備下載
+  badge: '新版本 v{}'
   up_to_date: 當前已是最新版本
   check: 檢查更新
   update_now: 立即更新
