@@ -163,7 +163,10 @@ impl TerminalBackend {
             env: env_map,
             ..tty::Options::default()
         };
-        let config = term::Config::default();
+        let config = term::Config {
+            scrolling_history: settings.scrollback,
+            ..term::Config::default()
+        };
         let terminal_size = TerminalSize::default();
         let pty = tty::new(&pty_config, terminal_size.into(), id)?;
         #[cfg(any(target_os = "linux", target_os = "macos"))]

@@ -2,6 +2,7 @@ pub mod app;
 pub mod completion;
 pub mod history_db;
 pub mod i18n;
+pub mod persist;
 pub mod proc_stats;
 pub mod shells;
 pub mod terminal;

@@ -4,11 +4,46 @@ pub use adapter::ShellInfo;
 
 use egui_term::{BackendSettings, TerminalBackend};
 
+/// Keyboard-navigation state for the per-terminal history menu
+/// (entries list + favorites side list). Owned by the terminal so the
+/// menu state dies with the tab; rendered by the app layer.
+#[derive(Clone)]
+pub struct HistoryNav {
+    pub entries: Vec<String>,
+    pub selected: usize,
+    /// When this nav was opened by the auto-match (typing) overlay, the
+    /// word the user has already typed — on confirm it is deleted before
+    /// the full command is sent. None for the manual Alt menu.
+    pub auto_word: Option<String>,
+    /// Snapshot of the GLOBAL favorite commands, shown in a side list
+    /// next to the manual (Alt) menu. Empty for auto-match overlays.
+    pub favorites: Vec<String>,
+    /// Whether keyboard focus sits on the favorites list (toggled with
+    /// Left/Right while the manual menu is open). Enter sends the
+    /// selected favorite.
+    pub fav_focused: bool,
+    /// Selection index inside the favorites list (only meaningful when
+    /// `fav_focused` is true).
+    pub fav_selected: usize,
+}
+
+impl HistoryNav {
+    pub(crate) fn move_previous(&mut self) {
+        self.selected = self.selected.saturating_sub(1);
+    }
+
+    pub(crate) fn move_next(&mut self) {
+        if self.selected + 1 < self.entries.len() {
+            self.selected += 1;
+        }
+    }
+}
+
 pub struct TerminalInstance {
     pub backend: TerminalBackend,
     pub cwd: String,
     pub shell_info: adapter::ShellInfo,
-    pub history_nav: Option<crate::app::HistoryNav>,
+    pub history_nav: Option<HistoryNav>,
     osc_buffer: String,
 }
 
@@ -144,6 +179,7 @@ impl TerminalInstance {
         _cols: u16,
         _rows: u16,
         extra_args: &[String],
+        scrollback: usize,
     ) -> Option<Self> {
         // Make sure the per-shell init file exists, then point the shell
         // at it. For bash we pass `--rcfile`; for zsh we override
@@ -185,6 +221,7 @@ impl TerminalInstance {
             args,
             working_directory: Some(std::path::PathBuf::from(cwd)),
             env: vec![],
+            scrollback,
         };
         // Explicit terminal capabilities: the app may be (re)started from
         // environments without TERM (updater helper, .desktop, systemd),
@@ -411,8 +448,11 @@ impl TerminalInstance {
     }
 
     pub fn poll_cwd(&mut self) {
-        // Scan terminal output for OSC 9;cwd sequences
-        self.backend.set_dirty();
+        // Scan terminal output for OSC 9;cwd sequences. Do NOT force a
+        // dirty flag here: forcing one made sync() clone the entire grid
+        // (up to ~10k history lines) every 15 frames per terminal even
+        // when completely idle. When output arrives, the PTY event loop
+        // sets dirty itself, so cwd updates are never delayed.
         let content = self.backend.sync();
         use alacritty_terminal::grid::Dimensions;
         let grid = &content.grid;
@@ -505,9 +545,17 @@ mod tests {
 
     #[test]
     fn poll_cwd_reads_the_shell_process_directory() {
-        let mut instance =
-            TerminalInstance::create(&egui::Context::default(), 1, "/bin/sh", "/tmp", 80, 24, &[])
-                .expect("shell should start");
+        let mut instance = TerminalInstance::create(
+            &egui::Context::default(),
+            1,
+            "/bin/sh",
+            "/tmp",
+            80,
+            24,
+            &[],
+            100,
+        )
+        .expect("shell should start");
 
         instance.write(b"cd /\r");
         for _ in 0..20 {
@@ -526,9 +574,17 @@ mod tests {
         // A command longer than the grid width wraps across rows; the
         // recorded command must contain the FULL text, not just the last
         // visual row.
-        let mut instance =
-            TerminalInstance::create(&egui::Context::default(), 2, "/bin/sh", "/tmp", 20, 24, &[])
-                .expect("shell should start");
+        let mut instance = TerminalInstance::create(
+            &egui::Context::default(),
+            2,
+            "/bin/sh",
+            "/tmp",
+            20,
+            24,
+            &[],
+            100,
+        )
+        .expect("shell should start");
 
         // Long word: wraps across at least two 20-col rows. Type it but do
         // NOT press Enter (the app records on Enter; here we only verify
@@ -557,9 +613,17 @@ mod tests {
         // the command wraps onto a second visual row, that column is a
         // small number again, chopping the word — auto-match then sees a
         // bogus prefix and the suggestion list goes empty.
-        let mut instance =
-            TerminalInstance::create(&egui::Context::default(), 3, "/bin/sh", "/tmp", 20, 24, &[])
-                .expect("shell should start");
+        let mut instance = TerminalInstance::create(
+            &egui::Context::default(),
+            3,
+            "/bin/sh",
+            "/tmp",
+            20,
+            24,
+            &[],
+            100,
+        )
+        .expect("shell should start");
 
         let long = "abcdefghijklmnopqrstuvwxy";
         instance.write(long.as_bytes());
@@ -582,9 +646,17 @@ mod tests {
         // onto a second visual row. The word must still come out as the
         // typed text: the clip has to use the cursor's LOGICAL column,
         // not its physical column on the wrapped row.
-        let mut instance =
-            TerminalInstance::create(&egui::Context::default(), 4, "bash", "/tmp", 20, 24, &[])
-                .expect("shell should start");
+        let mut instance = TerminalInstance::create(
+            &egui::Context::default(),
+            4,
+            "bash",
+            "/tmp",
+            20,
+            24,
+            &[],
+            100,
+        )
+        .expect("shell should start");
 
         // Install a 40-char prompt in a 20-col grid → the prompt alone
         // wraps onto 2+ rows.
@@ -628,6 +700,7 @@ mod tests {
                 cols,
                 24,
                 &[],
+                100,
             )
             .expect("shell should start");
             // create() ignores its cols/rows args (grid starts 80x50), so
@@ -685,6 +758,7 @@ mod tests {
                 80,
                 24,
                 &[],
+                100,
             )
             .expect("shell should start");
             std::thread::sleep(std::time::Duration::from_millis(300));
@@ -786,9 +860,17 @@ mod tests {
         // Regression: narrowing the pane makes the first typed character
         // wrap onto the next row (readline ate the line-end space), and
         // the Enter-recorder must STILL record the full command.
-        let mut instance =
-            TerminalInstance::create(&egui::Context::default(), 11, "bash", "/tmp", 80, 24, &[])
-                .expect("shell should start");
+        let mut instance = TerminalInstance::create(
+            &egui::Context::default(),
+            11,
+            "bash",
+            "/tmp",
+            80,
+            24,
+            &[],
+            100,
+        )
+        .expect("shell should start");
         std::thread::sleep(std::time::Duration::from_millis(300));
         instance.backend.set_dirty();
         let _ = instance.backend.sync();

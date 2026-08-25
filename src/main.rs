@@ -11,6 +11,7 @@ mod app;
 mod completion;
 mod history_db;
 mod i18n;
+mod persist;
 mod proc_stats;
 mod shells;
 mod terminal;

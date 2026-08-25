@@ -16,6 +16,9 @@ pub struct BackendSettings {
     /// `(name, value)` pairs. Existing variables with the same name are
     /// replaced.
     pub env: Vec<(String, String)>,
+    /// Scrollback history lines kept by the terminal grid. Previously a
+    /// fixed 10 000; now wired to the app's scrollback setting.
+    pub scrollback: usize,
 }
 
 impl Default for BackendSettings {
@@ -25,6 +28,7 @@ impl Default for BackendSettings {
             args: vec![],
             working_directory: None,
             env: vec![],
+            scrollback: 10_000,
         }
     }
 }

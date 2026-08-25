@@ -545,10 +545,17 @@ impl<'a> TerminalView<'a> {
         layout: &Response,
         painter: &Painter,
     ) {
-        // Request repaint for cursor blinking when focused
+        // Cursor blinking must NOT spin the frame loop at full rate while
+        // the user is idle: schedule exactly one repaint at the next
+        // phase flip (500 ms period). PTY output repaints arrive through
+        // the backend's own event loop, so no per-frame set_dirty here —
+        // an unfocused/idle terminal now costs zero frames.
         if self.has_focus {
-            painter.ctx().request_repaint();
-            self.backend.set_dirty();
+            let time = painter.ctx().input(|i| i.time);
+            let until_flip = 0.5 - (time % 0.5);
+            painter.ctx().request_repaint_after(
+                std::time::Duration::from_secs_f64(until_flip.max(0.008)),
+            );
         }
 
         let content = self.backend.sync();

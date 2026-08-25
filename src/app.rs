@@ -857,6 +857,58 @@ enum StartCheckResult {
     Error(String),
 }
 
+/// Process-tree sample job: pid roots for (all terminals, active
+/// workspace, focused terminal).
+type ProcSampleJob = (Vec<u32>, Vec<u32>, Vec<u32>);
+
+/// Aggregated status-bar metrics, computed OFF the UI thread by the
+/// persistent sampler worker and delivered through the egui temp store.
+#[derive(Clone, Copy, Default)]
+struct ProcSampleResult {
+    all: (Option<f32>, Option<u64>),
+    workspace: (Option<f32>, Option<u64>),
+    focused: (Option<f32>, Option<u64>),
+}
+
+fn proc_sample_id() -> egui::Id {
+    egui::Id::new("proc_sample_result")
+}
+
+/// Spawn the persistent process sampler worker. It owns the delta
+/// sampler (previous snapshot lives across jobs, so CPU% stays correct)
+/// and pushes each result into the egui temp store. The full process
+/// table scan — tens of ms on busy Windows machines — no longer runs on
+/// the UI thread.
+fn spawn_proc_sampler(ctx: egui::Context) -> std::sync::mpsc::Sender<ProcSampleJob> {
+    let (tx, rx) = std::sync::mpsc::channel::<ProcSampleJob>();
+    let _ = std::thread::Builder::new()
+        .name("opennex-proc-sampler".into())
+        .spawn(move || {
+            let mut sampler = crate::proc_stats::ProcSampler::new();
+            while let Ok((all_roots, ws_roots, focused_roots)) = rx.recv() {
+                let mut result = ProcSampleResult::default();
+                sampler.refresh_groups(
+                    [&focused_roots, &ws_roots, &all_roots],
+                    [
+                        &mut result.focused.0,
+                        &mut result.workspace.0,
+                        &mut result.all.0,
+                    ],
+                    [
+                        &mut result.focused.1,
+                        &mut result.workspace.1,
+                        &mut result.all.1,
+                    ],
+                );
+                ctx.memory_mut(|mem| {
+                    mem.data.insert_temp(proc_sample_id(), result);
+                });
+                ctx.request_repaint();
+            }
+        });
+    tx
+}
+
 impl Default for StartCheckResult {
     fn default() -> Self {
         StartCheckResult::UpToDate
@@ -919,15 +971,39 @@ fn settings_path() -> PathBuf {
 }
 
 fn load_settings() -> AppSettings {
-    let path = settings_path();
+    let mut warnings = Vec::new();
+    let settings = read_settings_from(&settings_path(), &mut warnings);
+    for warning in warnings {
+        log::warn!("{warning}");
+    }
+    settings
+}
+
+fn read_settings_from(path: &std::path::Path, warnings: &mut Vec<String>) -> AppSettings {
     if path.exists() {
-        if let Ok(content) = std::fs::read_to_string(&path) {
-            if let Ok(settings) = deserialize_settings(&content) {
-                let (settings, changed) = normalize_settings(settings);
-                if changed {
-                    let _ = save_settings(&settings);
+        match std::fs::read_to_string(path) {
+            Ok(content) => {
+                match deserialize_settings(&content) {
+                    Ok(settings) => {
+                        let (settings, changed) = normalize_settings(settings);
+                        if changed {
+                            let _ = save_settings(&settings);
+                        }
+                        return settings;
+                    }
+                    Err(e) => {
+                        log::error!("settings.json is corrupt: {e}");
+                        if crate::persist::quarantine_corrupt_file(path).is_some() {
+                            warnings.push("配置文件已损坏，已备份为 settings.json.corrupt，本次以默认配置启动。".into());
+                        } else {
+                            warnings.push("配置文件已损坏且无法备份，本次以默认配置启动。".into());
+                        }
+                    }
                 }
-                return settings;
+            }
+            Err(e) => {
+                log::error!("failed to read settings.json: {e}");
+                warnings.push("配置文件读取失败，本次以默认配置启动。".into());
             }
         }
     }
@@ -1035,9 +1111,15 @@ fn normalize_history_bindings(settings: AppSettings) -> AppSettings {
 }
 
 fn save_settings(settings: &AppSettings) -> Result<(), anyhow::Error> {
-    let content = serde_json::to_string_pretty(settings)?;
-    std::fs::write(settings_path(), content)?;
-    Ok(())
+    // Errors are logged here so the many `let _ = save_settings(..)`
+    // call sites never fail in total silence.
+    match crate::persist::atomic_write_json(&settings_path(), settings) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            log::error!("failed to persist settings.json: {e}");
+            Err(e)
+        }
+    }
 }
 
 impl Default for AppSettings {
@@ -1178,37 +1260,7 @@ struct Panel {
     bound_file: Option<PathBuf>,
 }
 
-#[derive(Clone)]
-pub struct HistoryNav {
-    pub entries: Vec<String>,
-    pub selected: usize,
-    /// When this nav was opened by the auto-match (typing) overlay, the
-    /// word the user has already typed — on confirm it is deleted before
-    /// the full command is sent. None for the manual Alt menu.
-    pub auto_word: Option<String>,
-    /// Snapshot of the GLOBAL favorite commands, shown in a side list
-    /// next to the manual (Alt) menu. Empty for auto-match overlays.
-    pub favorites: Vec<String>,
-    /// Whether keyboard focus sits on the favorites list (toggled with
-    /// Left/Right while the manual menu is open). Enter sends the
-    /// selected favorite.
-    pub fav_focused: bool,
-    /// Selection index inside the favorites list (only meaningful when
-    /// `fav_focused` is true).
-    pub fav_selected: usize,
-}
-
-impl HistoryNav {
-    fn move_previous(&mut self) {
-        self.selected = self.selected.saturating_sub(1);
-    }
-
-    fn move_next(&mut self) {
-        if self.selected + 1 < self.entries.len() {
-            self.selected += 1;
-        }
-    }
-}
+pub use crate::terminal::HistoryNav;
 
 #[derive(Default)]
 struct AltKeyState {
@@ -1383,8 +1435,17 @@ pub struct App {
     focused_mem: Option<u64>,
     /// Wall-clock of the last sampling tick.
     last_sample: std::time::Instant,
-    /// Delta sampler over per-terminal process trees.
-    terminal_sampler: crate::proc_stats::ProcSampler,
+    /// Sender to the persistent sampler worker; respawned on failure.
+    /// The heavy process-table scan runs OFF the UI thread.
+    proc_sample_tx: Option<std::sync::mpsc::Sender<ProcSampleJob>>,
+    /// System fonts scanned+validated once; Arc-shared into every font
+    /// atlas rebuild (see rebuild_fonts).
+    font_asset_cache: Option<Vec<(String, std::sync::Arc<egui::FontData>)>>,
+    /// Corruption/recovery notices queued at startup, drained into the
+    /// toast channel one per frame once the UI is live.
+    startup_warnings: Vec<String>,
+    /// Set once the deferred startup update-check result was consumed.
+    startup_check_consumed: bool,
 }
 
 struct TerminalData {
@@ -1400,6 +1461,7 @@ fn create_terminal(
     working_dir: &str,
     id_counter: &mut u64,
     shell: Option<&crate::shells::ShellOption>,
+    scrollback: usize,
 ) -> Option<TerminalInstance> {
     // Explicit shell choice (new-terminal menu / scene restore) wins;
     // otherwise the platform default (Unix: $SHELL, Windows: the
@@ -1445,7 +1507,16 @@ fn create_terminal(
     *id_counter += 1;
     let id = *id_counter;
 
-    TerminalInstance::create(ctx, id, &shell.program, &cwd_str, 80, 24, &shell.args)
+    TerminalInstance::create(
+        ctx,
+        id,
+        &shell.program,
+        &cwd_str,
+        80,
+        24,
+        &shell.args,
+        scrollback,
+    )
 }
 
 fn build_panel_state(app: &mut App, panel_idx: usize) -> Option<WorkspaceState> {
@@ -1472,17 +1543,32 @@ fn build_panel_state(app: &mut App, panel_idx: usize) -> Option<WorkspaceState> 
 }
 
 fn save_to_file<T: Serialize>(path: &PathBuf, data: &T) -> Result<(), anyhow::Error> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let json = serde_json::to_string_pretty(data)?;
-    std::fs::write(path, json)?;
-    Ok(())
+    crate::persist::atomic_write_json(path, data)
 }
 
 fn load_scene_file(path: &PathBuf) -> Option<SceneState> {
-    let content = std::fs::read_to_string(path).ok()?;
-    serde_json::from_str(&content).ok()
+    load_scene_file_with_warnings(path, &mut Vec::new())
+}
+
+fn load_scene_file_with_warnings(path: &PathBuf, warnings: &mut Vec<String>) -> Option<SceneState> {
+    let content = match std::fs::read_to_string(path) {
+        Ok(content) => content,
+        Err(_) => return None,
+    };
+    match serde_json::from_str(&content) {
+        Ok(scene) => Some(scene),
+        Err(e) => {
+            log::error!("scene.json is corrupt: {e}");
+            if crate::persist::quarantine_corrupt_file(path).is_some() {
+                warnings.push(
+                    "场景文件已损坏，已备份为 scene.json.corrupt，本次以默认布局启动。".into(),
+                );
+            } else {
+                warnings.push("场景文件已损坏且无法备份，本次以默认布局启动。".into());
+            }
+            None
+        }
+    }
 }
 
 fn build_scene_state(app: &mut App) -> SceneState {
@@ -1548,9 +1634,32 @@ fn update_button_label(version: &str) -> String {
     format!("更新版本: {version}")
 }
 
+/// The subset of a theme that feeds `rebuild_fonts`. Dragging color or
+/// spacing sliders in the theme editor changes the draft WITHOUT
+/// touching these, so the expensive font-atlas rebuild (full system
+/// font revalidation + glyph atlas invalidation) is skipped for those
+/// frames.
+fn theme_fonts_signature(theme: &crate::theme::ThemeDefinition) -> (String, String) {
+    (
+        theme
+            .app
+            .ui_font_families
+            .first()
+            .cloned()
+            .unwrap_or_default(),
+        theme
+            .typography
+            .terminal_font_families
+            .first()
+            .cloned()
+            .unwrap_or_default(),
+    )
+}
+
 impl App {
     pub fn new(cc: &eframe::CreationContext) -> Self {
-        let settings = load_settings();
+        let mut startup_warnings = Vec::new();
+        let settings = read_settings_from(&settings_path(), &mut startup_warnings);
         let ctx = &cc.egui_ctx.clone();
         // Shell discovery (Windows multi-shell support) + publish the
         // settings' default for create_terminal's fallback path.
@@ -1708,7 +1817,10 @@ impl App {
             focused_cpu: None,
             focused_mem: None,
             last_sample: std::time::Instant::now(),
-            terminal_sampler: crate::proc_stats::ProcSampler::new(),
+            proc_sample_tx: None,
+            font_asset_cache: None,
+            startup_warnings: Vec::new(),
+            startup_check_consumed: false,
         };
 
         // Register fonts (system + embedded + theme choices) now that the
@@ -1730,7 +1842,7 @@ impl App {
 
         let scene_path = scene_path();
         if scene_path.exists() {
-            if let Some(scene) = load_scene_file(&scene_path) {
+            if let Some(scene) = load_scene_file_with_warnings(&scene_path, &mut startup_warnings) {
                 app.settings_edit = app.settings.clone();
                 for panel in &scene.panels {
                     let idx = app.panels.len();
@@ -1740,6 +1852,7 @@ impl App {
                             &tstate.working_directory,
                             &mut app.terminal_id_counter,
                             None,
+                            app.settings.scrollback,
                         ) else {
                             continue;
                         };
@@ -1777,6 +1890,7 @@ impl App {
                 // id would inherit stale command history.
                 let live_ids: Vec<String> = app.terminals.keys().cloned().collect();
                 app.history_db.prune(&live_ids);
+                app.startup_warnings = startup_warnings;
                 spawn_startup_update_check(ctx);
                 return app;
             }
@@ -1784,6 +1898,7 @@ impl App {
 
         app.add_initial_terminal(ctx);
         app.refresh_template_files();
+        app.startup_warnings = startup_warnings;
 
         spawn_startup_update_check(ctx);
 
@@ -1882,6 +1997,7 @@ impl App {
                     &tstate.working_directory,
                     &mut self.terminal_id_counter,
                     None,
+                    self.settings.scrollback,
                 ) else {
                     continue;
                 };
@@ -1921,6 +2037,7 @@ impl App {
             &cwd,
             &mut self.terminal_id_counter,
             self.pending_shell.take().as_ref(),
+            self.settings.scrollback,
         )?;
         let random_suffix: String = uuid::Uuid::new_v4().as_bytes()[0..3]
             .iter()
@@ -2032,6 +2149,7 @@ impl App {
                                 &tstate.working_directory,
                                 &mut self.terminal_id_counter,
                                 None,
+                                self.settings.scrollback,
                             ) {
                                 self.terminals.insert(
                                     _id.clone(),
@@ -2704,10 +2822,16 @@ impl App {
             self.handle_theme_action(ctx, action, editor_draft.clone());
         }
         if editor_draft != self.theme_edit {
+            // Only font-affecting fields justify an atlas rebuild; color
+            // slider drags must not re-validate every system font per frame.
+            let fonts_changed =
+                theme_fonts_signature(&editor_draft) != theme_fonts_signature(&self.theme_edit);
             self.theme_edit = editor_draft;
             self.theme_dirty = true;
             crate::theme::apply_theme_definition(ctx, &self.theme_edit);
-            self.rebuild_fonts(ctx);
+            if fonts_changed {
+                self.rebuild_fonts(ctx);
+            }
         }
 
         if keep || !self.theme_editor_open {
@@ -2772,6 +2896,9 @@ impl App {
                 }
             }
         }
+        // Persist the layout before the restart so the post-update
+        // session restores exactly what the user was working on.
+        save_scene(&scene_path(), self);
         match crate::updater::replace_and_restart(&path) {
             Ok(_) => {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -3477,36 +3604,49 @@ impl App {
         }
     }
 
-    fn rebuild_fonts(&self, ctx: &egui::Context) {
-        let system_fonts = scan_system_fonts();
+    /// Fonts loaded from disk exactly once per process: scanning every
+    /// system font directory and re-validating each file on every theme
+    /// switch froze the UI for up to seconds on Windows. The cache holds
+    /// validated `FontData` behind an Arc; rebuilding only re-wires
+    /// family chains and swaps the atlas. Newly installed system fonts
+    /// are picked up after an app restart — acceptable for a font list.
+    fn rebuild_fonts(&mut self, ctx: &egui::Context) {
+        if self.font_asset_cache.is_none() {
+            let mut loaded: Vec<(String, std::sync::Arc<egui::FontData>)> = Vec::new();
+            for (name, path) in scan_system_fonts() {
+                let path = std::path::PathBuf::from(path);
+                match std::fs::read(&path) {
+                    Ok(data) => {
+                        // Validate the file parses as a real TTF/OTF/TTC
+                        // face before registering it. Some files carry a
+                        // .ttf extension but are not TrueType resources
+                        // (e.g. Windows mstmc.ttf bitmap fonts); epaint
+                        // panics on those at first use.
+                        if !is_valid_font_data(&data) {
+                            log::warn!("skipping invalid font file {}: {}", name, path.display());
+                            continue;
+                        }
+                        loaded.push((name, std::sync::Arc::new(egui::FontData::from_owned(data))));
+                    }
+                    Err(e) => log::warn!("unreadable font file {}: {}", path.display(), e),
+                }
+            }
+            self.font_asset_cache = Some(loaded);
+        }
+        let system_fonts = self.font_asset_cache.as_ref().unwrap();
         let mut fonts = egui::FontDefinitions::default();
         egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
         let mut registered_names: Vec<String> = Vec::new();
-        for (name, path) in &system_fonts {
-            if let Ok(data) = std::fs::read(path) {
-                // Validate the file parses as a real TTF/OTF/TTC face
-                // before registering it. Some files in the system font
-                // directories carry a .ttf extension but are not
-                // TrueType resources (e.g. Windows mstmc.ttf bitmap
-                // fonts); epaint panics on those at first use, which
-                // crashed startup. Skip them with a warning instead.
-                if !is_valid_font_data(&data) {
-                    log::warn!("skipping invalid font file {}: {}", name, path);
-                    continue;
-                }
-                fonts.font_data.insert(
-                    name.clone(),
-                    std::sync::Arc::new(egui::FontData::from_owned(data)),
-                );
-                // Symbol/decorative fonts stay REGISTERED (a theme or
-                // preview referencing FontFamily::Name("NotoColorEmoji")
-                // must stay bound — epaint PANICS on unbound names), but
-                // they never enter registered_names: no generic fallback
-                // chains, no font pickers. Their glyph pollution is thus
-                // impossible unless a user explicitly picks one.
-                if !is_symbol_font_name(name) {
-                    registered_names.push(name.clone());
-                }
+        for (name, data) in system_fonts {
+            fonts.font_data.insert(name.clone(), data.clone());
+            // Symbol/decorative fonts stay REGISTERED (a theme or
+            // preview referencing FontFamily::Name("NotoColorEmoji")
+            // must stay bound — epaint PANICS on unbound names), but
+            // they never enter registered_names: no generic fallback
+            // chains, no font pickers. Their glyph pollution is thus
+            // impossible unless a user explicitly picks one.
+            if !is_symbol_font_name(name) {
+                registered_names.push(name.clone());
             }
         }
         load_multilingual_fonts(&mut fonts);
@@ -4841,6 +4981,13 @@ fn render_restart_popup(ctx: &egui::Context, texts: &crate::i18n::Texts) {
 }
 
 impl eframe::App for App {
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        // Persist the layout on every exit path (window X button,
+        // menu quit, ViewportCommand::Close from the updater restart)
+        // so tabs/splits/renames survive without a manual Ctrl+S.
+        save_scene(&scene_path(), self);
+    }
+
     fn raw_input_hook(&mut self, ctx: &egui::Context, _raw_input: &mut egui::RawInput) {
         let any_theme_dialog = self.theme_dialog.show_copy_dialog
             || self.theme_dialog.show_new_dialog
@@ -4866,6 +5013,15 @@ impl eframe::App for App {
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Drain one queued startup warning per frame into the toast
+        // channel so corruption notices are actually seen.
+        if !self.startup_warnings.is_empty() {
+            let warning = self.startup_warnings.remove(0);
+            self.update_toast = Some((
+                warning,
+                std::time::Instant::now() + std::time::Duration::from_secs(8),
+            ));
+        }
         // Auto-copy selected text on mouse release.
         self.handle_selection_auto_copy(ctx);
         self.process_pending(ctx);
@@ -4877,9 +5033,9 @@ impl eframe::App for App {
             }
         }
 
-        // Status-bar sample: every 2 seconds, aggregate CPU/memory over
-        // terminal process trees — focused terminal, active workspace, and
-        // all workspaces — against a single process snapshot.
+        // Status-bar sample: every 2 seconds, hand the pid groups to the
+        // persistent sampler worker (off-thread) and apply whatever
+        // results have arrived through the temp store.
         if self.last_sample.elapsed() >= std::time::Duration::from_secs(2) {
             self.last_sample = std::time::Instant::now();
             let all_roots: Vec<u32> = self
@@ -4907,23 +5063,34 @@ impl eframe::App for App {
                 .filter(|&pid| pid != 0)
                 .into_iter()
                 .collect();
-            let mut ws_cpu = None;
-            let mut ws_mem = None;
-            let mut all_cpu = None;
-            let mut all_mem = None;
-            let mut f_cpu = None;
-            let mut f_mem = None;
-            self.terminal_sampler.refresh_groups(
-                [&focused_roots, &ws_roots, &all_roots],
-                [&mut f_cpu, &mut ws_cpu, &mut all_cpu],
-                [&mut f_mem, &mut ws_mem, &mut all_mem],
-            );
-            self.focused_cpu = f_cpu;
-            self.focused_mem = f_mem;
-            self.workspace_cpu = ws_cpu;
-            self.workspace_mem = ws_mem;
-            self.terminal_cpu = all_cpu;
-            self.terminal_mem = all_mem;
+            let job: ProcSampleJob = (all_roots, ws_roots, focused_roots);
+            match self.proc_sample_tx.as_ref() {
+                Some(tx) => {
+                    if let Err(err) = tx.send(job) {
+                        // Worker died (shouldn't happen — the loop only
+                        // exits when the channel closes): respawn and
+                        // redeliver.
+                        let tx = spawn_proc_sampler(ctx.clone());
+                        let _ = tx.send(err.0);
+                        self.proc_sample_tx = Some(tx);
+                    }
+                }
+                None => {
+                    let tx = spawn_proc_sampler(ctx.clone());
+                    let _ = tx.send(job);
+                    self.proc_sample_tx = Some(tx);
+                }
+            }
+        }
+        if let Some(result) =
+            ctx.memory_mut(|mem| mem.data.remove_temp::<ProcSampleResult>(proc_sample_id()))
+        {
+            self.terminal_cpu = result.all.0;
+            self.terminal_mem = result.all.1;
+            self.workspace_cpu = result.workspace.0;
+            self.workspace_mem = result.workspace.1;
+            self.focused_cpu = result.focused.0;
+            self.focused_mem = result.focused.1;
         }
         let renaming = self.is_renaming();
         if renaming {
@@ -6419,15 +6586,19 @@ impl eframe::App for App {
         // Check for update result from background thread.
         // After ~3 seconds (180 frames @ 60fps) we show the update dialog
         // for any available update, or display a toast for up-to-date / error.
-        if self.startup_frame_count < 180 {
+        // The window is a lower bound, not an exact frame: on slow networks
+        // the HTTP call outlives 3 s, so keep polling until the result
+        // actually arrives instead of dropping it.
+        if self.startup_frame_count < u32::MAX {
             self.startup_frame_count += 1;
         }
-        if self.startup_frame_count == 180 {
+        if !self.startup_check_consumed && self.startup_frame_count >= 180 {
             let result = ctx.memory_mut(|mem| {
                 mem.data
                     .remove_temp::<StartCheckResult>(egui::Id::new("start_check_result"))
             });
             if let Some(r) = result {
+                self.startup_check_consumed = true;
                 match r {
                     StartCheckResult::Available(info) => {
                         if !self.skipped_versions.contains(&info.version) {
@@ -7615,10 +7786,10 @@ impl eframe::App for App {
                                 history_menu_just_closed: &mut self.history_menu_just_closed,
                                 auto_match_pending: &mut self.auto_match_pending,
                                 detected_shells: &self.detected_shells,
-                                clipboard_binds: self.settings.key_binds.clone(),
+                                clipboard_binds: &self.settings.key_binds,
                                 clipboard_mirror: &mut self.clipboard_mirror,
                                 pending_shell: &mut self.pending_shell,
-                                default_shell_id: self.settings.default_shell.clone(),
+                                default_shell_id: &self.settings.default_shell,
                                 theme: if self.show_settings {
                                     &self.theme_edit
                                 } else {
@@ -8260,13 +8431,13 @@ struct TerminalTabViewer<'a> {
     auto_match_pending: &'a mut std::collections::HashMap<String, String>,
     detected_shells: &'a [crate::shells::ShellOption],
     /// Terminal clipboard/interrupt shortcut bindings (settings).
-    clipboard_binds: HashMap<String, ShortcutBinding>,
+    clipboard_binds: &'a HashMap<String, ShortcutBinding>,
     /// Clipboard mirror for remapped paste.
     clipboard_mirror: &'a mut String,
     pending_shell: &'a mut Option<crate::shells::ShellOption>,
     /// Shell id chosen as default in settings (labels the menu's
     /// default entry; the actual spawn resolves in create_terminal).
-    default_shell_id: String,
+    default_shell_id: &'a str,
     theme: &'a crate::theme::ThemeDefinition,
     texts: &'a crate::i18n::Texts,
 }
