@@ -35,6 +35,11 @@ pub enum BackendCommand {
     Resize(Size, Size),
     SelectStart(SelectionType, f32, f32),
     SelectUpdate(f32, f32),
+    /// Drop the active selection (highlight) entirely. Sent when app-
+    /// driven redraws would leave a stale highlight pinned to the wrong
+    /// content (TUI wheel scrolls), and after copy-on-release inside
+    /// mouse-reporting apps.
+    ClearSelection,
     ProcessLink(LinkAction, Point),
     MouseReport(MouseButton, Modifiers, Point, bool),
 }
@@ -250,6 +255,11 @@ impl TerminalBackend {
             },
             BackendCommand::SelectUpdate(x, y) => {
                 self.update_selection(&mut term, x, y);
+            },
+            BackendCommand::ClearSelection => {
+                if term.selection.take().is_some() {
+                    self.dirty.store(true, Ordering::Relaxed);
+                }
             },
             BackendCommand::ProcessLink(link_action, point) => {
                 self.process_link_action(&term, link_action, point);
@@ -633,6 +643,40 @@ pub struct RenderableContent {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn clear_selection_drops_highlight_and_updates_snapshot() {
+        let mut backend = TerminalBackend::new(
+            90,
+            egui::Context::default(),
+            BackendSettings {
+                shell: "/bin/sh".into(),
+                args: vec!["-c".into(), "sleep 3".into()],
+                working_directory: Some("/tmp".into()),
+                env: vec![],
+                scrollback: 100,
+            },
+        )
+        .expect("backend");
+        // Start + update a selection, verify it lands in the snapshot...
+        backend.process_command(BackendCommand::SelectStart(
+            SelectionType::Simple,
+            3.0,
+            3.0,
+        ));
+        backend.process_command(BackendCommand::SelectUpdate(300.0, 300.0));
+        backend.set_dirty();
+        let _ = backend.sync();
+        assert!(backend.last_content().selectable_range.is_some());
+        // ...then ClearSelection must remove it (and mark dirty so the
+        // highlight repaints away immediately).
+        backend.process_command(BackendCommand::ClearSelection);
+        backend.set_dirty();
+        let _ = backend.sync();
+        assert!(backend.last_content().selectable_range.is_none());
+        // Clearing again with no selection must be a harmless no-op.
+        backend.process_command(BackendCommand::ClearSelection);
+    }
 
     #[test]
     fn wheel_releases_are_dropped_defensively() {

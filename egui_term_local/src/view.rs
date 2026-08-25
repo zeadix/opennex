@@ -942,7 +942,14 @@ fn process_mouse_wheel(
             } else {
                 return Vec::new();
             };
-            let mut actions = Vec::with_capacity(presses);
+            // The app scrolls/redraws its content in response to these
+            // wheel reports; a local selection highlight would stay
+            // pinned to the OLD content (grid coords don't follow an
+            // app-side scroll). Drop it so the highlight never
+            // desynchronizes from the text it was made on.
+            let mut actions = Vec::with_capacity(presses + 1);
+            actions
+                .push(InputAction::BackendCall(BackendCommand::ClearSelection));
             for _ in 0..presses {
                 actions.push(InputAction::BackendCall(
                     BackendCommand::MouseReport(
@@ -1050,8 +1057,22 @@ fn process_left_button(
                     )),
                 ];
             }
-            // A resolved local-selection drag falls through to the normal
-            // local release handling below (selection finish/copy).
+            // A resolved local-selection drag: the App-level auto-copy
+            // hook already ran this frame (frame start, selection still
+            // present), so now mirror the mouse-reporting app convention —
+            // the highlight disappears on release instead of staying
+            // pinned over content the app may redraw at any moment.
+            return vec![
+                process_left_button_released(
+                    state,
+                    layout,
+                    backend,
+                    bindings_layout,
+                    position,
+                    modifiers,
+                ),
+                InputAction::BackendCall(BackendCommand::ClearSelection),
+            ];
         }
     }
     if pressed {
@@ -1258,8 +1279,16 @@ mod wheel_tests {
             egui::vec2(0.0, 3.0),
             &egui::Modifiers::NONE,
         );
+        // The local selection is dropped FIRST: the app redraws its
+        // content in response to the wheel, and a grid-anchored highlight
+        // would otherwise stay pinned to the old position.
+        assert!(matches!(
+            actions.first(),
+            Some(InputAction::BackendCall(BackendCommand::ClearSelection))
+        ));
+        let reports = &actions[1..];
         assert!(
-            actions.iter().all(|a| matches!(
+            reports.iter().all(|a| matches!(
                 a,
                 InputAction::BackendCall(BackendCommand::MouseReport(
                     MouseButton::ScrollUp | MouseButton::ScrollDown,
@@ -1272,8 +1301,8 @@ mod wheel_tests {
         );
         // xterm wheel semantics: PRESS-ONLY, one report per notch — no
         // synthetic releases (they made TUI frameworks synthesize clicks).
-        assert_eq!(actions.len(), 3);
-        assert!(actions.iter().all(|a| matches!(
+        assert_eq!(reports.len(), 3);
+        assert!(reports.iter().all(|a| matches!(
             a,
             InputAction::BackendCall(BackendCommand::MouseReport(
                 _,
