@@ -257,6 +257,62 @@ fn load_user_theme(dir: &Path, id: &str) -> Result<ThemeDefinition, ThemeError> 
 
 #[cfg(test)]
 mod tests {
+
+    /// WCAG relative-luminance contrast ratio.
+    fn contrast(a: &str, b: &str) -> f64 {
+        let parse = |h: &str| {
+            let h = h.trim_start_matches('#');
+            let v: Vec<f64> = (0..3)
+                .map(|i| u8::from_str_radix(&h[i * 2..i * 2 + 2], 16).unwrap() as f64 / 255.0)
+                .collect();
+            let f = |c: f64| {
+                if c <= 0.03928 {
+                    c / 12.92
+                } else {
+                    ((c + 0.055) / 1.055).powf(2.4)
+                }
+            };
+            0.2126 * f(v[0]) + 0.7152 * f(v[1]) + 0.0722 * f(v[2])
+        };
+        let (la, lb) = (parse(a), parse(b));
+        let (hi, lo) = if la > lb { (la, lb) } else { (lb, la) };
+        (hi + 0.05) / (lo + 0.05)
+    }
+
+    /// Semantic status colors (danger/warning/accent) are used for small
+    /// text on every surface — they must stay readable (WCAG AA ≥ 4.5:1)
+    /// on the lightest app surface of their theme. Regression guard for
+    /// the v0.1.37 palette fixes (gruvbox danger was 2.41:1!).
+    #[test]
+    fn embedded_semantic_colors_meet_aa_on_all_surfaces() {
+        for theme in embedded_themes().unwrap() {
+            let app = &theme.app;
+            for fg in ["danger", "warning", "accent"] {
+                let fg_hex: String = match fg {
+                    "danger" => app.danger.to_string(),
+                    "warning" => app.warning.to_string(),
+                    _ => app.accent.to_string(),
+                };
+                for bg in [
+                    app.panel.to_string(),
+                    app.app_bg.to_string(),
+                    app.sidebar.to_string(),
+                ] {
+                    let r = contrast(&fg_hex, &bg);
+                    assert!(
+                        r >= 4.5,
+                        "{}: {} {} on {} = {:.2} < 4.5",
+                        theme.id,
+                        fg,
+                        fg_hex,
+                        bg,
+                        r
+                    );
+                }
+            }
+        }
+    }
+
     use super::*;
 
     struct TempDir(PathBuf);

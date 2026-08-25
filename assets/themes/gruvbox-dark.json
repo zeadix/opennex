@@ -14,7 +14,7 @@
     "weak_text": "#a89984",
     "accent": "#fabd2f",
     "warning": "#d79921",
-    "danger": "#cc241d",
+    "danger": "#fc6b5f",
     "lock": "#d79921",
     "input_bg": "#1d2021",
     "selection_bg": "#504945",
@@ -27,7 +27,10 @@
     "button_fg": "#ebdbb2",
     "button_hover_bg": "#3c342f",
     "sidebar_border": "#504945",
-    "tab_highlight": "#504945"
+    "tab_highlight": "#504945",
+    "success": "#22c55e",
+    "info": "#3b82f6",
+    "neutral": "#8c959f"
   },
   "terminal": {
     "foreground": "#ebdbb2",

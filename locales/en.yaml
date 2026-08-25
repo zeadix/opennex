@@ -100,6 +100,7 @@ settings:
     preview_section: Preview
     template_section: Palette Templates
     base_color_section: Base Colors
+  default_shell: Default Shell
 shortcut_labels:
   new_terminal: New Terminal
   close_terminal: Close Terminal
@@ -141,6 +142,8 @@ workspace:
   templates: Templates
   templates_empty: (empty)
   name_prefix: 'Workspace '
+  unlock_btn: Unlock
+  lock_btn: Lock
 close_confirm:
   message_prefix: Are you sure you want to close workspace "
   message_suffix: '"?'
@@ -166,6 +169,7 @@ password:
   set_title: Set Password
   change_title: Change Password
   clear_title: Clear Password
+  need_setup: Set a password before locking workspaces
 lock_overlay:
   title: This workspace is locked
   password_label: 'Password:'
@@ -185,9 +189,11 @@ terminal:
   history_count:  history commands
   clear_favorites_title: Clear All Favorite Commands
   clear_favorites_body: Clear all favorite commands? This cannot be undone.
+  history_empty: No commands yet — commands run in the terminal appear here automatically (press Alt to open)
 theme:
   light: Light
   dark: Dark
+  copy_suffix: copy
 about:
   menu_label: About
   title: About OpenNex
@@ -223,6 +229,7 @@ update:
   restart_title: Update Ready
   restart_body: A new version has been downloaded. Restart now?
   restart_confirm: Restart
+  download_failed: Download failed
 theme_editor:
   colors:
     app_bg: App background
@@ -261,6 +268,80 @@ theme_editor:
   terminal_font_size: 'Terminal size: '
   cell_spacing: 'Spacing: '
   terminal_padding: 'Terminal padding: '
+  accent_label: 'Accent:'
+  active_label: 'Active:'
+  app_bg_label: 'Main background:'
+  apply_template: Apply template
+  base_colors: Base Colors
+  bg_label: 'Background:'
+  black: Black
+  blue: Blue
+  border_label: 'Border:'
+  bright: Bright
+  builtin_readonly: Built-in themes are read-only; editing creates a copy
+  cell_spacing_label: 'Cell spacing:'
+  color_selection_term_bg: 'Selection bg:'
+  color_selection_term_text: 'Selection text:'
+  color_tab_highlight: 'Tab highlight:'
+  color_window_shadow: 'Window shadow:'
+  copy: Copy
+  copy_dialog_hint: 'Enter a new theme name:'
+  copy_dialog_title: Duplicate theme
+  current: 'Current theme:'
+  cursor_label: 'Cursor:'
+  cyan: Cyan
+  danger_label: 'Danger:'
+  delete: Delete
+  delete_confirm: Delete this theme?
+  dim: Dim
+  discard: Discard changes
+  discard_and_switch: Discard and switch
+  export: Export
+  fg_label: 'Foreground:'
+  green: Green
+  heading: Themes
+  hover_label: 'Hover:'
+  import: Import
+  input_bg_label: 'Input:'
+  interaction_colors: Interaction Colors
+  keep: Keep
+  link_label: 'Link:'
+  lock_label: 'Lock overlay:'
+  magenta: Magenta
+  new: New
+  new_dialog_hint: 'Enter a new theme name:'
+  new_dialog_title: New theme
+  normal: Normal
+  palette_template_label: 'Palette template:'
+  panel_label: 'Panel:'
+  red: Red
+  rename: Rename
+  rename_dialog_title: Rename theme
+  save_and_switch: Save and switch
+  selection_bg_label: 'Selection bg:'
+  selection_text_label: 'Selection text:'
+  sidebar_label: 'Sidebar:'
+  status_colors: Status Colors
+  switch_confirm: Current theme has unsaved changes
+  terminal_appearance: Terminal Appearance
+  terminal_base_colors: Base Colors
+  terminal_font_label_short: 'Terminal font:'
+  terminal_font_size_label: 'Terminal font size:'
+  terminal_padding_label: 'Terminal padding:'
+  text_colors: Text Colors
+  text_label: 'Normal text:'
+  ui_appearance: UI Appearance
+  ui_font_label_short: 'UI font:'
+  ui_font_size_label: 'UI font size:'
+  unsaved: ● unsaved
+  warning_label: 'Warning:'
+  weak_text_label: 'Muted text:'
+  white: White
+  yellow: Yellow
+shell:
+  vs_dev: VS Developer Prompt
+  default_fmt: Default ({})
+  default_mark: '{} (default)'
 stats:
   copied_toast: Copied to clipboard
   focused: Current Terminal

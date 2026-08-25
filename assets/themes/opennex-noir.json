@@ -31,7 +31,10 @@
     "button_fg": "#f5f5f5",
     "button_hover_bg": "#26262a",
     "sidebar_border": "#26262a",
-    "tab_highlight": "#26262a"
+    "tab_highlight": "#26262a",
+    "success": "#22c55e",
+    "info": "#3b82f6",
+    "neutral": "#8c959f"
   },
   "terminal": {
     "foreground": "#f5f5f5",

@@ -100,6 +100,7 @@ settings:
     preview_section: Vorschau
     template_section: Paletten-Vorlagen
     base_color_section: Grundfarben
+  default_shell: Standard-Shell
 shortcut_labels:
   new_terminal: Neues Terminal
   close_terminal: Terminal schließen
@@ -141,6 +142,8 @@ workspace:
   templates: Vorlagen
   templates_empty: (leer)
   name_prefix: 'Arbeitsbereich '
+  unlock_btn: Entsperren
+  lock_btn: Sperren
 close_confirm:
   message_prefix: Möchten Sie den Arbeitsbereich "
   message_suffix: '" wirklich schließen?'
@@ -166,6 +169,7 @@ password:
   set_title: Passwort festlegen
   change_title: Passwort ändern
   clear_title: Passwort löschen
+  need_setup: Legen Sie ein Passwort fest, bevor Sie Arbeitsbereiche sperren
 lock_overlay:
   title: Dieser Arbeitsbereich ist gesperrt
   password_label: 'Passwort:'
@@ -185,9 +189,11 @@ terminal:
   history_count:  Befehle im Verlauf
   clear_favorites_title: Alle Favoriten löschen
   clear_favorites_body: Alle Favoriten löschen? Dies kann nicht rückgängig gemacht werden.
+  history_empty: Noch keine Befehle — im Terminal ausgeführte Befehle erscheinen hier automatisch (Alt öffnet das Menü)
 theme:
   light: Hell
   dark: Dunkel
+  copy_suffix: Kopie
 about:
   menu_label: Über
   title: Über OpenNex
@@ -223,6 +229,7 @@ update:
   restart_title: Update bereit
   restart_body: Neue Version heruntergeladen. Jetzt neu starten?
   restart_confirm: Neustart
+  download_failed: Download fehlgeschlagen
 theme_editor:
   colors:
     app_bg: App-Hintergrund
@@ -261,6 +268,80 @@ theme_editor:
   terminal_font_size: 'Terminal-Größe: '
   cell_spacing: 'Abstand: '
   terminal_padding: 'Rand: '
+  accent_label: 'Akzent:'
+  active_label: 'Aktiv:'
+  app_bg_label: 'Hintergrund:'
+  apply_template: Vorlage anwenden
+  base_colors: Grundfarben
+  bg_label: 'Hintergrund:'
+  black: Schwarz
+  blue: Blau
+  border_label: 'Rahmen:'
+  bright: Hell
+  builtin_readonly: Integrierte Designs sind schreibgeschützt; Bearbeiten erstellt eine Kopie
+  cell_spacing_label: 'Zellenabstand:'
+  color_selection_term_bg: 'Auswahl-HG:'
+  color_selection_term_text: 'Auswahl-Text:'
+  color_tab_highlight: 'Tab-Hervorhebung:'
+  color_window_shadow: 'Fensterschatten:'
+  copy: Kopieren
+  copy_dialog_hint: 'Neuen Designnamen eingeben:'
+  copy_dialog_title: Design duplizieren
+  current: 'Aktuelles Design:'
+  cursor_label: 'Cursor:'
+  cyan: Cyan
+  danger_label: 'Gefahr:'
+  delete: Löschen
+  delete_confirm: Dieses Design löschen?
+  dim: Dim
+  discard: Änderungen verwerfen
+  discard_and_switch: Verwerfen und wechseln
+  export: Exportieren
+  fg_label: 'Vordergrund:'
+  green: Grün
+  heading: Designs
+  hover_label: 'Hover:'
+  import: Importieren
+  input_bg_label: 'Eingabe:'
+  interaction_colors: Interaktionsfarben
+  keep: Behalten
+  link_label: 'Link:'
+  lock_label: 'Sperr-Overlay:'
+  magenta: Magenta
+  new: Neu
+  new_dialog_hint: 'Neuen Designnamen eingeben:'
+  new_dialog_title: Neues Design
+  normal: Normal
+  palette_template_label: 'Palettenvorlage:'
+  panel_label: 'Panel:'
+  red: Rot
+  rename: Umbenennen
+  rename_dialog_title: Design umbenennen
+  save_and_switch: Speichern und wechseln
+  selection_bg_label: 'Auswahl-HG:'
+  selection_text_label: 'Auswahl-Text:'
+  sidebar_label: 'Seitenleiste:'
+  status_colors: Statusfarben
+  switch_confirm: Das aktuelle Design hat ungespeicherte Änderungen
+  terminal_appearance: Terminal-Erscheinung
+  terminal_base_colors: Grundfarben
+  terminal_font_label_short: 'Terminal-Schrift:'
+  terminal_font_size_label: 'Terminal-Schriftgröße:'
+  terminal_padding_label: 'Terminal-Innenabstand:'
+  text_colors: Textfarben
+  text_label: 'Normaler Text:'
+  ui_appearance: UI-Erscheinung
+  ui_font_label_short: 'UI-Schrift:'
+  ui_font_size_label: 'UI-Schriftgröße:'
+  unsaved: ● ungespeichert
+  warning_label: 'Warnung:'
+  weak_text_label: 'Gedämpfter Text:'
+  white: Weiß
+  yellow: Gelb
+shell:
+  vs_dev: VS-Entwicklereingabeaufforderung
+  default_fmt: Standard ({})
+  default_mark: '{} (Standard)'
 stats:
   copied_toast: In die Zwischenablage kopiert
   focused: Aktuelles Terminal

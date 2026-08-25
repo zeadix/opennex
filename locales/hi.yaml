@@ -100,6 +100,7 @@ settings:
     preview_section: पूर्वावलोकन
     template_section: पैलेट टेम्पलेट
     base_color_section: मूल रंग
+  default_shell: डिफ़ॉल्ट शेल
 shortcut_labels:
   new_terminal: नया टर्मिनल
   close_terminal: टर्मिनल बंद करें
@@ -141,6 +142,8 @@ workspace:
   templates: टेम्पलेट
   templates_empty: (खाली)
   name_prefix: 'कार्यक्षेत्र '
+  unlock_btn: अनलॉक
+  lock_btn: लॉक
 close_confirm:
   message_prefix: क्या आप वाकई कार्यक्षेत्र "
   message_suffix: '" को बंद करना चाहते हैं?'
@@ -166,6 +169,7 @@ password:
   set_title: पासवर्ड सेट करें
   change_title: पासवर्ड बदलें
   clear_title: पासवर्ड साफ़ करें
+  need_setup: वर्कस्पेस लॉक करने से पहले पासवर्ड सेट करें
 lock_overlay:
   title: यह कार्यक्षेत्र लॉक है
   password_label: 'पासवर्ड:'
@@ -185,9 +189,11 @@ terminal:
   history_count:  इतिहास कमांड
   clear_favorites_title: सभी पसंदीदा कमांड हटाएं
   clear_favorites_body: सभी पसंदीदा कमांड हटाएं? यह पूर्ववत नहीं हो सकता।
+  history_empty: अभी कोई कमांड नहीं — टर्मिनल में चलाए गए कमांड यहाँ स्वतः दिखेंगे (Alt से खोलें)
 theme:
   light: हल्का
   dark: गहरा
+  copy_suffix: प्रतिलिपि
 about:
   menu_label: के बारे में
   title: OpenNex के बारे में
@@ -223,6 +229,7 @@ update:
   restart_title: अपडेट तैयार
   restart_body: नया संस्करण डाउनलोड हो गया। अभी पुनः आरंभ करें?
   restart_confirm: पुनः आरंभ
+  download_failed: डाउनलोड विफल
 theme_editor:
   colors:
     app_bg: ऐप पृष्ठभूमि
@@ -261,6 +268,80 @@ theme_editor:
   terminal_font_size: 'टर्मिनल आकार: '
   cell_spacing: 'अंतराल: '
   terminal_padding: 'पैडिंग: '
+  accent_label: 'एक्सेंट:'
+  active_label: 'सक्रिय:'
+  app_bg_label: 'मुख्य पृष्ठभूमि:'
+  apply_template: टेम्पलेट लागू करें
+  base_colors: मूल रंग
+  bg_label: 'बैकग्राउंड:'
+  black: काला
+  blue: नीला
+  border_label: 'बॉर्डर:'
+  bright: चमकीला
+  builtin_readonly: इन-बिल्ट थीम केवल-पढ़ने के लिए हैं; संपादन से प्रतिलिपि बनती है
+  cell_spacing_label: 'सेल अंतराल:'
+  color_selection_term_bg: 'चयन पृष्ठभूमि:'
+  color_selection_term_text: 'चयन टेक्स्ट:'
+  color_tab_highlight: 'टैब हाइलाइट:'
+  color_window_shadow: 'विंडो छाया:'
+  copy: प्रतिलिपि
+  copy_dialog_hint: 'नई थीम का नाम दर्ज करें:'
+  copy_dialog_title: थीम प्रतिलिपि बनाएँ
+  current: 'वर्तमान थीम:'
+  cursor_label: 'कर्सर:'
+  cyan: सियान
+  danger_label: 'खतरा:'
+  delete: हटाएँ
+  delete_confirm: यह थीम हटाएँ?
+  dim: मद्धम
+  discard: बदलाव छोड़ें
+  discard_and_switch: छोड़ें और स्विच करें
+  export: निर्यात
+  fg_label: 'फोरग्राउंड:'
+  green: हरा
+  heading: थीम
+  hover_label: 'होवर:'
+  import: आयात
+  input_bg_label: 'इनपुट:'
+  interaction_colors: इंटरैक्शन रंग
+  keep: रखें
+  link_label: 'लिंक:'
+  lock_label: 'लॉक ओवरले:'
+  magenta: मजेंटा
+  new: नया
+  new_dialog_hint: 'नई थीम का नाम दर्ज करें:'
+  new_dialog_title: नई थीम
+  normal: सामान्य
+  palette_template_label: 'पैलेट टेम्पलेट:'
+  panel_label: 'पैनल:'
+  red: लाल
+  rename: नाम बदलें
+  rename_dialog_title: थीम नाम बदलें
+  save_and_switch: सहेजें और स्विच करें
+  selection_bg_label: 'चयन पृष्ठभूमि:'
+  selection_text_label: 'चयन टेक्स्ट:'
+  sidebar_label: 'साइडबार:'
+  status_colors: स्थिति रंग
+  switch_confirm: वर्तमान थीम में असहेजित बदलाव हैं
+  terminal_appearance: टर्मिनल रूप
+  terminal_base_colors: मूल रंग
+  terminal_font_label_short: 'टर्मिनल फ़ॉन्ट:'
+  terminal_font_size_label: 'टर्मिनल फ़ॉन्ट आकार:'
+  terminal_padding_label: 'टर्मिनल पैडिंग:'
+  text_colors: टेक्स्ट रंग
+  text_label: 'सामान्य टेक्स्ट:'
+  ui_appearance: UI रूप
+  ui_font_label_short: 'UI फ़ॉन्ट:'
+  ui_font_size_label: 'UI फ़ॉन्ट आकार:'
+  unsaved: ● असहेजित
+  warning_label: 'चेतावनी:'
+  weak_text_label: 'हल्का टेक्स्ट:'
+  white: सफेद
+  yellow: पीला
+shell:
+  vs_dev: VS डेवलपर प्रॉम्प्ट
+  default_fmt: डिफ़ॉल्ट ({})
+  default_mark: '{} (डिफ़ॉल्ट)'
 stats:
   copied_toast: क्लिपबोर्ड पर कॉपी हो गया
   focused: वर्तमान टर्मिनल

@@ -100,6 +100,7 @@ settings:
     preview_section: 预览
     template_section: 配色模版
     base_color_section: 基础颜色
+  default_shell: 默认 Shell
 shortcut_labels:
   new_terminal: 新建终端
   close_terminal: 关闭终端
@@ -141,6 +142,8 @@ workspace:
   templates: 模板
   templates_empty: (空)
   name_prefix: '工作区 '
+  unlock_btn: 解锁
+  lock_btn: 锁定
 close_confirm:
   message_prefix: 确定要关闭工作区「
   message_suffix: 」吗？
@@ -166,6 +169,7 @@ password:
   set_title: 设置密码
   change_title: 修改密码
   clear_title: 清除密码
+  need_setup: 请先设置密码后再锁定工作区
 lock_overlay:
   title: 此工作区已锁定
   password_label: '密码:'
@@ -185,9 +189,11 @@ terminal:
   history_count: 条历史指令
   clear_favorites_title: 清除全部收藏指令
   clear_favorites_body: 确认清除全部收藏指令？此操作不可恢复。
+  history_empty: 暂无指令记录 — 在终端中执行的命令会自动出现在这里（Alt 快速呼出）
 theme:
   light: 浅色
   dark: 深色
+  copy_suffix: 副本
 about:
   menu_label: 关于
   title: 关于 OpenNex
@@ -222,6 +228,7 @@ update:
   restart_title: 更新已准备就绪
   restart_body: 新版本已下载，是否立即重启应用？
   restart_confirm: 重启
+  download_failed: 下载失败
 theme_editor:
   colors:
     app_bg: 主背景
@@ -260,6 +267,80 @@ theme_editor:
   terminal_font_size: '终端字号: '
   cell_spacing: '间距: '
   terminal_padding: '终端内边距: '
+  accent_label: '强调:'
+  active_label: '激活:'
+  app_bg_label: '主背景:'
+  apply_template: 应用模板
+  base_colors: 基础颜色
+  bg_label: '背景色:'
+  black: 黑
+  blue: 蓝
+  border_label: '边框:'
+  bright: 明亮
+  builtin_readonly: 内置主题只读，编辑将创建副本
+  cell_spacing_label: '单元格间距:'
+  color_selection_term_bg: '选中背景:'
+  color_selection_term_text: '选中文字:'
+  color_tab_highlight: '标签高亮:'
+  color_window_shadow: '窗口阴影:'
+  copy: 复制
+  copy_dialog_hint: '输入新主题名称:'
+  copy_dialog_title: 创建主题副本
+  current: '当前主题:'
+  cursor_label: '光标:'
+  cyan: 青
+  danger_label: '危险:'
+  delete: 删除
+  delete_confirm: 确认删除此主题？
+  dim: 暗淡
+  discard: 放弃修改
+  discard_and_switch: 放弃并切换
+  export: 导出
+  fg_label: '前景色:'
+  green: 绿
+  heading: 主题
+  hover_label: '悬停:'
+  import: 导入
+  input_bg_label: '输入框:'
+  interaction_colors: 交互颜色
+  keep: 保留
+  link_label: '链接:'
+  lock_label: '锁定遮罩:'
+  magenta: 紫
+  new: 新建
+  new_dialog_hint: '输入新主题名称:'
+  new_dialog_title: 新建主题
+  normal: 普通
+  palette_template_label: '配色模板:'
+  panel_label: '面板:'
+  red: 红
+  rename: 重命名
+  rename_dialog_title: 重命名主题
+  save_and_switch: 保存并切换
+  selection_bg_label: '选中背景:'
+  selection_text_label: '选中文字:'
+  sidebar_label: '侧栏:'
+  status_colors: 状态颜色
+  switch_confirm: 当前主题有未保存的修改
+  terminal_appearance: 终端外观
+  terminal_base_colors: 基础颜色
+  terminal_font_label_short: '终端字体:'
+  terminal_font_size_label: '终端字号:'
+  terminal_padding_label: '终端内边距:'
+  text_colors: 文字颜色
+  text_label: '普通文字:'
+  ui_appearance: UI 外观
+  ui_font_label_short: 'UI 字体:'
+  ui_font_size_label: 'UI 字号:'
+  unsaved: ● 未保存
+  warning_label: '警告:'
+  weak_text_label: '弱化文字:'
+  white: 白
+  yellow: 黄
+shell:
+  vs_dev: VS 开发人员命令提示符
+  default_fmt: 默认 ({})
+  default_mark: '{}（默认）'
 stats:
   copied_toast: 已复制到剪切板
   focused: 当前终端

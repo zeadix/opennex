@@ -100,6 +100,7 @@ settings:
     preview_section: プレビュー
     template_section: パレットテンプレート
     base_color_section: 基本色
+  default_shell: デフォルト Shell
 shortcut_labels:
   new_terminal: 新規ターミナル
   close_terminal: ターミナルを閉じる
@@ -141,6 +142,8 @@ workspace:
   templates: テンプレート
   templates_empty: (空)
   name_prefix: 'ワークスペース '
+  unlock_btn: ロック解除
+  lock_btn: ロック
 close_confirm:
   message_prefix: ワークスペース「
   message_suffix: 」を閉じてもよろしいですか？
@@ -166,6 +169,7 @@ password:
   set_title: パスワードを設定
   change_title: パスワードを変更
   clear_title: パスワードを消去
+  need_setup: ワークスペースをロックする前にパスワードを設定してください
 lock_overlay:
   title: このワークスペースはロックされています
   password_label: 'パスワード:'
@@ -185,9 +189,11 @@ terminal:
   history_count: 件の履歴コマンド
   clear_favorites_title: お気に入りコマンドを全消去
   clear_favorites_body: お気に入りコマンドをすべて消去します？元に戻せません。
+  history_empty: コマンド履歴なし — ターミナルで実行したコマンドが自動的にここに表示されます（Alt で開く）
 theme:
   light: ライト
   dark: ダーク
+  copy_suffix: コピー
 about:
   menu_label: について
   title: OpenNex について
@@ -222,6 +228,7 @@ update:
   restart_title: アップデート準備完了
   restart_body: 新バージョンをダウンロードしました。再起動しますか？
   restart_confirm: 再起動
+  download_failed: ダウンロード失敗
 theme_editor:
   colors:
     app_bg: アプリ背景
@@ -260,6 +267,80 @@ theme_editor:
   terminal_font_size: 'ターミナルサイズ: '
   cell_spacing: '間隔: '
   terminal_padding: '余白: '
+  accent_label: 'アクセント:'
+  active_label: 'アクティブ:'
+  app_bg_label: 'メイン背景:'
+  apply_template: テンプレート適用
+  base_colors: 基本色
+  bg_label: '背景色:'
+  black: 黒
+  blue: 青
+  border_label: '枠線:'
+  bright: 明るい
+  builtin_readonly: 内蔵テーマは読み取り専用。編集するとコピーが作成されます
+  cell_spacing_label: 'セル間隔:'
+  color_selection_term_bg: '選択背景:'
+  color_selection_term_text: '選択テキスト:'
+  color_tab_highlight: 'タブハイライト:'
+  color_window_shadow: 'ウィンドウ影:'
+  copy: コピー
+  copy_dialog_hint: '新しいテーマ名を入力:'
+  copy_dialog_title: テーマのコピーを作成
+  current: '現在のテーマ:'
+  cursor_label: 'カーソル:'
+  cyan: シアン
+  danger_label: '危険:'
+  delete: 削除
+  delete_confirm: このテーマを削除しますか？
+  dim: 暗い
+  discard: 変更を破棄
+  discard_and_switch: 破棄して切替
+  export: エクスポート
+  fg_label: '前景色:'
+  green: 緑
+  heading: テーマ
+  hover_label: 'ホバー:'
+  import: インポート
+  input_bg_label: '入力欄:'
+  interaction_colors: 操作色
+  keep: 保持
+  link_label: 'リンク:'
+  lock_label: 'ロックオーバーレイ:'
+  magenta: マゼンタ
+  new: 新規作成
+  new_dialog_hint: '新しいテーマ名を入力:'
+  new_dialog_title: 新規テーマ
+  normal: 通常
+  palette_template_label: 'パレットテンプレート:'
+  panel_label: 'パネル:'
+  red: 赤
+  rename: 名前変更
+  rename_dialog_title: テーマ名を変更
+  save_and_switch: 保存して切替
+  selection_bg_label: '選択背景:'
+  selection_text_label: '選択テキスト:'
+  sidebar_label: 'サイドバー:'
+  status_colors: 状態色
+  switch_confirm: 現在のテーマに未保存の変更があります
+  terminal_appearance: ターミナル外観
+  terminal_base_colors: 基本色
+  terminal_font_label_short: 'ターミナルフォント:'
+  terminal_font_size_label: 'ターミナルフォントサイズ:'
+  terminal_padding_label: 'ターミナル余白:'
+  text_colors: 文字色
+  text_label: '通常テキスト:'
+  ui_appearance: UI 外観
+  ui_font_label_short: 'UI フォント:'
+  ui_font_size_label: 'UI フォントサイズ:'
+  unsaved: ● 未保存
+  warning_label: '警告:'
+  weak_text_label: '淡色テキスト:'
+  white: 白
+  yellow: 黄
+shell:
+  vs_dev: VS 開発者プロンプト
+  default_fmt: デフォルト ({})
+  default_mark: '{}（デフォルト）'
 stats:
   copied_toast: クリップボードにコピーしました
   focused: 現在のターミナル

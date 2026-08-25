@@ -27,7 +27,10 @@
     "button_fg": "#c0caf5",
     "button_hover_bg": "#292e42",
     "sidebar_border": "#3b4261",
-    "tab_highlight": "#24283b"
+    "tab_highlight": "#24283b",
+    "success": "#22c55e",
+    "info": "#3b82f6",
+    "neutral": "#8c959f"
   },
   "terminal": {
     "foreground": "#c0caf5",

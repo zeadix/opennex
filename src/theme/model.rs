@@ -148,6 +148,14 @@ pub struct AppTheme {
     pub accent: ThemeColor,
     pub warning: ThemeColor,
     pub danger: ThemeColor,
+    /// Semantic status colors for transient UI (toasts, update states).
+    /// Optional in JSON: apply-time fallback derives readable shades.
+    #[serde(default = "default_success")]
+    pub success: ThemeColor,
+    #[serde(default = "default_info")]
+    pub info: ThemeColor,
+    #[serde(default = "default_neutral")]
+    pub neutral: ThemeColor,
     pub lock: ThemeColor,
     pub input_bg: ThemeColor,
     pub selection_bg: ThemeColor,
@@ -191,6 +199,18 @@ fn default_ui_font_families() -> Vec<String> {
 
 fn default_ui_font_size() -> f32 {
     14.0
+}
+
+fn default_success() -> ThemeColor {
+    ThemeColor::from_rgb_opaque(0x22, 0xc5, 0x5e)
+}
+
+fn default_info() -> ThemeColor {
+    ThemeColor::from_rgb_opaque(0x3b, 0x82, 0xf6)
+}
+
+fn default_neutral() -> ThemeColor {
+    ThemeColor::from_rgb_opaque(0x6b, 0x72, 0x80)
 }
 
 fn default_menu_bg() -> ThemeColor {
@@ -388,6 +408,9 @@ mod tests {
                     accent: ThemeColor::from_rgb_opaque(0x2c, 0xbf, 0xae),
                     warning: ThemeColor::from_rgb_opaque(0xd9, 0xa4, 0x41),
                     danger: ThemeColor::from_rgb_opaque(0xe0, 0x5a, 0x65),
+                    success: ThemeColor::from_rgb_opaque(0x22, 0xc5, 0x5e),
+                    info: ThemeColor::from_rgb_opaque(0x3b, 0x82, 0xf6),
+                    neutral: ThemeColor::from_rgb_opaque(0x6b, 0x72, 0x80),
                     lock: ThemeColor::from_rgb_opaque(0xd9, 0xa4, 0x41),
                     input_bg: ThemeColor::from_rgb_opaque(0x1a, 0x1d, 0x21),
                     selection_bg: ThemeColor::from_rgb_opaque(0x33, 0x38, 0x40),

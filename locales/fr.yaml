@@ -100,6 +100,7 @@ settings:
     preview_section: Aperçu
     template_section: Modèles de palette
     base_color_section: Couleurs de base
+  default_shell: Shell par défaut
 shortcut_labels:
   new_terminal: Nouveau terminal
   close_terminal: Fermer terminal
@@ -141,6 +142,8 @@ workspace:
   templates: Modèles
   templates_empty: (vide)
   name_prefix: 'Espace '
+  unlock_btn: Déverrouiller
+  lock_btn: Verrouiller
 close_confirm:
   message_prefix: Voulez-vous vraiment fermer l'espace "
   message_suffix: '" ?'
@@ -166,6 +169,7 @@ password:
   set_title: Définir mot de passe
   change_title: Changer mot de passe
   clear_title: Effacer mot de passe
+  need_setup: Définissez un mot de passe avant de verrouiller l'espace
 lock_overlay:
   title: Cet espace est verrouillé
   password_label: 'Mot de passe :'
@@ -185,9 +189,11 @@ terminal:
   history_count:  commandes dans l'historique
   clear_favorites_title: Effacer toutes les commandes favorites
   clear_favorites_body: Effacer toutes les commandes favorites ? Cette action est irréversible.
+  history_empty: Pas encore de commandes — les commandes exécutées apparaissent ici automatiquement (Alt pour ouvrir)
 theme:
   light: Clair
   dark: Sombre
+  copy_suffix: copie
 about:
   menu_label: À propos
   title: À propos d'OpenNex
@@ -223,6 +229,7 @@ update:
   restart_title: Mise à jour prête
   restart_body: Nouvelle version téléchargée. Redémarrer maintenant ?
   restart_confirm: Redémarrer
+  download_failed: Échec du téléchargement
 theme_editor:
   colors:
     app_bg: Fond application
@@ -261,6 +268,80 @@ theme_editor:
   terminal_font_size: 'Taille terminal : '
   cell_spacing: 'Espacement : '
   terminal_padding: 'Marge : '
+  accent_label: 'Accent :'
+  active_label: 'Actif :'
+  app_bg_label: 'Arrière-plan :'
+  apply_template: Appliquer le modèle
+  base_colors: Couleurs de base
+  bg_label: 'Arrière-plan :'
+  black: Noir
+  blue: Bleu
+  border_label: 'Bordure :'
+  bright: Vif
+  builtin_readonly: Les thèmes intégrés sont en lecture seule ; modifier crée une copie
+  cell_spacing_label: 'Espacement cellules :'
+  color_selection_term_bg: 'Sélection (fond) :'
+  color_selection_term_text: 'Sélection (texte) :'
+  color_tab_highlight: 'Surbrillance onglet :'
+  color_window_shadow: 'Ombre fenêtre :'
+  copy: Copier
+  copy_dialog_hint: 'Nom du nouveau thème :'
+  copy_dialog_title: Dupliquer le thème
+  current: 'Thème actuel :'
+  cursor_label: 'Curseur :'
+  cyan: Cyan
+  danger_label: 'Danger :'
+  delete: Supprimer
+  delete_confirm: Supprimer ce thème ?
+  dim: Sombre
+  discard: Ignorer les modifications
+  discard_and_switch: Ignorer et changer
+  export: Exporter
+  fg_label: 'Premier plan :'
+  green: Vert
+  heading: Thèmes
+  hover_label: 'Survol :'
+  import: Importer
+  input_bg_label: 'Saisie :'
+  interaction_colors: Couleurs d'interaction
+  keep: Conserver
+  link_label: 'Lien :'
+  lock_label: 'Voile de verrouillage :'
+  magenta: Magenta
+  new: Nouveau
+  new_dialog_hint: 'Nom du nouveau thème :'
+  new_dialog_title: Nouveau thème
+  normal: Normal
+  palette_template_label: 'Modèle de palette :'
+  panel_label: 'Panneau :'
+  red: Rouge
+  rename: Renommer
+  rename_dialog_title: Renommer le thème
+  save_and_switch: Enregistrer et changer
+  selection_bg_label: 'Sélection (fond) :'
+  selection_text_label: 'Sélection (texte) :'
+  sidebar_label: 'Barre latérale :'
+  status_colors: Couleurs d'état
+  switch_confirm: Le thème actuel a des modifications non enregistrées
+  terminal_appearance: Apparence du terminal
+  terminal_base_colors: Couleurs de base
+  terminal_font_label_short: 'Police terminal :'
+  terminal_font_size_label: 'Taille police terminal :'
+  terminal_padding_label: 'Marge interne terminal :'
+  text_colors: Couleurs du texte
+  text_label: 'Texte normal :'
+  ui_appearance: Apparence UI
+  ui_font_label_short: 'Police UI :'
+  ui_font_size_label: 'Taille police UI :'
+  unsaved: ● non enregistré
+  warning_label: 'Avertissement :'
+  weak_text_label: 'Texte atténué :'
+  white: Blanc
+  yellow: Jaune
+shell:
+  vs_dev: Invite VS Developer
+  default_fmt: Défaut ({})
+  default_mark: '{} (défaut)'
 stats:
   copied_toast: Copié dans le presse-papiers
   focused: Terminal actuel

@@ -100,6 +100,7 @@ settings:
     preview_section: Anteprima
     template_section: Modelli di palette
     base_color_section: Colori base
+  default_shell: Shell predefinita
 shortcut_labels:
   new_terminal: Nuovo terminale
   close_terminal: Chiudi terminale
@@ -141,6 +142,8 @@ workspace:
   templates: Modelli
   templates_empty: (vuoto)
   name_prefix: 'Area '
+  unlock_btn: Sblocca
+  lock_btn: Blocca
 close_confirm:
   message_prefix: Sei sicuro di voler chiudere l'area "
   message_suffix: '"?'
@@ -166,6 +169,7 @@ password:
   set_title: Imposta password
   change_title: Cambia password
   clear_title: Cancella password
+  need_setup: Imposta una password prima di bloccare gli spazi di lavoro
 lock_overlay:
   title: Questa area è bloccata
   password_label: 'Password:'
@@ -185,9 +189,11 @@ terminal:
   history_count:  comandi cronologici
   clear_favorites_title: Cancella tutti i preferiti
   clear_favorites_body: Cancellare tutti i comandi preferiti? Operazione irreversibile.
+  history_empty: Nessun comando — i comandi eseguiti nel terminale appaiono qui automaticamente (Alt per aprire)
 theme:
   light: Chiaro
   dark: Scuro
+  copy_suffix: copia
 about:
   menu_label: Informazioni
   title: Informazioni su OpenNex
@@ -223,6 +229,7 @@ update:
   restart_title: Aggiornamento pronto
   restart_body: Nuova versione scaricata. Riavviare ora?
   restart_confirm: Riavvia
+  download_failed: Download non riuscito
 theme_editor:
   colors:
     app_bg: Sfondo app
@@ -261,6 +268,80 @@ theme_editor:
   terminal_font_size: 'Dimensione terminale: '
   cell_spacing: 'Spaziatura: '
   terminal_padding: 'Margine: '
+  accent_label: 'Accento:'
+  active_label: 'Attivo:'
+  app_bg_label: 'Sfondo principale:'
+  apply_template: Applica modello
+  base_colors: Colori base
+  bg_label: 'Sfondo:'
+  black: Nero
+  blue: Blu
+  border_label: 'Bordo:'
+  bright: Chiaro
+  builtin_readonly: I temi integrati sono di sola lettura; la modifica crea una copia
+  cell_spacing_label: 'Spaziatura celle:'
+  color_selection_term_bg: 'Selezione (sfondo):'
+  color_selection_term_text: 'Selezione (testo):'
+  color_tab_highlight: 'Evidenzia scheda:'
+  color_window_shadow: 'Ombra finestra:'
+  copy: Copia
+  copy_dialog_hint: 'Nome del nuovo tema:'
+  copy_dialog_title: Duplica tema
+  current: 'Tema attuale:'
+  cursor_label: 'Cursore:'
+  cyan: Ciano
+  danger_label: 'Pericolo:'
+  delete: Elimina
+  delete_confirm: Eliminare questo tema?
+  dim: Scuro
+  discard: Scarta modifiche
+  discard_and_switch: Scarta e cambia
+  export: Esporta
+  fg_label: 'Primo piano:'
+  green: Verde
+  heading: Temi
+  hover_label: 'Hover:'
+  import: Importa
+  input_bg_label: 'Input:'
+  interaction_colors: Colori interazione
+  keep: Mantieni
+  link_label: 'Link:'
+  lock_label: 'Overlay blocco:'
+  magenta: Magenta
+  new: Nuovo
+  new_dialog_hint: 'Nome del nuovo tema:'
+  new_dialog_title: Nuovo tema
+  normal: Normale
+  palette_template_label: 'Modello palette:'
+  panel_label: 'Pannello:'
+  red: Rosso
+  rename: Rinomina
+  rename_dialog_title: Rinomina tema
+  save_and_switch: Salva e cambia
+  selection_bg_label: 'Selezione (sfondo):'
+  selection_text_label: 'Selezione (testo):'
+  sidebar_label: 'Barra laterale:'
+  status_colors: Colori stato
+  switch_confirm: Il tema attuale ha modifiche non salvate
+  terminal_appearance: Aspetto terminale
+  terminal_base_colors: Colori base
+  terminal_font_label_short: 'Font terminale:'
+  terminal_font_size_label: 'Dimensione font terminale:'
+  terminal_padding_label: 'Padding terminale:'
+  text_colors: Colori testo
+  text_label: 'Testo normale:'
+  ui_appearance: Aspetto UI
+  ui_font_label_short: 'Font UI:'
+  ui_font_size_label: 'Dimensione font UI:'
+  unsaved: ● non salvato
+  warning_label: 'Avviso:'
+  weak_text_label: 'Testo attenuato:'
+  white: Bianco
+  yellow: Giallo
+shell:
+  vs_dev: Prompt sviluppatore VS
+  default_fmt: Predefinito ({})
+  default_mark: '{} (predefinito)'
 stats:
   copied_toast: Copiato negli appunti
   focused: Terminale corrente

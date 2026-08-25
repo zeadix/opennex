@@ -100,6 +100,7 @@ settings:
     preview_section: 預覽
     template_section: 配色範本
     base_color_section: 基礎顏色
+  default_shell: 預設 Shell
 shortcut_labels:
   new_terminal: 新增終端機
   close_terminal: 關閉終端機
@@ -141,6 +142,8 @@ workspace:
   templates: 範本
   templates_empty: (空)
   name_prefix: '工作區 '
+  unlock_btn: 解鎖
+  lock_btn: 鎖定
 close_confirm:
   message_prefix: 確定要關閉工作區「
   message_suffix: 」嗎？
@@ -166,6 +169,7 @@ password:
   set_title: 設定密碼
   change_title: 修改密碼
   clear_title: 清除密碼
+  need_setup: 請先設定密碼後再鎖定工作區
 lock_overlay:
   title: 此工作區已鎖定
   password_label: '密碼:'
@@ -185,9 +189,11 @@ terminal:
   history_count: 條歷史指令
   clear_favorites_title: 清除全部收藏指令
   clear_favorites_body: 確認清除全部收藏指令？此操作不可復原。
+  history_empty: 暫無指令記錄 — 在終端機中執行的命令會自動出現在這裡（Alt 快速呼出）
 theme:
   light: 淺色
   dark: 深色
+  copy_suffix: 副本
 about:
   menu_label: 關於
   title: 關於 OpenNex
@@ -222,6 +228,7 @@ update:
   restart_title: 更新已準備就緒
   restart_body: 新版本已下載，是否立即重啟應用？
   restart_confirm: 重啟
+  download_failed: 下載失敗
 theme_editor:
   colors:
     app_bg: 主背景
@@ -260,6 +267,80 @@ theme_editor:
   terminal_font_size: '終端字號: '
   cell_spacing: '間距: '
   terminal_padding: '終端內邊距: '
+  accent_label: '強調:'
+  active_label: '啟用:'
+  app_bg_label: '主背景:'
+  apply_template: 套用範本
+  base_colors: 基礎顏色
+  bg_label: '背景色:'
+  black: 黑
+  blue: 藍
+  border_label: '邊框:'
+  bright: 明亮
+  builtin_readonly: 內建主題唯讀，編輯將建立副本
+  cell_spacing_label: '儲存格間距:'
+  color_selection_term_bg: '選取背景:'
+  color_selection_term_text: '選取文字:'
+  color_tab_highlight: '標籤高亮:'
+  color_window_shadow: '視窗陰影:'
+  copy: 複製
+  copy_dialog_hint: '輸入新主題名稱:'
+  copy_dialog_title: 建立主題副本
+  current: '目前主題:'
+  cursor_label: '游標:'
+  cyan: 青
+  danger_label: '危險:'
+  delete: 刪除
+  delete_confirm: 確認刪除此主題？
+  dim: 暗淡
+  discard: 放棄修改
+  discard_and_switch: 放棄並切換
+  export: 匯出
+  fg_label: '前景色:'
+  green: 綠
+  heading: 主題
+  hover_label: '懸停:'
+  import: 匯入
+  input_bg_label: '輸入框:'
+  interaction_colors: 互動顏色
+  keep: 保留
+  link_label: '連結:'
+  lock_label: '鎖定遮罩:'
+  magenta: 紫
+  new: 新增
+  new_dialog_hint: '輸入新主題名稱:'
+  new_dialog_title: 新增主題
+  normal: 普通
+  palette_template_label: '配色範本:'
+  panel_label: '面板:'
+  red: 紅
+  rename: 重新命名
+  rename_dialog_title: 重新命名主題
+  save_and_switch: 儲存並切換
+  selection_bg_label: '選取背景:'
+  selection_text_label: '選取文字:'
+  sidebar_label: '側欄:'
+  status_colors: 狀態顏色
+  switch_confirm: 目前主題有未儲存的修改
+  terminal_appearance: 終端機外觀
+  terminal_base_colors: 基礎顏色
+  terminal_font_label_short: '終端機字體:'
+  terminal_font_size_label: '終端機字號:'
+  terminal_padding_label: '終端機內邊距:'
+  text_colors: 文字顏色
+  text_label: '普通文字:'
+  ui_appearance: UI 外觀
+  ui_font_label_short: 'UI 字體:'
+  ui_font_size_label: 'UI 字號:'
+  unsaved: ● 未儲存
+  warning_label: '警告:'
+  weak_text_label: '弱化文字:'
+  white: 白
+  yellow: 黃
+shell:
+  vs_dev: VS 開發人員命令提示字元
+  default_fmt: 預設 ({})
+  default_mark: '{}（預設）'
 stats:
   copied_toast: 已複製到剪貼板
   focused: 當前終端

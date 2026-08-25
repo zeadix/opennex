@@ -1,5 +1,4 @@
 use crate::theme::model::{AnsiColors, ThemeColor, ThemeDefinition};
-use egui::Color32;
 
 /// Actions returned by the theme editor UI, handled by `app.rs`.
 #[derive(Debug, Clone)]
@@ -82,6 +81,70 @@ pub struct ColorLabels {
 
 /// Localized labels for the theme editor sections.
 #[derive(Clone, Default)]
+/// Unified three-state (hover/pressed/focus) styling for hand-drawn
+/// buttons. Every ad-hoc button in the app routes through these so the
+/// feedback layer is consistent (the v0.1.37 UI audit found three
+/// divergent hover implementations and zero pressed/focus states).
+pub struct ButtonChrome<'a> {
+    pub fg: egui::Color32,
+    pub hover_bg: egui::Color32,
+    pub active_bg: egui::Color32,
+    pub focus_ring: egui::Color32,
+    pub corner: f32,
+    pub _marker: std::marker::PhantomData<&'a ()>,
+}
+
+impl<'a> ButtonChrome<'a> {
+    pub fn from_theme(app: &crate::theme::model::AppTheme, text: egui::Color32) -> Self {
+        let hover = app.hover.to_egui();
+        // Pressed: hover darkened/lightened toward its complement — a
+        // simple alpha blend over the hover color reads clearly on both
+        // light and dark themes.
+        let active = egui::Color32::from_rgba_unmultiplied(
+            hover.r(),
+            hover.g(),
+            hover.b(),
+            (hover.a() as f32 * 0.6) as u8,
+        );
+        Self {
+            fg: text,
+            hover_bg: hover,
+            active_bg: active,
+            focus_ring: app.accent.to_egui(),
+            corner: 4.0,
+            _marker: Default::default(),
+        }
+    }
+
+    /// Paint the chrome layers for a response; returns the (possibly
+    /// pressed-adjusted) foreground color for the label.
+    pub fn paint(&self, ui: &egui::Ui, rect: egui::Rect, resp: &egui::Response) -> egui::Color32 {
+        if resp.contains_pointer() {
+            ui.painter().rect_filled(rect, self.corner, self.hover_bg);
+        }
+        let fg = if resp.is_pointer_button_down_on() || resp.clicked() {
+            // pressed: slightly dim the glyph
+            egui::Color32::from_rgba_unmultiplied(
+                self.fg.r(),
+                self.fg.g(),
+                self.fg.b(),
+                (self.fg.a() as f32 * 0.75) as u8,
+            )
+        } else {
+            self.fg
+        };
+        if resp.has_focus() {
+            ui.painter().rect_stroke(
+                rect,
+                self.corner,
+                egui::Stroke::new(1.5_f32, self.focus_ring),
+                egui::StrokeKind::Inside,
+            );
+        }
+        fg
+    }
+}
+
 pub struct ThemeEditorLabels {
     pub system_ui: String,
     pub terminal: String,
@@ -92,6 +155,72 @@ pub struct ThemeEditorLabels {
     pub cell_spacing: String,
     pub terminal_padding: String,
     pub colors: ColorLabels,
+    pub heading: String,
+    pub current: String,
+    pub unsaved: String,
+    pub new_theme: String,
+    pub copy_theme: String,
+    pub rename_theme: String,
+    pub delete_theme: String,
+    pub import_theme: String,
+    pub export_theme: String,
+    pub ui_appearance: String,
+    pub base_colors: String,
+    pub app_bg_label: String,
+    pub sidebar_label: String,
+    pub panel_label: String,
+    pub input_bg_label: String,
+    pub text_colors: String,
+    pub text_label: String,
+    pub weak_text_label: String,
+    pub status_colors: String,
+    pub accent_label: String,
+    pub warning_label: String,
+    pub danger_label: String,
+    pub interaction_colors: String,
+    pub hover_label: String,
+    pub active_label: String,
+    pub selection_bg_label: String,
+    pub selection_text_label: String,
+    pub border_label: String,
+    pub lock_label: String,
+    pub terminal_appearance: String,
+    pub palette_template_label: String,
+    pub apply_template: String,
+    pub terminal_base_colors: String,
+    pub fg_label: String,
+    pub bg_label: String,
+    pub cursor_label: String,
+    pub link_label: String,
+    pub normal: String,
+    pub bright: String,
+    pub dim: String,
+    pub black: String,
+    pub red: String,
+    pub green: String,
+    pub yellow: String,
+    pub blue: String,
+    pub magenta: String,
+    pub cyan: String,
+    pub white: String,
+    pub copy_dialog_title: String,
+    pub copy_dialog_hint: String,
+    pub new_dialog_title: String,
+    pub new_dialog_hint: String,
+    pub rename_dialog_title: String,
+    pub delete_confirm: String,
+    pub switch_confirm: String,
+    pub save_and_switch: String,
+    pub discard_and_switch: String,
+    pub builtin_readonly: String,
+    pub keep: String,
+    pub discard: String,
+    pub ui_font_label_short: String,
+    pub ui_font_size_label: String,
+    pub terminal_font_label_short: String,
+    pub terminal_font_size_label: String,
+    pub cell_spacing_label: String,
+    pub terminal_padding_label: String,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -123,182 +252,9 @@ pub fn show_theme_editor_body(
             );
         }
         ThemeEditorSubtab::AnsiPalette => {
-            show_ansi_palette_editor(ui, draft, is_builtin, &mut actions);
+            show_ansi_palette_editor(ui, draft, is_builtin, &mut actions, labels);
         }
     }
-    actions
-}
-
-/// Render the full theme management section.
-#[allow(dead_code)]
-#[allow(clippy::too_many_arguments)]
-pub fn show_theme_section(
-    ui: &mut egui::Ui,
-    draft: &mut ThemeDefinition,
-    available: &[ThemeDefinition],
-    available_fonts: &[String],
-    is_builtin: bool,
-    has_unsaved: bool,
-    subtab: ThemeEditorSubtab,
-    dialog: &mut ThemeDialogState,
-) -> Vec<ThemeAction> {
-    let mut actions = Vec::new();
-    let labels = ThemeEditorLabels {
-        system_ui: "System UI".into(),
-        terminal: "Terminal".into(),
-        ui_font: "UI 字体: ".into(),
-        ui_font_size: "UI 字号: ".into(),
-        terminal_font: "终端字体: ".into(),
-        terminal_font_size: "终端字号: ".into(),
-        cell_spacing: "间距: ".into(),
-        terminal_padding: "终端内边距: ".into(),
-        colors: Default::default(),
-    };
-
-    actions.extend(show_theme_selector(ui, draft, available, has_unsaved));
-    actions.extend(show_theme_buttons(ui, is_builtin, dialog));
-    actions.extend(show_import_export(ui));
-
-    ui.add_space(8.0);
-    ui.horizontal(|ui| {
-        if ui
-            .selectable_label(
-                matches!(subtab, ThemeEditorSubtab::UiAppearance),
-                crate::theme::ui_appearance_text(),
-            )
-            .clicked()
-        {
-            actions.push(ThemeAction::SelectSubtab(ThemeEditorSubtab::UiAppearance));
-        }
-        if ui
-            .selectable_label(
-                matches!(subtab, ThemeEditorSubtab::Terminal),
-                crate::theme::terminal_appearance_text(),
-            )
-            .clicked()
-        {
-            actions.push(ThemeAction::SelectSubtab(ThemeEditorSubtab::Terminal));
-        }
-        if ui
-            .selectable_label(
-                matches!(subtab, ThemeEditorSubtab::AnsiPalette),
-                crate::theme::ansi_palette_text(),
-            )
-            .clicked()
-        {
-            actions.push(ThemeAction::SelectSubtab(ThemeEditorSubtab::AnsiPalette));
-        }
-    });
-    ui.add_space(4.0);
-
-    match subtab {
-        ThemeEditorSubtab::UiAppearance => {
-            show_ui_appearance_editor(
-                ui,
-                draft,
-                available_fonts,
-                is_builtin,
-                &mut actions,
-                &labels,
-            );
-        }
-        ThemeEditorSubtab::Terminal => {
-            show_terminal_section_editor(
-                ui,
-                draft,
-                available_fonts,
-                is_builtin,
-                &mut actions,
-                &labels,
-            );
-        }
-        ThemeEditorSubtab::AnsiPalette => {
-            show_ansi_palette_editor(ui, draft, is_builtin, &mut actions);
-        }
-    }
-
-    actions
-}
-
-fn show_theme_selector(
-    ui: &mut egui::Ui,
-    draft: &ThemeDefinition,
-    available: &[ThemeDefinition],
-    has_unsaved: bool,
-) -> Vec<ThemeAction> {
-    let mut actions = Vec::new();
-    let current_id = draft.id.clone();
-
-    ui.horizontal(|ui| {
-        ui.label(crate::theme::theme_label_text());
-        egui::ComboBox::from_id_salt("theme_dropdown")
-            .selected_text(
-                available
-                    .iter()
-                    .find(|t| t.id == current_id)
-                    .map(|t| t.name.as_str())
-                    .unwrap_or("—"),
-            )
-            .show_ui(ui, |ui| {
-                for theme in available {
-                    let label = theme.name.clone();
-                    if ui
-                        .selectable_label(theme.id == current_id, &label)
-                        .clicked()
-                    {
-                        actions.push(ThemeAction::SelectTheme(theme.id.clone()));
-                    }
-                }
-            });
-        if has_unsaved {
-            ui.colored_label(
-                Color32::from_rgb(0xd9, 0xa4, 0x41),
-                crate::theme::unsaved_text(),
-            );
-        }
-    });
-    let _ = has_unsaved;
-    actions
-}
-
-fn show_theme_buttons(
-    ui: &mut egui::Ui,
-    is_builtin: bool,
-    dialog: &mut ThemeDialogState,
-) -> Vec<ThemeAction> {
-    let actions = Vec::new();
-    ui.horizontal(|ui| {
-        if ui.button(crate::theme::new_theme_text()).clicked() {
-            dialog.show_new_dialog = true;
-            dialog.name_input.clear();
-        }
-        if ui.button(crate::theme::copy_theme_text()).clicked() {
-            dialog.show_copy_dialog = true;
-            dialog.name_input.clear();
-        }
-        if !is_builtin {
-            if ui.button(crate::theme::rename_theme_text()).clicked() {
-                dialog.show_rename_dialog = true;
-                dialog.name_input.clear();
-            }
-            if ui.button(crate::theme::delete_theme_text()).clicked() {
-                dialog.show_delete_confirm = true;
-            }
-        }
-    });
-    actions
-}
-
-fn show_import_export(ui: &mut egui::Ui) -> Vec<ThemeAction> {
-    let mut actions = Vec::new();
-    ui.horizontal(|ui| {
-        if ui.button(crate::theme::import_theme_text()).clicked() {
-            actions.push(ThemeAction::ImportTheme);
-        }
-        if ui.button(crate::theme::export_theme_text()).clicked() {
-            actions.push(ThemeAction::ExportTheme);
-        }
-    });
     actions
 }
 
@@ -370,7 +326,7 @@ fn show_ui_appearance_editor(
                 .range(8.0..=32.0)
                 .prefix(&labels.ui_font_size),
         )
-        .on_hover_text(crate::theme::ui_font_size_label());
+        .on_hover_text(labels.ui_font_size.clone());
     });
 
     ui.add_space(6.0);
@@ -525,15 +481,19 @@ fn show_ansi_palette_editor(
     draft: &mut ThemeDefinition,
     _is_builtin: bool,
     actions: &mut Vec<ThemeAction>,
+    labels: &ThemeEditorLabels,
 ) {
-    let mut groups: [(&str, &mut AnsiColors); 3] = [
-        ("普通", &mut draft.terminal.normal),
-        ("明亮", &mut draft.terminal.bright),
-        ("暗淡", &mut draft.terminal.dim),
+    let normal = labels.normal.clone();
+    let bright = labels.bright.clone();
+    let dim = labels.dim.clone();
+    let mut groups: [(String, &mut AnsiColors); 3] = [
+        (normal, &mut draft.terminal.normal),
+        (bright, &mut draft.terminal.bright),
+        (dim, &mut draft.terminal.dim),
     ];
     for (label, colors) in groups.iter_mut() {
         ui.horizontal(|ui| {
-            ui.weak(egui::RichText::new(*label).small());
+            ui.weak(egui::RichText::new(label.as_str()).small());
         });
         ui.horizontal(|ui| {
             let black = &mut colors.black;
@@ -544,15 +504,23 @@ fn show_ansi_palette_editor(
             let magenta = &mut colors.magenta;
             let cyan = &mut colors.cyan;
             let white = &mut colors.white;
-            let mut slots: [(&mut ThemeColor, &str); 8] = [
-                (black, "黑"),
-                (red, "红"),
-                (green, "绿"),
-                (yellow, "黄"),
-                (blue, "蓝"),
-                (magenta, "紫"),
-                (cyan, "青"),
-                (white, "白"),
+            let black_n = labels.black.clone();
+            let red_n = labels.red.clone();
+            let green_n = labels.green.clone();
+            let yellow_n = labels.yellow.clone();
+            let blue_n = labels.blue.clone();
+            let magenta_n = labels.magenta.clone();
+            let cyan_n = labels.cyan.clone();
+            let white_n = labels.white.clone();
+            let mut slots: [(&mut ThemeColor, String); 8] = [
+                (black, black_n),
+                (red, red_n),
+                (green, green_n),
+                (yellow, yellow_n),
+                (blue, blue_n),
+                (magenta, magenta_n),
+                (cyan, cyan_n),
+                (white, white_n),
             ];
             for (color, name) in slots.iter_mut() {
                 compact_color_cell(ui, color, name, true, actions, "ansi");
@@ -715,219 +683,4 @@ fn color_dragvalue_row(
             actions.push(ThemeAction::DraftModified);
         }
     });
-}
-
-/// Text strings for the theme editor, centralized for i18n.
-/// These are inline constants; full i18n wiring happens in Task 7.
-pub mod texts {
-    pub fn heading() -> String {
-        "主题".into()
-    }
-    pub fn theme_label() -> String {
-        "当前主题:".into()
-    }
-    pub fn unsaved() -> String {
-        "● 未保存".into()
-    }
-    pub fn new_theme() -> String {
-        "新建".into()
-    }
-    pub fn copy_theme() -> String {
-        "复制".into()
-    }
-    pub fn rename_theme() -> String {
-        "重命名".into()
-    }
-    pub fn delete_theme() -> String {
-        "删除".into()
-    }
-    pub fn import_theme() -> String {
-        "导入".into()
-    }
-    pub fn export_theme() -> String {
-        "导出".into()
-    }
-
-    pub fn ui_appearance() -> String {
-        "UI 外观".into()
-    }
-    pub fn ui_font() -> String {
-        "UI 字体:".into()
-    }
-    pub fn ui_font_size() -> String {
-        "UI 字号:".into()
-    }
-    pub fn base_colors() -> String {
-        "基础颜色".into()
-    }
-    pub fn app_bg() -> String {
-        "主背景:".into()
-    }
-    pub fn sidebar() -> String {
-        "侧栏:".into()
-    }
-    pub fn panel() -> String {
-        "面板:".into()
-    }
-    pub fn input_bg() -> String {
-        "输入框:".into()
-    }
-    pub fn text_colors() -> String {
-        "文字颜色".into()
-    }
-    pub fn text() -> String {
-        "普通文字:".into()
-    }
-    pub fn weak_text() -> String {
-        "弱化文字:".into()
-    }
-    pub fn status_colors() -> String {
-        "状态颜色".into()
-    }
-    pub fn accent() -> String {
-        "强调:".into()
-    }
-    pub fn warning() -> String {
-        "警告:".into()
-    }
-    pub fn danger() -> String {
-        "危险:".into()
-    }
-    pub fn interaction_colors() -> String {
-        "交互颜色".into()
-    }
-    pub fn hover() -> String {
-        "悬停:".into()
-    }
-    pub fn active() -> String {
-        "激活:".into()
-    }
-    pub fn selection_bg() -> String {
-        "选中背景:".into()
-    }
-    pub fn selection_text() -> String {
-        "选中文字:".into()
-    }
-    pub fn border() -> String {
-        "边框:".into()
-    }
-    pub fn lock() -> String {
-        "锁定遮罩:".into()
-    }
-
-    pub fn terminal_appearance() -> String {
-        "终端外观".into()
-    }
-    pub fn terminal_font_size() -> String {
-        "终端字号:".into()
-    }
-    pub fn cell_spacing() -> String {
-        "单元格间距:".into()
-    }
-    pub fn palette_template() -> String {
-        "配色模板:".into()
-    }
-    pub fn apply_template() -> String {
-        "应用模板".into()
-    }
-    pub fn terminal_base_colors() -> String {
-        "基础颜色".into()
-    }
-    pub fn fg() -> String {
-        "前景色:".into()
-    }
-    pub fn bg() -> String {
-        "背景色:".into()
-    }
-    pub fn cursor() -> String {
-        "光标:".into()
-    }
-    pub fn link() -> String {
-        "链接:".into()
-    }
-    pub fn normal() -> String {
-        "普通".into()
-    }
-    pub fn bright() -> String {
-        "明亮".into()
-    }
-    pub fn dim() -> String {
-        "暗淡".into()
-    }
-    pub fn black() -> &'static str {
-        "黑"
-    }
-    pub fn red() -> &'static str {
-        "红"
-    }
-    pub fn green() -> &'static str {
-        "绿"
-    }
-    pub fn yellow() -> &'static str {
-        "黄"
-    }
-    pub fn blue() -> &'static str {
-        "蓝"
-    }
-    pub fn magenta() -> &'static str {
-        "紫"
-    }
-    pub fn cyan() -> &'static str {
-        "青"
-    }
-    pub fn white() -> &'static str {
-        "白"
-    }
-
-    pub fn copy_dialog_title() -> String {
-        "创建主题副本".into()
-    }
-    pub fn copy_dialog_hint() -> String {
-        "输入新主题名称:".into()
-    }
-    pub fn new_dialog_title() -> String {
-        "新建主题".into()
-    }
-    pub fn new_dialog_hint() -> String {
-        "输入新主题名称:".into()
-    }
-    pub fn rename_dialog_title() -> String {
-        "重命名主题".into()
-    }
-    pub fn delete_confirm() -> String {
-        "确认删除此主题？".into()
-    }
-    pub fn switch_confirm() -> String {
-        "当前主题有未保存的修改".into()
-    }
-    pub fn save_and_switch() -> String {
-        "保存并切换".into()
-    }
-    pub fn discard_and_switch() -> String {
-        "放弃并切换".into()
-    }
-    pub fn cancel() -> String {
-        "取消".into()
-    }
-    pub fn confirm() -> String {
-        "确认".into()
-    }
-    pub fn ok() -> String {
-        "确定".into()
-    }
-    pub fn builtin_readonly() -> String {
-        "内置主题只读，编辑将创建副本".into()
-    }
-    pub fn keep() -> String {
-        "保留".into()
-    }
-    pub fn discard() -> String {
-        "放弃修改".into()
-    }
-    pub fn edit_theme() -> String {
-        "编辑主题".into()
-    }
-    pub fn name_label() -> String {
-        "名称:".into()
-    }
 }

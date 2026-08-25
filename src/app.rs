@@ -2519,27 +2519,27 @@ impl App {
             DialogKind::New => (
                 "theme_new_modal",
                 "theme_new_name_input",
-                crate::theme::new_dialog_title(),
+                self.texts.theme_editor.new_dialog_title.clone(),
             ),
             DialogKind::Copy => (
                 "theme_copy_modal",
                 "theme_copy_name_input",
-                crate::theme::copy_dialog_title(),
+                self.texts.theme_editor.copy_dialog_title.clone(),
             ),
             DialogKind::Rename => (
                 "theme_rename_modal",
                 "theme_rename_name_input",
-                crate::theme::rename_dialog_title(),
+                self.texts.theme_editor.rename_dialog_title.clone(),
             ),
             DialogKind::Delete => (
                 "theme_delete_modal",
                 "",
-                crate::theme::delete_confirm_text(),
+                self.texts.theme_editor.delete_confirm.clone(),
             ),
             DialogKind::Switch => (
                 "theme_switch_modal",
                 "",
-                crate::theme::switch_confirm_text(),
+                self.texts.theme_editor.switch_confirm.clone(),
             ),
         };
 
@@ -2589,12 +2589,12 @@ impl App {
                 DialogKind::Delete => {
                     ui.label(format!(
                         "{}: {}",
-                        crate::theme::delete_confirm_text(),
+                        self.texts.theme_editor.delete_confirm.clone(),
                         self.theme_edit.name
                     ));
                 }
                 DialogKind::Switch => {
-                    ui.label(crate::theme::switch_confirm_text());
+                    ui.label(self.texts.theme_editor.switch_confirm.clone());
                 }
             }
 
@@ -2703,6 +2703,13 @@ impl App {
         let mut keep = false;
         let mut discard = false;
         let mut is_open = self.theme_editor_open;
+        // Esc closes the editor through the SAME path as the close button
+        // (unsaved draft is kept/saved, never silently dropped).
+        if self.theme_editor_open
+            && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+        {
+            is_open = false;
+        }
         let mut editor_name = self.theme_edit.name.clone();
         let editor_dirty = self.theme_dirty;
         let mut editor_draft = self.theme_edit.clone();
@@ -2721,6 +2728,72 @@ impl App {
             terminal_font_size: te.terminal_font_size.clone(),
             cell_spacing: te.cell_spacing.clone(),
             terminal_padding: te.terminal_padding.clone(),
+            heading: te.heading.clone(),
+            current: te.current.clone(),
+            unsaved: te.unsaved.clone(),
+            new_theme: te.new.clone(),
+            copy_theme: te.copy.clone(),
+            rename_theme: te.rename.clone(),
+            delete_theme: te.delete.clone(),
+            import_theme: te.import.clone(),
+            export_theme: te.export.clone(),
+            ui_appearance: te.ui_appearance.clone(),
+            base_colors: te.base_colors.clone(),
+            app_bg_label: te.app_bg_label.clone(),
+            sidebar_label: te.sidebar_label.clone(),
+            panel_label: te.panel_label.clone(),
+            input_bg_label: te.input_bg_label.clone(),
+            text_colors: te.text_colors.clone(),
+            text_label: te.text_label.clone(),
+            weak_text_label: te.weak_text_label.clone(),
+            status_colors: te.status_colors.clone(),
+            accent_label: te.accent_label.clone(),
+            warning_label: te.warning_label.clone(),
+            danger_label: te.danger_label.clone(),
+            interaction_colors: te.interaction_colors.clone(),
+            hover_label: te.hover_label.clone(),
+            active_label: te.active_label.clone(),
+            selection_bg_label: te.selection_bg_label.clone(),
+            selection_text_label: te.selection_text_label.clone(),
+            border_label: te.border_label.clone(),
+            lock_label: te.lock_label.clone(),
+            terminal_appearance: te.terminal_appearance.clone(),
+            palette_template_label: te.palette_template_label.clone(),
+            apply_template: te.apply_template.clone(),
+            terminal_base_colors: te.terminal_base_colors.clone(),
+            fg_label: te.fg_label.clone(),
+            bg_label: te.bg_label.clone(),
+            cursor_label: te.cursor_label.clone(),
+            link_label: te.link_label.clone(),
+            normal: te.normal.clone(),
+            bright: te.bright.clone(),
+            dim: te.dim.clone(),
+            black: te.black.clone(),
+            red: te.red.clone(),
+            green: te.green.clone(),
+            yellow: te.yellow.clone(),
+            blue: te.blue.clone(),
+            magenta: te.magenta.clone(),
+            cyan: te.cyan.clone(),
+            white: te.white.clone(),
+            copy_dialog_title: te.copy_dialog_title.clone(),
+            copy_dialog_hint: te.copy_dialog_hint.clone(),
+            new_dialog_title: te.new_dialog_title.clone(),
+            new_dialog_hint: te.new_dialog_hint.clone(),
+            rename_dialog_title: te.rename_dialog_title.clone(),
+            delete_confirm: te.delete_confirm.clone(),
+            switch_confirm: te.switch_confirm.clone(),
+            save_and_switch: te.save_and_switch.clone(),
+            discard_and_switch: te.discard_and_switch.clone(),
+            builtin_readonly: te.builtin_readonly.clone(),
+            keep: te.keep.clone(),
+            discard: te.discard.clone(),
+            ui_font_label_short: te.ui_font_label_short.clone(),
+            ui_font_size_label: te.ui_font_size_label.clone(),
+            terminal_font_label_short: te.terminal_font_label_short.clone(),
+            terminal_font_size_label: te.terminal_font_size_label.clone(),
+            cell_spacing_label: te.cell_spacing_label.clone(),
+            terminal_padding_label: te.terminal_padding_label.clone(),
             colors: crate::theme::ui::ColorLabels {
                 app_bg: te.colors.app_bg.clone(),
                 sidebar: te.colors.sidebar.clone(),
@@ -3209,10 +3282,10 @@ impl App {
     /// UI 外观 / 终端.
     fn settings_page_theme(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
         if let Some(Err(msg)) = &self.theme_message {
-            ui.colored_label(egui::Color32::from_rgb(230, 120, 120), msg);
+            ui.colored_label(self.active_theme.app.danger.to_egui(), msg);
         }
         if let Some(Ok(msg)) = &self.theme_message {
-            ui.colored_label(egui::Color32::from_rgb(120, 200, 130), msg);
+            ui.colored_label(self.active_theme.app.success.to_egui(), msg);
         }
 
         // The list takes all the remaining height down to the window bottom.
@@ -3510,18 +3583,32 @@ impl App {
                 // right border.
                 let btn_y = title_cy - 9.0;
                 let mut x = term_half.max.x;
+                let hover_col = self.active_theme.app.hover.to_egui();
+                let active_col = self.active_theme.app.active.to_egui();
                 let btn = |ui: &mut egui::Ui, x: f32, y: f32, glyph: &str, id: egui::Id| -> bool {
                     let r = egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(22.0, 18.0));
                     let resp = ui.interact(r, id, egui::Sense::click());
-                    let g = ui.fonts(|f| {
-                        f.layout_no_wrap(
-                            glyph.to_string(),
-                            egui::FontId::proportional(12.0),
-                            text_col,
+                    // Three-state feedback (was: static glyph, zero states).
+                    if resp.is_pointer_button_down_on() {
+                        ui.painter().rect_filled(r, 3.0, active_col);
+                    } else if resp.contains_pointer() {
+                        ui.painter().rect_filled(r, 3.0, hover_col);
+                    }
+                    let dim = resp.is_pointer_button_down_on();
+                    let col = if dim {
+                        egui::Color32::from_rgba_unmultiplied(
+                            text_col.r(),
+                            text_col.g(),
+                            text_col.b(),
+                            (text_col.a() as f32 * 0.75) as u8,
                         )
+                    } else {
+                        text_col
+                    };
+                    let g = ui.fonts(|f| {
+                        f.layout_no_wrap(glyph.to_string(), egui::FontId::proportional(12.0), col)
                     });
-                    ui.painter()
-                        .galley(r.center() - g.size() / 2.0, g, text_col);
+                    ui.painter().galley(r.center() - g.size() / 2.0, g, col);
                     resp.clicked()
                 };
                 // Action buttons laid out right-to-left at fixed offsets:
@@ -3796,6 +3883,23 @@ impl App {
         self.available_themes = themes;
     }
 
+    /// Lock a workspace. WITHOUT a configured password, locking would be
+    /// cosmetic (any input unlocks) — instead route the user into the
+    /// password-setup flow so the lock always means something.
+    fn try_lock_workspace(&mut self, index: usize) {
+        if self.settings.lock_password.is_empty() {
+            self.pw_set1.clear();
+            self.pw_set2.clear();
+            self.pw_message.clear();
+            self.pw_popup = Some("set");
+            self.pw_message = self.texts.password.need_setup.clone();
+        } else {
+            self.locked_panels.insert(index);
+            self.lock_password_input.clear();
+            self.pw_message.clear();
+        }
+    }
+
     fn check_update_manual(&mut self, ctx: &egui::Context) {
         self.update_state = crate::updater::UpdateState::Checking;
         let ctx_clone = ctx.clone();
@@ -3906,9 +4010,9 @@ impl App {
     /// workspace list (a ScrollArea above) can never squeeze it out.
     fn render_sidebar_bottom_cluster(&mut self, ui: &mut egui::Ui) {
         let weak = self.active_theme.app.weak_text.to_egui();
-        let fg = self.active_theme.app.button_fg.to_egui();
-        let footer_h = 96.0;
-        let line_h = 16.0;
+        // Single-line summary with hover details (was a 6-line wall of
+        // 10-11px text — the v0.1.37 UI audit's top density finding).
+        let footer_h = 24.0;
 
         // Divider between the (scrolling) workspace list and the fixed
         // quick toggles. It lives INSIDE the bottom panel, so it stays
@@ -3938,73 +4042,44 @@ impl App {
         }
         ui.separator();
 
-        let (footer_rect, _) = ui.allocate_exact_size(
+        let (footer_rect, footer_resp) = ui.allocate_exact_size(
             egui::vec2(ui.available_width(), footer_h),
-            egui::Sense::hover(),
+            egui::Sense::click(),
         );
         let x = footer_rect.min.x + 10.0;
-        let title_font = egui::FontId::proportional(10.0);
         let data_font = egui::FontId::proportional(11.0);
-        let line = |i: usize| footer_rect.min.y + line_h * i as f32 + line_h / 2.0;
 
-        ui.painter().text(
-            egui::pos2(x, line(0)),
-            egui::Align2::LEFT_CENTER,
-            self.texts.stats.focused.as_str(),
-            title_font.clone(),
-            fg,
+        // Compact summary: focused terminal's CPU/MEM (the number users
+        // glance at); full breakdown lives on hover.
+        let summary = format!(
+            "{} · {}",
+            format_cpu(self.focused_cpu),
+            format_memory(self.focused_mem)
         );
         ui.painter().text(
-            egui::pos2(x, line(1)),
+            egui::pos2(x, footer_rect.center().y),
             egui::Align2::LEFT_CENTER,
-            format!(
-                "{} | {}",
-                format_cpu(self.focused_cpu),
-                format_memory(self.focused_mem)
-            ),
-            data_font.clone(),
-            weak,
-        );
-        ui.painter().text(
-            egui::pos2(x, line(2)),
-            egui::Align2::LEFT_CENTER,
-            self.texts.stats.workspace.as_str(),
-            title_font.clone(),
-            fg,
-        );
-        ui.painter().text(
-            egui::pos2(x, line(3)),
-            egui::Align2::LEFT_CENTER,
-            format!(
-                "{} {} | {} | {}",
-                format_active_ws_terminal_count(self),
-                self.texts.stats.terminals,
-                format_cpu(self.workspace_cpu),
-                format_memory(self.workspace_mem)
-            ),
-            data_font.clone(),
-            weak,
-        );
-        ui.painter().text(
-            egui::pos2(x, line(4)),
-            egui::Align2::LEFT_CENTER,
-            self.texts.stats.global.as_str(),
-            title_font,
-            fg,
-        );
-        ui.painter().text(
-            egui::pos2(x, line(5)),
-            egui::Align2::LEFT_CENTER,
-            format!(
-                "{} {} | {} | {}",
-                format_ws_terminal_count(self),
-                self.texts.stats.terminals,
-                format_cpu(self.terminal_cpu),
-                format_memory(self.terminal_mem)
-            ),
+            &summary,
             data_font,
             weak,
         );
+        let details = format!(
+            "{}: {} | {}\n{}: {} {} | {} | {}\n{}: {} {} | {} | {}",
+            self.texts.stats.focused,
+            format_cpu(self.focused_cpu),
+            format_memory(self.focused_mem),
+            self.texts.stats.workspace,
+            format_active_ws_terminal_count(self),
+            self.texts.stats.terminals,
+            format_cpu(self.workspace_cpu),
+            format_memory(self.workspace_mem),
+            self.texts.stats.global,
+            format_ws_terminal_count(self),
+            self.texts.stats.terminals,
+            format_cpu(self.terminal_cpu),
+            format_memory(self.terminal_mem),
+        );
+        footer_resp.on_hover_text(details);
     }
 
     fn focus_adjacent_panel(&mut self, direction: i32) {
@@ -4058,13 +4133,50 @@ impl App {
             self.update_toast = None;
             return;
         }
-        egui::Area::new(egui::Id::new("update_toast"))
+        self.draw_toast(ctx, egui::Id::new("update_toast"), &msg, expires);
+    }
+
+    /// Shared toast painter with a 150 ms fade-in and fade-out over the
+    /// last 300 ms before expiry (v0.1.37 UI audit: toasts used to pop
+    /// in and vanish instantly).
+    fn draw_toast(
+        &self,
+        ctx: &egui::Context,
+        id: egui::Id,
+        msg: &str,
+        expires: std::time::Instant,
+    ) {
+        const FADE: f32 = 0.15;
+        let remaining = expires
+            .duration_since(std::time::Instant::now())
+            .as_secs_f32();
+        let target = if remaining > 0.3 { 1.0 } else { 0.0 };
+        let alpha = ctx.animate_value_with_time(id, target, FADE);
+        if alpha < 0.01 {
+            return;
+        }
+        egui::Area::new(id)
             .order(egui::Order::Tooltip)
             .anchor(egui::Align2::CENTER_BOTTOM, [0.0, -24.0])
             .interactable(false)
             .show(ctx, |ui| {
-                egui::Frame::popup(&ctx.style()).show(ui, |ui| {
-                    ui.label(msg);
+                let mut frame = egui::Frame::popup(&ui.ctx().style());
+                let bg = frame.fill;
+                frame.fill = egui::Color32::from_rgba_unmultiplied(
+                    bg.r(),
+                    bg.g(),
+                    bg.b(),
+                    (bg.a() as f32 * alpha) as u8,
+                );
+                frame.show(ui, |ui| {
+                    let fg = ui.style().visuals.strong_text_color();
+                    let rt = egui::RichText::new(msg).color(egui::Color32::from_rgba_unmultiplied(
+                        fg.r(),
+                        fg.g(),
+                        fg.b(),
+                        (fg.a() as f32 * alpha) as u8,
+                    ));
+                    ui.label(rt);
                 });
             });
     }
@@ -4142,15 +4254,17 @@ impl App {
         let sel_bg = app.active.to_egui();
         let font_size = self.active_theme.typography.menu_font_size;
 
-        // Fixed geometry: ALWAYS 10 rows tall (even when empty), footer
-        // shared by both columns, favorites column glued to the right of
-        // the main list inside the SAME window.
+        // Adaptive geometry: height fits the content (capped at 10 rows)
+        // so a 2-entry history doesn't float a mostly-empty 10-row menu
+        // (v0.1.37 UI audit). Footer shared by both columns, favorites
+        // column glued to the right of the main list inside the SAME window.
         let row_h = 20.0f32;
         let max_visible = 10usize;
         let footer_h = 24.0f32;
         let list_w = 320.0f32;
         let fav_w = 200.0f32;
-        let rows_h = max_visible as f32 * row_h;
+        let visible_rows = nav.entries.len().min(max_visible).max(1);
+        let rows_h = visible_rows as f32 * row_h;
         let list_h = rows_h + footer_h;
         let show_favs = nav.auto_word.is_none() && !nav.favorites.is_empty();
         let total_w = list_w + if show_favs { fav_w } else { 0.0 };
@@ -4160,8 +4274,8 @@ impl App {
         // Independent scroll offsets for the two columns.
         let scroll_id = egui::Id::new(("hist_menu_scroll", tab.as_str()));
         let fav_scroll_id = egui::Id::new(("hist_fav_scroll", tab.as_str()));
-        let max_scroll = total.saturating_sub(max_visible);
-        let fav_max_scroll = fav_total.saturating_sub(max_visible);
+        let max_scroll = total.saturating_sub(visible_rows);
+        let fav_max_scroll = fav_total.saturating_sub(visible_rows);
         let mut scroll: usize = ctx
             .memory(|m| m.data.get_temp(scroll_id).unwrap_or(0))
             .min(max_scroll);
@@ -4261,8 +4375,20 @@ impl App {
                     }
                 }
 
+                // ---- Empty state: actionable hint instead of a bare
+                // empty list (v0.1.37 UI audit P3-12). ----
+                if total == 0 {
+                    ui.painter().text(
+                        egui::pos2(frame_rect.min.x + 12.0, frame_rect.min.y + row_h * 0.5),
+                        egui::Align2::LEFT_CENTER,
+                        self.texts.terminal.history_empty.clone(),
+                        egui::FontId::proportional(11.0),
+                        weak,
+                    );
+                }
+
                 // ---- Main rows ----
-                for i in scroll..(scroll + max_visible).min(total) {
+                for i in scroll..(scroll + visible_rows).min(total) {
                     let row = egui::Rect::from_min_size(
                         egui::pos2(
                             frame_rect.min.x,
@@ -4325,7 +4451,7 @@ impl App {
                     // Per-row actions (manual menu only): hover or
                     // keyboard selection shows 收藏 / 删除 on the right.
                     if nav.auto_word.is_none() && (row_hovered || is_sel) {
-                        let act_font = egui::FontId::proportional(10.0);
+                        let act_font = egui::FontId::proportional(11.0);
                         let star_txt = self.texts.terminal.favorite.clone();
                         let del_txt = self.texts.terminal.delete.clone();
                         let measure = |txt: &str, col| {
@@ -4387,12 +4513,12 @@ impl App {
                 }
 
                 // ---- Main scrollbar ----
-                if total > max_visible {
+                if total > visible_rows {
                     let sb_track = egui::Rect::from_min_max(
                         egui::pos2(frame_rect.min.x + list_w - 6.0, frame_rect.min.y),
                         egui::pos2(frame_rect.min.x + list_w, frame_rect.min.y + rows_h),
                     );
-                    let thumb_h = (max_visible as f32 / total as f32 * rows_h).max(16.0);
+                    let thumb_h = (visible_rows as f32 / total as f32 * rows_h).max(16.0);
                     let scrollable = (rows_h - thumb_h).max(1.0);
                     let thumb_y =
                         frame_rect.min.y + scrollable * (scroll as f32 / max_scroll as f32);
@@ -4430,7 +4556,7 @@ impl App {
                     // (The separator line is painted AFTER the rows, with
                     // the outer border — row backgrounds painted over it
                     // when it was drawn here first.)
-                    for fi in fav_scroll..(fav_scroll + max_visible).min(fav_total) {
+                    for fi in fav_scroll..(fav_scroll + visible_rows).min(fav_total) {
                         let frow = egui::Rect::from_min_size(
                             egui::pos2(fx0, frame_rect.min.y + (fi - fav_scroll) as f32 * row_h),
                             egui::vec2(fav_w, row_h),
@@ -4487,7 +4613,7 @@ impl App {
                             let dg = ui.fonts(|f| {
                                 f.layout_no_wrap(
                                     del_txt.to_string(),
-                                    egui::FontId::proportional(10.0),
+                                    egui::FontId::proportional(11.0),
                                     weak,
                                 )
                             });
@@ -4508,7 +4634,7 @@ impl App {
                             let dg2 = ui.fonts(|f| {
                                 f.layout_no_wrap(
                                     del_txt.to_string(),
-                                    egui::FontId::proportional(10.0),
+                                    egui::FontId::proportional(11.0),
                                     dcol,
                                 )
                             });
@@ -4520,12 +4646,12 @@ impl App {
                         }
                     }
                     // Favorites scrollbar when overflowing.
-                    if fav_total > max_visible {
+                    if fav_total > visible_rows {
                         let sb_track = egui::Rect::from_min_max(
                             egui::pos2(fx0 + fav_w - 6.0, frame_rect.min.y),
                             egui::pos2(fx0 + fav_w, frame_rect.min.y + rows_h),
                         );
-                        let thumb_h = (max_visible as f32 / fav_total as f32 * rows_h).max(16.0);
+                        let thumb_h = (visible_rows as f32 / fav_total as f32 * rows_h).max(16.0);
                         let scrollable = (rows_h - thumb_h).max(1.0);
                         let thumb_y = frame_rect.min.y
                             + scrollable * (fav_scroll as f32 / fav_max_scroll as f32);
@@ -4574,7 +4700,7 @@ impl App {
                     egui::pos2(footer.min.x + 8.0, footer.center().y),
                     egui::Align2::LEFT_CENTER,
                     format!("{}{}", total, self.texts.terminal.history_count),
-                    egui::FontId::proportional(10.0),
+                    egui::FontId::proportional(11.0),
                     weak,
                 );
                 // X close pinned at the far right.
@@ -4606,7 +4732,7 @@ impl App {
                 if show_favs {
                     let txt = self.texts.terminal.clear_favorites.clone();
                     let g = ui.fonts(|f| {
-                        f.layout_no_wrap(txt.to_string(), egui::FontId::proportional(10.0), weak)
+                        f.layout_no_wrap(txt.to_string(), egui::FontId::proportional(11.0), weak)
                     });
                     let w = g.size().x + 10.0;
                     let rect = egui::Rect::from_min_max(
@@ -4624,7 +4750,7 @@ impl App {
                         weak
                     };
                     let g2 = ui.fonts(|f| {
-                        f.layout_no_wrap(txt.to_string(), egui::FontId::proportional(10.0), col)
+                        f.layout_no_wrap(txt.to_string(), egui::FontId::proportional(11.0), col)
                     });
                     ui.painter()
                         .galley(rect.center() - g2.size() / 2.0, g2, col);
@@ -4636,7 +4762,7 @@ impl App {
                 {
                     let txt = self.texts.terminal.clear_history.clone();
                     let g = ui.fonts(|f| {
-                        f.layout_no_wrap(txt.clone(), egui::FontId::proportional(10.0), weak)
+                        f.layout_no_wrap(txt.clone(), egui::FontId::proportional(11.0), weak)
                     });
                     let w = g.size().x + 10.0;
                     let rect = egui::Rect::from_min_max(
@@ -4654,7 +4780,7 @@ impl App {
                         weak
                     };
                     let g2 = ui.fonts(|f| {
-                        f.layout_no_wrap(txt.clone(), egui::FontId::proportional(10.0), col)
+                        f.layout_no_wrap(txt.clone(), egui::FontId::proportional(11.0), col)
                     });
                     ui.painter()
                         .galley(rect.center() - g2.size() / 2.0, g2, col);
@@ -5606,9 +5732,7 @@ impl eframe::App for App {
                 self.lock_password_input.clear();
                 self.pw_message.clear();
             } else {
-                self.locked_panels.insert(self.active_panel);
-                self.lock_password_input.clear();
-                self.pw_message.clear();
+                self.try_lock_workspace(self.active_panel);
             }
         }
 
@@ -5641,11 +5765,13 @@ impl eframe::App for App {
                     // Unified menu-bar button for ALL entries (dropdown
                     // menus and plain buttons): same text size, padding,
                     // square corners, transparent fill with hover highlight.
-                    let hover_bg = self.active_theme.app.hover.to_egui();
+                    let chrome =
+                        crate::theme::ui::ButtonChrome::from_theme(&self.active_theme.app, fg_menu);
                     let menu_btn = |ui: &mut egui::Ui, label: &str| -> egui::Response {
-                        // Fully hand-drawn button: the hover background is
-                        // painted BEFORE the text so it can never cover the
-                        // label (Button + later rect_filled hid the text).
+                        // Fully hand-drawn button: the chrome layers are
+                        // painted BEFORE the text so they can never cover
+                        // the label. Unified three-state feedback via
+                        // ButtonChrome (hover fill + pressed dim + focus ring).
                         let galley = ui.fonts(|f| {
                             f.layout_no_wrap(
                                 label.to_string(),
@@ -5656,9 +5782,7 @@ impl eframe::App for App {
                         let pad = 8.0;
                         let size = egui::vec2(galley.size().x + pad * 2.0, galley.size().y + 8.0);
                         let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
-                        if resp.contains_pointer() {
-                            ui.painter().rect_filled(rect, 0.0, hover_bg);
-                        }
+                        let _fg = chrome.paint(ui, rect, &resp);
                         ui.painter()
                             .galley(rect.center() - galley.size() / 2.0, galley, fg_menu);
                         resp
@@ -6311,6 +6435,10 @@ impl eframe::App for App {
         }
 
         if self.show_about {
+            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+                self.show_about = false;
+                return;
+            }
             let mut open = self.show_about;
             let mut clicked_close = false;
             egui::Window::new(format!("OpenNex v{}", env!("CARGO_PKG_VERSION")))
@@ -6374,28 +6502,26 @@ impl eframe::App for App {
                             UpdateState::Idle | UpdateState::Checking => {
                                 ("".to_string(), egui::Color32::WHITE)
                             }
-                            UpdateState::Downloading(_) => (
-                                ut.downloading.clone(),
-                                egui::Color32::from_rgb(0x3b, 0x82, 0xf6),
-                            ),
-                            UpdateState::Verifying => (
-                                ut.verifying.clone(),
-                                egui::Color32::from_rgb(0xa8, 0x55, 0xf7),
-                            ),
+                            UpdateState::Downloading(_) => {
+                                (ut.downloading.clone(), self.active_theme.app.info.to_egui())
+                            }
+                            UpdateState::Verifying => {
+                                (ut.verifying.clone(), self.active_theme.app.accent.to_egui())
+                            }
                             UpdateState::Ready(_) => {
-                                (ut.ready.clone(), egui::Color32::from_rgb(0x22, 0xc5, 0x5e))
+                                (ut.ready.clone(), self.active_theme.app.success.to_egui())
                             }
                             UpdateState::Error(msg) => (
                                 ut.failed.replace("{}", msg),
-                                egui::Color32::from_rgb(0xef, 0x44, 0x44),
+                                self.active_theme.app.danger.to_egui(),
                             ),
                             UpdateState::Available(info) => (
                                 ut.available.replace("{}", &info.version),
-                                egui::Color32::from_rgb(0x22, 0xc5, 0x5e),
+                                self.active_theme.app.success.to_egui(),
                             ),
                             UpdateState::UpToDate => (
                                 ut.up_to_date.clone(),
-                                egui::Color32::from_rgb(0x6b, 0x72, 0x80),
+                                self.active_theme.app.neutral.to_egui(),
                             ),
                         };
                         if !text.is_empty() {
@@ -6422,7 +6548,7 @@ impl eframe::App for App {
                                 rect.min,
                                 egui::vec2(rect.width() * p, rect.height()),
                             );
-                            let filled_color = egui::Color32::from_rgb(0x3b, 0x82, 0xf6);
+                            let filled_color = self.active_theme.app.info.to_egui();
                             painter.rect_filled(filled, egui::CornerRadius::ZERO, filled_color);
                             let pct_text = format!("{}%", (p * 100.0) as i32);
                             let galley = ui.fonts(|f| {
@@ -6553,6 +6679,10 @@ impl eframe::App for App {
 
         // Close workspace confirmation
         if let Some(panel_idx) = self.close_confirm_panel {
+            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+                self.close_confirm_panel = None;
+                return;
+            }
             let mut open = true;
             let panel_name = self
                 .panels
@@ -6748,6 +6878,11 @@ impl eframe::App for App {
 
         // Password popup windows
         if let Some(popup) = self.pw_popup {
+            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+                self.pw_popup = None;
+                self.pw_message.clear();
+                return;
+            }
             let mut open = true;
             let title = match popup {
                 "set" => self.texts.password.set_title.as_str(),
@@ -7316,9 +7451,7 @@ impl eframe::App for App {
                                                 self.lock_password_input.clear();
                                                 self.pw_message.clear();
                                             } else {
-                                                self.locked_panels.insert(i);
-                                                self.lock_password_input.clear();
-                                                self.pw_message.clear();
+                                                self.try_lock_workspace(i);
                                             }
                                             ui.close_menu();
                                         }
@@ -7388,11 +7521,11 @@ impl eframe::App for App {
                                     if lock_resp.clicked() {
                                         if is_locked {
                                             self.active_panel = i;
+                                            self.lock_password_input.clear();
+                                            self.pw_message.clear();
                                         } else {
-                                            self.locked_panels.insert(i);
+                                            self.try_lock_workspace(i);
                                         }
-                                        self.lock_password_input.clear();
-                                        self.pw_message.clear();
                                     }
                                     let _ = lock_resp.on_hover_text(if is_locked {
                                         &self.texts.workspace.locked_hint
@@ -7689,7 +7822,7 @@ impl eframe::App for App {
                                     ui.label(
                                         egui::RichText::new(&self.pw_message)
                                             .size(11.0)
-                                            .color(egui::Color32::from_rgb(255, 120, 120)),
+                                            .color(self.active_theme.app.danger.to_egui()),
                                     );
                                 }
                             });

@@ -1064,6 +1064,23 @@ impl<Tab> DockArea<'_, Tab> {
         ui.painter()
             .line_segment([tab_rect.left_bottom(), tab_rect.right_bottom()], stroke);
 
+        // OpenNex patch: the FOCUSED tab gets a 2px accent underline along
+        // its bottom edge (on top of the shared border stroke). Background
+        // tints alone were too subtle to locate the focused terminal in a
+        // multi-split layout; an explicit marker survives near-identical
+        // active/inactive fills. The color is the style's focused bg_fill,
+        // which the app injects with the theme's tab_highlight color.
+        if focused && !is_being_dragged {
+            let hl = egui::Shape::line_segment(
+                [
+                    pos2(tab_rect.left_bottom().x, tab_rect.bottom() - 1.0),
+                    pos2(tab_rect.right_bottom().x, tab_rect.bottom() - 1.0),
+                ],
+                egui::Stroke::new(2.0_f32, tab_style.bg_fill),
+            );
+            ui.painter().add(hl);
+        }
+
         let mut text_rect = tab_rect;
         text_rect.set_width(text_rect.width() - close_button_size);
         let text_pos = {
