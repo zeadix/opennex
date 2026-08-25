@@ -1090,8 +1090,19 @@ const ARGON2_HASH_PREFIX: &str = "$argon2";
 /// Hash a workspace-lock password into a PHC string (argon2id, random
 /// salt). Plaintext never touches disk from a fresh install onwards.
 fn hash_lock_password(password: &str) -> String {
-    use argon2::password_hash::{rand_core::OsRng, PasswordHasher, SaltString};
-    let salt = SaltString::generate(&mut OsRng);
+    use argon2::password_hash::{PasswordHasher, SaltString};
+    // Salt from two UUIDs (64 hex chars): hex is within the PHC b64
+    // alphabet, and this avoids argon2's re-exported rand_core::OsRng,
+    // whose availability depends on transitive feature unification and
+    // broke the macOS/Windows CI builds.
+    let salt_hex = format!(
+        "{}{}",
+        uuid::Uuid::new_v4().simple(),
+        uuid::Uuid::new_v4().simple()
+    );
+    let Ok(salt) = SaltString::new(&salt_hex) else {
+        return String::new();
+    };
     argon2::Argon2::default()
         .hash_password(password.as_bytes(), &salt)
         .map(|hash| hash.to_string())
