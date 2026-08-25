@@ -541,7 +541,9 @@ impl TerminalInstance {
 mod tests {
     use super::TerminalInstance;
 
-    #[cfg(unix)]
+    // /bin/sh has no OSC 9 integration; the cwd update this asserts rides
+    // on the Linux /proc/<pid>/cwd fallback, which no other Unix has.
+    #[cfg(target_os = "linux")]
     #[test]
     fn poll_cwd_reads_the_shell_process_directory() {
         let mut instance = TerminalInstance::create(
