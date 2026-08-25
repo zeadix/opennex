@@ -439,9 +439,17 @@ jobs:
           fi
           printf '%s' "$OPENNEX_UPDATE_SIGNING_KEY" > /tmp/signing-key.pem
           openssl pkeyutl -sign -inkey /tmp/signing-key.pem -rawin \
-            -in deploy/latest.json -out deploy/latest.json.sig
+            -in deploy/latest.json | base64 -w 0 > deploy/latest.json.sig
           rm -f /tmp/signing-key.pem
-          echo "signature bytes: $(wc -c < deploy/latest.json.sig)"
+          # Self-check: verify with the COMMITTED public key (the one
+          # embedded in client binaries) BEFORE anything is uploaded —
+          # a format mismatch here would brick every client's update.
+          openssl pkeyutl -verify \
+            -inkey research/formalization/audit/update-signing-pub.pem \
+            -pubin -rawin -in deploy/latest.json \
+            -sigfile <(base64 -d deploy/latest.json.sig) \
+            || { echo "::error::signature self-check failed"; exit 1; }
+          echo "signature ok: $(wc -c < deploy/latest.json.sig) base64 chars -> $(base64 -d deploy/latest.json.sig | wc -c) raw bytes"
 
       - name: Upload latest.json to R2
         env:
