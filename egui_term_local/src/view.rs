@@ -73,12 +73,6 @@ pub struct TerminalViewState {
     /// terminal must keep ignoring pointer events or the movement
     /// re-arms text selection mid-drag.
     scrollbar_session: bool,
-    /// Held-back left press inside mouse-reporting TUIs. The gesture is
-    /// ambiguous until the pointer moves: an in-place release is a CLICK
-    /// (forwarded to the app as press+release), movement of >= 1 cell
-    /// resolves to a LOCAL text-selection drag (normal-terminal drag
-    /// select). See process_left_button / process_mouse_move.
-    pending_press: Option<(egui::Pos2, TerminalGridPoint)>,
     /// Pending size while layout is still changing (drag).
     pending_cols: u16,
     pending_rows: u16,
@@ -1019,6 +1013,13 @@ fn should_process_pointer_button(
     pointer_inside || (!pressed && was_dragged)
 }
 
+/// Routing decision for left-button events: with the app tracking the
+/// mouse and no Shift held, the event belongs to the app (xterm
+/// semantics); Shift forces the local-selection escape hatch.
+fn left_button_to_app(terminal_mode: TermMode, modifiers: &Modifiers) -> bool {
+    terminal_mode.intersects(TermMode::MOUSE_MODE) && !modifiers.shift
+}
+
 fn process_left_button(
     state: &mut TerminalViewState,
     layout: &Response,
@@ -1029,51 +1030,19 @@ fn process_left_button(
     pressed: bool,
 ) -> Vec<InputAction> {
     let terminal_mode = backend.last_content().terminal_mode;
-    if terminal_mode.intersects(TermMode::MOUSE_MODE) {
-        if pressed {
-            // Hold the press back: click vs drag-select is decided by
-            // whether the pointer leaves its cell (see process_mouse_move).
-            state.pending_press =
-                Some((position, state.current_mouse_position_on_grid));
-            return Vec::new();
-        }
-        // Release inside mouse mode.
-        if let Some((_, start_grid)) = state.pending_press.take() {
-            if start_grid == state.current_mouse_position_on_grid {
-                // In-place release = a CLICK: hand press+release to the
-                // app so TUI buttons/toggles keep working.
-                return vec![
-                    InputAction::BackendCall(BackendCommand::MouseReport(
-                        MouseButton::LeftButton,
-                        *modifiers,
-                        start_grid,
-                        true,
-                    )),
-                    InputAction::BackendCall(BackendCommand::MouseReport(
-                        MouseButton::LeftButton,
-                        *modifiers,
-                        start_grid,
-                        false,
-                    )),
-                ];
-            }
-            // A resolved local-selection drag: the App-level auto-copy
-            // hook already ran this frame (frame start, selection still
-            // present), so now mirror the mouse-reporting app convention —
-            // the highlight disappears on release instead of staying
-            // pinned over content the app may redraw at any moment.
-            return vec![
-                process_left_button_released(
-                    state,
-                    layout,
-                    backend,
-                    bindings_layout,
-                    position,
-                    modifiers,
-                ),
-                InputAction::BackendCall(BackendCommand::ClearSelection),
-            ];
-        }
+    // Standard xterm semantics: when the application requested mouse
+    // tracking, the mouse belongs to the APP — press/drag/release are
+    // delivered as reports and the app implements its own selection,
+    // copy and highlight clearing (exactly like system terminals).
+    // Shift is the industry-standard escape hatch (Alacritty/kitty/WT):
+    // it bypasses reporting and selects locally.
+    if left_button_to_app(terminal_mode, modifiers) {
+        return vec![InputAction::BackendCall(BackendCommand::MouseReport(
+            MouseButton::LeftButton,
+            *modifiers,
+            state.current_mouse_position_on_grid,
+            pressed,
+        ))];
     }
     if pressed {
         vec![process_left_button_pressed(state, layout, position)]
@@ -1166,36 +1135,37 @@ fn process_mouse_move(
 
     let mut actions = vec![];
 
-    // A held-back press (mouse-mode TUI): resolve click vs drag-select.
-    // Any movement of >= 1 cell turns the gesture into a LOCAL text
-    // selection that starts at the ORIGINAL press point — this is what
-    // makes drag-select feel like a normal terminal inside TUI apps.
-    if let Some((start_px, start_grid)) = state.pending_press {
-        if start_grid != state.current_mouse_position_on_grid {
-            state.pending_press = None;
-            state.is_dragged = true;
-            return vec![
-                InputAction::BackendCall(BackendCommand::SelectStart(
-                    SelectionType::Simple,
-                    start_px.x - layout.rect.min.x,
-                    start_px.y - layout.rect.min.y,
-                )),
-                InputAction::BackendCall(BackendCommand::SelectUpdate(
-                    cursor_x, cursor_y,
-                )),
-            ];
-        }
-        // Same cell: keep holding the gesture (also swallows hover
-        // motion reports mid-click so the app sees no jitter).
-        return vec![];
-    }
-
-    // While a LOCAL selection drag is in flight it owns the pointer:
-    // motion must update the selection, never leak to the app as drag
-    // reports.
+    // Pointer motion routing:
+    //  * primary button held (drag) — if the app tracks mouse motion and
+    //    Shift is NOT held, forward drag reports so TUIs can implement
+    //    their own selection (opencode etc.); otherwise update the LOCAL
+    //    selection.
+    //  * no button — with any-motion tracking (1003), hover motion is
+    //    reported too; otherwise nothing to do.
+    let terminal_mode = terminal_content.terminal_mode;
+    let motion_to_app =
+        terminal_mode.intersects(TermMode::MOUSE_MODE) && !modifiers.shift;
     if state.is_dragged {
-        actions.push(InputAction::BackendCall(BackendCommand::SelectUpdate(
-            cursor_x, cursor_y,
+        if motion_to_app {
+            actions.push(InputAction::BackendCall(
+                BackendCommand::MouseReport(
+                    MouseButton::LeftMove,
+                    *modifiers,
+                    state.current_mouse_position_on_grid,
+                    true,
+                ),
+            ));
+        } else {
+            actions.push(InputAction::BackendCall(
+                BackendCommand::SelectUpdate(cursor_x, cursor_y),
+            ));
+        }
+    } else if motion_to_app && terminal_mode.contains(TermMode::MOUSE_MOTION) {
+        actions.push(InputAction::BackendCall(BackendCommand::MouseReport(
+            MouseButton::LeftMove,
+            *modifiers,
+            state.current_mouse_position_on_grid,
+            true,
         )));
     }
 
@@ -1236,6 +1206,25 @@ mod wheel_tests {
     use super::*;
     use crate::backend::TerminalBackend;
     use crate::BackendSettings;
+
+    #[test]
+    fn left_button_routes_to_app_under_mouse_tracking() {
+        use egui::Modifiers;
+        let tracking = TermMode::MOUSE_REPORT_CLICK;
+        // Plain click/drag in a mouse-tracking TUI goes to the app...
+        assert!(super::left_button_to_app(tracking, &Modifiers::NONE));
+        assert!(super::left_button_to_app(
+            TermMode::MOUSE_MOTION,
+            &Modifiers::NONE
+        ));
+        // ...Shift always forces LOCAL selection (industry escape hatch)...
+        assert!(!super::left_button_to_app(tracking, &Modifiers::SHIFT));
+        // ...and without any tracking the terminal selects locally.
+        assert!(!super::left_button_to_app(
+            TermMode::empty(),
+            &Modifiers::NONE
+        ));
+    }
 
     #[test]
     fn wheel_reports_to_app_when_mouse_mode_enabled() {
