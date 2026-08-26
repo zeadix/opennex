@@ -1512,9 +1512,13 @@ pub struct App {
     /// history menu; the floating submenu stays open while the pointer
     /// is inside either this or the submenu itself.
     fav_column_rect: egui::Rect,
-    /// In-flight drag of an ITEM inside an expanded folder: (folder,
-    /// source index).
+    /// In-flight drag of a submenu COMMAND: (source folder id, source
+    /// index).
     fav_item_drag: Option<(i64, usize)>,
+    /// Drop target for a submenu drag: (folder id, index, past-center).
+    /// The folder may differ from the source — dropping onto another
+    /// folder's submenu MOVES the command there.
+    fav_item_drop: Option<(i64, usize, bool)>,
     /// Item drop target (folder, index, after-midpoint).
     fav_item_drag_dst: Option<(i64, usize, bool)>,
     /// Name dialog for create/rename: (folder id or None for create,
@@ -1901,6 +1905,7 @@ impl App {
             fav_folder_rects: Vec::new(),
             fav_column_rect: egui::Rect::NOTHING,
             fav_item_drag: None,
+            fav_item_drop: None,
             fav_item_drag_dst: None,
             fav_name_dialog: None,
             fav_delete_confirm: None,
@@ -4751,10 +4756,33 @@ impl App {
                             );
                             folder_row_index.push((fid, row_rect));
                             self.fav_folder_rects.push(row_rect);
+                            // During a submenu ITEM drag, hovering another
+                            // folder does NOT switch the submenu — the
+                            // folder becomes the cross-folder drop target.
+                            if row_hover {
+                                if let Some((src_fid, _src_idx)) = self.fav_item_drag {
+                                    if fid != src_fid {
+                                        self.fav_item_drop = Some((fid, usize::MAX, true));
+                                        // Highlight the whole folder row as
+                                        // the move target.
+                                        ui.painter().rect_filled(
+                                            row_rect,
+                                            0.0,
+                                            egui::Color32::from_rgba_unmultiplied(
+                                                sel_bg.r(),
+                                                sel_bg.g(),
+                                                sel_bg.b(),
+                                                120,
+                                            ),
+                                        );
+                                    }
+                                }
+                            }
                             // Hover over a folder row IMMEDIATELY opens
                             // its floating command list (native-menu feel;
                             // user requirement — no click needed).
                             if row_hover
+                                && self.fav_item_drag.is_none()
                                 && self
                                     .fav_submenu
                                     .as_ref()
@@ -5469,6 +5497,82 @@ impl App {
                                 return;
                             }
                             self.fav_submenu = Some((fid, anchor, fresh, kb_sel));
+                        }
+                    }
+                }
+
+                // ---- In-flight item drag: insertion line + drop ----
+                if let Some((src_fid, src_idx)) = self.fav_item_drag {
+                    let pointer = ui.input(|i| i.pointer.hover_pos());
+                    let released = ui.input(|i| i.pointer.any_released());
+                    if released {
+                        if let Some((dst_fid, dst_idx, after)) = self.fav_item_drop.take() {
+                            if dst_fid == src_fid {
+                                // Same folder: reorder.
+                                let mut items = self.history_db.fav_items(src_fid);
+                                if src_idx < items.len() {
+                                    let dst =
+                                        drag_drop_destination(src_idx, dst_idx, after, items.len());
+                                    if src_idx != dst {
+                                        let moved = items.remove(src_idx);
+                                        items.insert(dst, moved);
+                                        self.history_db.fav_item_reorder(src_fid, &items);
+                                    }
+                                }
+                            } else {
+                                // Different folder (or folder-row drop):
+                                // MOVE the command, appended at the end.
+                                let items = self.history_db.fav_items(src_fid);
+                                if let Some(cmd) = items.get(src_idx).cloned() {
+                                    if dst_fid == src_fid && dst_idx == usize::MAX {
+                                        // Dropped back onto its own folder
+                                        // row: reorder to the end.
+                                        let mut items = items.clone();
+                                        if src_idx < items.len() {
+                                            let moved = items.remove(src_idx);
+                                            items.push(moved);
+                                            self.history_db.fav_item_reorder(src_fid, &items);
+                                        }
+                                    } else {
+                                        self.history_db.fav_item_move(src_fid, dst_fid, &cmd);
+                                    }
+                                }
+                            }
+                            self.fav_folders = self.history_db.fav_folders();
+                            // Refresh the open submenu snapshot.
+                            let fresh = self.history_db.fav_items(fid);
+                            if fresh.is_empty() {
+                                self.fav_submenu = None;
+                            } else {
+                                let sel = kb_sel.unwrap_or(0).min(fresh.len() - 1);
+                                self.fav_submenu = Some((fid, anchor, fresh, Some(sel)));
+                            }
+                        }
+                        self.fav_item_drag = None;
+                    } else if let Some(p) = pointer {
+                        // Target: a row inside THIS submenu. (Only one
+                        // submenu is visible at a time; a cross-folder
+                        // drop is resolved by the folder-column hover
+                        // switching the submenu — see below.)
+                        if rect.contains(p) {
+                            let idx = (((p.y - rect.min.y) / row_h) as usize)
+                                .min(items.len().saturating_sub(1));
+                            let after = p.y > rect.min.y + idx as f32 * row_h + row_h / 2.0;
+                            self.fav_item_drop = Some((fid, idx, after));
+                            let iy = if after {
+                                rect.min.y + (idx + 1) as f32 * row_h
+                            } else {
+                                rect.min.y + idx as f32 * row_h
+                            };
+                            ui.painter().line_segment(
+                                [
+                                    egui::pos2(rect.min.x + 2.0, iy),
+                                    egui::pos2(rect.max.x - 2.0, iy),
+                                ],
+                                egui::Stroke::new(2.0, sel),
+                            );
+                        } else {
+                            self.fav_item_drop = None;
                         }
                     }
                 }

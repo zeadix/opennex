@@ -444,6 +444,42 @@ impl HistoryDb {
         );
     }
 
+    /// Move a command from one folder to another, appended at the END
+    /// of the destination (next sort_key). Used by the submenu's
+    /// cross-folder drag.
+    pub fn fav_item_move(&self, from_folder: i64, to_folder: i64, command: &str) {
+        if from_folder == to_folder {
+            return;
+        }
+        let Ok(tx) = self.conn.unchecked_transaction() else {
+            return;
+        };
+        let next_key: i64 = tx
+            .query_row(
+                "SELECT COALESCE(MAX(sort_key), 0) + 1 FROM favorite_commands WHERE folder_id = ?1",
+                params![to_folder],
+                |r| r.get(0),
+            )
+            .unwrap_or(1);
+        let ok = tx
+            .execute(
+                "DELETE FROM favorite_commands WHERE folder_id = ?1 AND command = ?2",
+                params![from_folder, command],
+            )
+            .is_ok()
+            && tx
+                .execute(
+                    "INSERT INTO favorite_commands (command, folder_id, sort_key) VALUES (?1, ?2, ?3)",
+                    params![command, to_folder, next_key],
+                )
+                .is_ok();
+        if ok {
+            let _ = tx.commit();
+        } else {
+            let _ = tx.rollback();
+        }
+    }
+
     /// Persist a new drag order for a folder's items by rewriting
     /// sort_key to 1..=N in the given order.
     pub fn fav_item_reorder(&self, folder_id: i64, ordered: &[String]) {
@@ -674,6 +710,16 @@ mod tests {
         // Delete cascades the items away.
         assert!(db.fav_folder_delete(fid));
         assert!(db.fav_items(fid).is_empty());
+
+        // Cross-folder move appends at the destination's end.
+        let fid3 = db.fav_folder_create("third").unwrap();
+        db.fav_item_move(fid2, fid3, "make -j8");
+        assert!(!db.fav_items(fid2).contains(&"make -j8".to_string()));
+        let third = db.fav_items(fid3);
+        assert_eq!(third.last().map(String::as_str), Some("make -j8"));
+        // Moving within the same folder is a no-op.
+        db.fav_item_move(fid3, fid3, "make -j8");
+        assert_eq!(db.fav_items(fid3), third);
 
         // The default folder can never be deleted.
         let (def_id, _) = db
