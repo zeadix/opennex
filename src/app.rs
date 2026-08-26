@@ -4291,7 +4291,7 @@ impl App {
         let menu_alt = app.menu_alt_bg.to_egui();
         let menu_fg = app.menu_fg.to_egui();
         let weak = app.weak_text.to_egui();
-        let border = app.sidebar_border.to_egui();
+        let _border = app.sidebar_border.to_egui();
         let sel_bg = app.active.to_egui();
         let font_size = self.active_theme.typography.menu_font_size;
 
@@ -5381,13 +5381,10 @@ impl App {
                 let weak = app.weak_text.to_egui();
                 let sel = app.active.to_egui();
                 let border = app.sidebar_border.to_egui();
-                ui.painter().rect_filled(rect, 4.0, bg);
-                ui.painter().rect_stroke(
-                    rect,
-                    4.0,
-                    egui::Stroke::new(1.0, border),
-                    egui::StrokeKind::Outside,
-                );
+                // Flat, square, borderless — visually a CONTINUATION of
+                // the folder list sitting right next to it (same style as
+                // the favorites column), not a separate popup.
+                ui.painter().rect_filled(rect, 0.0, bg);
                 for (idx, cmd) in items.iter().enumerate() {
                     let row = egui::Rect::from_min_size(
                         egui::pos2(rect.min.x, rect.min.y + idx as f32 * row_h),
@@ -6018,10 +6015,17 @@ impl eframe::App for App {
                                     }
                                 }
                             } else if nav.fav_focused {
-                                // Collapse any open submenu; hand focus
-                                // back to the main list.
-                                self.fav_submenu = None;
-                                nav.fav_focused = false;
+                                if self.fav_submenu.is_some() {
+                                    // Left from an OPEN submenu: just close
+                                    // the submenu — the cursor STAYS on the
+                                    // folder list (it does NOT jump back to
+                                    // the history list).
+                                    self.fav_submenu = None;
+                                } else {
+                                    // Left from the bare folder list:
+                                    // hand focus back to the main list.
+                                    nav.fav_focused = false;
+                                }
                             }
                         }
                     }
