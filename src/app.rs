@@ -1508,6 +1508,10 @@ pub struct App {
     fav_drag_dst: Option<(usize, bool)>,
     /// Folder row rects for hit-testing during a drag.
     fav_folder_rects: Vec<egui::Rect>,
+    /// Full rect of the favorites column (folders + items area) in the
+    /// history menu; the floating submenu stays open while the pointer
+    /// is inside either this or the submenu itself.
+    fav_column_rect: egui::Rect,
     /// In-flight drag of an ITEM inside an expanded folder: (folder,
     /// source index).
     fav_item_drag: Option<(i64, usize)>,
@@ -1895,6 +1899,7 @@ impl App {
             fav_drag_src: None,
             fav_drag_dst: None,
             fav_folder_rects: Vec::new(),
+            fav_column_rect: egui::Rect::NOTHING,
             fav_item_drag: None,
             fav_item_drag_dst: None,
             fav_name_dialog: None,
@@ -4629,14 +4634,12 @@ impl App {
                         .memory(|m| m.data.get_temp(col_scroll_id).unwrap_or(0))
                         .min(max_col_scroll);
 
-                    ui.painter().rect_filled(
-                        egui::Rect::from_min_size(
-                            egui::pos2(fx0, frame_rect.min.y),
-                            egui::vec2(col_w, rows_h + footer_h),
-                        ),
-                        0.0,
-                        menu_bg,
+                    let col_full_rect = egui::Rect::from_min_size(
+                        egui::pos2(fx0, frame_rect.min.y),
+                        egui::vec2(col_w, rows_h + footer_h),
                     );
+                    self.fav_column_rect = col_full_rect;
+                    ui.painter().rect_filled(col_full_rect, 0.0, menu_bg);
 
                     // --- "New folder" button at the column top ---
                     let new_txt = t.fav_new_folder.clone();
@@ -4752,32 +4755,22 @@ impl App {
                             );
                             ui.set_clip_rect(frame_rect.expand(1.0));
 
-                            let hresp = ui.interact(
+                            let _hresp = ui.interact(
                                 row_rect,
                                 egui::Id::new(("fav_folder", tab.as_str(), fid)),
                                 egui::Sense::click_and_drag(),
                             );
                             folder_row_index.push((fid, row_rect));
                             self.fav_folder_rects.push(row_rect);
-                            if hresp.clicked() {
-                                // Left-click also toggles the floating
-                                // submenu (anchored beside the folder row).
-                                if has_submenu {
-                                    self.fav_submenu = None;
-                                } else {
-                                    let items = folder_items[fidx].clone();
-                                    if !items.is_empty() {
-                                        self.fav_submenu = Some((
-                                            fid,
-                                            egui::pos2(row_rect.max.x + 4.0, row_rect.min.y),
-                                            items,
-                                            None,
-                                        ));
-                                    }
-                                }
-                            }
-                            if hresp.secondary_clicked() {
-                                // Right-click: same floating submenu.
+                            // Hover over a folder row IMMEDIATELY opens
+                            // its floating command list (native-menu feel;
+                            // user requirement — no click needed).
+                            if row_hover
+                                && self
+                                    .fav_submenu
+                                    .as_ref()
+                                    .is_none_or(|(sid, _, _, _)| *sid != fid)
+                            {
                                 let items = folder_items[fidx].clone();
                                 if !items.is_empty() {
                                     self.fav_submenu = Some((
@@ -5384,13 +5377,13 @@ impl App {
 
         // Click-outside detection happens on the layer below; the Area
         // itself only paints when the pointer stays inside.
+        let row_h = 20.0f32;
+        let w = 200.0f32; // same width as the favorites column
+        let h = items.len() as f32 * row_h;
         egui::Area::new(egui::Id::new("fav_submenu"))
             .order(egui::Order::Foreground)
             .fixed_pos(anchor)
             .show(ctx, |ui| {
-                let row_h = 20.0f32;
-                let w = 300.0f32;
-                let h = items.len() as f32 * row_h + 8.0;
                 let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, h), egui::Sense::click());
                 let app = &self.active_theme.app;
                 let bg = app.menu_bg.to_egui();
@@ -5407,9 +5400,15 @@ impl App {
                 );
                 for (idx, cmd) in items.iter().enumerate() {
                     let row = egui::Rect::from_min_size(
-                        egui::pos2(rect.min.x + 4.0, rect.min.y + 4.0 + idx as f32 * row_h),
-                        egui::vec2(w - 8.0, row_h),
+                        egui::pos2(rect.min.x, rect.min.y + idx as f32 * row_h),
+                        egui::vec2(w, row_h),
                     );
+
+                    let alt_col = app.menu_alt_bg.to_egui();
+                    if idx % 2 == 1 {
+                        ui.painter().rect_filled(row, 0.0, alt_col);
+                    }
+
                     let hovered =
                         row.contains(ui.input(|i| i.pointer.hover_pos()).unwrap_or_default());
                     let is_kb = kb_sel.is_some_and(|k| k == idx);
@@ -5445,29 +5444,22 @@ impl App {
                 let _ = weak;
             });
 
-        // Pointer outside the submenu -> close (like a real menu).
-        let pointer_inside = ctx.input(|i| {
-            i.pointer.hover_pos().is_some_and(|p| {
-                let w = 300.0f32;
-                let h = items.len() as f32 * 20.0 + 8.0;
-                egui::Rect::from_min_size(anchor, egui::vec2(w, h)).contains(p)
-            })
-        });
-        let clicked_outside = ctx.input(|i| {
-            i.pointer.any_click()
-                && i.pointer.hover_pos().is_none_or(|p| {
-                    !egui::Rect::from_min_size(
-                        anchor,
-                        egui::vec2(300.0, items.len() as f32 * 20.0 + 8.0),
-                    )
-                    .contains(p)
-                })
-        });
-        if clicked_outside {
+        // Close only when the pointer leaves BOTH the submenu AND the
+        // folder column region (moving from the folder row toward the
+        // submenu crosses empty space — closing there would make the
+        // submenu unhoverable). Esc also closes.
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
             self.fav_submenu = None;
             return;
         }
-        let _ = pointer_inside;
+        let hover = ctx.input(|i| i.pointer.hover_pos());
+        let sub_rect = egui::Rect::from_min_size(anchor, egui::vec2(w, h));
+        let col_rect = self.fav_column_rect;
+        let inside = hover.is_some_and(|p| sub_rect.contains(p) || col_rect.contains(p));
+        if !inside && ctx.input(|i| i.pointer.any_down()) {
+            self.fav_submenu = None;
+            return;
+        }
 
         // Keyboard: Up/Down move within the submenu; Enter sends.
         let (up, down, enter) = ctx.input(|i| {
@@ -8616,6 +8608,8 @@ impl eframe::App for App {
                                 terminal_focus_id: &mut self.terminal_focus_id,
                                 show_settings: self.show_settings,
                                 pw_popup_open: self.pw_popup.is_some(),
+                                fav_dialogs_open: self.fav_name_dialog.is_some()
+                                    || self.fav_delete_confirm.is_some(),
                                 auto_match: self.settings_edit.auto_match_command,
                                 terminal_view_rects: &mut self.terminal_view_rects,
                                 history_menu_just_closed: &mut self.history_menu_just_closed,
@@ -9327,6 +9321,8 @@ struct TerminalTabViewer<'a> {
     terminal_focus_id: &'a mut Option<egui::Id>,
     show_settings: bool,
     pw_popup_open: bool,
+    /// Favorite-folder dialogs open: the terminal must not steal focus.
+    fav_dialogs_open: bool,
     auto_match: bool,
     terminal_view_rects: &'a mut std::collections::HashMap<String, egui::Rect>,
     history_menu_just_closed: &'a mut std::collections::HashMap<String, bool>,
@@ -9472,7 +9468,11 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                 let hit = |ui: &egui::Ui, b: &ShortcutBinding| -> bool {
                     mk(b).is_some_and(|(key, mods)| ui.input_mut(|i| i.consume_key(mods, key)))
                 };
-                if is_focused && !self.show_settings && !self.pw_popup_open {
+                if is_focused
+                    && !self.show_settings
+                    && !self.pw_popup_open
+                    && !self.fav_dialogs_open
+                {
                     if let Some(b) = self.clipboard_binds.get("terminal_interrupt") {
                         if hit(ui, b) {
                             td.instance.write(&[0x03]);
@@ -9533,7 +9533,14 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                 // open, the terminal must NOT claim keyboard focus every
                 // frame — otherwise text inputs in the popups lose focus
                 // immediately after being clicked.
-                let terminal_may_focus = is_focused && !self.show_settings && !self.pw_popup_open;
+                // The favorite-folder name/delete dialogs need the same
+                // protection as the settings popups: without it the
+                // terminal re-claims keyboard focus every frame and the
+                // dialog's text field can never hold focus.
+                let terminal_may_focus = is_focused
+                    && !self.show_settings
+                    && !self.pw_popup_open
+                    && !self.fav_dialogs_open;
                 tv = tv.set_focus(terminal_may_focus);
                 // Override keys handled by app-level history UI
                 tv = tv.add_bindings(vec![
