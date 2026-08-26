@@ -43,7 +43,14 @@ mod imp {
         if !vswhere.is_file() {
             return None;
         }
+        // CREATE_NO_WINDOW: we are a GUI-subsystem process; spawning a
+        // console child without this flag makes Windows flash a native
+        // terminal window for EVERY probe (one per terminal tab created
+        // — the "ghost console windows" users reported at startup).
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         let out = std::process::Command::new(&vswhere)
+            .creation_flags(CREATE_NO_WINDOW)
             .args([
                 "-latest",
                 "-products",
@@ -79,7 +86,17 @@ mod imp {
         })
     }
 
+    /// Process-level cache: shell discovery probes the filesystem and
+    /// (for the VS developer prompt) runs vswhere — repeating that on
+    /// every new terminal tab both stalls the UI thread and (before the
+    /// no-window flag) flashed a console per probe. Shells don't appear
+    /// mid-process in practice; a restart refreshes the list.
     pub fn detect_shells() -> Vec<ShellOption> {
+        static CACHE: std::sync::OnceLock<Vec<ShellOption>> = std::sync::OnceLock::new();
+        CACHE.get_or_init(detect_shells_uncached).clone()
+    }
+
+    fn detect_shells_uncached() -> Vec<ShellOption> {
         let mut shells = Vec::new();
         // cmd.exe (COMSPEC) — always present.
         let comspec = std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".into());
