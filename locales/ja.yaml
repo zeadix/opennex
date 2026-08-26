@@ -198,6 +198,12 @@ terminal:
   fav_new_folder: フォルダー作成
   fav_new_title: フォルダー作成
   fav_rename_title: フォルダー名変更
+  fav_btn_add_cmd: コマンド追加
+  fav_btn_assemble: 組み合わせ
+  fav_btn_delete: 削除
+  fav_btn_rename: 名前変更
+  fav_cmd_dialog_label: 'コマンド:'
+  fav_cmd_dialog_title: コマンド追加
 theme:
   light: ライト
   dark: ダーク

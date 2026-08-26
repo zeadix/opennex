@@ -198,6 +198,12 @@ terminal:
   fav_new_folder: 新增收藏夾
   fav_new_title: 新增收藏夾
   fav_rename_title: 重新命名收藏夾
+  fav_btn_add_cmd: 新增指令
+  fav_btn_assemble: 組合指令
+  fav_btn_delete: 刪除
+  fav_btn_rename: 修改
+  fav_cmd_dialog_label: '指令:'
+  fav_cmd_dialog_title: 新增指令
 theme:
   light: 淺色
   dark: 深色

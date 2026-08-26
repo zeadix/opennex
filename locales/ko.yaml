@@ -198,6 +198,12 @@ terminal:
   fav_new_folder: 새 폴더
   fav_new_title: 새 폴더
   fav_rename_title: 이름 바꾸기
+  fav_btn_add_cmd: 명령 추가
+  fav_btn_assemble: 조립
+  fav_btn_delete: 삭제
+  fav_btn_rename: 이름 바꾸기
+  fav_cmd_dialog_label: '명령:'
+  fav_cmd_dialog_title: 명령 추가
 theme:
   light: 밝게
   dark: 어둡게

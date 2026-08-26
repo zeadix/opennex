@@ -198,6 +198,12 @@ terminal:
   fav_new_folder: Neuer Ordner
   fav_new_title: Neuer Ordner
   fav_rename_title: Ordner umbenennen
+  fav_btn_add_cmd: Befehl hinzufügen
+  fav_btn_assemble: Zusammenfügen
+  fav_btn_delete: Löschen
+  fav_btn_rename: Umbenennen
+  fav_cmd_dialog_label: 'Befehl:'
+  fav_cmd_dialog_title: Befehl hinzufügen
 theme:
   light: Hell
   dark: Dunkel

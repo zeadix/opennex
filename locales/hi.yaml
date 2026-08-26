@@ -198,6 +198,12 @@ terminal:
   fav_new_folder: नया फ़ोल्डर
   fav_new_title: नया फ़ोल्डर
   fav_rename_title: नाम बदलें
+  fav_btn_add_cmd: जोड़ें
+  fav_btn_assemble: जोड़ें
+  fav_btn_delete: हटाएँ
+  fav_btn_rename: नाम बदलें
+  fav_cmd_dialog_label: 'कमांड:'
+  fav_cmd_dialog_title: नया कमांड
 theme:
   light: हल्का
   dark: गहरा

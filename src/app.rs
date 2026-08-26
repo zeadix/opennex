@@ -622,6 +622,7 @@ fn global_shortcuts_allowed(app: &App) -> bool {
         && app.pw_popup.is_none()
         && app.unlock_popup.is_none()
         && app.fav_name_dialog.is_none()
+        && app.fav_cmd_dialog.is_none()
         && app.fav_delete_confirm.is_none()
         && app.binding_recording.is_none()
         && app.close_confirm_panel.is_none()
@@ -1524,6 +1525,13 @@ pub struct App {
     /// Name dialog for create/rename: (folder id or None for create,
     /// buffer). Rendered as a small modal like the theme dialogs.
     fav_name_dialog: Option<(Option<i64>, String)>,
+    /// Add-command dialog for a folder: (folder id, command buffer).
+    fav_cmd_dialog: Option<(i64, String)>,
+    /// A HISTORY entry being dragged onto a favorites folder: the
+    /// command text (history is NOT removed — the drop COPIES it).
+    hist_drag_cmd: Option<String>,
+    /// Folder id under a history-drag (the drop target).
+    hist_drop_folder: Option<i64>,
     /// Delete-folder confirmation target.
     fav_delete_confirm: Option<(i64, String)>,
 }
@@ -1908,6 +1916,9 @@ impl App {
             fav_item_drop: None,
             fav_item_drag_dst: None,
             fav_name_dialog: None,
+            fav_cmd_dialog: None,
+            hist_drag_cmd: None,
+            hist_drop_folder: None,
             fav_delete_confirm: None,
         };
 
@@ -4496,10 +4507,38 @@ impl App {
                     let resp = ui.interact(
                         row,
                         egui::Id::new(("hist_row", tab.as_str(), i)),
-                        egui::Sense::click(),
+                        egui::Sense::click_and_drag(),
                     );
                     if resp.clicked() {
                         entry_clicked = Some(i);
+                    }
+                    // Drag a history entry onto a favorites FOLDER to
+                    // copy it there (history keeps its entry). Presses
+                    // in the trailing action gutter don't start drags.
+                    let press = ui.input(|i| i.pointer.press_origin());
+                    let in_action_gutter =
+                        press.is_some_and(|p| p.x > row.max.x - 120.0 && row.contains(p));
+                    if resp.contains_pointer()
+                        && !in_action_gutter
+                        && ui.input(|i| i.pointer.primary_down())
+                        && self.hist_drag_cmd.is_none()
+                        && self.fav_item_drag.is_none()
+                    {
+                        if let Some(cmd) = nav.entries.get(i).cloned() {
+                            self.hist_drag_cmd = Some(cmd);
+                        }
+                    }
+                    // Release anywhere ends a history drag; if a folder
+                    // target was registered, COPY the command in.
+                    if self.hist_drag_cmd.is_some() && ui.input(|i| i.pointer.any_released()) {
+                        if let (Some(cmd), Some(fid)) =
+                            (self.hist_drag_cmd.take(), self.hist_drop_folder.take())
+                        {
+                            self.history_db.fav_add_to(fid, &cmd);
+                            self.fav_folders = self.history_db.fav_folders();
+                        }
+                        self.hist_drag_cmd = None;
+                        self.hist_drop_folder = None;
                     }
                     // Per-row actions (manual menu only): hover or
                     // keyboard selection shows 收藏 / 删除 on the right.
@@ -4756,6 +4795,25 @@ impl App {
                             );
                             folder_row_index.push((fid, row_rect));
                             self.fav_folder_rects.push(row_rect);
+                            // A HISTORY entry dragged over a folder row:
+                            // highlight + register the drop target; the
+                            // drop COPIES the command into this folder.
+                            if row_hover
+                                && self.hist_drag_cmd.is_some()
+                                && self.fav_item_drag.is_none()
+                            {
+                                self.hist_drop_folder = Some(fid);
+                                ui.painter().rect_filled(
+                                    row_rect,
+                                    0.0,
+                                    egui::Color32::from_rgba_unmultiplied(
+                                        sel_bg.r(),
+                                        sel_bg.g(),
+                                        sel_bg.b(),
+                                        120,
+                                    ),
+                                );
+                            }
                             // During a submenu ITEM drag, hovering another
                             // folder does NOT switch the submenu — the
                             // folder becomes the cross-folder drop target.
@@ -4802,24 +4860,35 @@ impl App {
                             }
                             // hover 3 buttons: assemble / rename / delete
                             if row_hover && self.fav_drag_src.is_none() {
-                                let mut bx = row_rect.max.x - 4.0;
+                                let mut bx = row_rect.max.x - 8.0;
                                 let mut assemble_clicked = false;
+                                let mut add_cmd_clicked = false;
                                 let mut rename_clicked = false;
                                 let mut delete_clicked = false;
                                 let is_default_folder =
                                     name == crate::history_db::HistoryDb::DEFAULT_FAVORITE_FOLDER;
-                                let mut btns: Vec<(&str, &str, bool)> =
-                                    vec![("✎", "ren", false), ("⚡", "asm", false)];
+                                // TEXT buttons, same style as the history
+                                // rows' 收藏/删除 (user request — no icons).
+                                let act_font = egui::FontId::proportional(11.0);
+                                let t = &self.texts.terminal;
+                                // (label, id_ext, is_danger) — delete only
+                                // for non-default folders.
+                                let mut btns: Vec<(String, &str, bool)> = vec![
+                                    (t.fav_btn_rename.clone(), "ren", false),
+                                    (t.fav_btn_assemble.clone(), "asm", false),
+                                    (t.fav_btn_add_cmd.clone(), "add", false),
+                                ];
                                 if !is_default_folder {
-                                    // The default folder is protected —
-                                    // no delete affordance at all.
-                                    btns.push(("🗑", "del", true));
+                                    btns.push((t.fav_btn_delete.clone(), "del", true));
                                 }
-                                for (glyph, id_ext, is_danger) in btns {
-                                    let bw = 20.0;
+                                for (label, id_ext, is_danger) in &btns {
+                                    let lg = ui.fonts(|f| {
+                                        f.layout_no_wrap(label.clone(), act_font.clone(), weak)
+                                    });
+                                    let pad = 6.0;
                                     let brect = egui::Rect::from_min_max(
-                                        egui::pos2(bx - bw, row_rect.center().y - 9.0),
-                                        egui::pos2(bx, row_rect.center().y + 9.0),
+                                        egui::pos2(bx - lg.size().x, row_rect.center().y - 8.0),
+                                        egui::pos2(bx, row_rect.center().y + 8.0),
                                     );
                                     let bresp = ui.interact(
                                         brect,
@@ -4832,7 +4901,7 @@ impl App {
                                         egui::Sense::click(),
                                     );
                                     let bcol = if bresp.contains_pointer() {
-                                        if is_danger {
+                                        if *is_danger {
                                             app.danger.to_egui()
                                         } else {
                                             app.accent.to_egui()
@@ -4840,24 +4909,17 @@ impl App {
                                     } else {
                                         weak
                                     };
-                                    let bg2 = ui.fonts(|f| {
-                                        f.layout_no_wrap(
-                                            glyph.to_string(),
-                                            egui::FontId::proportional(11.0),
-                                            bcol,
-                                        )
-                                    });
-                                    ui.painter().galley(
-                                        brect.center() - bg2.size() / 2.0,
-                                        bg2,
-                                        bcol,
-                                    );
-                                    match id_ext {
+                                    let lw = lg.size().x;
+                                    ui.painter()
+                                        .galley(brect.center() - lg.size() / 2.0, lg, bcol);
+                                    let _ = lw;
+                                    match *id_ext {
                                         "asm" => assemble_clicked |= bresp.clicked(),
+                                        "add" => add_cmd_clicked |= bresp.clicked(),
                                         "ren" => rename_clicked |= bresp.clicked(),
                                         _ => delete_clicked |= bresp.clicked(),
                                     }
-                                    bx -= bw + 2.0;
+                                    bx -= lw + pad;
                                 }
                                 if assemble_clicked {
                                     let cmds = self.history_db.fav_items(fid);
@@ -4874,6 +4936,9 @@ impl App {
                                             }
                                         }
                                     }
+                                }
+                                if add_cmd_clicked {
+                                    self.fav_cmd_dialog = Some((fid, String::new()));
                                 }
                                 if rename_clicked {
                                     self.fav_name_dialog =
@@ -5452,45 +5517,64 @@ impl App {
                     let rresp = ui.interact(
                         row,
                         egui::Id::new(("fav_sub_row", fid, idx)),
-                        egui::Sense::click(),
+                        egui::Sense::click_and_drag(),
                     );
+                    // Drag start — but NEVER when the press lands in the
+                    // trailing delete gutter (that click belongs to the
+                    // text button registered below).
+                    let press = ui.input(|i| i.pointer.press_origin());
+                    let in_delete_gutter =
+                        press.is_some_and(|p| p.x > row.max.x - 60.0 && row.contains(p));
+                    if rresp.contains_pointer()
+                        && !in_delete_gutter
+                        && ui.input(|i| i.pointer.primary_down())
+                        && self.fav_item_drag.is_none()
+                    {
+                        self.fav_item_drag = Some((fid, idx));
+                    }
                     if rresp.clicked() {
                         send = Some(cmd.clone());
                     }
                     if rresp.hovered() {
                         new_sel = Some(idx);
                     }
-                    // Delete button (hover or keyboard-selected row),
-                    // mirroring the history list's row actions.
+                    // Delete button (hover or keyboard-selected row):
+                    // TEXT button matching the history rows' 删除; the
+                    // drag start excludes this trailing gutter so the
+                    // click is never swallowed by the row's drag sense.
                     if hovered || is_kb {
+                        let del_txt = self.texts.terminal.delete.clone();
+                        let dg = ui.fonts(|f| {
+                            f.layout_no_wrap(
+                                del_txt.clone(),
+                                egui::FontId::proportional(11.0),
+                                weak,
+                            )
+                        });
+                        let dw = dg.size().x;
                         let drect = egui::Rect::from_min_max(
-                            egui::pos2(row.max.x - 20.0, row.center().y - 9.0),
-                            egui::pos2(row.max.x - 4.0, row.center().y + 9.0),
+                            egui::pos2(row.max.x - 8.0 - dw, row.center().y - 8.0),
+                            egui::pos2(row.max.x - 8.0, row.center().y + 8.0),
                         );
                         let dresp = ui.interact(
                             drect,
                             egui::Id::new(("fav_sub_del", fid, idx)),
                             egui::Sense::click(),
                         );
-                        let dcol = if dresp.contains_pointer() {
+                        let dhot = if dresp.contains_pointer() {
                             app.danger.to_egui()
                         } else {
                             weak
                         };
-                        let dg = ui.fonts(|f| {
-                            f.layout_no_wrap(
-                                "×".to_string(),
-                                egui::FontId::proportional(12.0),
-                                dcol,
-                            )
+                        let dg2 = ui.fonts(|f| {
+                            f.layout_no_wrap(del_txt, egui::FontId::proportional(11.0), dhot)
                         });
                         ui.painter()
-                            .galley(drect.center() - dg.size() / 2.0, dg, dcol);
+                            .galley(drect.center() - dg2.size() / 2.0, dg2, dhot);
+                        let _ = dg;
                         if dresp.clicked() {
                             self.history_db.fav_item_remove(fid, cmd);
                             self.fav_folders = self.history_db.fav_folders();
-                            // Refresh the open submenu's items; an empty
-                            // folder closes the whole menu.
                             let fresh = self.history_db.fav_items(fid);
                             if fresh.is_empty() {
                                 self.fav_submenu = None;
@@ -5703,6 +5787,62 @@ impl App {
         }
     }
 
+    /// Add-command dialog: text input, Enter confirms, Esc cancels.
+    /// The command is appended to the folder on confirm.
+    fn render_fav_cmd_dialog(&mut self, ctx: &egui::Context) {
+        if self.fav_cmd_dialog.is_none() {
+            return;
+        }
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+            self.fav_cmd_dialog = None;
+            return;
+        }
+        let mut confirm = false;
+        let mut cancel = false;
+        egui::Window::new(self.texts.terminal.fav_cmd_dialog_title.clone())
+            .id(egui::Id::new("fav_cmd_dialog"))
+            .fixed_pos(screen_center(ctx) - egui::vec2(160.0, 40.0))
+            .resizable(false)
+            .collapsible(false)
+            .show(ctx, |ui| {
+                ui.set_min_width(320.0);
+                ui.add_space(4.0);
+                ui.label(self.texts.terminal.fav_cmd_dialog_label.clone());
+                let resp = ui.text_edit_singleline(&mut self.fav_cmd_dialog.as_mut().unwrap().1);
+                if !resp.has_focus() {
+                    resp.request_focus();
+                }
+                let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui.button(self.texts.theme_editor.confirm.clone()).clicked() {
+                        confirm = true;
+                    }
+                    if ui.button(self.texts.theme_editor.cancel.clone()).clicked() {
+                        cancel = true;
+                    }
+                });
+                if enter {
+                    confirm = true;
+                }
+            });
+        if confirm || cancel {
+            if confirm {
+                if let Some((fid, cmd)) = self.fav_cmd_dialog.take() {
+                    let cmd = cmd.trim().to_string();
+                    if cmd.is_empty() {
+                        self.fav_cmd_dialog = None;
+                    } else {
+                        self.history_db.fav_add_to(fid, &cmd);
+                        self.fav_folders = self.history_db.fav_folders();
+                    }
+                }
+            } else {
+                self.fav_cmd_dialog = None;
+            }
+        }
+    }
+
     /// Delete-folder confirmation: warns the folder AND all its commands
     /// go away.
     fn render_fav_delete_confirm(&mut self, ctx: &egui::Context) {
@@ -5901,6 +6041,7 @@ impl eframe::App for App {
                 && !self.show_settings
                 && self.pw_popup.is_none()
                 && self.fav_name_dialog.is_none()
+                && self.fav_cmd_dialog.is_none()
                 && self.fav_delete_confirm.is_none()
             {
                 ctx.memory_mut(|memory| {
@@ -7638,6 +7779,7 @@ impl eframe::App for App {
         self.render_history_menu(ctx);
         self.render_history_clear_confirm(ctx);
         self.render_fav_name_dialog(ctx);
+        self.render_fav_cmd_dialog(ctx);
         self.render_fav_delete_confirm(ctx);
         self.render_fav_submenu(ctx);
 
@@ -8814,6 +8956,7 @@ impl eframe::App for App {
                                 show_settings: self.show_settings,
                                 pw_popup_open: self.pw_popup.is_some(),
                                 fav_dialogs_open: self.fav_name_dialog.is_some()
+                                    || self.fav_cmd_dialog.is_some()
                                     || self.fav_delete_confirm.is_some(),
                                 auto_match: self.settings_edit.auto_match_command,
                                 terminal_view_rects: &mut self.terminal_view_rects,

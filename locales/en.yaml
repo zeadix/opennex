@@ -198,6 +198,12 @@ terminal:
   fav_new_folder: New folder
   fav_new_title: New folder
   fav_rename_title: Rename folder
+  fav_btn_add_cmd: Add command
+  fav_btn_assemble: Assemble
+  fav_btn_delete: Delete
+  fav_btn_rename: Rename
+  fav_cmd_dialog_label: 'Command:'
+  fav_cmd_dialog_title: Add command
 theme:
   light: Light
   dark: Dark
