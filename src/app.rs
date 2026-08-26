@@ -4867,25 +4867,23 @@ impl App {
                                 let mut delete_clicked = false;
                                 let is_default_folder =
                                     name == crate::history_db::HistoryDb::DEFAULT_FAVORITE_FOLDER;
-                                // TEXT buttons, same style as the history
-                                // rows' 收藏/删除 (user request — no icons).
-                                let act_font = egui::FontId::proportional(11.0);
-                                let t = &self.texts.terminal;
-                                // (label, id_ext, is_danger) — delete only
-                                // for non-default folders.
-                                let mut btns: Vec<(String, &str, bool)> = vec![
-                                    (t.fav_btn_rename.clone(), "ren", false),
-                                    (t.fav_btn_assemble.clone(), "asm", false),
-                                    (t.fav_btn_add_cmd.clone(), "add", false),
+                                // ICON buttons (user request): PENCIL = rename,
+                                // LIGHTNING = assemble, PLUS = add command,
+                                // TRASH = delete (default folder: no trash).
+                                let act_font = egui::FontId::proportional(13.0);
+                                let mut btns: Vec<(&str, &str, bool)> = vec![
+                                    (egui_phosphor::regular::PENCIL_SIMPLE, "ren", false),
+                                    (egui_phosphor::regular::LIGHTNING, "asm", false),
+                                    (egui_phosphor::regular::PLUS, "add", false),
                                 ];
                                 if !is_default_folder {
-                                    btns.push((t.fav_btn_delete.clone(), "del", true));
+                                    btns.push((egui_phosphor::regular::TRASH, "del", true));
                                 }
-                                for (label, id_ext, is_danger) in &btns {
+                                for (icon, id_ext, is_danger) in &btns {
                                     let lg = ui.fonts(|f| {
-                                        f.layout_no_wrap(label.clone(), act_font.clone(), weak)
+                                        f.layout_no_wrap(icon.to_string(), act_font.clone(), weak)
                                     });
-                                    let pad = 6.0;
+                                    let pad = 4.0;
                                     let brect = egui::Rect::from_min_max(
                                         egui::pos2(bx - lg.size().x, row_rect.center().y - 8.0),
                                         egui::pos2(bx, row_rect.center().y + 8.0),
@@ -5488,6 +5486,22 @@ impl App {
                     if idx % 2 == 1 {
                         ui.painter().rect_filled(row, 0.0, alt_col);
                     }
+                    // Leading drag handle (DOTS_SIX_VERTICAL): the ONLY
+                    // drag affordance — drags must start here, not on the
+                    // command text (so clicks still send and the trailing
+                    // delete button stays untangled from drag logic).
+                    let handle_g = ui.fonts(|f| {
+                        f.layout_no_wrap(
+                            egui_phosphor::regular::DOTS_SIX_VERTICAL.to_string(),
+                            egui::FontId::proportional(11.0),
+                            weak,
+                        )
+                    });
+                    ui.painter().galley(
+                        egui::pos2(row.min.x + 4.0, row.center().y - handle_g.size().y / 2.0),
+                        handle_g,
+                        weak,
+                    );
 
                     let hovered =
                         row.contains(ui.input(|i| i.pointer.hover_pos()).unwrap_or_default());
@@ -5509,7 +5523,7 @@ impl App {
                         egui::pos2(row.max.x - 22.0, row.max.y),
                     ));
                     ui.painter().galley(
-                        egui::pos2(row.min.x + 6.0, row.center().y - g.size().y / 2.0),
+                        egui::pos2(row.min.x + 24.0, row.center().y - g.size().y / 2.0),
                         g,
                         fg,
                     );
@@ -5519,14 +5533,13 @@ impl App {
                         egui::Id::new(("fav_sub_row", fid, idx)),
                         egui::Sense::click_and_drag(),
                     );
-                    // Drag start — but NEVER when the press lands in the
-                    // trailing delete gutter (that click belongs to the
-                    // text button registered below).
+                    // Drag start: ONLY from the leading handle zone —
+                    // the command text stays click-to-send and the delete
+                    // button keeps its clicks.
                     let press = ui.input(|i| i.pointer.press_origin());
-                    let in_delete_gutter =
-                        press.is_some_and(|p| p.x > row.max.x - 60.0 && row.contains(p));
-                    if rresp.contains_pointer()
-                        && !in_delete_gutter
+                    let in_handle =
+                        press.is_some_and(|p| row.contains(p) && p.x < row.min.x + 22.0);
+                    if in_handle
                         && ui.input(|i| i.pointer.primary_down())
                         && self.fav_item_drag.is_none()
                     {
