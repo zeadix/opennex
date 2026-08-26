@@ -22,7 +22,7 @@
            our extra Control is appended to InstallDirDlg, the wizard
            flow stays entirely the library's own (no rerouting, no
            duplicate symbols). -->
-      <Dialog Id="InstallDirDlg">
+      <Dialog Id="InstallDirDlg" Width="370" Height="270">
         <Control Id="DesktopShortcutCheckbox"
                  Type="CheckBox"
                  X="20" Y="150" Width="290" Height="17"
