@@ -351,7 +351,20 @@ impl HistoryDb {
     }
 
     /// Delete a folder AND everything inside it (ON DELETE CASCADE).
+    /// The default folder is protected — legacy favorites always land
+    /// there, so deleting it would orphan future ones.
     pub fn fav_folder_delete(&self, folder_id: i64) -> bool {
+        let name: String = self
+            .conn
+            .query_row(
+                "SELECT name FROM favorite_folders WHERE id = ?1",
+                params![folder_id],
+                |r| r.get(0),
+            )
+            .unwrap_or_default();
+        if name == Self::DEFAULT_FAVORITE_FOLDER {
+            return false;
+        }
         self.conn
             .execute(
                 "DELETE FROM favorite_folders WHERE id = ?1",
@@ -643,6 +656,21 @@ mod tests {
         // Delete cascades the items away.
         assert!(db.fav_folder_delete(fid));
         assert!(db.fav_items(fid).is_empty());
+
+        // The default folder can never be deleted.
+        let (def_id, _) = db
+            .fav_folders()
+            .into_iter()
+            .find(|(_, n)| n == HistoryDb::DEFAULT_FAVORITE_FOLDER)
+            .expect("default folder exists");
+        assert!(
+            !db.fav_folder_delete(def_id),
+            "default folder must be protected"
+        );
+        assert!(db
+            .fav_folders()
+            .iter()
+            .any(|(_, n)| n == HistoryDb::DEFAULT_FAVORITE_FOLDER));
         let _ = std::fs::remove_file(path);
     }
 
