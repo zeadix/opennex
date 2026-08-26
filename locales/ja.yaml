@@ -190,6 +190,14 @@ terminal:
   clear_favorites_title: お気に入りコマンドを全消去
   clear_favorites_body: お気に入りコマンドをすべて消去します？元に戻せません。
   history_empty: 'コマンド履歴なし'
+  fav_assemble: 組み合わせ
+  fav_delete_body: フォルダーとその中のすべてのコマンドを削除します。元に戻せません。
+  fav_delete_title: フォルダー削除
+  fav_expand_hint: → 展開 / ← 折りたたみ
+  fav_name_label: '名前:'
+  fav_new_folder: フォルダー作成
+  fav_new_title: フォルダー作成
+  fav_rename_title: フォルダー名変更
 theme:
   light: ライト
   dark: ダーク

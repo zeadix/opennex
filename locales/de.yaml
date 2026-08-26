@@ -190,6 +190,14 @@ terminal:
   clear_favorites_title: Alle Favoriten löschen
   clear_favorites_body: Alle Favoriten löschen? Dies kann nicht rückgängig gemacht werden.
   history_empty: 'Noch keine Befehle'
+  fav_assemble: Zusammenfügen
+  fav_delete_body: Der Ordner und ALLE darin enthaltenen Befehle werden gelöscht. Nicht widerrufbar.
+  fav_delete_title: Ordner löschen
+  fav_expand_hint: → ausklappen / ← einklappen
+  fav_name_label: 'Name:'
+  fav_new_folder: Neuer Ordner
+  fav_new_title: Neuer Ordner
+  fav_rename_title: Ordner umbenennen
 theme:
   light: Hell
   dark: Dunkel

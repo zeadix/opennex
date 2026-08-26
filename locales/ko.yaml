@@ -190,6 +190,14 @@ terminal:
   clear_favorites_title: 모든 즐겨찾기 명령 삭제
   clear_favorites_body: 모든 즐겨찾기 명령을 삭제할까요? 되돌릴 수 없습니다.
   history_empty: '명령 기록 없음'
+  fav_assemble: 조립
+  fav_delete_body: 폴더와 그 안의 모든 명령을 삭제합니다. 되돌릴 수 없습니다.
+  fav_delete_title: 폴더 삭제
+  fav_expand_hint: → 펼치기 / ← 접기
+  fav_name_label: '이름:'
+  fav_new_folder: 새 폴더
+  fav_new_title: 새 폴더
+  fav_rename_title: 이름 바꾸기
 theme:
   light: 밝게
   dark: 어둡게

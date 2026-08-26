@@ -190,6 +190,14 @@ terminal:
   clear_favorites_title: 清除全部收藏指令
   clear_favorites_body: 确认清除全部收藏指令？此操作不可恢复。
   history_empty: '暂无指令'
+  fav_assemble: 组装指令
+  fav_delete_body: 将删除该收藏夹及其所有指令，此操作不可恢复。
+  fav_delete_title: 删除收藏夹
+  fav_expand_hint: 按 → 展开 / ← 收起
+  fav_name_label: '名称:'
+  fav_new_folder: 新建收藏夹
+  fav_new_title: 新建收藏夹
+  fav_rename_title: 重命名收藏夹
 theme:
   light: 浅色
   dark: 深色

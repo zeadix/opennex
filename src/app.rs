@@ -1493,6 +1493,28 @@ pub struct App {
     startup_warnings: Vec<String>,
     /// Set once the deferred startup update-check result was consumed.
     startup_check_consumed: bool,
+    // ---- Favorite folders (v0.1.46) ----
+    /// Cached (id, name) list in DISPLAY order; refreshed after every
+    /// mutation from history_db.
+    fav_folders: Vec<(i64, String)>,
+    /// Expanded folder ids in the history menu's favorites column.
+    fav_expanded: std::collections::HashSet<i64>,
+    /// In-flight drag in the FOLDER list: source index.
+    fav_drag_src: Option<usize>,
+    /// Drop target index + whether the pointer is past its midpoint.
+    fav_drag_dst: Option<(usize, bool)>,
+    /// Folder row rects for hit-testing during a drag.
+    fav_folder_rects: Vec<egui::Rect>,
+    /// In-flight drag of an ITEM inside an expanded folder: (folder,
+    /// source index).
+    fav_item_drag: Option<(i64, usize)>,
+    /// Item drop target (folder, index, after-midpoint).
+    fav_item_drag_dst: Option<(i64, usize, bool)>,
+    /// Name dialog for create/rename: (folder id or None for create,
+    /// buffer). Rendered as a small modal like the theme dialogs.
+    fav_name_dialog: Option<(Option<i64>, String)>,
+    /// Delete-folder confirmation target.
+    fav_delete_confirm: Option<(i64, String)>,
 }
 
 struct TerminalData {
@@ -1865,7 +1887,18 @@ impl App {
             font_asset_cache: None,
             startup_warnings: Vec::new(),
             startup_check_consumed: false,
+            fav_folders: Vec::new(),
+            fav_expanded: Default::default(),
+            fav_drag_src: None,
+            fav_drag_dst: None,
+            fav_folder_rects: Vec::new(),
+            fav_item_drag: None,
+            fav_item_drag_dst: None,
+            fav_name_dialog: None,
+            fav_delete_confirm: None,
         };
+
+        app.fav_folders = app.history_db.fav_folders();
 
         // Register fonts (system + embedded + theme choices) now that the
         // App and its active theme exist. rebuild_fonts reuses the scanned
@@ -4327,8 +4360,6 @@ impl App {
         let mut entry_clicked: Option<usize> = None;
         let mut row_fav_clicked: Option<usize> = None;
         let mut row_del_clicked: Option<usize> = None;
-        let mut fav_entry_clicked: Option<usize> = None;
-        let mut fav_del_clicked: Option<usize> = None;
         let mut clear_favs_clicked = false;
         let mut clear_history_clicked = false;
         let mut close_clicked = false;
@@ -4550,141 +4581,479 @@ impl App {
                     }
                 }
 
-                // ---- Favorites column (manual menu only) ----
-                if show_favs {
+                // ---- Favorites column: folder tree (v0.1.46) ----
+                if show_favs || !self.fav_folders.is_empty() {
                     let fx0 = frame_rect.min.x + list_w;
-                    // (The separator line is painted AFTER the rows, with
-                    // the outer border — row backgrounds painted over it
-                    // when it was drawn here first.)
-                    for fi in fav_scroll..(fav_scroll + visible_rows).min(fav_total) {
-                        let frow = egui::Rect::from_min_size(
-                            egui::pos2(fx0, frame_rect.min.y + (fi - fav_scroll) as f32 * row_h),
-                            egui::vec2(fav_w, row_h),
-                        );
-                        let is_fsel = nav.fav_focused && fi == nav.fav_selected;
-                        let frow_hovered = frow.contains(hover_pos);
-                        let fbg = if is_fsel {
-                            sel_bg
-                        } else if frow_hovered {
-                            egui::Color32::from_rgba_unmultiplied(
-                                sel_bg.r(),
-                                sel_bg.g(),
-                                sel_bg.b(),
-                                90,
-                            )
-                        } else if fi % 2 == 1 {
-                            menu_alt
-                        } else {
-                            menu_bg
-                        };
-                        ui.painter().rect_filled(frow, 0.0, fbg);
-                        // Command text: no ellipsis, clipped at the row's
-                        // right edge (minus the delete-button gutter).
-                        let ffont = egui::FontId::monospace(font_size * 0.9);
-                        let fg = ui.fonts(|f| {
-                            f.layout_no_wrap(nav.favorites[fi].clone(), ffont.clone(), menu_fg)
-                        });
-                        ui.set_clip_rect(egui::Rect::from_min_max(
-                            egui::pos2(frow.min.x + 6.0, frow.min.y),
-                            egui::pos2(frow.max.x - 6.0, frow.max.y),
-                        ));
-                        ui.painter().galley(
-                            egui::pos2(frow.min.x + 6.0, frow.center().y - fg.size().y / 2.0),
-                            fg,
-                            menu_fg,
-                        );
-                        // Restore with a 1px bleed so the later outer
-                        // border (stroked on the boundary) is not clipped
-                        // to half thickness.
-                        ui.set_clip_rect(frame_rect.expand(1.0));
-                        let fresp = ui.interact(
-                            frow,
-                            egui::Id::new(("fav_row", tab.as_str(), fi)),
-                            egui::Sense::click(),
-                        );
-                        if fresp.clicked() {
-                            fav_entry_clicked = Some(fi);
+                    let col_w = total_w_actual - list_w;
+                    let t = &self.texts.terminal;
+                    // Fresh snapshot of folders+items for rendering; the
+                    // DB is the source of truth, mutations refresh below.
+                    let folders = self.fav_folders.clone();
+                    let mut folder_items: Vec<Vec<String>> = Vec::new();
+                    for (fid, _) in &folders {
+                        folder_items.push(self.history_db.fav_items(*fid));
+                    }
+                    let rows: Vec<(i64, usize, String)> = {
+                        let mut r = Vec::new();
+                        for (fi, (fid, _)) in folders.iter().enumerate() {
+                            r.push((*fid, 0, String::new()));
+                            if self.fav_expanded.contains(fid) {
+                                for item in &folder_items[fi] {
+                                    r.push((*fid, 1, item.clone()));
+                                }
+                            }
                         }
-                        // Delete button on the right edge: shown on hover
-                        // OR on the keyboard-selected (highlighted) row,
-                        // mirroring the main list's row actions.
-                        if frow_hovered || is_fsel {
-                            let del_txt = self.texts.terminal.delete.clone();
-                            let dg = ui.fonts(|f| {
+                        r
+                    };
+                    let row_h: f32 = 20.0;
+                    let content_h = rows.len() as f32 * row_h + footer_h;
+                    let max_col_scroll =
+                        ((content_h - rows_h - footer_h) / row_h).ceil().max(0.0) as usize;
+                    let col_scroll_id = egui::Id::new(("hist_favcol_scroll", tab.as_str()));
+                    let mut col_scroll: usize = ctx
+                        .memory(|m| m.data.get_temp(col_scroll_id).unwrap_or(0))
+                        .min(max_col_scroll);
+
+                    ui.painter().rect_filled(
+                        egui::Rect::from_min_size(
+                            egui::pos2(fx0, frame_rect.min.y),
+                            egui::vec2(col_w, rows_h + footer_h),
+                        ),
+                        0.0,
+                        menu_bg,
+                    );
+
+                    // --- "New folder" button at the column top ---
+                    let new_txt = t.fav_new_folder.clone();
+                    let ng = ui.fonts(|f| {
+                        f.layout_no_wrap(
+                            format!("+ {new_txt}"),
+                            egui::FontId::proportional(11.0),
+                            menu_fg,
+                        )
+                    });
+                    let btn_rect = egui::Rect::from_min_size(
+                        egui::pos2(fx0 + 6.0, frame_rect.min.y + 4.0),
+                        egui::vec2(ng.size().x + 12.0, 16.0),
+                    );
+                    let nresp = ui.interact(
+                        btn_rect,
+                        egui::Id::new(("fav_new_folder", tab.as_str())),
+                        egui::Sense::click(),
+                    );
+                    let nbg = if nresp.contains_pointer() {
+                        egui::Color32::from_rgba_unmultiplied(
+                            sel_bg.r(),
+                            sel_bg.g(),
+                            sel_bg.b(),
+                            90,
+                        )
+                    } else {
+                        egui::Color32::TRANSPARENT
+                    };
+                    ui.painter().rect_filled(btn_rect, 3.0, nbg);
+                    ui.painter()
+                        .galley(btn_rect.center() - ng.size() / 2.0, ng, menu_fg);
+                    if nresp.clicked() {
+                        self.fav_name_dialog = Some((None, String::new()));
+                    }
+
+                    // --- Folder & item rows ---
+                    let mut y = frame_rect.min.y + 24.0 - col_scroll as f32 * row_h;
+                    self.fav_folder_rects.clear();
+                    let mut item_rects: Vec<(i64, usize, egui::Rect)> = Vec::new();
+                    let mut folder_row_index: Vec<(i64, egui::Rect)> = Vec::new();
+                    let pointer_down = ui.input(|i| i.pointer.primary_down());
+                    let pointer_released = ui.input(|i| i.pointer.any_released());
+
+                    for row in &rows {
+                        if y + row_h < frame_rect.min.y + 24.0 {
+                            y += row_h;
+                            continue;
+                        }
+                        if y > frame_rect.min.y + rows_h {
+                            break;
+                        }
+                        let (fid, kind, cmd) = row.clone();
+                        let is_header = kind == 0;
+                        let fidx = folders.iter().position(|(id, _)| *id == fid).unwrap_or(0);
+                        let row_rect =
+                            egui::Rect::from_min_size(egui::pos2(fx0, y), egui::vec2(col_w, row_h));
+                        let row_hover = row_rect.contains(hover_pos);
+
+                        if is_header {
+                            // Folder header row
+                            let name = folders[fidx].1.clone();
+                            let count = folder_items[fidx].len();
+                            let expanded = self.fav_expanded.contains(&fid);
+                            let is_sel = nav.fav_focused && nav.fav_selected == fidx;
+                            let bg = if is_sel {
+                                sel_bg
+                            } else if row_hover {
+                                egui::Color32::from_rgba_unmultiplied(
+                                    sel_bg.r(),
+                                    sel_bg.g(),
+                                    sel_bg.b(),
+                                    90,
+                                )
+                            } else {
+                                menu_bg
+                            };
+                            ui.painter().rect_filled(row_rect, 0.0, bg);
+                            let hg = ui.fonts(|f| {
                                 f.layout_no_wrap(
-                                    del_txt.to_string(),
+                                    "≡".to_string(),
                                     egui::FontId::proportional(11.0),
                                     weak,
                                 )
                             });
-                            let drect = egui::Rect::from_min_max(
-                                egui::pos2(frow.max.x - 4.0 - dg.size().x, frow.center().y - 8.0),
-                                egui::pos2(frow.max.x - 4.0, frow.center().y + 8.0),
+                            ui.painter().galley(
+                                egui::pos2(
+                                    row_rect.min.x + 6.0,
+                                    row_rect.center().y - hg.size().y / 2.0,
+                                ),
+                                hg,
+                                weak,
                             );
-                            let dresp = ui.interact(
-                                drect,
-                                egui::Id::new(("fav_row_del", tab.as_str(), fi)),
-                                egui::Sense::click(),
+                            let caret = if expanded { "▾" } else { "▸" };
+                            let label = format!("{caret} {name} ({count})");
+                            let fnt = egui::FontId::proportional(font_size * 0.9);
+                            let g = ui.fonts(|f| f.layout_no_wrap(label, fnt, menu_fg));
+                            ui.set_clip_rect(egui::Rect::from_min_max(
+                                egui::pos2(row_rect.min.x, row_rect.min.y),
+                                egui::pos2(row_rect.max.x - 60.0, row_rect.max.y),
+                            ));
+                            ui.painter().galley(
+                                egui::pos2(
+                                    row_rect.min.x + 20.0,
+                                    row_rect.center().y - g.size().y / 2.0,
+                                ),
+                                g,
+                                menu_fg,
                             );
-                            let dcol = if dresp.hovered() {
-                                app.danger.to_egui()
+                            ui.set_clip_rect(frame_rect.expand(1.0));
+
+                            let hresp = ui.interact(
+                                row_rect,
+                                egui::Id::new(("fav_folder", tab.as_str(), fid)),
+                                egui::Sense::click_and_drag(),
+                            );
+                            folder_row_index.push((fid, row_rect));
+                            self.fav_folder_rects.push(row_rect);
+                            if hresp.clicked() {
+                                if expanded {
+                                    self.fav_expanded.remove(&fid);
+                                } else {
+                                    self.fav_expanded.insert(fid);
+                                }
+                            }
+                            // hover 3 buttons: assemble / rename / delete
+                            if row_hover && self.fav_drag_src.is_none() {
+                                let mut bx = row_rect.max.x - 4.0;
+                                let mut assemble_clicked = false;
+                                let mut rename_clicked = false;
+                                let mut delete_clicked = false;
+                                for (glyph, id_ext, is_danger) in [
+                                    ("🗑", "del", true),
+                                    ("✎", "ren", false),
+                                    ("⚡", "asm", false),
+                                ] {
+                                    let bw = 20.0;
+                                    let brect = egui::Rect::from_min_max(
+                                        egui::pos2(bx - bw, row_rect.center().y - 9.0),
+                                        egui::pos2(bx, row_rect.center().y + 9.0),
+                                    );
+                                    let bresp = ui.interact(
+                                        brect,
+                                        egui::Id::new((
+                                            "fav_folder_btn",
+                                            tab.as_str(),
+                                            fid,
+                                            id_ext,
+                                        )),
+                                        egui::Sense::click(),
+                                    );
+                                    let bcol = if bresp.contains_pointer() {
+                                        if is_danger {
+                                            app.danger.to_egui()
+                                        } else {
+                                            app.accent.to_egui()
+                                        }
+                                    } else {
+                                        weak
+                                    };
+                                    let bg2 = ui.fonts(|f| {
+                                        f.layout_no_wrap(
+                                            glyph.to_string(),
+                                            egui::FontId::proportional(11.0),
+                                            bcol,
+                                        )
+                                    });
+                                    ui.painter().galley(
+                                        brect.center() - bg2.size() / 2.0,
+                                        bg2,
+                                        bcol,
+                                    );
+                                    match id_ext {
+                                        "asm" => assemble_clicked |= bresp.clicked(),
+                                        "ren" => rename_clicked |= bresp.clicked(),
+                                        _ => delete_clicked |= bresp.clicked(),
+                                    }
+                                    bx -= bw + 2.0;
+                                }
+                                if assemble_clicked {
+                                    let cmds = self.history_db.fav_items(fid);
+                                    if let Some(shell_id) =
+                                        self.terminals.get(&tab).map(|td| td.shell_id.clone())
+                                    {
+                                        let line = assemble_commands(&cmds, &shell_id);
+                                        if !line.is_empty() {
+                                            if let Some(td) = self.terminals.get_mut(&tab) {
+                                                td.instance.write(format!("{line}\r").as_bytes());
+                                                td.instance.history_nav = None;
+                                                self.history_menu_just_closed
+                                                    .insert(tab.clone(), true);
+                                            }
+                                        }
+                                    }
+                                }
+                                if rename_clicked {
+                                    self.fav_name_dialog =
+                                        Some((Some(fid), folders[fidx].1.clone()));
+                                }
+                                if delete_clicked {
+                                    self.fav_delete_confirm = Some((fid, folders[fidx].1.clone()));
+                                }
+                            }
+
+                            // folder drag start
+                            let handle_rect = egui::Rect::from_min_size(
+                                egui::pos2(row_rect.min.x, row_rect.min.y),
+                                egui::vec2(20.0, row_h),
+                            );
+                            if handle_rect.contains(hover_pos)
+                                && pointer_down
+                                && self.fav_drag_src.is_none()
+                                && self.fav_item_drag.is_none()
+                            {
+                                self.fav_drag_src = Some(fidx);
+                            }
+                        } else {
+                            // Item row inside expanded folder
+                            let fbg = if row_hover {
+                                egui::Color32::from_rgba_unmultiplied(
+                                    sel_bg.r(),
+                                    sel_bg.g(),
+                                    sel_bg.b(),
+                                    90,
+                                )
                             } else {
-                                weak
+                                menu_alt
                             };
-                            let dg2 = ui.fonts(|f| {
+                            ui.painter().rect_filled(row_rect, 0.0, fbg);
+                            let fnt = egui::FontId::monospace(font_size * 0.9);
+                            let g = ui.fonts(|f| f.layout_no_wrap(cmd.clone(), fnt, menu_fg));
+                            ui.set_clip_rect(egui::Rect::from_min_max(
+                                egui::pos2(row_rect.min.x, row_rect.min.y),
+                                egui::pos2(row_rect.max.x - 24.0, row_rect.max.y),
+                            ));
+                            ui.painter().galley(
+                                egui::pos2(
+                                    row_rect.min.x + 26.0,
+                                    row_rect.center().y - g.size().y / 2.0,
+                                ),
+                                g,
+                                menu_fg,
+                            );
+                            let hg = ui.fonts(|f| {
                                 f.layout_no_wrap(
-                                    del_txt.to_string(),
-                                    egui::FontId::proportional(11.0),
-                                    dcol,
+                                    "≡".to_string(),
+                                    egui::FontId::proportional(10.0),
+                                    weak,
                                 )
                             });
-                            ui.painter()
-                                .galley(drect.center() - dg2.size() / 2.0, dg2, dcol);
-                            if dresp.clicked() {
-                                fav_del_clicked = Some(fi);
+                            ui.painter().galley(
+                                egui::pos2(
+                                    row_rect.min.x + 8.0,
+                                    row_rect.center().y - hg.size().y / 2.0,
+                                ),
+                                hg,
+                                weak,
+                            );
+                            ui.set_clip_rect(frame_rect.expand(1.0));
+
+                            let iresp = ui.interact(
+                                row_rect,
+                                egui::Id::new(("fav_item", tab.as_str(), fid, cmd.as_str())),
+                                egui::Sense::click_and_drag(),
+                            );
+                            item_rects.push((fid, 0, row_rect));
+                            if iresp.clicked() {
+                                if let Some(td) = self.terminals.get_mut(&tab) {
+                                    td.instance.write(format!("{cmd}\r").as_bytes());
+                                    td.instance.history_nav = None;
+                                    self.history_menu_just_closed.insert(tab.clone(), true);
+                                }
+                            }
+                            if row_hover {
+                                let drect = egui::Rect::from_min_max(
+                                    egui::pos2(row_rect.max.x - 20.0, row_rect.center().y - 9.0),
+                                    egui::pos2(row_rect.max.x - 4.0, row_rect.center().y + 9.0),
+                                );
+                                let dresp = ui.interact(
+                                    drect,
+                                    egui::Id::new((
+                                        "fav_item_del",
+                                        tab.as_str(),
+                                        fid,
+                                        cmd.as_str(),
+                                    )),
+                                    egui::Sense::click(),
+                                );
+                                let dcol = if dresp.contains_pointer() {
+                                    app.danger.to_egui()
+                                } else {
+                                    weak
+                                };
+                                let dg = ui.fonts(|f| {
+                                    f.layout_no_wrap(
+                                        "×".to_string(),
+                                        egui::FontId::proportional(12.0),
+                                        dcol,
+                                    )
+                                });
+                                ui.painter()
+                                    .galley(drect.center() - dg.size() / 2.0, dg, dcol);
+                                if dresp.clicked() {
+                                    self.history_db.fav_item_remove(fid, &cmd);
+                                    self.fav_folders = self.history_db.fav_folders();
+                                }
+                            }
+                            if row_hover
+                                && pointer_down
+                                && self.fav_item_drag.is_none()
+                                && self.fav_drag_src.is_none()
+                            {
+                                if let Some(items) = folder_items.get(fidx) {
+                                    if let Some(idx) = items.iter().position(|c| *c == cmd) {
+                                        self.fav_item_drag = Some((fid, idx));
+                                    }
+                                }
+                            }
+                        }
+                        y += row_h;
+                    }
+
+                    // Folder drag: insertion line + drop
+                    if let Some(src) = self.fav_drag_src {
+                        if pointer_released {
+                            if let Some((dst_idx, after)) = self.fav_drag_dst.take() {
+                                let n = folders.len();
+                                let dst = drag_drop_destination(src, dst_idx, after, n);
+                                if src != dst {
+                                    let mut ids: Vec<i64> =
+                                        folders.iter().map(|(id, _)| *id).collect();
+                                    let moved = ids.remove(src);
+                                    ids.insert(dst, moved);
+                                    self.history_db.fav_folder_reorder(&ids);
+                                    self.fav_folders = self.history_db.fav_folders();
+                                }
+                            }
+                            self.fav_drag_src = None;
+                        } else {
+                            let mut target: Option<(usize, bool)> = None;
+                            for (fi, (_, frect)) in folder_row_index.iter().enumerate() {
+                                if frect.contains(hover_pos) && fi != src {
+                                    target = Some((fi, hover_pos.y > frect.center().y));
+                                    break;
+                                }
+                            }
+                            self.fav_drag_dst = target;
+                            if let Some((ti, after)) = target {
+                                if let Some((_, trect)) = folder_row_index.get(ti) {
+                                    let iy = if after { trect.max.y } else { trect.min.y };
+                                    ui.painter().line_segment(
+                                        [
+                                            egui::pos2(fx0 + 4.0, iy),
+                                            egui::pos2(fx0 + col_w - 4.0, iy),
+                                        ],
+                                        egui::Stroke::new(2.0, app.accent.to_egui()),
+                                    );
+                                }
                             }
                         }
                     }
-                    // Favorites scrollbar when overflowing.
-                    if fav_total > visible_rows {
-                        let sb_track = egui::Rect::from_min_max(
-                            egui::pos2(fx0 + fav_w - 6.0, frame_rect.min.y),
-                            egui::pos2(fx0 + fav_w, frame_rect.min.y + rows_h),
-                        );
-                        let thumb_h = (visible_rows as f32 / fav_total as f32 * rows_h).max(16.0);
-                        let scrollable = (rows_h - thumb_h).max(1.0);
-                        let thumb_y = frame_rect.min.y
-                            + scrollable * (fav_scroll as f32 / fav_max_scroll as f32);
-                        let sb_col = egui::Color32::from_rgba_unmultiplied(
-                            weak.r(),
-                            weak.g(),
-                            weak.b(),
-                            110,
-                        );
-                        let track_col =
-                            egui::Color32::from_rgba_unmultiplied(weak.r(), weak.g(), weak.b(), 40);
-                        ui.painter().rect_filled(sb_track, 0.0, track_col);
-                        ui.painter().rect_filled(
-                            egui::Rect::from_min_size(
-                                egui::pos2(sb_track.min.x, thumb_y),
-                                egui::vec2(sb_track.width(), thumb_h),
-                            ),
-                            0.0,
-                            sb_col,
-                        );
-                        let sb_resp = ui.interact(
-                            sb_track,
-                            egui::Id::new(("hist_fav_sb", tab.as_str())),
-                            egui::Sense::click_and_drag(),
-                        );
-                        if sb_resp.dragged() {
-                            let dy = ui.input(|i| i.pointer.delta().y);
-                            let lines = dy * fav_max_scroll as f32 / scrollable;
-                            fav_scroll = (fav_scroll as f32 + lines)
-                                .round()
-                                .clamp(0.0, fav_max_scroll as f32)
-                                as usize;
+
+                    // Item drag: insertion line + drop
+                    if let Some((src_fid, src_idx)) = self.fav_item_drag {
+                        if pointer_released {
+                            if let Some((dst_fid, dst_idx, after)) = self.fav_item_drag_dst.take() {
+                                if dst_fid == src_fid {
+                                    let mut items = self.history_db.fav_items(src_fid);
+                                    if src_idx < items.len() {
+                                        let dst = drag_drop_destination(
+                                            src_idx,
+                                            dst_idx,
+                                            after,
+                                            items.len(),
+                                        );
+                                        if src_idx != dst {
+                                            let moved = items.remove(src_idx);
+                                            items.insert(dst, moved);
+                                            self.history_db.fav_item_reorder(src_fid, &items);
+                                            self.fav_folders = self.history_db.fav_folders();
+                                        }
+                                    }
+                                }
+                            }
+                            self.fav_item_drag = None;
+                        } else {
+                            let mut target: Option<(i64, usize, bool)> = None;
+                            for (fid, _, irect) in &item_rects {
+                                if irect.contains(hover_pos) {
+                                    target = Some((*fid, 0, hover_pos.y > irect.center().y));
+                                    break;
+                                }
+                            }
+                            self.fav_item_drag_dst = target;
+                            if let Some((_, ti, after)) = target {
+                                if let Some((_, _, trect)) =
+                                    item_rects.get(ti.min(item_rects.len().saturating_sub(1)))
+                                {
+                                    let iy = if after { trect.max.y } else { trect.min.y };
+                                    ui.painter().line_segment(
+                                        [
+                                            egui::pos2(fx0 + 24.0, iy),
+                                            egui::pos2(fx0 + col_w - 4.0, iy),
+                                        ],
+                                        egui::Stroke::new(2.0, app.accent.to_egui()),
+                                    );
+                                }
+                            }
                         }
+                    }
+
+                    // Column wheel scroll
+                    let col_rect = egui::Rect::from_min_size(
+                        egui::pos2(fx0, frame_rect.min.y),
+                        egui::vec2(col_w, rows_h),
+                    );
+                    let wheel = ui.input(|i| {
+                        i.events
+                            .iter()
+                            .try_fold(0.0f32, |acc, e| match e {
+                                egui::Event::MouseWheel { delta, .. } => Some(acc + delta.y),
+                                _ => Some(acc),
+                            })
+                            .unwrap_or(0.0)
+                    });
+                    if col_rect.contains(hover_pos) && wheel != 0.0 {
+                        col_scroll = if wheel > 0.0 {
+                            col_scroll.saturating_sub(1)
+                        } else {
+                            (col_scroll + 1).min(max_col_scroll)
+                        };
+                        ctx.memory_mut(|m| m.data.insert_temp(col_scroll_id, col_scroll));
                     }
                 }
 
@@ -4825,20 +5194,6 @@ impl App {
             return;
         }
         // Favorite row click: send the command.
-        if let Some(fi) = fav_entry_clicked {
-            let cmd = self
-                .terminals
-                .get(&tab)
-                .and_then(|td| td.instance.history_nav.as_ref())
-                .and_then(|nav| nav.favorites.get(fi).cloned());
-            if let Some(cmd) = cmd {
-                if let Some(td) = self.terminals.get_mut(&tab) {
-                    td.instance.history_nav = None;
-                    td.instance.write(cmd.as_bytes());
-                }
-                self.history_menu_just_closed.insert(tab.clone(), true);
-            }
-        }
         // Row action: add to global favorites.
         if let Some(i) = row_fav_clicked {
             let cmd = self
@@ -4870,26 +5225,6 @@ impl App {
             }
         }
         // Favorite row delete.
-        if let Some(fi) = fav_del_clicked {
-            let cmd = self
-                .terminals
-                .get(&tab)
-                .and_then(|td| td.instance.history_nav.as_ref())
-                .and_then(|nav| nav.favorites.get(fi).cloned());
-            if let Some(cmd) = cmd {
-                self.history_db.fav_remove(&cmd);
-                if let Some(td) = self.terminals.get_mut(&tab) {
-                    if let Some(nav) = td.instance.history_nav.as_mut() {
-                        nav.favorites = self.history_db.fav_all();
-                        if !nav.favorites.is_empty() {
-                            nav.fav_selected = nav.fav_selected.min(nav.favorites.len() - 1);
-                        } else {
-                            nav.fav_focused = false;
-                        }
-                    }
-                }
-            }
-        }
         // Footer: clear global favorites (same confirm dialog as settings).
         if clear_favs_clicked {
             self.show_clear_favorites_confirm = true;
@@ -4977,6 +5312,120 @@ impl App {
             self.history_clear_confirm = None;
         } else if cancelled || !open {
             self.history_clear_confirm = None;
+        }
+    }
+    /// Name dialog for favorite folders (create when folder id is None,
+    /// rename otherwise). Modal with text input, Enter confirms, Esc
+    /// cancels.
+    fn render_fav_name_dialog(&mut self, ctx: &egui::Context) {
+        let Some((folder_id, _)) = self.fav_name_dialog.clone() else {
+            return;
+        };
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+            self.fav_name_dialog = None;
+            return;
+        }
+        let title = match folder_id {
+            Some(_) => self.texts.terminal.fav_rename_title.clone(),
+            None => self.texts.terminal.fav_new_title.clone(),
+        };
+        let mut confirm = false;
+        let mut cancel = false;
+        egui::Window::new(title)
+            .id(egui::Id::new("fav_name_dialog"))
+            .fixed_pos(screen_center(ctx) - egui::vec2(160.0, 40.0))
+            .resizable(false)
+            .collapsible(false)
+            .show(ctx, |ui| {
+                ui.set_min_width(280.0);
+                ui.add_space(4.0);
+                ui.label(self.texts.terminal.fav_name_label.clone());
+                let resp = ui.text_edit_singleline(&mut self.fav_name_dialog.as_mut().unwrap().1);
+                if !resp.has_focus() {
+                    resp.request_focus();
+                }
+                let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui.button(self.texts.theme_editor.confirm.clone()).clicked() {
+                        confirm = true;
+                    }
+                    if ui.button(self.texts.theme_editor.cancel.clone()).clicked() {
+                        cancel = true;
+                    }
+                });
+                if enter {
+                    confirm = true;
+                }
+            });
+        if confirm || cancel {
+            if confirm {
+                if let Some((fid, name)) = self.fav_name_dialog.take() {
+                    let name = name.trim().to_string();
+                    if name.is_empty() {
+                        self.fav_name_dialog = None;
+                    } else {
+                        match fid {
+                            Some(id) => {
+                                self.history_db.fav_folder_rename(id, &name);
+                            }
+                            None => {
+                                self.history_db.fav_folder_create(&name);
+                            }
+                        }
+                        self.fav_folders = self.history_db.fav_folders();
+                    }
+                }
+            } else {
+                self.fav_name_dialog = None;
+            }
+        }
+    }
+
+    /// Delete-folder confirmation: warns the folder AND all its commands
+    /// go away.
+    fn render_fav_delete_confirm(&mut self, ctx: &egui::Context) {
+        let Some((fid, name)) = self.fav_delete_confirm.clone() else {
+            return;
+        };
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+            self.fav_delete_confirm = None;
+            return;
+        }
+        let mut confirm = false;
+        let mut cancel = false;
+        let mut open = true;
+        egui::Window::new(self.texts.terminal.fav_delete_title.clone())
+            .id(egui::Id::new("fav_delete_confirm"))
+            .fixed_pos(screen_center(ctx) - egui::vec2(180.0, 50.0))
+            .resizable(false)
+            .collapsible(false)
+            .open(&mut open)
+            .show(ctx, |ui| {
+                ui.set_min_width(320.0);
+                ui.add_space(4.0);
+                ui.strong(format!("\u{201c}{name}\u{201d}"));
+                ui.label(self.texts.terminal.fav_delete_body.clone());
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui.button(self.texts.theme_editor.confirm.clone()).clicked() {
+                        confirm = true;
+                    }
+                    if ui.button(self.texts.theme_editor.cancel.clone()).clicked() {
+                        cancel = true;
+                    }
+                });
+            });
+        if !open {
+            cancel = true;
+        }
+        if confirm || cancel {
+            if confirm {
+                self.history_db.fav_folder_delete(fid);
+                self.fav_expanded.remove(&fid);
+                self.fav_folders = self.history_db.fav_folders();
+            }
+            self.fav_delete_confirm = None;
         }
     }
 
@@ -5371,10 +5820,24 @@ impl eframe::App for App {
                     if let Some(td) = self.terminals.get_mut(&tab) {
                         if let Some(nav) = td.instance.history_nav.as_mut() {
                             if focus_right {
-                                nav.fav_focused = true;
-                                nav.fav_selected = 0;
-                            } else {
-                                nav.fav_focused = false;
+                                if nav.fav_focused {
+                                    // Already in the folder column:
+                                    // expand the selected folder.
+                                    if let Some((fid, _)) = self.fav_folders.get(nav.fav_selected) {
+                                        self.fav_expanded.insert(*fid);
+                                    }
+                                } else {
+                                    nav.fav_focused = true;
+                                    nav.fav_selected = 0;
+                                }
+                            } else if nav.fav_focused {
+                                let collapsed_to_empty = self
+                                    .fav_folders
+                                    .get(nav.fav_selected)
+                                    .is_some_and(|(fid, _)| self.fav_expanded.remove(fid));
+                                if !collapsed_to_empty {
+                                    nav.fav_focused = false;
+                                }
                             }
                         }
                     }
@@ -5386,10 +5849,13 @@ impl eframe::App for App {
                         .get(&tab)
                         .and_then(|td| td.instance.history_nav.as_ref())
                         .map(|nav| {
-                            if nav.fav_focused {
-                                (Some(nav.fav_selected), None)
-                            } else {
+                            if !nav.fav_focused {
+                                // Folder model (v0.1.46): keyboard Delete in
+                                // the favorites column is a no-op (folder
+                                // deletion is mouse-driven with confirm).
                                 (None, Some(nav.selected))
+                            } else {
+                                (None::<usize>, None)
                             }
                         })
                         .unwrap_or((None, None));
@@ -5453,9 +5919,10 @@ impl eframe::App for App {
                 if let Some(td) = self.terminals.get_mut(&tab) {
                     if let Some(nav) = td.instance.history_nav.as_mut() {
                         if nav.fav_focused && (previous || next) {
+                            let folder_count = self.fav_folders.len();
                             if previous {
                                 nav.fav_selected = nav.fav_selected.saturating_sub(1);
-                            } else if next && nav.fav_selected + 1 < nav.favorites.len() {
+                            } else if next && nav.fav_selected + 1 < folder_count {
                                 nav.fav_selected += 1;
                             }
                             // Selection changed: bring it into view THIS
@@ -5517,13 +5984,26 @@ impl eframe::App for App {
                 }
                 if confirm {
                     if fav_confirming {
-                        // Enter on the favorites list: send that command.
-                        let cmd = self
-                            .terminals
-                            .get(&tab)
-                            .and_then(|td| td.instance.history_nav.as_ref())
-                            .and_then(|nav| nav.favorites.get(nav.fav_selected).cloned());
-                        if let Some(cmd) = cmd {
+                        // Enter on the folder column: ASSEMBLE the selected
+                        // folder's commands into one line and send it (shell-
+                        // aware separators).
+                        let assembled = self
+                            .fav_folders
+                            .get(
+                                self.terminals
+                                    .get(&tab)
+                                    .and_then(|td| td.instance.history_nav.as_ref())
+                                    .map(|nav| nav.fav_selected)
+                                    .unwrap_or(0),
+                            )
+                            .and_then(|(fid, _)| {
+                                let shell_id =
+                                    self.terminals.get(&tab).map(|td| td.shell_id.clone())?;
+                                let line =
+                                    assemble_commands(&self.history_db.fav_items(*fid), &shell_id);
+                                (!line.is_empty()).then_some(line)
+                            });
+                        if let Some(cmd) = assembled {
                             if let Some(td) = self.terminals.get_mut(&tab) {
                                 td.instance.history_nav = None;
                                 td.instance.write(cmd.as_bytes());
@@ -6761,6 +7241,8 @@ impl eframe::App for App {
         self.show_copy_toast(ctx);
         self.render_history_menu(ctx);
         self.render_history_clear_confirm(ctx);
+        self.render_fav_name_dialog(ctx);
+        self.render_fav_delete_confirm(ctx);
 
         // Terminal close confirmation
         if let Some(ref tab_id) = self.pending_close_confirm.clone() {
@@ -8549,6 +9031,74 @@ fn shell_display_name(s: &crate::shells::ShellOption) -> String {
 }
 
 /// Last path component of a shell program, for the default-shell label.
+/// Command separator for assembling a favorite folder's commands into
+/// one line, by the target terminal's shell family:
+///   POSIX (bash/zsh/fish/nu/sh)  -> " && "   (stop on first failure)
+///   PowerShell                   -> "; "     (PS has no && prior to 7)
+///   cmd.exe                      -> " & "    (cmd chains with single &)
+pub(crate) fn assemble_separator(shell_id: &str) -> &'static str {
+    match shell_id {
+        "powershell" => "; ",
+        "cmd" | "vs-dev" => " & ",
+        _ => " && ",
+    }
+}
+
+/// Join a folder's commands for execution in the given shell. Empty
+/// commands are filtered; multi-line commands collapse to single spaces
+/// (a newline inside an assembled line would execute prematurely).
+pub(crate) fn assemble_commands(commands: &[String], shell_id: &str) -> String {
+    commands
+        .iter()
+        .map(|c| c.trim())
+        .filter(|c| !c.is_empty())
+        .map(|c| c.split_whitespace().collect::<Vec<_>>().join(" "))
+        .collect::<Vec<_>>()
+        .join(assemble_separator(shell_id))
+}
+
+#[cfg(test)]
+mod assemble_tests {
+    use super::assemble_commands;
+
+    #[test]
+    fn posix_shells_join_with_and_chain() {
+        let cmds = vec![
+            "cmake .".into(),
+            "make -j8".into(),
+            "sudo make install".into(),
+        ];
+        assert_eq!(
+            assemble_commands(&cmds, "bash"),
+            "cmake . && make -j8 && sudo make install"
+        );
+        assert_eq!(
+            assemble_commands(&cmds, "zsh"),
+            assemble_commands(&cmds, "bash")
+        );
+        assert_eq!(
+            assemble_commands(&cmds, "fish"),
+            assemble_commands(&cmds, "sh")
+        );
+    }
+
+    #[test]
+    fn windows_shells_use_their_own_separators() {
+        let cmds = vec!["dir".into(), "echo ok".into()];
+        assert_eq!(assemble_commands(&cmds, "powershell"), "dir; echo ok");
+        assert_eq!(assemble_commands(&cmds, "cmd"), "dir & echo ok");
+        assert_eq!(assemble_commands(&cmds, "vs-dev"), "dir & echo ok");
+    }
+
+    #[test]
+    fn blank_and_multiline_entries_are_sanitized() {
+        let cmds = vec!["".into(), "   ".into(), "cd\n/tmp".into(), "ls".into()];
+        assert_eq!(assemble_commands(&cmds, "bash"), "cd /tmp && ls");
+        let only_blank = vec!["".into()];
+        assert_eq!(assemble_commands(&only_blank, "bash"), "");
+    }
+}
+
 fn shell_short_name(program: &str) -> &str {
     program.rsplit('/').next().unwrap_or(program)
 }

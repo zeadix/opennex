@@ -190,6 +190,14 @@ terminal:
   clear_favorites_title: Effacer toutes les commandes favorites
   clear_favorites_body: Effacer toutes les commandes favorites ? Cette action est irréversible.
   history_empty: 'Pas encore de commandes'
+  fav_assemble: Assembler
+  fav_delete_body: Le dossier et TOUTES ses commandes seront supprimés. Irréversible.
+  fav_delete_title: Supprimer
+  fav_expand_hint: → ouvrir / ← replier
+  fav_name_label: 'Nom :'
+  fav_new_folder: Nouveau dossier
+  fav_new_title: Nouveau dossier
+  fav_rename_title: Renommer
 theme:
   light: Clair
   dark: Sombre

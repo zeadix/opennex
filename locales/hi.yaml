@@ -190,6 +190,14 @@ terminal:
   clear_favorites_title: सभी पसंदीदा कमांड हटाएं
   clear_favorites_body: सभी पसंदीदा कमांड हटाएं? यह पूर्ववत नहीं हो सकता।
   history_empty: 'अभी कोई कमांड नहीं'
+  fav_assemble: जोड़ें
+  fav_delete_body: फ़ोल्डर और उसके सभी कमांड हटाए जाएँगे। इसे पूर्ववत नहीं किया जा सकता।
+  fav_delete_title: हटाएँ
+  fav_expand_hint: → खोलें / ← बंद करें
+  fav_name_label: 'नाम:'
+  fav_new_folder: नया फ़ोल्डर
+  fav_new_title: नया फ़ोल्डर
+  fav_rename_title: नाम बदलें
 theme:
   light: हल्का
   dark: गहरा

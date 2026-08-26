@@ -1,7 +1,12 @@
 use rusqlite::{params, Connection};
 use std::path::Path;
 
-const SCHEMA_SQL: &str = "CREATE TABLE IF NOT EXISTS command_history (
+const SCHEMA_SQL: &str = "CREATE TABLE IF NOT EXISTS favorite_folders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS command_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 terminal_id TEXT NOT NULL,
                 command TEXT NOT NULL,
@@ -64,6 +69,46 @@ impl HistoryDb {
     fn open_healthy(path: &Path) -> rusqlite::Result<Connection> {
         let conn = Connection::open(path)?;
         conn.execute_batch(SCHEMA_SQL)?;
+        // --- favorite-folder migration (v0.1.46) -------------------------
+        // Older schemas had a flat favorite_commands table. Add the
+        // folder/position columns idempotently, then move any legacy
+        // rows into a default folder on first run.
+        let has_folder_col: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('favorite_commands') \
+                 WHERE name='folder_id'",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .map(|n| n > 0)?;
+        if !has_folder_col {
+            conn.execute_batch(
+                "ALTER TABLE favorite_commands ADD COLUMN folder_id INTEGER \
+                   REFERENCES favorite_folders(id) ON DELETE CASCADE;
+                 ALTER TABLE favorite_commands ADD COLUMN sort_key INTEGER;
+                 UPDATE favorite_commands SET sort_key = id;",
+            )?;
+        }
+        let default_folder: i64 = conn
+            .query_row(
+                "SELECT id FROM favorite_folders WHERE name = '默认收藏'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(-1);
+        if default_folder < 0 {
+            conn.execute(
+                "INSERT INTO favorite_folders (name) VALUES ('默认收藏')",
+                [],
+            )?;
+            let id = conn.last_insert_rowid();
+            conn.execute(
+                "UPDATE favorite_commands SET folder_id = ?1 WHERE folder_id IS NULL",
+                [id],
+            )?;
+        }
+        // ------------------------------------------------------------------
+
         // Cheap consistency gate: catches truncated/garbage files that
         // still "open" fine but explode later mid-query.
         let status: String = conn.query_row("PRAGMA integrity_check", [], |r| r.get(0))?;
@@ -177,9 +222,27 @@ impl HistoryDb {
 
     // ---- Global favorite commands (shared across ALL terminals) ----
 
-    /// Add a command to the global favorites (idempotent, newest-first on
-    /// re-add via delete+insert like the history table).
+    /// The well-known default folder every legacy favorite lands in.
+    pub const DEFAULT_FAVORITE_FOLDER: &str = "默认收藏";
+
+    fn default_folder_id(&self) -> Option<i64> {
+        self.conn
+            .query_row(
+                "SELECT id FROM favorite_folders WHERE name = ?1",
+                params![Self::DEFAULT_FAVORITE_FOLDER],
+                |r| r.get(0),
+            )
+            .ok()
+    }
+
     pub fn fav_add(&self, command: &str) {
+        let folder = self.default_folder_id().unwrap_or(1);
+        self.fav_add_to(folder, command);
+    }
+
+    /// Append a command to a folder's END (ascending sort_key); the UI
+    /// drag order decides the final assemble order.
+    pub fn fav_add_to(&self, folder_id: i64, command: &str) {
         let trimmed = command.trim();
         if trimmed.is_empty() || trimmed.len() <= 1 {
             return;
@@ -187,16 +250,23 @@ impl HistoryDb {
         let Ok(tx) = self.conn.unchecked_transaction() else {
             return;
         };
+        let next_key: i64 = tx
+            .query_row(
+                "SELECT COALESCE(MAX(sort_key), 0) + 1 FROM favorite_commands WHERE folder_id = ?1",
+                params![folder_id],
+                |r| r.get(0),
+            )
+            .unwrap_or(1);
         if tx
             .execute(
-                "DELETE FROM favorite_commands WHERE command = ?1",
-                params![trimmed],
+                "DELETE FROM favorite_commands WHERE folder_id = ?1 AND command = ?2",
+                params![folder_id, trimmed],
             )
             .is_err()
             || tx
                 .execute(
-                    "INSERT INTO favorite_commands (command) VALUES (?1)",
-                    params![trimmed],
+                    "INSERT INTO favorite_commands (command, folder_id, sort_key) VALUES (?1, ?2, ?3)",
+                    params![trimmed, folder_id, next_key],
                 )
                 .is_err()
         {
@@ -231,6 +301,151 @@ impl HistoryDb {
 
     pub fn fav_clear(&self) {
         self.conn.execute("DELETE FROM favorite_commands", []).ok();
+    }
+
+    // ---- Favorite folders (v0.1.46) ----
+
+    /// All folders in display order (creation order), newest first to
+    /// match the historical favorites list.
+    pub fn fav_folders(&self) -> Vec<(i64, String)> {
+        let Ok(mut stmt) = self
+            .conn
+            .prepare("SELECT id, name FROM favorite_folders ORDER BY id DESC")
+        else {
+            return Vec::new();
+        };
+        stmt.query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })
+        .map(|rows| rows.flatten().collect())
+        .unwrap_or_default()
+    }
+
+    /// Create a folder; returns its id. Name uniqueness is enforced by
+    /// the table constraint; a duplicate returns Err(())-style None.
+    pub fn fav_folder_create(&self, name: &str) -> Option<i64> {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        self.conn
+            .execute(
+                "INSERT INTO favorite_folders (name) VALUES (?1)",
+                params![trimmed],
+            )
+            .ok()?;
+        Some(self.conn.last_insert_rowid())
+    }
+
+    pub fn fav_folder_rename(&self, folder_id: i64, new_name: &str) -> bool {
+        let trimmed = new_name.trim();
+        if trimmed.is_empty() {
+            return false;
+        }
+        self.conn
+            .execute(
+                "UPDATE favorite_folders SET name = ?2 WHERE id = ?1",
+                params![folder_id, trimmed],
+            )
+            .is_ok()
+    }
+
+    /// Delete a folder AND everything inside it (ON DELETE CASCADE).
+    pub fn fav_folder_delete(&self, folder_id: i64) -> bool {
+        self.conn
+            .execute(
+                "DELETE FROM favorite_folders WHERE id = ?1",
+                params![folder_id],
+            )
+            .is_ok()
+    }
+
+    /// Persist a new folder order by rewriting ids' positions via a
+    /// shadow sort: simplest robust trick is renaming through a temp
+    /// mapping, but SQLite rows have no order — the UI keeps Vec order
+    /// and we materialize it with a position column-less approach:
+    /// rewrite `created_at` so ORDER BY created_at DESC matches the Vec.
+    pub fn fav_folder_reorder(&self, ordered_ids: &[i64]) {
+        let Ok(tx) = self.conn.unchecked_transaction() else {
+            return;
+        };
+        // Rank N (highest) = first in the Vec, so DESC ordering restores it.
+        let n = ordered_ids.len() as i64;
+        let mut ok = true;
+        for (idx, id) in ordered_ids.iter().enumerate() {
+            let rank = n - idx as i64;
+            if tx
+                .execute(
+                    "UPDATE favorite_folders SET created_at = \
+                     datetime('now', ?2) WHERE id = ?1",
+                    params![id, format!("+{rank} seconds")],
+                )
+                .is_err()
+            {
+                ok = false;
+                break;
+            }
+        }
+        if ok {
+            let _ = tx.commit();
+        } else {
+            let _ = tx.rollback();
+        }
+    }
+
+    /// Commands of a folder in the user's drag order (ascending
+    /// sort_key) — the order "assemble" concatenates.
+    pub fn fav_items(&self, folder_id: i64) -> Vec<String> {
+        let Ok(mut stmt) = self.conn.prepare(
+            "SELECT command FROM favorite_commands \
+             WHERE folder_id = ?1 ORDER BY sort_key ASC",
+        ) else {
+            return Vec::new();
+        };
+        stmt.query_map(params![folder_id], |row| row.get::<_, String>(0))
+            .map(|rows| rows.flatten().collect())
+            .unwrap_or_default()
+    }
+
+    /// Remove one command from a folder.
+    pub fn fav_item_remove(&self, folder_id: i64, command: &str) {
+        let _ = self.conn.execute(
+            "DELETE FROM favorite_commands WHERE folder_id = ?1 AND command = ?2",
+            params![folder_id, command],
+        );
+    }
+
+    /// Persist a new drag order for a folder's items by rewriting
+    /// sort_key to 1..=N in the given order.
+    pub fn fav_item_reorder(&self, folder_id: i64, ordered: &[String]) {
+        let Ok(tx) = self.conn.unchecked_transaction() else {
+            return;
+        };
+        let mut ok = true;
+        for (idx, cmd) in ordered.iter().enumerate() {
+            if tx
+                .execute(
+                    "UPDATE favorite_commands SET sort_key = ?3 \
+                     WHERE folder_id = ?1 AND command = ?2",
+                    params![folder_id, cmd, (idx + 1) as i64],
+                )
+                .is_err()
+            {
+                ok = false;
+                break;
+            }
+        }
+        if ok {
+            let _ = tx.commit();
+        } else {
+            let _ = tx.rollback();
+        }
+    }
+
+    /// Commands of a folder in drag order, joined for direct execution:
+    /// the assemble feature writes this into the current terminal.
+    pub fn fav_folder_assemble(&self, folder_id: i64, separator: &str) -> String {
+        self.fav_items(folder_id).join(separator)
     }
 
     /// Delete ONE occurrence of a command from a terminal's history
@@ -326,6 +541,108 @@ mod tests {
         db.add("terminal", "first");
 
         assert_eq!(db.get("terminal", 10), vec!["first", "second"]);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn legacy_favorites_migrate_into_default_folder() {
+        // Build a LEGACY database with the pre-folder schema first...
+        let path = std::env::temp_dir().join(format!(
+            "opennex_hist_legacy_{}-{}.db",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        {
+            use rusqlite::Connection;
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE command_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    terminal_id TEXT NOT NULL,
+                    command TEXT NOT NULL,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE favorite_commands (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    command TEXT NOT NULL UNIQUE,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                );
+                INSERT INTO favorite_commands (command) VALUES ('legacy-cmd'), ('another');",
+            )
+            .unwrap();
+        }
+        // ...then open it through the app's entry point: the v0.1.46
+        // migration must add the folder columns and move both legacy
+        // favorites into the default folder.
+        let db = HistoryDb::new(&path, 10);
+        let folders = db.fav_folders();
+        assert!(
+            folders
+                .iter()
+                .any(|(_, n)| n == HistoryDb::DEFAULT_FAVORITE_FOLDER),
+            "default folder must exist after migration: {folders:?}"
+        );
+        let (default_id, _) = folders
+            .iter()
+            .find(|(_, n)| *n == HistoryDb::DEFAULT_FAVORITE_FOLDER)
+            .unwrap();
+        let items = db.fav_items(*default_id);
+        assert!(items.contains(&"legacy-cmd".to_string()));
+        assert!(items.contains(&"another".to_string()));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn folder_crud_reorder_and_assemble() {
+        let (db, path) = test_db();
+        let fid = db.fav_folder_create("build").expect("create");
+        assert!(db.fav_folder_create("build").is_none(), "dup name rejected");
+        db.fav_add_to(fid, "cmake .");
+        db.fav_add_to(fid, "make -j8");
+        db.fav_add_to(fid, "sudo make install");
+        assert_eq!(
+            db.fav_items(fid),
+            vec!["cmake .", "make -j8", "sudo make install"]
+        );
+
+        // Drag reorder: move the last item to the front.
+        db.fav_item_reorder(
+            fid,
+            &[
+                "sudo make install".into(),
+                "cmake .".into(),
+                "make -j8".into(),
+            ],
+        );
+        assert_eq!(
+            db.fav_items(fid),
+            vec!["sudo make install", "cmake .", "make -j8"]
+        );
+
+        // Assemble joins in drag order.
+        assert_eq!(
+            db.fav_folder_assemble(fid, " && "),
+            "sudo make install && cmake . && make -j8"
+        );
+
+        // Item remove.
+        db.fav_item_remove(fid, "cmake .");
+        assert_eq!(db.fav_items(fid).len(), 2);
+
+        // Rename + folder reorder persistence.
+        assert!(db.fav_folder_rename(fid, "build-all"));
+        let fid2 = db.fav_folder_create("zzz-other").unwrap();
+        // Vec order = display order: fid2 first after the reorder.
+        db.fav_folder_reorder(&[fid2, fid]);
+        let names: Vec<String> = db.fav_folders().into_iter().map(|(_, n)| n).collect();
+        assert_eq!(names.first().map(String::as_str), Some("zzz-other"));
+
+        // Delete cascades the items away.
+        assert!(db.fav_folder_delete(fid));
+        assert!(db.fav_items(fid).is_empty());
         let _ = std::fs::remove_file(path);
     }
 

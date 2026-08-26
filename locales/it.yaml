@@ -190,6 +190,14 @@ terminal:
   clear_favorites_title: Cancella tutti i preferiti
   clear_favorites_body: Cancellare tutti i comandi preferiti? Operazione irreversibile.
   history_empty: 'Nessun comando'
+  fav_assemble: Assembla
+  fav_delete_body: La cartella e TUTTI i suoi comandi verranno eliminati. Irreversibile.
+  fav_delete_title: Elimina
+  fav_expand_hint: → espandi / ← comprimi
+  fav_name_label: 'Nome:'
+  fav_new_folder: Nuova cartella
+  fav_new_title: Nuova cartella
+  fav_rename_title: Rinomina
 theme:
   light: Chiaro
   dark: Scuro

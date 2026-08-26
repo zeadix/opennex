@@ -190,6 +190,14 @@ terminal:
   clear_favorites_title: Clear All Favorite Commands
   clear_favorites_body: Clear all favorite commands? This cannot be undone.
   history_empty: 'No commands yet'
+  fav_assemble: Assemble
+  fav_delete_body: This deletes the folder and ALL commands inside it. This cannot be undone.
+  fav_delete_title: Delete folder
+  fav_expand_hint: → expand / ← collapse
+  fav_name_label: 'Name:'
+  fav_new_folder: New folder
+  fav_new_title: New folder
+  fav_rename_title: Rename folder
 theme:
   light: Light
   dark: Dark
