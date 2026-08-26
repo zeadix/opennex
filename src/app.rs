@@ -4291,8 +4291,9 @@ impl App {
         let menu_alt = app.menu_alt_bg.to_egui();
         let menu_fg = app.menu_fg.to_egui();
         let weak = app.weak_text.to_egui();
-        let _border = app.sidebar_border.to_egui();
+
         let sel_bg = app.active.to_egui();
+        let border = app.sidebar_border.to_egui();
         let font_size = self.active_theme.typography.menu_font_size;
 
         // Adaptive geometry: height fits the content (capped at 10 rows)
@@ -5380,7 +5381,6 @@ impl App {
                 let fg = app.menu_fg.to_egui();
                 let weak = app.weak_text.to_egui();
                 let sel = app.active.to_egui();
-                let border = app.sidebar_border.to_egui();
                 // Flat, square, borderless — visually a CONTINUATION of
                 // the folder list sitting right next to it (same style as
                 // the favorites column), not a separate popup.
