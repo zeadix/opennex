@@ -4763,7 +4763,9 @@ impl App {
                                 if !items.is_empty() {
                                     self.fav_submenu = Some((
                                         fid,
-                                        egui::pos2(row_rect.max.x + 4.0, row_rect.min.y),
+                                        // Anchor at the COLUMN's right edge
+                                        // (aligned with the folder list).
+                                        egui::pos2(col_full_rect.max.x + 2.0, row_rect.min.y),
                                         items,
                                         None,
                                     ));
@@ -6005,7 +6007,10 @@ impl eframe::App for App {
                                         if !items.is_empty() {
                                             self.fav_submenu = Some((
                                                 *fid,
-                                                egui::pos2(400.0, 200.0),
+                                                egui::pos2(
+                                                    self.fav_column_rect.max.x + 2.0,
+                                                    self.fav_column_rect.min.y + 4.0,
+                                                ),
                                                 items,
                                                 Some(0),
                                             ));
@@ -6121,6 +6126,25 @@ impl eframe::App for App {
                                 nav.fav_selected = nav.fav_selected.saturating_sub(1);
                             } else if next && nav.fav_selected + 1 < folder_count {
                                 nav.fav_selected += 1;
+                            }
+                            // Keyboard hover parity: moving the cursor over
+                            // a folder opens ITS floating submenu, exactly
+                            // like hovering with the mouse.
+                            if let Some((fid, _)) = self.fav_folders.get(nav.fav_selected) {
+                                let items = self.history_db.fav_items(*fid);
+                                if !items.is_empty() {
+                                    self.fav_submenu = Some((
+                                        *fid,
+                                        egui::pos2(
+                                            self.fav_column_rect.max.x + 2.0,
+                                            self.fav_column_rect.min.y + 4.0,
+                                        ),
+                                        items,
+                                        None,
+                                    ));
+                                } else {
+                                    self.fav_submenu = None;
+                                }
                             }
                             // Selection changed: bring it into view THIS
                             // frame, mirroring the main-list follow logic.
