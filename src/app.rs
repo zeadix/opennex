@@ -5399,13 +5399,22 @@ impl App {
                     let hovered =
                         row.contains(ui.input(|i| i.pointer.hover_pos()).unwrap_or_default());
                     let is_kb = kb_sel.is_some_and(|k| k == idx);
+                    // Same hover treatment as the favorites column rows:
+                    // translucent selection tint, square corners.
                     if hovered || is_kb {
-                        ui.painter().rect_filled(row, 3.0, sel);
+                        ui.painter().rect_filled(
+                            row,
+                            0.0,
+                            egui::Color32::from_rgba_unmultiplied(sel.r(), sel.g(), sel.b(), 90),
+                        );
                     }
                     let g = ui.fonts(|f| {
                         f.layout_no_wrap(cmd.clone(), egui::FontId::monospace(11.0), fg)
                     });
-                    ui.set_clip_rect(row);
+                    ui.set_clip_rect(egui::Rect::from_min_max(
+                        row.min,
+                        egui::pos2(row.max.x - 22.0, row.max.y),
+                    ));
                     ui.painter().galley(
                         egui::pos2(row.min.x + 6.0, row.center().y - g.size().y / 2.0),
                         g,
@@ -5422,6 +5431,45 @@ impl App {
                     }
                     if rresp.hovered() {
                         new_sel = Some(idx);
+                    }
+                    // Delete button (hover or keyboard-selected row),
+                    // mirroring the history list's row actions.
+                    if hovered || is_kb {
+                        let drect = egui::Rect::from_min_max(
+                            egui::pos2(row.max.x - 20.0, row.center().y - 9.0),
+                            egui::pos2(row.max.x - 4.0, row.center().y + 9.0),
+                        );
+                        let dresp = ui.interact(
+                            drect,
+                            egui::Id::new(("fav_sub_del", fid, idx)),
+                            egui::Sense::click(),
+                        );
+                        let dcol = if dresp.contains_pointer() {
+                            app.danger.to_egui()
+                        } else {
+                            weak
+                        };
+                        let dg = ui.fonts(|f| {
+                            f.layout_no_wrap(
+                                "×".to_string(),
+                                egui::FontId::proportional(12.0),
+                                dcol,
+                            )
+                        });
+                        ui.painter()
+                            .galley(drect.center() - dg.size() / 2.0, dg, dcol);
+                        if dresp.clicked() {
+                            self.history_db.fav_item_remove(fid, cmd);
+                            self.fav_folders = self.history_db.fav_folders();
+                            // Refresh the open submenu's items; an empty
+                            // folder closes the whole menu.
+                            let fresh = self.history_db.fav_items(fid);
+                            if fresh.is_empty() {
+                                self.fav_submenu = None;
+                                return;
+                            }
+                            self.fav_submenu = Some((fid, anchor, fresh, kb_sel));
+                        }
                     }
                 }
                 let _ = resp;
@@ -6032,6 +6080,27 @@ impl eframe::App for App {
                 }
                 // Delete under the keyboard cursor (history or favorite).
                 if delete_pressed {
+                    // Submenu open: delete the SELECTED command inside the
+                    // folder (mirrors the history-list Delete behavior).
+                    if let Some((fid, _, items, Some(sel))) = self.fav_submenu.clone() {
+                        if let Some(cmd) = items.get(sel).cloned() {
+                            self.history_db.fav_item_remove(fid, &cmd);
+                            self.fav_folders = self.history_db.fav_folders();
+                            let fresh = self.history_db.fav_items(fid);
+                            if fresh.is_empty() {
+                                self.fav_submenu = None;
+                            } else {
+                                let sel = sel.min(fresh.len() - 1);
+                                let anchor = self
+                                    .fav_submenu
+                                    .as_ref()
+                                    .map(|(_, a, _, _)| *a)
+                                    .unwrap_or(egui::pos2(0.0, 0.0));
+                                self.fav_submenu = Some((fid, anchor, fresh, Some(sel)));
+                            }
+                        }
+                        return;
+                    }
                     let (fav_idx, hist_idx) = self
                         .terminals
                         .get(&tab)
@@ -6123,7 +6192,6 @@ impl eframe::App for App {
                             if focus_left {
                                 self.fav_submenu = None;
                             }
-                            history_menu_handled = true;
                         } else if nav.fav_focused && (previous || next) {
                             let folder_count = self.fav_folders.len();
                             if previous {
@@ -6131,25 +6199,11 @@ impl eframe::App for App {
                             } else if next && nav.fav_selected + 1 < folder_count {
                                 nav.fav_selected += 1;
                             }
-                            // Keyboard hover parity: moving the cursor over
-                            // a folder opens ITS floating submenu, exactly
-                            // like hovering with the mouse.
-                            if let Some((fid, _)) = self.fav_folders.get(nav.fav_selected) {
-                                let items = self.history_db.fav_items(*fid);
-                                if !items.is_empty() {
-                                    self.fav_submenu = Some((
-                                        *fid,
-                                        egui::pos2(
-                                            self.fav_column_rect.max.x + 2.0,
-                                            self.fav_column_rect.min.y + 4.0,
-                                        ),
-                                        items,
-                                        None,
-                                    ));
-                                } else {
-                                    self.fav_submenu = None;
-                                }
-                            }
+                            // NOTE: moving the folder cursor does NOT
+                            // auto-open its submenu — the cursor stays on
+                            // the folder list until Right is pressed (which
+                            // switches into the submenu). Mouse hover still
+                            // opens it; that is pointer-driven only.
                             // Selection changed: bring it into view THIS
                             // frame, mirroring the main-list follow logic.
                             let fav_scroll_id = egui::Id::new(("hist_fav_scroll", tab.as_str()));
