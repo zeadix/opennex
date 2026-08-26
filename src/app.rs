@@ -4309,23 +4309,11 @@ impl App {
         // the favorites/folder column (which can hold more rows than the
         // main list has entries — a folder tree with no history would
         // otherwise clip the folders out of view).
-        let fav_col_rows = self
-            .fav_folders
-            .iter()
-            .map(|(fid, _)| {
-                1 + if self
-                    .fav_submenu
-                    .as_ref()
-                    .is_some_and(|(sid, _, _, _)| sid == fid)
-                {
-                    self.history_db.fav_items(*fid).len()
-                } else {
-                    0
-                }
-            })
-            .sum::<usize>()
-            .max(visible_rows);
-        let rows_h = fav_col_rows as f32 * row_h;
+        // FIXED 10-row height (v0.1.47): the favorites/folder column must
+        // always have room for its full tree regardless of how few history
+        // entries exist — an adaptive height clipped it to the main list.
+        // The columns scroll internally when content overflows.
+        let rows_h = max_visible as f32 * row_h;
         let list_h = rows_h + footer_h;
         let show_favs = nav.auto_word.is_none() && !nav.favorites.is_empty();
         let total_w = list_w + if show_favs { fav_w } else { 0.0 };
@@ -6109,7 +6097,25 @@ impl eframe::App for App {
                 // (bring into view only on the frame the selection moved).
                 if let Some(td) = self.terminals.get_mut(&tab) {
                     if let Some(nav) = td.instance.history_nav.as_mut() {
-                        if nav.fav_focused && (previous || next) {
+                        // A folder's floating submenu captures Up/Down/Left
+                        // while open: Up/Down walk the submenu items, Left
+                        // closes it back to the folder list.
+                        if let Some((fid, anchor, sub_items, sub_sel)) = self.fav_submenu.clone() {
+                            let mut new_sel = sub_sel;
+                            if previous {
+                                new_sel = Some(sub_sel.unwrap_or(0).saturating_sub(1));
+                            } else if next {
+                                let cur = sub_sel.unwrap_or(0);
+                                if cur + 1 < sub_items.len() {
+                                    new_sel = Some(cur + 1);
+                                }
+                            }
+                            self.fav_submenu = Some((fid, anchor, sub_items.clone(), new_sel));
+                            if focus_left {
+                                self.fav_submenu = None;
+                            }
+                            history_menu_handled = true;
+                        } else if nav.fav_focused && (previous || next) {
                             let folder_count = self.fav_folders.len();
                             if previous {
                                 nav.fav_selected = nav.fav_selected.saturating_sub(1);
@@ -6174,7 +6180,20 @@ impl eframe::App for App {
                     self.close_history_menu(&tab);
                 }
                 if confirm {
-                    if fav_confirming {
+                    // A folder's floating submenu captures Enter: send the
+                    // submenu's selected COMMAND (not the folder assembly).
+                    if let Some((fid, _, items, Some(sel))) = self.fav_submenu.clone() {
+                        if let Some(cmd) = items.get(sel).cloned() {
+                            let _ = fid;
+                            if let Some(td) = self.terminals.get_mut(&tab) {
+                                td.instance.history_nav = None;
+                                td.instance.write(format!("{cmd}\r").as_bytes());
+                            }
+                            self.history_menu_just_closed.insert(tab.clone(), true);
+                            self.fav_submenu = None;
+                        }
+                        history_menu_handled = true;
+                    } else if fav_confirming {
                         // Enter on the folder column: ASSEMBLE the selected
                         // folder's commands into one line and send it (shell-
                         // aware separators).

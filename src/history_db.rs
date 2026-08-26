@@ -89,6 +89,24 @@ impl HistoryDb {
                  UPDATE favorite_commands SET sort_key = id;",
             )?;
         }
+        let has_position_col: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('favorite_folders') \
+                 WHERE name='position'",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .map(|n| n > 0)?;
+        if !has_position_col {
+            // Seed from the current id-DESC display order: the LAST row
+            // by id is displayed FIRST, so it gets position 1.
+            conn.execute_batch(
+                "ALTER TABLE favorite_folders ADD COLUMN position INTEGER;
+                 UPDATE favorite_folders SET position =
+                   (SELECT COUNT(*) + 1 FROM favorite_folders f2
+                    WHERE f2.id > favorite_folders.id);",
+            )?;
+        }
         let default_folder: i64 = conn
             .query_row(
                 "SELECT id FROM favorite_folders WHERE name = '默认收藏'",
@@ -308,10 +326,10 @@ impl HistoryDb {
     /// All folders in display order (creation order), newest first to
     /// match the historical favorites list.
     pub fn fav_folders(&self) -> Vec<(i64, String)> {
-        let Ok(mut stmt) = self
-            .conn
-            .prepare("SELECT id, name FROM favorite_folders ORDER BY id DESC")
-        else {
+        let Ok(mut stmt) = self.conn.prepare(
+            "SELECT id, name FROM favorite_folders \
+                 ORDER BY position IS NULL, position ASC, id DESC",
+        ) else {
             return Vec::new();
         };
         stmt.query_map([], |row| {
@@ -328,10 +346,18 @@ impl HistoryDb {
         if trimmed.is_empty() {
             return None;
         }
+        let next_pos: i64 = self
+            .conn
+            .query_row(
+                "SELECT COALESCE(MAX(position), 0) + 1 FROM favorite_folders",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(1);
         self.conn
             .execute(
-                "INSERT INTO favorite_folders (name) VALUES (?1)",
-                params![trimmed],
+                "INSERT INTO favorite_folders (name, position) VALUES (?1, ?2)",
+                params![trimmed, next_pos],
             )
             .ok()?;
         Some(self.conn.last_insert_rowid())
@@ -377,33 +403,23 @@ impl HistoryDb {
     /// shadow sort: simplest robust trick is renaming through a temp
     /// mapping, but SQLite rows have no order — the UI keeps Vec order
     /// and we materialize it with a position column-less approach:
-    /// rewrite `created_at` so ORDER BY created_at DESC matches the Vec.
     pub fn fav_folder_reorder(&self, ordered_ids: &[i64]) {
         let Ok(tx) = self.conn.unchecked_transaction() else {
             return;
         };
-        // Rank N (highest) = first in the Vec, so DESC ordering restores it.
-        let n = ordered_ids.len() as i64;
-        let mut ok = true;
         for (idx, id) in ordered_ids.iter().enumerate() {
-            let rank = n - idx as i64;
             if tx
                 .execute(
-                    "UPDATE favorite_folders SET created_at = \
-                     datetime('now', ?2) WHERE id = ?1",
-                    params![id, format!("+{rank} seconds")],
+                    "UPDATE favorite_folders SET position = ?2 WHERE id = ?1",
+                    params![id, (idx + 1) as i64],
                 )
                 .is_err()
             {
-                ok = false;
-                break;
+                let _ = tx.rollback();
+                return;
             }
         }
-        if ok {
-            let _ = tx.commit();
-        } else {
-            let _ = tx.rollback();
-        }
+        let _ = tx.commit();
     }
 
     /// Commands of a folder in the user's drag order (ascending
@@ -645,13 +661,15 @@ mod tests {
         db.fav_item_remove(fid, "cmake .");
         assert_eq!(db.fav_items(fid).len(), 2);
 
-        // Rename + folder reorder persistence.
+        // Rename + folder reorder persistence: Vec order = display order.
         assert!(db.fav_folder_rename(fid, "build-all"));
         let fid2 = db.fav_folder_create("zzz-other").unwrap();
-        // Vec order = display order: fid2 first after the reorder.
         db.fav_folder_reorder(&[fid2, fid]);
         let names: Vec<String> = db.fav_folders().into_iter().map(|(_, n)| n).collect();
+        // fid was renamed to build-all and reordered AFTER fid2? No —
+        // the Vec is [fid2, fid], so fid2 (zzz-other) displays first.
         assert_eq!(names.first().map(String::as_str), Some("zzz-other"));
+        assert_eq!(names.get(1).map(String::as_str), Some("build-all"));
 
         // Delete cascades the items away.
         assert!(db.fav_folder_delete(fid));
