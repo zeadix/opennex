@@ -189,7 +189,7 @@ terminal:
   history_count: 개의 명령 기록
   clear_favorites_title: 모든 즐겨찾기 명령 삭제
   clear_favorites_body: 모든 즐겨찾기 명령을 삭제할까요? 되돌릴 수 없습니다.
-  history_empty: 명령 기록 없음 — 터미널에서 실행한 명령이 자동으로 여기 표시됩니다(Alt 으로 열기)
+  history_empty: '명령 기록 없음'
 theme:
   light: 밝게
   dark: 어둡게

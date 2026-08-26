@@ -189,7 +189,7 @@ terminal:
   history_count:  history commands
   clear_favorites_title: Clear All Favorite Commands
   clear_favorites_body: Clear all favorite commands? This cannot be undone.
-  history_empty: No commands yet — commands run in the terminal appear here automatically (press Alt to open)
+  history_empty: 'No commands yet'
 theme:
   light: Light
   dark: Dark

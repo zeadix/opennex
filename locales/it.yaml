@@ -189,7 +189,7 @@ terminal:
   history_count:  comandi cronologici
   clear_favorites_title: Cancella tutti i preferiti
   clear_favorites_body: Cancellare tutti i comandi preferiti? Operazione irreversibile.
-  history_empty: Nessun comando — i comandi eseguiti nel terminale appaiono qui automaticamente (Alt per aprire)
+  history_empty: 'Nessun comando'
 theme:
   light: Chiaro
   dark: Scuro

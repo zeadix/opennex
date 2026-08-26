@@ -682,7 +682,7 @@ impl Texts {
             },
             terminal: TerminalTexts {
                 not_found: "未找到终端".into(),
-                history_empty: "暂无指令记录 — 在终端中执行的命令会自动出现在这里（Alt 快速呼出）".into(),
+                history_empty: "暂无指令".into(),
                 rename: "重命名".into(),
                 clear_history: "清空指令历史".into(),
                 new_tab: "+ 新建标签页".into(),

@@ -189,7 +189,7 @@ terminal:
   history_count:  इतिहास कमांड
   clear_favorites_title: सभी पसंदीदा कमांड हटाएं
   clear_favorites_body: सभी पसंदीदा कमांड हटाएं? यह पूर्ववत नहीं हो सकता।
-  history_empty: अभी कोई कमांड नहीं — टर्मिनल में चलाए गए कमांड यहाँ स्वतः दिखेंगे (Alt से खोलें)
+  history_empty: 'अभी कोई कमांड नहीं'
 theme:
   light: हल्का
   dark: गहरा

@@ -189,7 +189,7 @@ terminal:
   history_count:  Befehle im Verlauf
   clear_favorites_title: Alle Favoriten löschen
   clear_favorites_body: Alle Favoriten löschen? Dies kann nicht rückgängig gemacht werden.
-  history_empty: Noch keine Befehle — im Terminal ausgeführte Befehle erscheinen hier automatisch (Alt öffnet das Menü)
+  history_empty: 'Noch keine Befehle'
 theme:
   light: Hell
   dark: Dunkel

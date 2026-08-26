@@ -189,7 +189,7 @@ terminal:
   history_count: 條歷史指令
   clear_favorites_title: 清除全部收藏指令
   clear_favorites_body: 確認清除全部收藏指令？此操作不可復原。
-  history_empty: 暫無指令記錄 — 在終端機中執行的命令會自動出現在這裡（Alt 快速呼出）
+  history_empty: '暫無指令'
 theme:
   light: 淺色
   dark: 深色

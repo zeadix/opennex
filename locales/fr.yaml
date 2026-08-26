@@ -189,7 +189,7 @@ terminal:
   history_count:  commandes dans l'historique
   clear_favorites_title: Effacer toutes les commandes favorites
   clear_favorites_body: Effacer toutes les commandes favorites ? Cette action est irréversible.
-  history_empty: Pas encore de commandes — les commandes exécutées apparaissent ici automatiquement (Alt pour ouvrir)
+  history_empty: 'Pas encore de commandes'
 theme:
   light: Clair
   dark: Sombre
