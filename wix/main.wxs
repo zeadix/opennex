@@ -21,11 +21,6 @@
            page (canonical WiX pattern from "How To: Add a checkbox to
            the UI"): shrink the dialog's bottom banner, then add the
            checkbox bound to INSTALLDESKTOPSHORTCUT. -->
-      <Publish Dialog="InstallDirDlg"
-               Control="Next"
-               Event="DoAction"
-               Value="WixSetDefaultPerUserFolder"
-               Order="1">NOT Installed AND ALLUSERS=""</Publish>
       <Dialog Id="MyInstallDirDlg" Width="370" Height="270" Title="!(loc.InstallDirDlg_Title)">
         <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="!(loc.WixUINext)" />
         <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="!(loc.WixUIBack)" />
@@ -53,8 +48,6 @@
       <Publish Dialog="MyInstallDirDlg" Control="Next" Event="DoAction" Value="WixUIValidatePath" Order="2">NOT WIXUI_DONTVALIDATEPATH</Publish>
       <Publish Dialog="MyInstallDirDlg" Control="Next" Event="SpawnDialog" Value="InvalidDirDlg" Order="3"><![CDATA[NOT WIXUI_DONTVALIDATEPATH AND WIXUI_INSTALLDIR_VALID<>"1"]]></Publish>
       <Publish Dialog="MyInstallDirDlg" Control="Next" Event="NewDialog" Value="VerifyReadyDlg" Order="4">WIXUI_INSTALLDIR_VALID="1"</Publish>
-      <Publish Dialog="MyInstallDirDlg" Control="ChangeFolder" Property="_BrowseProperty" Value="[WIXUI_INSTALLDIR]" Order="1">1</Publish>
-      <Publish Dialog="MyInstallDirDlg" Control="ChangeFolder" Event="SpawnDialog" Value="BrowseDlg" Order="2">1</Publish>
       <Publish Dialog="MyInstallDirDlg" Control="Browse" Property="_BrowseProperty" Value="[WIXUI_INSTALLDIR]" Order="1">1</Publish>
       <Publish Dialog="MyInstallDirDlg" Control="Browse" Event="SpawnDialog" Value="BrowseDlg" Order="2">1</Publish>
       <Publish Dialog="BrowseDlg" Control="OK" Event="SetTargetPath" Value="[[_BrowseProperty]]" Order="1">1</Publish>
