@@ -56,6 +56,37 @@ def main() -> int:
         if cid not in group_comp_ids:
             assert cid in refs, f"unreferenced component {cid} would never install"
 
+    # 5. LGHT0091: Dialog ids are GLOBAL in the linked MSI. WiX v3 does
+    # NOT merge a second Dialog with a library dialog's Id — it fails
+    # with a duplicate symbol. Any dialog we declare must therefore use
+    # an Id the referenced UI library does not already define
+    # (WixUI_InstallDir brings its own InstallDirDlg, WelcomeDlg, ...).
+    LIBRARY_DIALOGS = {
+        "BrowseDlg", "CancelDlg", "CustomizeDlg", "DiskCostDlg", "ErrorDlg",
+        "ExitDialog", "FatalError", "FilesInUse", "InstallDirDlg",
+        "InvalidDirDlg", "LicenseAgreementDlg", "MaintenanceTypeDlg",
+        "MaintenanceWelcomeDlg", "MsiRMFilesInUse", "OutOfDiskDlg",
+        "OutOfRbDiskDlg", "PrepareDlg", "ProgressDlg", "ResumeDlg",
+        "UserExit", "VerifyReadyDlg", "WaitForCostingDlg", "WelcomeDlg",
+        "WixUIAdvertiseExitDialog", "AdvancedWelcomeEulaDlg", "WelcomeEulaDlg",
+        "InstallScopeDlg", "InstallPerMachineDlg",
+    }
+    ours = [d.get("Id") for d in root.findall(".//w:Dialog", NS)]
+    clash = sorted(set(ours) & LIBRARY_DIALOGS)
+    assert not clash, (
+        "LGHT0091: our Dialog Id(s) collide with the WixUI library: "
+        + ", ".join(clash)
+        + " — use a unique Id and reroute with Publish elements"
+    )
+    assert len(ours) == len(set(ours)), "duplicate Dialog Id in our source"
+
+    # 6. CNDL0107: Dialog requires Width/Height even when it looks
+    # "derived" from a library dialog (it never is — see rule 5).
+    for d in root.findall(".//w:Dialog", NS):
+        assert d.get("Width") and d.get("Height"), (
+            f"CNDL0107: Dialog {d.get('Id')} misses Width/Height"
+        )
+
     print(f"wix structural lint OK: {path}")
     return 0
 
