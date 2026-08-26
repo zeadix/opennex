@@ -17,23 +17,12 @@
     <Property Id="WIXUI_INSTALLDIR" Value="INSTALLDIR" />
     <UI>
       <UIRef Id="WixUI_InstallDir" />
-      <!-- Desktop-shortcut checkbox injected into the install-directory
-           page (canonical WiX pattern from "How To: Add a checkbox to
-           the UI"): shrink the dialog's bottom banner, then add the
-           checkbox bound to INSTALLDESKTOPSHORTCUT. -->
-      <Dialog Id="MyInstallDirDlg" Width="370" Height="270" Title="!(loc.InstallDirDlg_Title)">
-        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="!(loc.WixUINext)" />
-        <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="!(loc.WixUIBack)" />
-        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="!(loc.WixUICancel)">
-          <Publish Event="SpawnDialog" Value="CancelDlg">1</Publish>
-        </Control>
-        <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" TabSkip="no" Text="!(loc.InstallDirDlgBannerBitmap)" />
-        <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="2" />
-        <Control Id="Description" Type="Text" X="25" Y="23" Width="280" Height="15" Transparent="yes" NoPrefix="yes" Text="!(loc.InstallDirDlgDescription)" />
-        <Control Id="Title" Type="Text" X="15" Y="6" Width="200" Height="15" Transparent="yes" NoPrefix="yes" Text="!(loc.InstallDirDlgTitle)" />
-        <Control Id="FolderLabel" Type="Text" X="20" Y="58" Width="290" Height="30" Text="!(loc.InstallDirDlgFolderLabel)" />
-        <Control Id="Browse" Type="PushButton" X="304" Y="120" Width="56" Height="17" Text="!(loc.WixUIBrowse)" />
-        <Control Id="InstallDir" Type="PathEdit" X="20" Y="100" Width="279" Height="18" Property="INSTALLDIR" Indirect="yes" />
+      <!-- Canonical WiX pattern ("How To: Add a checkbox to a built-in
+           dialog"): a Dialog with the SAME Id as the library's merges —
+           our extra Control is appended to InstallDirDlg, the wizard
+           flow stays entirely the library's own (no rerouting, no
+           duplicate symbols). -->
+      <Dialog Id="InstallDirDlg">
         <Control Id="DesktopShortcutCheckbox"
                  Type="CheckBox"
                  X="20" Y="150" Width="290" Height="17"
@@ -41,20 +30,6 @@
                  CheckBoxValue="1"
                  Text="Create a desktop shortcut" />
       </Dialog>
-      <!-- Route the wizard through our customized dialog. -->
-      <Publish Dialog="LicenseAgreementDlg" Control="Next" Event="NewDialog" Value="MyInstallDirDlg" Order="3">1</Publish>
-      <Publish Dialog="MyInstallDirDlg" Control="Back" Event="NewDialog" Value="LicenseAgreementDlg">1</Publish>
-      <Publish Dialog="MyInstallDirDlg" Control="Next" Event="SetTargetPath" Value="[WIXUI_INSTALLDIR]" Order="1">1</Publish>
-      <Publish Dialog="MyInstallDirDlg" Control="Next" Event="DoAction" Value="WixUIValidatePath" Order="2">NOT WIXUI_DONTVALIDATEPATH</Publish>
-      <Publish Dialog="MyInstallDirDlg" Control="Next" Event="SpawnDialog" Value="InvalidDirDlg" Order="3"><![CDATA[NOT WIXUI_DONTVALIDATEPATH AND WIXUI_INSTALLDIR_VALID<>"1"]]></Publish>
-      <Publish Dialog="MyInstallDirDlg" Control="Next" Event="NewDialog" Value="VerifyReadyDlg" Order="4">WIXUI_INSTALLDIR_VALID="1"</Publish>
-      <Publish Dialog="MyInstallDirDlg" Control="Browse" Property="_BrowseProperty" Value="[WIXUI_INSTALLDIR]" Order="1">1</Publish>
-      <Publish Dialog="MyInstallDirDlg" Control="Browse" Event="SpawnDialog" Value="BrowseDlg" Order="2">1</Publish>
-      <Publish Dialog="BrowseDlg" Control="OK" Event="SetTargetPath" Value="[[_BrowseProperty]]" Order="1">1</Publish>
-      <Publish Dialog="BrowseDlg" Control="OK" Event="EndDialog" Value="Return" Order="2">1</Publish>
-      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="MyInstallDirDlg" Order="1">NOT Installed</Publish>
-      <Publish Dialog="MaintenanceWelcomeDlg" Control="Next" Event="NewDialog" Value="MyInstallDirDlg">1</Publish>
-      <Publish Dialog="MyInstallDirDlg" Control="Browse" Event="DoAction" Value="WixUIValidatePath" Order="3">NOT WIXUI_DONTVALIDATEPATH</Publish>
     </UI>
 
     <!-- 1 = create the desktop shortcut (checkbox default), 0 = skip. -->
