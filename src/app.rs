@@ -1510,6 +1510,10 @@ pub struct App {
     /// Remembered folder-cursor position across menu (re)opens — the
     /// folder list must not snap back to the top every time.
     fav_cursor: usize,
+    /// Per-terminal menu cursor snapshot, synced every frame while the
+    /// history menu is open and restored on reopen: WHICH panel was
+    /// active (history / folders / commands) and each cursor position.
+    menu_cursors: HashMap<String, (usize, usize, bool, usize, bool, i64)>,
     /// In-flight drag in the FOLDER list: source index.
     fav_drag_src: Option<usize>,
     /// Drop target index + whether the pointer is past its midpoint.
@@ -1915,6 +1919,7 @@ impl App {
             fav_submenu: None,
             fav_sub_focused: false,
             fav_cursor: 0,
+            menu_cursors: HashMap::new(),
             fav_drag_src: None,
             fav_drag_dst: None,
             fav_folder_rects: Vec::new(),
@@ -4270,6 +4275,35 @@ impl App {
         let Some(tab) = self.focused_terminal.clone() else {
             return;
         };
+        // Snapshot the cursor/panel state EVERY frame while the menu is
+        // open, so ANY close path (Esc, Enter-send, click-away) persists
+        // it for the next open. (history, folder, folder_active, sub,
+        // sub_active, sub_folder)
+        {
+            let snap: Option<(usize, usize, bool, usize, bool, i64)> = self
+                .terminals
+                .get(&tab)
+                .and_then(|td| td.instance.history_nav.as_ref())
+                .map(|nav| {
+                    (
+                        nav.selected,
+                        nav.fav_selected,
+                        nav.fav_focused,
+                        self.fav_submenu
+                            .as_ref()
+                            .and_then(|(_, _, _, sel)| *sel)
+                            .unwrap_or(0),
+                        self.fav_sub_focused,
+                        self.fav_submenu
+                            .as_ref()
+                            .map(|(f, _, _, _)| *f)
+                            .unwrap_or(0),
+                    )
+                });
+            if let Some(snap) = snap {
+                self.menu_cursors.insert(tab.clone(), snap);
+            }
+        }
         let Some(td) = self.terminals.get_mut(&tab) else {
             return;
         };
@@ -4296,6 +4330,8 @@ impl App {
                     td.instance.history_nav = None;
                 }
             }
+            self.fav_submenu = None;
+            self.fav_sub_focused = false;
             return;
         }
         let Some(tab) = self.focused_terminal.clone() else {
@@ -5953,6 +5989,11 @@ impl App {
         if let Some(td) = self.terminals.get_mut(tab) {
             td.instance.history_nav = None;
         }
+        // Drop the transient column state WITH the menu (the snapshot in
+        // menu_cursors already captured what to restore); leaving it set
+        // made restored sessions drive two lists at once.
+        self.fav_submenu = None;
+        self.fav_sub_focused = false;
         self.history_menu_just_closed.insert(tab.to_string(), true);
     }
 
@@ -6233,10 +6274,40 @@ impl eframe::App for App {
                     let was_open = td.instance.history_nav.is_some();
                     toggle_history_menu(&mut td.instance.history_nav, entries, favorites);
                     if !was_open {
-                        // Fresh open: reset selection AND both scroll
-                        // offsets so the view matches the cursor (the
-                        // scroll used to keep its stale position from
-                        // the previous open).
+                        // Fresh open: RESTORE the last session's panel
+                        // focus and cursors (history / folder / command
+                        // column), so reopening lands exactly where the
+                        // user left off — including which panel Up/Down
+                        // operate on (they used to drive two lists at
+                        // once after a reopen because fav_focused reset
+                        // while the command column state didn't).
+                        let snap = self.menu_cursors.get(&tab).copied();
+                        if let Some(nav) = td.instance.history_nav.as_mut() {
+                            if let Some((
+                                hist_sel,
+                                fav_sel,
+                                fav_focused,
+                                sub_sel,
+                                sub_focused,
+                                sub_fid,
+                            )) = snap
+                            {
+                                nav.selected = hist_sel.min(nav.entries.len().saturating_sub(1));
+                                nav.fav_focused = fav_focused;
+                                nav.fav_selected =
+                                    fav_sel.min(self.fav_folders.len().saturating_sub(1));
+                                if sub_focused && sub_fid != 0 {
+                                    let items = self.history_db.fav_items(sub_fid);
+                                    if !items.is_empty() {
+                                        self.fav_sub_focused = true;
+                                        self.fav_submenu =
+                                            Some((sub_fid, egui::Pos2::ZERO, items, Some(sub_sel)));
+                                    }
+                                }
+                            }
+                        }
+                        // Scroll offsets realign below via follow-logic;
+                        // clear stale ones first.
                         ctx.memory_mut(|m| {
                             m.data.insert_temp(
                                 egui::Id::new(("hist_menu_scroll", tab.as_str())),
@@ -6497,7 +6568,7 @@ impl eframe::App for App {
                         // user pressed Right INTO it (fav_sub_focused);
                         // while it merely PREVIEWS (cursor on folders),
                         // Up/Down keep walking the folder list.
-                        if self.fav_sub_focused && self.fav_submenu.is_some() {
+                        if self.fav_sub_focused && self.fav_submenu.is_some() && nav.fav_focused {
                             if let Some((fid, anchor, sub_items, sub_sel)) =
                                 self.fav_submenu.clone()
                             {
