@@ -4981,6 +4981,10 @@ impl App {
                                 self.fav_drag_src = Some(fidx);
                             }
                         }
+                        // Advance to the next row (this was lost with the
+                        // dead inline-item block that used to share it —
+                        // every folder painted at the SAME y).
+                        y += row_h;
                     }
 
                     // Folder drag: insertion line + drop
