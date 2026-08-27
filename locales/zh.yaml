@@ -204,6 +204,8 @@ terminal:
   fav_btn_rename: 修改
   fav_cmd_dialog_label: '指令:'
   fav_cmd_dialog_title: 新建指令
+  fav_clear_folder: 清空收藏夹
+  fav_menu_assemble: 合并指令
 theme:
   light: 浅色
   dark: 深色

@@ -204,6 +204,8 @@ terminal:
   fav_btn_rename: नाम बदलें
   fav_cmd_dialog_label: 'कमांड:'
   fav_cmd_dialog_title: नया कमांड
+  fav_clear_folder: सभी कमांड हटाएँ
+  fav_menu_assemble: कमांड जोड़ें
 theme:
   light: हल्का
   dark: गहरा

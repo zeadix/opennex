@@ -204,6 +204,8 @@ terminal:
   fav_btn_rename: Rename
   fav_cmd_dialog_label: 'Command:'
   fav_cmd_dialog_title: Add command
+  fav_clear_folder: Clear commands
+  fav_menu_assemble: Assemble commands
 theme:
   light: Light
   dark: Dark

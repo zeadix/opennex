@@ -4334,7 +4334,10 @@ impl App {
         // The columns scroll internally when content overflows.
         let rows_h = max_visible as f32 * row_h;
         let list_h = rows_h + footer_h;
-        let show_favs = nav.auto_word.is_none() && !nav.favorites.is_empty();
+        // The folder column is ALWAYS visible in the manual menu (even
+        // with zero legacy favorites or after clear-favorites) — the
+        // folders themselves are the feature now.
+        let show_favs = nav.auto_word.is_none();
         // The folder's command list renders as a THIRD column in the
         // same window (flush against the folder column, same style) —
         // not a floating popup.
@@ -4815,11 +4818,58 @@ impl App {
                             );
                             ui.set_clip_rect(frame_rect.expand(1.0));
 
-                            let _hresp = ui.interact(
+                            let mut assemble_clicked = false;
+                            let mut add_cmd_clicked = false;
+                            let mut rename_clicked = false;
+                            let mut delete_clicked = false;
+                            let is_default_folder =
+                                name == crate::history_db::HistoryDb::DEFAULT_FAVORITE_FOLDER;
+                            let hresp = ui.interact(
                                 row_rect,
                                 egui::Id::new(("fav_folder", tab.as_str(), fid)),
                                 egui::Sense::click_and_drag(),
                             );
+                            // Right-click context menu (hover-button
+                            // actions + clear/delete folder).
+                            hresp.context_menu(|menu_ui| {
+                                let t = &self.texts.terminal;
+                                if menu_ui.button(t.fav_menu_assemble.clone()).clicked() {
+                                    assemble_clicked = true;
+                                    menu_ui.close_menu();
+                                }
+                                if menu_ui.button(t.fav_btn_add_cmd.clone()).clicked() {
+                                    add_cmd_clicked = true;
+                                    menu_ui.close_menu();
+                                }
+                                if menu_ui.button(t.fav_btn_rename.clone()).clicked() {
+                                    rename_clicked = true;
+                                    menu_ui.close_menu();
+                                }
+                                menu_ui.separator();
+                                if menu_ui.button(t.fav_clear_folder.clone()).clicked() {
+                                    self.history_db.fav_folder_clear(fid);
+                                    self.fav_folders = self.history_db.fav_folders();
+                                    if self
+                                        .fav_submenu
+                                        .as_ref()
+                                        .is_some_and(|(sid, _, _, _)| *sid == fid)
+                                    {
+                                        self.fav_submenu = None;
+                                    }
+                                    menu_ui.close_menu();
+                                }
+                                if !is_default_folder
+                                    && menu_ui
+                                        .button(
+                                            egui::RichText::new(t.fav_btn_delete.clone())
+                                                .color(self.active_theme.app.danger.to_egui()),
+                                        )
+                                        .clicked()
+                                {
+                                    self.fav_delete_confirm = Some((fid, folders[fidx].1.clone()));
+                                    menu_ui.close_menu();
+                                }
+                            });
                             folder_row_index.push((fid, row_rect));
                             self.fav_folder_rects.push(row_rect);
                             // A HISTORY entry dragged over a folder row:
@@ -4882,23 +4932,24 @@ impl App {
                             // hover 3 buttons: assemble / rename / delete
                             if row_hover && self.fav_drag_src.is_none() {
                                 let mut bx = row_rect.max.x - 8.0;
-                                let mut assemble_clicked = false;
-                                let mut add_cmd_clicked = false;
-                                let mut rename_clicked = false;
-                                let mut delete_clicked = false;
                                 let is_default_folder =
                                     name == crate::history_db::HistoryDb::DEFAULT_FAVORITE_FOLDER;
                                 // ICON buttons (user request): PENCIL = rename,
                                 // LIGHTNING = assemble, PLUS = add command,
                                 // TRASH = delete (default folder: no trash).
                                 let act_font = egui::FontId::proportional(13.0);
+                                // Painted right-to-left, so the VISUAL order
+                                // (left→right) is: 合并(asm) 添加(add)
+                                // 修改(ren) 删除(del).
                                 let mut btns: Vec<(&str, &str, bool)> = vec![
                                     (egui_phosphor::regular::PENCIL_SIMPLE, "ren", false),
-                                    (egui_phosphor::regular::LIGHTNING, "asm", false),
                                     (egui_phosphor::regular::PLUS, "add", false),
+                                    (egui_phosphor::regular::LIGHTNING, "asm", false),
                                 ];
                                 if !is_default_folder {
-                                    btns.push((egui_phosphor::regular::TRASH, "del", true));
+                                    // Visual rightmost = delete; protected
+                                    // default folder shows none.
+                                    btns.insert(0, (egui_phosphor::regular::TRASH, "del", true));
                                 }
                                 for (icon, id_ext, is_danger) in &btns {
                                     let lg = ui.fonts(|f| {

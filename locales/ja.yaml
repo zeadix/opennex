@@ -204,6 +204,8 @@ terminal:
   fav_btn_rename: 名前変更
   fav_cmd_dialog_label: 'コマンド:'
   fav_cmd_dialog_title: コマンド追加
+  fav_clear_folder: コマンドを全消去
+  fav_menu_assemble: コマンドを結合
 theme:
   light: ライト
   dark: ダーク

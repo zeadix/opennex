@@ -411,6 +411,14 @@ impl HistoryDb {
             .is_ok()
     }
 
+    /// Remove ALL commands from a folder, keeping the folder itself.
+    pub fn fav_folder_clear(&self, folder_id: i64) {
+        let _ = self.conn.execute(
+            "DELETE FROM favorite_commands WHERE folder_id = ?1",
+            params![folder_id],
+        );
+    }
+
     /// Delete a folder AND everything inside it (ON DELETE CASCADE).
     /// The default folder is protected — legacy favorites always land
     /// there, so deleting it would orphan future ones.

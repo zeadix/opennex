@@ -204,6 +204,8 @@ terminal:
   fav_btn_rename: 이름 바꾸기
   fav_cmd_dialog_label: '명령:'
   fav_cmd_dialog_title: 명령 추가
+  fav_clear_folder: 명령 모두 지우기
+  fav_menu_assemble: 명령 조립
 theme:
   light: 밝게
   dark: 어둡게
