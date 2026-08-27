@@ -4263,6 +4263,20 @@ impl App {
         if !self.settings.auto_copy_selection {
             return;
         }
+        // The history/favorites menu is open: its rows and buttons are
+        // click targets, and a button RELEASE (e.g. the trash icon in a
+        // folder's command column) must not be interpreted as the end of
+        // a terminal text selection — that copy/toast burst caused the
+        // black flash on delete. Selection auto-copy only applies to
+        // releases while NO menu is open.
+        let any_menu_open = self
+            .focused_terminal
+            .as_ref()
+            .and_then(|tab| self.terminals.get(tab))
+            .is_some_and(|td| td.instance.history_nav.is_some());
+        if any_menu_open {
+            return;
+        }
         let mut released = false;
         ctx.input(|input| {
             for event in &input.events {
@@ -5470,16 +5484,27 @@ impl App {
                             if let Some(idx) = remove_idx {
                                 if let Some(rid) = row_ids.get(idx) {
                                     self.history_db.fav_item_remove_row(*rid);
-                                    // LIVE refresh: the column re-reads the
-                                    // DB next frame — the row vanishes
-                                    // immediately (no re-entry needed).
-                                    let fresh = self.history_db.fav_items(fid);
+                                    self.fav_folders = self.history_db.fav_folders();
+                                    // The renderer re-reads the DB live
+                                    // every frame, so the row vanishes on
+                                    // its own; replacing the in-Flight
+                                    // snapshot MID-AREA (old behavior)
+                                    // caused a one-frame clip/paint
+                                    // mismatch — the black flash. Only
+                                    // close the column if the folder is
+                                    // now empty, and clamp the keyboard
+                                    // selection.
+                                    let fresh = self.history_db.fav_items_with_ids(fid);
                                     if fresh.is_empty() {
                                         self.fav_submenu = None;
-                                    } else {
-                                        let sel = kb_sel.unwrap_or(0).min(fresh.len() - 1);
-                                        self.fav_submenu =
-                                            Some((fid, egui::Pos2::ZERO, fresh, Some(sel)));
+                                    } else if let Some((f, a, _, sel)) = self.fav_submenu.clone() {
+                                        let sel = sel.unwrap_or(0).min(fresh.len() - 1);
+                                        self.fav_submenu = Some((
+                                            f,
+                                            a,
+                                            fresh.into_iter().map(|(_, c)| c).collect(),
+                                            Some(sel),
+                                        ));
                                     }
                                 }
                             }
