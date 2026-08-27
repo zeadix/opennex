@@ -6522,14 +6522,17 @@ impl eframe::App for App {
                         // aborted the rest of update() (dock area, side
                         // bar, menus) for one frame: the black flash.
                     }
-                    // Cursor on the FOLDER list: Delete opens the SAME
-                    // confirm dialog as the trash button (protected
-                    // default folder excluded).
+                    // Cursor on the FOLDER list (and NOT inside its
+                    // command column — fav_sub_focused stays true while
+                    // the folder keeps focus, so both deletes used to
+                    // fire): open the SAME confirm dialog as the trash
+                    // button (protected default folder excluded).
                     let on_folders = self
                         .terminals
                         .get(&tab)
                         .and_then(|td| td.instance.history_nav.as_ref())
-                        .is_some_and(|n| n.fav_focused);
+                        .is_some_and(|n| n.fav_focused)
+                        && !self.fav_sub_focused;
                     if on_folders {
                         let target = self
                             .terminals
@@ -6541,53 +6544,55 @@ impl eframe::App for App {
                                 self.fav_delete_confirm = Some((fid, name));
                             }
                         }
-                        // (no bare return — see above)
-                    }
-                    let (fav_idx, hist_idx) = self
-                        .terminals
-                        .get(&tab)
-                        .and_then(|td| td.instance.history_nav.as_ref())
-                        .map(|nav| {
-                            if !nav.fav_focused {
-                                (None, Some(nav.selected))
-                            } else {
-                                (None::<usize>, None)
-                            }
-                        })
-                        .unwrap_or((None, None));
-                    if let Some(fi) = fav_idx {
-                        let cmd = self
+                    } else {
+                        let (fav_idx, hist_idx) = self
                             .terminals
                             .get(&tab)
                             .and_then(|td| td.instance.history_nav.as_ref())
-                            .and_then(|nav| nav.favorites.get(fi).cloned());
-                        if let Some(cmd) = cmd {
-                            self.history_db.fav_remove(&cmd);
+                            .map(|nav| {
+                                if !nav.fav_focused {
+                                    (None, Some(nav.selected))
+                                } else {
+                                    (None::<usize>, None)
+                                }
+                            })
+                            .unwrap_or((None, None));
+                        if let Some(fi) = fav_idx {
+                            let cmd = self
+                                .terminals
+                                .get(&tab)
+                                .and_then(|td| td.instance.history_nav.as_ref())
+                                .and_then(|nav| nav.favorites.get(fi).cloned());
+                            if let Some(cmd) = cmd {
+                                self.history_db.fav_remove(&cmd);
+                                // (history-path legacy branch; closes the
+                                // exclusive else-chain opened above)
+                                if let Some(td) = self.terminals.get_mut(&tab) {
+                                    if let Some(nav) = td.instance.history_nav.as_mut() {
+                                        nav.favorites = self.history_db.fav_all();
+                                        if nav.favorites.is_empty() {
+                                            nav.fav_focused = false;
+                                        } else {
+                                            nav.fav_selected =
+                                                nav.fav_selected.min(nav.favorites.len() - 1);
+                                        }
+                                    }
+                                }
+                            }
+                        } else if let Some(i) = hist_idx {
+                            self.history_db.remove_entry(&tab, i);
                             if let Some(td) = self.terminals.get_mut(&tab) {
                                 if let Some(nav) = td.instance.history_nav.as_mut() {
-                                    nav.favorites = self.history_db.fav_all();
-                                    if nav.favorites.is_empty() {
-                                        nav.fav_focused = false;
-                                    } else {
-                                        nav.fav_selected =
-                                            nav.fav_selected.min(nav.favorites.len() - 1);
+                                    if i < nav.entries.len() {
+                                        nav.entries.remove(i);
+                                    }
+                                    if !nav.entries.is_empty() {
+                                        nav.selected = nav.selected.min(nav.entries.len() - 1);
                                     }
                                 }
                             }
                         }
-                    } else if let Some(i) = hist_idx {
-                        self.history_db.remove_entry(&tab, i);
-                        if let Some(td) = self.terminals.get_mut(&tab) {
-                            if let Some(nav) = td.instance.history_nav.as_mut() {
-                                if i < nav.entries.len() {
-                                    nav.entries.remove(i);
-                                }
-                                if !nav.entries.is_empty() {
-                                    nav.selected = nav.selected.min(nav.entries.len() - 1);
-                                }
-                            }
-                        }
-                    }
+                    } // exclusive else-chain (folder-list vs history)
                     history_menu_handled = true;
                 }
                 // Favorite the selected HISTORY entry (Insert by default).
