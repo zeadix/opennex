@@ -1503,6 +1503,10 @@ pub struct App {
     /// Floating submenu for one folder's commands: (folder id, anchor
     /// top-left, items snapshot, keyboard-selected index).
     fav_submenu: Option<(i64, egui::Pos2, Vec<String>, Option<usize>)>,
+    /// True only after Right pressed into the command column — then
+    /// Up/Down/Enter operate on commands; before that the column merely
+    /// PREVIEWS while the folder list keeps focus.
+    fav_sub_focused: bool,
     /// In-flight drag in the FOLDER list: source index.
     fav_drag_src: Option<usize>,
     /// Drop target index + whether the pointer is past its midpoint.
@@ -1908,6 +1912,7 @@ impl App {
             startup_check_consumed: false,
             fav_folders: Vec::new(),
             fav_submenu: None,
+            fav_sub_focused: false,
             fav_drag_src: None,
             fav_drag_dst: None,
             fav_folder_rects: Vec::new(),
@@ -5531,6 +5536,30 @@ impl App {
                         (1.0, border),
                     );
                 }
+                // Column separators: history|favorites and favorites|
+                // commands — vertical hairlines matching the outer border.
+                if show_favs {
+                    ui.painter().line_segment(
+                        [
+                            egui::pos2(frame_rect.min.x + list_w, frame_rect.min.y),
+                            egui::pos2(
+                                frame_rect.min.x + list_w,
+                                frame_rect.min.y + rows_h + footer_h,
+                            ),
+                        ],
+                        egui::Stroke::new(1.0, border),
+                    );
+                    if self.fav_submenu.is_some() {
+                        let x = frame_rect.min.x + list_w + fav_w;
+                        ui.painter().line_segment(
+                            [
+                                egui::pos2(x, frame_rect.min.y),
+                                egui::pos2(x, frame_rect.min.y + rows_h + footer_h),
+                            ],
+                            egui::Stroke::new(1.0, border),
+                        );
+                    }
+                }
                 ui.painter().rect_stroke(
                     frame_rect,
                     0.0,
@@ -6244,24 +6273,28 @@ impl eframe::App for App {
                                 if !nav.fav_focused {
                                     nav.fav_focused = true;
                                     nav.fav_selected = 0;
-                                } else {
-                                    // Already in the folder column:
-                                    // open the selected folder's floating
-                                    // submenu (keyboard mode).
-                                    if let Some((fid, _)) = self.fav_folders.get(nav.fav_selected) {
-                                        let items = self.history_db.fav_items(*fid);
-                                        if !items.is_empty() {
-                                            self.fav_submenu =
-                                                Some((*fid, egui::Pos2::ZERO, items, Some(0)));
-                                        }
+                                } else if !self.fav_sub_focused && self.fav_submenu.is_some() {
+                                    // Right moves INTO the visible command
+                                    // column: now Up/Down/Enter operate on
+                                    // commands.
+                                    self.fav_sub_focused = true;
+                                    if let Some((fid, a, items, _)) = self.fav_submenu.clone() {
+                                        self.fav_submenu = Some((fid, a, items, Some(0)));
                                     }
+                                }
+                            } else if self.fav_sub_focused {
+                                // Left from INSIDE the command column:
+                                // focus returns to the folder list; the
+                                // column keeps previewing the folder.
+                                self.fav_sub_focused = false;
+                                if let Some((fid, a, items, _)) = self.fav_submenu.clone() {
+                                    self.fav_submenu = Some((fid, a, items, None));
                                 }
                             } else if nav.fav_focused {
                                 if self.fav_submenu.is_some() {
-                                    // Left from an OPEN submenu: just close
-                                    // the submenu — the cursor STAYS on the
-                                    // folder list (it does NOT jump back to
-                                    // the history list).
+                                    // Left from the folder list with the
+                                    // column previewing: close the column
+                                    // (cursor stays on folders).
                                     self.fav_submenu = None;
                                 } else {
                                     // Left from the bare folder list:
@@ -6274,23 +6307,25 @@ impl eframe::App for App {
                 }
                 // Delete under the keyboard cursor (history or favorite).
                 if delete_pressed {
-                    // Submenu open: delete the SELECTED command inside the
-                    // folder (mirrors the history-list Delete behavior).
-                    if let Some((fid, _, items, Some(sel))) = self.fav_submenu.clone() {
-                        if let Some(cmd) = items.get(sel).cloned() {
-                            self.history_db.fav_item_remove(fid, &cmd);
-                            self.fav_folders = self.history_db.fav_folders();
-                            let fresh = self.history_db.fav_items(fid);
-                            if fresh.is_empty() {
-                                self.fav_submenu = None;
-                            } else {
-                                let sel = sel.min(fresh.len() - 1);
-                                let anchor = self
-                                    .fav_submenu
-                                    .as_ref()
-                                    .map(|(_, a, _, _)| *a)
-                                    .unwrap_or(egui::pos2(0.0, 0.0));
-                                self.fav_submenu = Some((fid, anchor, fresh, Some(sel)));
+                    // Command-column Delete (only when focus is INSIDE
+                    // the column — mirrors the history-list behavior).
+                    if self.fav_sub_focused {
+                        if let Some((fid, _, items, Some(sel))) = self.fav_submenu.clone() {
+                            if let Some(cmd) = items.get(sel).cloned() {
+                                self.history_db.fav_item_remove(fid, &cmd);
+                                self.fav_folders = self.history_db.fav_folders();
+                                let fresh = self.history_db.fav_items(fid);
+                                if fresh.is_empty() {
+                                    self.fav_submenu = None;
+                                } else {
+                                    let sel = sel.min(fresh.len() - 1);
+                                    let anchor = self
+                                        .fav_submenu
+                                        .as_ref()
+                                        .map(|(_, a, _, _)| *a)
+                                        .unwrap_or(egui::pos2(0.0, 0.0));
+                                    self.fav_submenu = Some((fid, anchor, fresh, Some(sel)));
+                                }
                             }
                         }
                         return;
@@ -6369,22 +6404,24 @@ impl eframe::App for App {
                 // (bring into view only on the frame the selection moved).
                 if let Some(td) = self.terminals.get_mut(&tab) {
                     if let Some(nav) = td.instance.history_nav.as_mut() {
-                        // A folder's floating submenu captures Up/Down/Left
-                        // while open: Up/Down walk the submenu items, Left
-                        // closes it back to the folder list.
-                        if let Some((fid, anchor, sub_items, sub_sel)) = self.fav_submenu.clone() {
-                            let mut new_sel = sub_sel;
-                            if previous {
-                                new_sel = Some(sub_sel.unwrap_or(0).saturating_sub(1));
-                            } else if next {
-                                let cur = sub_sel.unwrap_or(0);
-                                if cur + 1 < sub_items.len() {
-                                    new_sel = Some(cur + 1);
+                        // The command column owns Up/Down ONLY after the
+                        // user pressed Right INTO it (fav_sub_focused);
+                        // while it merely PREVIEWS (cursor on folders),
+                        // Up/Down keep walking the folder list.
+                        if self.fav_sub_focused && self.fav_submenu.is_some() {
+                            if let Some((fid, anchor, sub_items, sub_sel)) =
+                                self.fav_submenu.clone()
+                            {
+                                let mut new_sel = sub_sel;
+                                if previous {
+                                    new_sel = Some(sub_sel.unwrap_or(0).saturating_sub(1));
+                                } else if next {
+                                    let cur = sub_sel.unwrap_or(0);
+                                    if cur + 1 < sub_items.len() {
+                                        new_sel = Some(cur + 1);
+                                    }
                                 }
-                            }
-                            self.fav_submenu = Some((fid, anchor, sub_items.clone(), new_sel));
-                            if focus_left {
-                                self.fav_submenu = None;
+                                self.fav_submenu = Some((fid, anchor, sub_items.clone(), new_sel));
                             }
                         } else if nav.fav_focused && (previous || next) {
                             let folder_count = self.fav_folders.len();
@@ -6463,17 +6500,20 @@ impl eframe::App for App {
                     self.close_history_menu(&tab);
                 }
                 if confirm {
-                    // A folder's floating submenu captures Enter: send the
-                    // submenu's selected COMMAND (not the folder assembly).
-                    if let Some((fid, _, items, Some(sel))) = self.fav_submenu.clone() {
-                        if let Some(cmd) = items.get(sel).cloned() {
-                            let _ = fid;
-                            if let Some(td) = self.terminals.get_mut(&tab) {
-                                td.instance.history_nav = None;
-                                td.instance.write(format!("{cmd}\r").as_bytes());
+                    // Enter with focus INSIDE the command column sends the
+                    // selected command; with focus on folders it assembles
+                    // the folder (earlier behavior).
+                    if self.fav_sub_focused {
+                        if let Some((fid, _, items, Some(sel))) = self.fav_submenu.clone() {
+                            if let Some(cmd) = items.get(sel).cloned() {
+                                let _ = fid;
+                                if let Some(td) = self.terminals.get_mut(&tab) {
+                                    td.instance.history_nav = None;
+                                    td.instance.write(format!("{cmd}\r").as_bytes());
+                                }
+                                self.history_menu_just_closed.insert(tab.clone(), true);
+                                self.fav_submenu = None;
                             }
-                            self.history_menu_just_closed.insert(tab.clone(), true);
-                            self.fav_submenu = None;
                         }
                         history_menu_handled = true;
                     } else if fav_confirming {
