@@ -4282,60 +4282,6 @@ impl App {
         let Some(tab) = self.focused_terminal.clone() else {
             return;
         };
-        // FIRST-frame restoration after a reopen: apply the snapshot
-        // BEFORE anything else this frame can reset focus states.
-        if self.menu_pending_restore.remove(&tab) {
-            let snap = self.menu_cursors.get(&tab).copied();
-            if let Some((hist_sel, fav_sel, fav_focused, sub_sel, sub_focused, sub_fid)) = snap {
-                let clamp_sel;
-                if let Some(td) = self.terminals.get_mut(&tab) {
-                    if let Some(nav) = td.instance.history_nav.as_mut() {
-                        nav.selected = hist_sel.min(nav.entries.len().saturating_sub(1));
-                        nav.fav_focused = fav_focused;
-                        nav.fav_selected = fav_sel.min(self.fav_folders.len().saturating_sub(1));
-                    }
-                    clamp_sel = true;
-                } else {
-                    clamp_sel = false;
-                }
-                if clamp_sel && sub_focused && sub_fid != 0 {
-                    let items = self.history_db.fav_items(sub_fid);
-                    if !items.is_empty() {
-                        self.fav_sub_focused = true;
-                        self.fav_submenu = Some((sub_fid, egui::Pos2::ZERO, items, Some(sub_sel)));
-                    }
-                }
-            }
-        }
-        // Snapshot the cursor/panel state EVERY frame while the menu is
-        // open, so ANY close path (Esc, Enter-send, click-away) persists
-        // it for the next open. (history, folder, folder_active, sub,
-        // sub_active, sub_folder)
-        {
-            let snap: Option<(usize, usize, bool, usize, bool, i64)> = self
-                .terminals
-                .get(&tab)
-                .and_then(|td| td.instance.history_nav.as_ref())
-                .map(|nav| {
-                    (
-                        nav.selected,
-                        nav.fav_selected,
-                        nav.fav_focused,
-                        self.fav_submenu
-                            .as_ref()
-                            .and_then(|(_, _, _, sel)| *sel)
-                            .unwrap_or(0),
-                        self.fav_sub_focused,
-                        self.fav_submenu
-                            .as_ref()
-                            .map(|(f, _, _, _)| *f)
-                            .unwrap_or(0),
-                    )
-                });
-            if let Some(snap) = snap {
-                self.menu_cursors.insert(tab.clone(), snap);
-            }
-        }
         let Some(td) = self.terminals.get_mut(&tab) else {
             return;
         };
@@ -4369,12 +4315,55 @@ impl App {
         let Some(tab) = self.focused_terminal.clone() else {
             return;
         };
+
+        // FIRST-frame restoration after a reopen: apply the snapshot
+        // BEFORE anything else this frame can reset focus states.
+        if self.menu_pending_restore.remove(&tab) {
+            let snap = self.menu_cursors.get(&tab).copied();
+            if let Some((hist_sel, fav_sel, fav_focused, sub_sel, sub_focused, sub_fid)) = snap {
+                if let Some(td) = self.terminals.get_mut(&tab) {
+                    if let Some(nav) = td.instance.history_nav.as_mut() {
+                        nav.selected = hist_sel.min(nav.entries.len().saturating_sub(1));
+                        nav.fav_focused = fav_focused;
+                        nav.fav_selected = fav_sel.min(self.fav_folders.len().saturating_sub(1));
+                    }
+                }
+                if sub_focused && sub_fid != 0 {
+                    let items = self.history_db.fav_items(sub_fid);
+                    if !items.is_empty() {
+                        self.fav_sub_focused = true;
+                        self.fav_submenu = Some((sub_fid, egui::Pos2::ZERO, items, Some(sub_sel)));
+                    }
+                }
+            }
+        }
+
         let Some(td) = self.terminals.get_mut(&tab) else {
             return;
         };
         let Some(nav) = td.instance.history_nav.clone() else {
             return;
         };
+
+        // Snapshot the cursor/panel state EVERY frame while the menu is
+        // open, so ANY close path (Esc, Enter-send, click-away) persists
+        // it for the next open. (history, folder, folder_active, sub,
+        // sub_active, sub_folder)
+        {
+            let (sub_sel_snap, sub_fid_snap) = match &self.fav_submenu {
+                Some((fid, _, _, sel)) => (sel.unwrap_or(0), *fid),
+                None => (0, 0),
+            };
+            let snap = (
+                nav.selected,
+                nav.fav_selected,
+                nav.fav_focused,
+                sub_sel_snap,
+                self.fav_sub_focused,
+                sub_fid_snap,
+            );
+            self.menu_cursors.insert(tab.clone(), snap);
+        }
 
         let app = &self.active_theme.app;
         let menu_bg = app.menu_bg.to_egui();
