@@ -1505,8 +1505,11 @@ pub struct App {
     fav_submenu: Option<(i64, egui::Pos2, Vec<String>, Option<usize>)>,
     /// True only after Right pressed into the command column — then
     /// Up/Down/Enter operate on commands; before that the column merely
-    /// PREVIEWS while the folder list keeps focus.
+    /// PREVIEW while the folder list keeps focus.
     fav_sub_focused: bool,
+    /// Remembered folder-cursor position across menu (re)opens — the
+    /// folder list must not snap back to the top every time.
+    fav_cursor: usize,
     /// In-flight drag in the FOLDER list: source index.
     fav_drag_src: Option<usize>,
     /// Drop target index + whether the pointer is past its midpoint.
@@ -1911,6 +1914,7 @@ impl App {
             fav_folders: Vec::new(),
             fav_submenu: None,
             fav_sub_focused: false,
+            fav_cursor: 0,
             fav_drag_src: None,
             fav_drag_dst: None,
             fav_folder_rects: Vec::new(),
@@ -6337,7 +6341,13 @@ impl eframe::App for App {
                             if focus_right {
                                 if !nav.fav_focused {
                                     nav.fav_focused = true;
-                                    nav.fav_selected = 0;
+                                    // Restore the REMEMBERED folder cursor
+                                    // (clamped to the current folder
+                                    // count) instead of snapping to the
+                                    // first folder every time.
+                                    nav.fav_selected = self
+                                        .fav_cursor
+                                        .min(self.fav_folders.len().saturating_sub(1));
                                     // Entering the folder list PREVIEWS the
                                     // first folder's command column right
                                     // away (parity with Up/Down moves and
@@ -6561,6 +6571,8 @@ impl eframe::App for App {
                                 sc = nav.fav_selected + 1 - mv;
                             }
                             ctx.memory_mut(|m| m.data.insert_temp(col_scroll_id, sc));
+                            // Remember the cursor for the next open.
+                            self.fav_cursor = nav.fav_selected;
                         }
                     }
                 }
