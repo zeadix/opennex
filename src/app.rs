@@ -1514,6 +1514,12 @@ pub struct App {
     /// history menu is open and restored on reopen: WHICH panel was
     /// active (history / folders / commands) and each cursor position.
     menu_cursors: HashMap<String, (usize, usize, bool, usize, bool, i64)>,
+    /// Tabs whose menu just (re)opened and still need the cursor
+    /// snapshot restored on the FIRST render frame — restoring in the
+    /// open block itself lost to state resets running in between
+    /// (Esc/Enter closes reset fav_focused AFTER the snapshot capture,
+    /// so Alt-close restored fine but Enter/Esc reopens didn't).
+    menu_pending_restore: std::collections::HashSet<String>,
     /// In-flight drag in the FOLDER list: source index.
     fav_drag_src: Option<usize>,
     /// Drop target index + whether the pointer is past its midpoint.
@@ -1920,6 +1926,7 @@ impl App {
             fav_sub_focused: false,
             fav_cursor: 0,
             menu_cursors: HashMap::new(),
+            menu_pending_restore: Default::default(),
             fav_drag_src: None,
             fav_drag_dst: None,
             fav_folder_rects: Vec::new(),
@@ -4275,6 +4282,31 @@ impl App {
         let Some(tab) = self.focused_terminal.clone() else {
             return;
         };
+        // FIRST-frame restoration after a reopen: apply the snapshot
+        // BEFORE anything else this frame can reset focus states.
+        if self.menu_pending_restore.remove(&tab) {
+            let snap = self.menu_cursors.get(&tab).copied();
+            if let Some((hist_sel, fav_sel, fav_focused, sub_sel, sub_focused, sub_fid)) = snap {
+                let clamp_sel;
+                if let Some(td) = self.terminals.get_mut(&tab) {
+                    if let Some(nav) = td.instance.history_nav.as_mut() {
+                        nav.selected = hist_sel.min(nav.entries.len().saturating_sub(1));
+                        nav.fav_focused = fav_focused;
+                        nav.fav_selected = fav_sel.min(self.fav_folders.len().saturating_sub(1));
+                    }
+                    clamp_sel = true;
+                } else {
+                    clamp_sel = false;
+                }
+                if clamp_sel && sub_focused && sub_fid != 0 {
+                    let items = self.history_db.fav_items(sub_fid);
+                    if !items.is_empty() {
+                        self.fav_sub_focused = true;
+                        self.fav_submenu = Some((sub_fid, egui::Pos2::ZERO, items, Some(sub_sel)));
+                    }
+                }
+            }
+        }
         // Snapshot the cursor/panel state EVERY frame while the menu is
         // open, so ANY close path (Esc, Enter-send, click-away) persists
         // it for the next open. (history, folder, folder_active, sub,
@@ -6274,38 +6306,13 @@ impl eframe::App for App {
                     let was_open = td.instance.history_nav.is_some();
                     toggle_history_menu(&mut td.instance.history_nav, entries, favorites);
                     if !was_open {
-                        // Fresh open: RESTORE the last session's panel
-                        // focus and cursors (history / folder / command
-                        // column), so reopening lands exactly where the
-                        // user left off — including which panel Up/Down
-                        // operate on (they used to drive two lists at
-                        // once after a reopen because fav_focused reset
-                        // while the command column state didn't).
-                        let snap = self.menu_cursors.get(&tab).copied();
-                        if let Some(nav) = td.instance.history_nav.as_mut() {
-                            if let Some((
-                                hist_sel,
-                                fav_sel,
-                                fav_focused,
-                                sub_sel,
-                                sub_focused,
-                                sub_fid,
-                            )) = snap
-                            {
-                                nav.selected = hist_sel.min(nav.entries.len().saturating_sub(1));
-                                nav.fav_focused = fav_focused;
-                                nav.fav_selected =
-                                    fav_sel.min(self.fav_folders.len().saturating_sub(1));
-                                if sub_focused && sub_fid != 0 {
-                                    let items = self.history_db.fav_items(sub_fid);
-                                    if !items.is_empty() {
-                                        self.fav_sub_focused = true;
-                                        self.fav_submenu =
-                                            Some((sub_fid, egui::Pos2::ZERO, items, Some(sub_sel)));
-                                    }
-                                }
-                            }
-                        }
+                        // Fresh open: flag for restoration on the FIRST
+                        // render frame (see render_history_menu) — the
+                        // snapshot holds the last session's panel focus
+                        // and cursors.
+                        self.menu_pending_restore.insert(tab.clone());
+                        // (Actual restoration runs on the first render
+                        // frame — see render_history_menu.)
                         // Scroll offsets realign below via follow-logic;
                         // clear stale ones first.
                         ctx.memory_mut(|m| {
