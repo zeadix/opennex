@@ -4699,9 +4699,15 @@ impl App {
                         .map(|(fid, _)| (*fid, 0, String::new()))
                         .collect();
                     let row_h: f32 = 20.0;
-                    let content_h = rows.len() as f32 * row_h + footer_h;
+                    // The rows paint below a 24px "new folder" header,
+                    // so usable height is rows_h - 24 — without this the
+                    // overflow check misses by one row and the scrollbar
+                    // never appears for exactly-overflowing lists.
+                    let header_h = 24.0f32;
+                    let col_usable_h = (rows_h - header_h).max(row_h);
+                    let content_h = rows.len() as f32 * row_h;
                     let max_col_scroll =
-                        ((content_h - rows_h - footer_h) / row_h).ceil().max(0.0) as usize;
+                        ((content_h - col_usable_h) / row_h).ceil().max(0.0) as usize;
                     let col_scroll_id = egui::Id::new(("hist_favcol_scroll", tab.as_str()));
                     let mut col_scroll: usize = ctx
                         .memory(|m| m.data.get_temp(col_scroll_id).unwrap_or(0))
@@ -5414,7 +5420,7 @@ impl App {
                     // Folder-column scrollbar (same style as the main
                     // list's): shows only when folders overflow 10 rows.
                     let folder_count = folders.len();
-                    let col_visible_rows = (rows_h / row_h) as usize;
+                    let col_visible_rows = ((rows_h - 24.0).max(row_h) / row_h) as usize;
                     if folder_count > col_visible_rows {
                         let sb_track = egui::Rect::from_min_max(
                             egui::pos2(fx0 + col_w - 6.0, frame_rect.min.y),
