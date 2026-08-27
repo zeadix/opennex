@@ -4345,11 +4345,15 @@ impl App {
             return;
         };
 
-        // Snapshot the cursor/panel state EVERY frame while the menu is
-        // open, so ANY close path (Esc, Enter-send, click-away) persists
-        // it for the next open. (history, folder, folder_active, sub,
-        // sub_active, sub_folder)
-        {
+        // Snapshot the cursor/panel state EVERY frame while the MANUAL
+        // (Alt) menu is open, so ANY close path (Esc, Enter-send,
+        // click-away) persists it for the next open. AUTO-MATCH sessions
+        // (auto_word set) share this HistoryNav slot but are a different
+        // feature: they must never overwrite the manual menu's snapshot
+        // (their fav_focused is false and their transient column state
+        // is gone — snapshotting them reset every Alt reopen to the
+        // history list).
+        if nav.auto_word.is_none() {
             let (sub_sel_snap, sub_fid_snap) = match &self.fav_submenu {
                 Some((fid, _, _, sel)) => (sel.unwrap_or(0), *fid),
                 None => (0, 0),
@@ -9137,6 +9141,8 @@ impl eframe::App for App {
                                 fav_dialogs_open: self.fav_name_dialog.is_some()
                                     || self.fav_cmd_dialog.is_some()
                                     || self.fav_delete_confirm.is_some(),
+                                fav_submenu_slot: &mut self.fav_submenu,
+                                fav_sub_focus_slot: &mut self.fav_sub_focused,
                                 auto_match: self.settings_edit.auto_match_command,
                                 terminal_view_rects: &mut self.terminal_view_rects,
                                 history_menu_just_closed: &mut self.history_menu_just_closed,
@@ -9850,6 +9856,10 @@ struct TerminalTabViewer<'a> {
     pw_popup_open: bool,
     /// Favorite-folder dialogs open: the terminal must not steal focus.
     fav_dialogs_open: bool,
+    /// Manual-menu transient column state, so the auto-match overlay
+    /// (opened inside tab_ui) can clear it.
+    fav_submenu_slot: &'a mut Option<(i64, egui::Pos2, Vec<String>, Option<usize>)>,
+    fav_sub_focus_slot: &'a mut bool,
     auto_match: bool,
     terminal_view_rects: &'a mut std::collections::HashMap<String, egui::Rect>,
     history_menu_just_closed: &'a mut std::collections::HashMap<String, bool>,
@@ -10237,6 +10247,13 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                                 fav_focused: false,
                                 fav_selected: 0,
                             });
+                            // The auto-match overlay is a SEPARATE
+                            // feature from the manual menu: drop the
+                            // manual session's column leftovers so they
+                            // can neither render behind the overlay nor
+                            // leak into the snapshot above.
+                            *self.fav_submenu_slot = None;
+                            *self.fav_sub_focus_slot = false;
                         }
                     }
                 }
