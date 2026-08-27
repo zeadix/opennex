@@ -6520,15 +6520,33 @@ impl eframe::App for App {
                         }
                         return;
                     }
+                    // Cursor on the FOLDER list: Delete opens the SAME
+                    // confirm dialog as the trash button (protected
+                    // default folder excluded).
+                    let on_folders = self
+                        .terminals
+                        .get(&tab)
+                        .and_then(|td| td.instance.history_nav.as_ref())
+                        .is_some_and(|n| n.fav_focused);
+                    if on_folders {
+                        let target = self
+                            .terminals
+                            .get(&tab)
+                            .and_then(|td| td.instance.history_nav.as_ref())
+                            .and_then(|n| self.fav_folders.get(n.fav_selected).cloned());
+                        if let Some((fid, name)) = target {
+                            if name != crate::history_db::HistoryDb::DEFAULT_FAVORITE_FOLDER {
+                                self.fav_delete_confirm = Some((fid, name));
+                            }
+                        }
+                        return;
+                    }
                     let (fav_idx, hist_idx) = self
                         .terminals
                         .get(&tab)
                         .and_then(|td| td.instance.history_nav.as_ref())
                         .map(|nav| {
                             if !nav.fav_focused {
-                                // Folder model (v0.1.46): keyboard Delete in
-                                // the favorites column is a no-op (folder
-                                // deletion is mouse-driven with confirm).
                                 (None, Some(nav.selected))
                             } else {
                                 (None::<usize>, None)
