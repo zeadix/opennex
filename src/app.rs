@@ -5249,8 +5249,11 @@ impl App {
                                                         .fav_item_reorder_rows(src_fid, &ids2);
                                                 }
                                             }
-                                        } else if let Some(rid) = row_ids.get(src_idx) {
-                                            self.history_db.fav_item_move_row(*rid, dst_fid);
+                                        } else if let Some(cmd) = items.get(src_idx) {
+                                            // Cross-folder drop COPIES (adds)
+                                            // the command to the target —
+                                            // the source keeps its copy.
+                                            self.history_db.fav_add_to(dst_fid, cmd);
                                         }
                                         self.fav_folders = self.history_db.fav_folders();
                                     }
