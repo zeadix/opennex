@@ -4351,13 +4351,22 @@ impl App {
         // already-open column.
         let hover_pos_pre = ctx.input(|i| i.pointer.hover_pos());
         let sub_open = show_favs && {
-            let already = self.fav_submenu.is_some();
+            // An EMPTY folder must not open a column at all.
+            let folder_has_items = |fid: i64| !self.history_db.fav_items(fid).is_empty();
+            let already = self
+                .fav_submenu
+                .as_ref()
+                .is_some_and(|(fid, _, _, _)| folder_has_items(*fid));
             let hover_hit =
                 hover_pos_pre.is_some_and(|p| self.fav_folder_rects.iter().any(|r| r.contains(p)));
-            let kb_hit = nav.fav_focused;
+            let kb_hit = nav.fav_focused
+                && self
+                    .fav_folders
+                    .get(nav.fav_selected)
+                    .is_some_and(|(fid, _)| folder_has_items(*fid));
             already || hover_hit || kb_hit
         };
-        let sub_w = 200.0f32;
+        let sub_w = 140.0f32;
         let total_w = list_w
             + if show_favs { fav_w } else { 0.0 }
             + if show_favs && sub_open { sub_w } else { 0.0 };
@@ -5104,8 +5113,20 @@ impl App {
                                 menu_bg,
                             );
                             let pointer = ui.input(|i| i.pointer.hover_pos());
-                            let mut y = frame_rect.min.y;
+                            // Sub-column scroll (wheel + scrollbar), same
+                            // style as the main list.
+                            let sub_visible_rows = (rows_h / row_h) as usize;
+                            let sub_max_scroll = items.len().saturating_sub(sub_visible_rows);
+                            let sub_scroll_id = egui::Id::new(("hist_subcol_scroll", tab.as_str()));
+                            let mut sub_scroll: usize = ctx
+                                .memory(|m| m.data.get_temp(sub_scroll_id).unwrap_or(0))
+                                .min(sub_max_scroll);
+                            let mut y = frame_rect.min.y - sub_scroll as f32 * row_h;
                             for (idx, cmd) in items.iter().enumerate() {
+                                if y + row_h < frame_rect.min.y {
+                                    y += row_h;
+                                    continue;
+                                }
                                 if y >= frame_rect.min.y + rows_h {
                                     break;
                                 }
@@ -5226,6 +5247,80 @@ impl App {
                                 }
                                 y += row_h;
                             }
+                            // Sub-column scrollbar + wheel.
+                            if items.len() > sub_visible_rows {
+                                let sb_track = egui::Rect::from_min_max(
+                                    egui::pos2(sub_x0 + sub_w - 6.0, frame_rect.min.y),
+                                    egui::pos2(sub_x0 + sub_w, frame_rect.min.y + rows_h),
+                                );
+                                let thumb_h = (sub_visible_rows as f32 / items.len() as f32
+                                    * rows_h)
+                                    .max(16.0);
+                                let scrollable = (rows_h - thumb_h).max(1.0);
+                                let thumb_y = frame_rect.min.y
+                                    + scrollable * (sub_scroll as f32 / sub_max_scroll as f32);
+                                let sb_col = egui::Color32::from_rgba_unmultiplied(
+                                    weak.r(),
+                                    weak.g(),
+                                    weak.b(),
+                                    110,
+                                );
+                                let track_col = egui::Color32::from_rgba_unmultiplied(
+                                    weak.r(),
+                                    weak.g(),
+                                    weak.b(),
+                                    40,
+                                );
+                                ui.painter().rect_filled(sb_track, 0.0, track_col);
+                                ui.painter().rect_filled(
+                                    egui::Rect::from_min_size(
+                                        egui::pos2(sb_track.min.x, thumb_y),
+                                        egui::vec2(sb_track.width(), thumb_h),
+                                    ),
+                                    0.0,
+                                    sb_col,
+                                );
+                                let sb_resp = ui.interact(
+                                    sb_track,
+                                    egui::Id::new(("fav_sub_sb", tab.as_str())),
+                                    egui::Sense::click_and_drag(),
+                                );
+                                if sb_resp.dragged() {
+                                    let dy = ui.input(|i| i.pointer.delta().y);
+                                    let lines = dy * sub_max_scroll as f32 / scrollable;
+                                    sub_scroll = (sub_scroll as f32 + lines)
+                                        .round()
+                                        .clamp(0.0, sub_max_scroll as f32)
+                                        as usize;
+                                    ctx.memory_mut(|m| {
+                                        m.data.insert_temp(sub_scroll_id, sub_scroll)
+                                    });
+                                }
+                            }
+                            let sub_wheel = ui.input(|i| {
+                                i.events
+                                    .iter()
+                                    .try_fold(0.0f32, |acc, e| match e {
+                                        egui::Event::MouseWheel { delta, .. } => {
+                                            Some(acc + delta.y)
+                                        }
+                                        _ => Some(acc),
+                                    })
+                                    .unwrap_or(0.0)
+                            });
+                            let sub_rect_wheel = egui::Rect::from_min_size(
+                                egui::pos2(sub_x0, frame_rect.min.y),
+                                egui::vec2(sub_w, rows_h),
+                            );
+                            if sub_rect_wheel.contains(hover_pos) && sub_wheel != 0.0 {
+                                sub_scroll = if sub_wheel > 0.0 {
+                                    sub_scroll.saturating_sub(1)
+                                } else {
+                                    (sub_scroll + 1).min(sub_max_scroll)
+                                };
+                                ctx.memory_mut(|m| m.data.insert_temp(sub_scroll_id, sub_scroll));
+                            }
+
                             // In-flight drag: insertion line + drop.
                             if let Some((src_fid, src_idx)) = self.fav_item_drag {
                                 let released = ui.input(|i| i.pointer.any_released());
@@ -5313,6 +5408,53 @@ impl App {
                                 }
                             }
                             let _ = pointer;
+                        }
+                    }
+
+                    // Folder-column scrollbar (same style as the main
+                    // list's): shows only when folders overflow 10 rows.
+                    let folder_count = folders.len();
+                    let col_visible_rows = (rows_h / row_h) as usize;
+                    if folder_count > col_visible_rows {
+                        let sb_track = egui::Rect::from_min_max(
+                            egui::pos2(fx0 + col_w - 6.0, frame_rect.min.y),
+                            egui::pos2(fx0 + col_w, frame_rect.min.y + rows_h),
+                        );
+                        let thumb_h =
+                            (col_visible_rows as f32 / folder_count as f32 * rows_h).max(16.0);
+                        let scrollable = (rows_h - thumb_h).max(1.0);
+                        let thumb_y = frame_rect.min.y
+                            + scrollable * (col_scroll as f32 / max_col_scroll as f32);
+                        let sb_col = egui::Color32::from_rgba_unmultiplied(
+                            weak.r(),
+                            weak.g(),
+                            weak.b(),
+                            110,
+                        );
+                        let track_col =
+                            egui::Color32::from_rgba_unmultiplied(weak.r(), weak.g(), weak.b(), 40);
+                        ui.painter().rect_filled(sb_track, 0.0, track_col);
+                        ui.painter().rect_filled(
+                            egui::Rect::from_min_size(
+                                egui::pos2(sb_track.min.x, thumb_y),
+                                egui::vec2(sb_track.width(), thumb_h),
+                            ),
+                            0.0,
+                            sb_col,
+                        );
+                        let sb_resp = ui.interact(
+                            sb_track,
+                            egui::Id::new(("fav_col_sb", tab.as_str())),
+                            egui::Sense::click_and_drag(),
+                        );
+                        if sb_resp.dragged() {
+                            let dy = ui.input(|i| i.pointer.delta().y);
+                            let lines = dy * max_col_scroll as f32 / scrollable;
+                            col_scroll = (col_scroll as f32 + lines)
+                                .round()
+                                .clamp(0.0, max_col_scroll as f32)
+                                as usize;
+                            ctx.memory_mut(|m| m.data.insert_temp(col_scroll_id, col_scroll));
                         }
                     }
 
