@@ -6291,16 +6291,14 @@ impl eframe::App for App {
                                     self.fav_submenu = Some((fid, a, items, None));
                                 }
                             } else if nav.fav_focused {
-                                if self.fav_submenu.is_some() {
-                                    // Left from the folder list with the
-                                    // column previewing: close the column
-                                    // (cursor stays on folders).
-                                    self.fav_submenu = None;
-                                } else {
-                                    // Left from the bare folder list:
-                                    // hand focus back to the main list.
-                                    nav.fav_focused = false;
-                                }
+                                // Left from the folder list: straight
+                                // back to the HISTORY list — the preview
+                                // column closes with the focus handoff
+                                // (no intermediate step that swallows
+                                // the first Left press).
+                                nav.fav_focused = false;
+                                self.fav_submenu = None;
+                                self.fav_sub_focused = false;
                             }
                         }
                     }
