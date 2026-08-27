@@ -5079,7 +5079,10 @@ impl App {
                                         let line = assemble_commands(&cmds, &shell_id);
                                         if !line.is_empty() {
                                             if let Some(td) = self.terminals.get_mut(&tab) {
-                                                td.instance.write(format!("{line}\r").as_bytes());
+                                                // Type without executing
+                                                // (parity with the history
+                                                // list's Enter).
+                                                td.instance.write(line.as_bytes());
                                                 td.instance.history_nav = None;
                                                 self.history_menu_just_closed
                                                     .insert(tab.clone(), true);
@@ -5456,7 +5459,9 @@ impl App {
                             // discipline): send or live-delete.
                             if let Some(cmd) = send_cmd {
                                 if let Some(td) = self.terminals.get_mut(&tab) {
-                                    td.instance.write(format!("{cmd}\r").as_bytes());
+                                    // Type without executing (parity with
+                                    // the history list).
+                                    td.instance.write(cmd.as_bytes());
                                     td.instance.history_nav = None;
                                 }
                                 self.history_menu_just_closed.insert(tab.clone(), true);
@@ -6697,7 +6702,10 @@ impl eframe::App for App {
                                 let _ = fid;
                                 if let Some(td) = self.terminals.get_mut(&tab) {
                                     td.instance.history_nav = None;
-                                    td.instance.write(format!("{cmd}\r").as_bytes());
+                                    // Type without executing — same as the
+                                    // history list's Enter (the \r made it
+                                    // run immediately).
+                                    td.instance.write(cmd.as_bytes());
                                 }
                                 self.history_menu_just_closed.insert(tab.clone(), true);
                                 self.fav_submenu = None;
