@@ -6518,7 +6518,9 @@ impl eframe::App for App {
                                 }
                             }
                         }
-                        return;
+                        // NOTE: no bare `return` — returning from HERE
+                        // aborted the rest of update() (dock area, side
+                        // bar, menus) for one frame: the black flash.
                     }
                     // Cursor on the FOLDER list: Delete opens the SAME
                     // confirm dialog as the trash button (protected
@@ -6539,7 +6541,7 @@ impl eframe::App for App {
                                 self.fav_delete_confirm = Some((fid, name));
                             }
                         }
-                        return;
+                        // (no bare return — see above)
                     }
                     let (fav_idx, hist_idx) = self
                         .terminals
