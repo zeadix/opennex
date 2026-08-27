@@ -6501,6 +6501,25 @@ impl eframe::App for App {
                                     }
                                 }
                                 self.fav_submenu = Some((fid, anchor, sub_items.clone(), new_sel));
+                                // Bring the highlighted COMMAND into view
+                                // this frame — same follow semantics as
+                                // the folder column (no header offset
+                                // here; 10 rows fit the 200px body).
+                                if let Some(sel) = new_sel {
+                                    let sub_scroll_id =
+                                        egui::Id::new(("hist_subcol_scroll", tab.as_str()));
+                                    let mv = 10usize;
+                                    let max_sc = sub_items.len().saturating_sub(mv);
+                                    let mut sc = ctx
+                                        .memory(|m| m.data.get_temp(sub_scroll_id).unwrap_or(0))
+                                        .min(max_sc);
+                                    if sel < sc {
+                                        sc = sel;
+                                    } else if sel >= sc + mv {
+                                        sc = sel + 1 - mv;
+                                    }
+                                    ctx.memory_mut(|m| m.data.insert_temp(sub_scroll_id, sc));
+                                }
                             }
                         } else if nav.fav_focused && (previous || next) {
                             let folder_count = self.fav_folders.len();
