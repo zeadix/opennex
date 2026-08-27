@@ -4333,7 +4333,14 @@ impl App {
         let rows_h = max_visible as f32 * row_h;
         let list_h = rows_h + footer_h;
         let show_favs = nav.auto_word.is_none() && !nav.favorites.is_empty();
-        let total_w = list_w + if show_favs { fav_w } else { 0.0 };
+        // The folder's command list renders as a THIRD column in the
+        // same window (flush against the folder column, same style) —
+        // not a floating popup.
+        let sub_open = self.fav_submenu.is_some();
+        let sub_w = 200.0f32;
+        let total_w = list_w
+            + if show_favs { fav_w } else { 0.0 }
+            + if show_favs && sub_open { sub_w } else { 0.0 };
         let total = nav.entries.len();
         let fav_total = nav.favorites.len();
 
@@ -4513,21 +4520,25 @@ impl App {
                         entry_clicked = Some(i);
                     }
                     // Drag a history entry onto a favorites FOLDER to
-                    // copy it there (history keeps its entry). Presses
-                    // in the trailing action gutter don't start drags.
+                    // copy it there (history keeps its entry). The drag
+                    // must START on this row (press origin inside it,
+                    // outside the trailing action gutter); once armed it
+                    // follows the pointer regardless of hover.
                     let press = ui.input(|i| i.pointer.press_origin());
-                    let in_action_gutter =
-                        press.is_some_and(|p| p.x > row.max.x - 120.0 && row.contains(p));
-                    if resp.contains_pointer()
-                        && !in_action_gutter
-                        && ui.input(|i| i.pointer.primary_down())
+                    let starts_here =
+                        press.is_some_and(|p| row.contains(p) && p.x <= row.max.x - 70.0);
+                    let primary_down = ui.input(|i| i.pointer.primary_down());
+                    if starts_here
+                        && primary_down
                         && self.hist_drag_cmd.is_none()
                         && self.fav_item_drag.is_none()
+                        && self.fav_drag_src.is_none()
                     {
                         if let Some(cmd) = nav.entries.get(i).cloned() {
                             self.hist_drag_cmd = Some(cmd);
                         }
                     }
+                    let _ = resp;
                     // Release anywhere ends a history drag; if a folder
                     // target was registered, COPY the command in.
                     if self.hist_drag_cmd.is_some() && ui.input(|i| i.pointer.any_released()) {
@@ -4841,6 +4852,7 @@ impl App {
                             // user requirement — no click needed).
                             if row_hover
                                 && self.fav_item_drag.is_none()
+                                && self.hist_drag_cmd.is_none()
                                 && self
                                     .fav_submenu
                                     .as_ref()
@@ -4848,14 +4860,7 @@ impl App {
                             {
                                 let items = folder_items[fidx].clone();
                                 if !items.is_empty() {
-                                    self.fav_submenu = Some((
-                                        fid,
-                                        // Anchor at the COLUMN's right edge
-                                        // (aligned with the folder list).
-                                        egui::pos2(col_full_rect.max.x + 2.0, row_rect.min.y),
-                                        items,
-                                        None,
-                                    ));
+                                    self.fav_submenu = Some((fid, egui::Pos2::ZERO, items, None));
                                 }
                             }
                             // hover 3 buttons: assemble / rename / delete
@@ -5154,6 +5159,241 @@ impl App {
                         }
                     }
 
+                    // ---- THIRD column: the selected folder's commands ----
+                    // Rendered INSIDE the same window, flush against the
+                    // folder column, same row style (this replaces the
+                    // old floating-popup submenu). Items are read LIVE
+                    // from the DB so deletes/reorders reflect instantly.
+                    if let Some((fid, _, _, kb_sel)) = self.fav_submenu.clone() {
+                        let items = self.history_db.fav_items(fid);
+                        if items.is_empty() {
+                            self.fav_submenu = None;
+                        } else {
+                            let sub_x0 = fx0 + col_w;
+                            let mut send_cmd: Option<String> = None;
+                            let mut remove_idx: Option<usize> = None;
+                            ui.painter().rect_filled(
+                                egui::Rect::from_min_size(
+                                    egui::pos2(sub_x0, frame_rect.min.y),
+                                    egui::vec2(sub_w, rows_h + footer_h),
+                                ),
+                                0.0,
+                                menu_bg,
+                            );
+                            let pointer = ui.input(|i| i.pointer.hover_pos());
+                            let mut y = frame_rect.min.y;
+                            for (idx, cmd) in items.iter().enumerate() {
+                                if y >= frame_rect.min.y + rows_h {
+                                    break;
+                                }
+                                let row = egui::Rect::from_min_size(
+                                    egui::pos2(sub_x0, y),
+                                    egui::vec2(sub_w, row_h),
+                                );
+                                let row_hover = row.contains(hover_pos);
+                                if idx % 2 == 1 {
+                                    ui.painter().rect_filled(row, 0.0, menu_alt);
+                                }
+                                // Drag handle (leading edge): DOTS_SIX_VERTICAL.
+                                let handle_g = ui.fonts(|f| {
+                                    f.layout_no_wrap(
+                                        egui_phosphor::regular::DOTS_SIX_VERTICAL.to_string(),
+                                        egui::FontId::proportional(11.0),
+                                        weak,
+                                    )
+                                });
+                                ui.painter().galley(
+                                    egui::pos2(
+                                        row.min.x + 4.0,
+                                        row.center().y - handle_g.size().y / 2.0,
+                                    ),
+                                    handle_g,
+                                    weak,
+                                );
+                                // Selection tint (hover or keyboard).
+                                let is_kb = kb_sel.is_some_and(|k| k == idx);
+                                if row_hover || is_kb {
+                                    ui.painter().rect_filled(
+                                        row,
+                                        0.0,
+                                        egui::Color32::from_rgba_unmultiplied(
+                                            sel_bg.r(),
+                                            sel_bg.g(),
+                                            sel_bg.b(),
+                                            90,
+                                        ),
+                                    );
+                                }
+                                let g = ui.fonts(|f| {
+                                    f.layout_no_wrap(
+                                        cmd.clone(),
+                                        egui::FontId::monospace(font_size * 0.9),
+                                        menu_fg,
+                                    )
+                                });
+                                ui.set_clip_rect(egui::Rect::from_min_max(
+                                    row.min,
+                                    egui::pos2(row.max.x - 26.0, row.max.y),
+                                ));
+                                ui.painter().galley(
+                                    egui::pos2(row.min.x + 24.0, row.center().y - g.size().y / 2.0),
+                                    g,
+                                    menu_fg,
+                                );
+                                ui.set_clip_rect(frame_rect.expand(1.0));
+                                let rresp = ui.interact(
+                                    row,
+                                    egui::Id::new(("fav_sub_row", tab.as_str(), fid, idx)),
+                                    egui::Sense::click_and_drag(),
+                                );
+                                if rresp.clicked() {
+                                    send_cmd = Some(cmd.clone());
+                                }
+                                // Delete (TRASH icon) on hover/selection.
+                                if row_hover || is_kb {
+                                    let dcol = weak;
+                                    let dg = ui.fonts(|f| {
+                                        f.layout_no_wrap(
+                                            egui_phosphor::regular::TRASH.to_string(),
+                                            egui::FontId::proportional(13.0),
+                                            dcol,
+                                        )
+                                    });
+                                    let dw = dg.size().x;
+                                    let drect = egui::Rect::from_min_max(
+                                        egui::pos2(row.max.x - 8.0 - dw, row.center().y - 8.0),
+                                        egui::pos2(row.max.x - 8.0, row.center().y + 8.0),
+                                    );
+                                    let dresp = ui.interact(
+                                        drect,
+                                        egui::Id::new(("fav_sub_del", tab.as_str(), fid, idx)),
+                                        egui::Sense::click(),
+                                    );
+                                    let dhot = if dresp.contains_pointer() {
+                                        app.danger.to_egui()
+                                    } else {
+                                        weak
+                                    };
+                                    let dg2 = ui.fonts(|f| {
+                                        f.layout_no_wrap(
+                                            egui_phosphor::regular::TRASH.to_string(),
+                                            egui::FontId::proportional(13.0),
+                                            dhot,
+                                        )
+                                    });
+                                    ui.painter().galley(
+                                        drect.center() - dg2.size() / 2.0,
+                                        dg2,
+                                        dhot,
+                                    );
+                                    let _ = dg;
+                                    if dresp.clicked() {
+                                        remove_idx = Some(idx);
+                                    }
+                                }
+                                // Drag start: ONLY from the handle zone.
+                                let press = ui.input(|i| i.pointer.press_origin());
+                                let in_handle = press
+                                    .is_some_and(|pp| row.contains(pp) && pp.x < row.min.x + 22.0);
+                                if in_handle
+                                    && ui.input(|i| i.pointer.primary_down())
+                                    && self.fav_item_drag.is_none()
+                                {
+                                    self.fav_item_drag = Some((fid, idx));
+                                }
+                                y += row_h;
+                            }
+                            // In-flight drag: insertion line + drop.
+                            if let Some((src_fid, src_idx)) = self.fav_item_drag {
+                                let released = ui.input(|i| i.pointer.any_released());
+                                if released {
+                                    if let Some((dst_fid, dst_idx, after)) =
+                                        self.fav_item_drop.take()
+                                    {
+                                        if dst_fid == src_fid {
+                                            let mut items2 = self.history_db.fav_items(src_fid);
+                                            if src_idx < items2.len() {
+                                                let dst = drag_drop_destination(
+                                                    src_idx,
+                                                    dst_idx,
+                                                    after,
+                                                    items2.len(),
+                                                );
+                                                if src_idx != dst {
+                                                    let moved = items2.remove(src_idx);
+                                                    items2.insert(dst, moved);
+                                                    self.history_db
+                                                        .fav_item_reorder(src_fid, &items2);
+                                                }
+                                            }
+                                        } else {
+                                            let items2 = self.history_db.fav_items(src_fid);
+                                            if let Some(cmd) = items2.get(src_idx).cloned() {
+                                                self.history_db
+                                                    .fav_item_move(src_fid, dst_fid, &cmd);
+                                            }
+                                        }
+                                        self.fav_folders = self.history_db.fav_folders();
+                                    }
+                                    self.fav_item_drag = None;
+                                } else if let Some(pp) = pointer {
+                                    let sub_rect = egui::Rect::from_min_size(
+                                        egui::pos2(sub_x0, frame_rect.min.y),
+                                        egui::vec2(sub_w, rows_h),
+                                    );
+                                    if sub_rect.contains(pp) {
+                                        let idx = (((pp.y - frame_rect.min.y) / row_h) as usize)
+                                            .min(items.len().saturating_sub(1));
+                                        let after = pp.y
+                                            > frame_rect.min.y + idx as f32 * row_h + row_h / 2.0;
+                                        self.fav_item_drop = Some((fid, idx, after));
+                                        let iy = if after {
+                                            frame_rect.min.y + (idx + 1) as f32 * row_h
+                                        } else {
+                                            frame_rect.min.y + idx as f32 * row_h
+                                        };
+                                        ui.painter().line_segment(
+                                            [
+                                                egui::pos2(sub_x0 + 2.0, iy),
+                                                egui::pos2(sub_x0 + sub_w - 2.0, iy),
+                                            ],
+                                            egui::Stroke::new(2.0, sel_bg),
+                                        );
+                                    } else {
+                                        self.fav_item_drop = None;
+                                    }
+                                }
+                            }
+                            // Apply row actions AFTER painting (borrow
+                            // discipline): send or live-delete.
+                            if let Some(cmd) = send_cmd {
+                                if let Some(td) = self.terminals.get_mut(&tab) {
+                                    td.instance.write(format!("{cmd}\r").as_bytes());
+                                    td.instance.history_nav = None;
+                                }
+                                self.history_menu_just_closed.insert(tab.clone(), true);
+                                self.fav_submenu = None;
+                            }
+                            if let Some(idx) = remove_idx {
+                                if let Some(cmd) = items.get(idx).cloned() {
+                                    self.history_db.fav_item_remove(fid, &cmd);
+                                    // LIVE refresh: the column re-reads the
+                                    // DB next frame — the row vanishes
+                                    // immediately (no re-entry needed).
+                                    let fresh = self.history_db.fav_items(fid);
+                                    if fresh.is_empty() {
+                                        self.fav_submenu = None;
+                                    } else {
+                                        let sel = kb_sel.unwrap_or(0).min(fresh.len() - 1);
+                                        self.fav_submenu =
+                                            Some((fid, egui::Pos2::ZERO, fresh, Some(sel)));
+                                    }
+                                }
+                            }
+                            let _ = pointer;
+                        }
+                    }
+
                     // Column wheel scroll
                     let col_rect = egui::Rect::from_min_size(
                         egui::pos2(fx0, frame_rect.min.y),
@@ -5435,303 +5675,6 @@ impl App {
             self.history_clear_confirm = None;
         }
     }
-    /// Floating submenu listing one folder's commands (the favorites
-    /// column's second level). Keyboard: Up/Down move, Enter sends,
-    /// Esc/left-click-outside closes. Mouse: click sends.
-    fn render_fav_submenu(&mut self, ctx: &egui::Context) {
-        let Some((fid, anchor, items, kb_sel)) = self.fav_submenu.clone() else {
-            return;
-        };
-        // Close when the history menu itself is gone.
-        let menu_alive = self
-            .focused_terminal
-            .as_ref()
-            .and_then(|tab| self.terminals.get(tab))
-            .and_then(|td| td.instance.history_nav.as_ref())
-            .is_some();
-        if !menu_alive || items.is_empty() {
-            self.fav_submenu = None;
-            return;
-        }
-
-        let mut send: Option<String> = None;
-        let mut new_sel = kb_sel;
-
-        // Click-outside detection happens on the layer below; the Area
-        // itself only paints when the pointer stays inside.
-        let row_h = 20.0f32;
-        let w = 200.0f32; // same width as the favorites column
-        let h = items.len() as f32 * row_h;
-        egui::Area::new(egui::Id::new("fav_submenu"))
-            .order(egui::Order::Foreground)
-            .fixed_pos(anchor)
-            .show(ctx, |ui| {
-                let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, h), egui::Sense::click());
-                let app = &self.active_theme.app;
-                let bg = app.menu_bg.to_egui();
-                let fg = app.menu_fg.to_egui();
-                let weak = app.weak_text.to_egui();
-                let sel = app.active.to_egui();
-                // Flat, square, borderless — visually a CONTINUATION of
-                // the folder list sitting right next to it (same style as
-                // the favorites column), not a separate popup.
-                ui.painter().rect_filled(rect, 0.0, bg);
-                for (idx, cmd) in items.iter().enumerate() {
-                    let row = egui::Rect::from_min_size(
-                        egui::pos2(rect.min.x, rect.min.y + idx as f32 * row_h),
-                        egui::vec2(w, row_h),
-                    );
-
-                    let alt_col = app.menu_alt_bg.to_egui();
-                    if idx % 2 == 1 {
-                        ui.painter().rect_filled(row, 0.0, alt_col);
-                    }
-                    // Leading drag handle (DOTS_SIX_VERTICAL): the ONLY
-                    // drag affordance — drags must start here, not on the
-                    // command text (so clicks still send and the trailing
-                    // delete button stays untangled from drag logic).
-                    let handle_g = ui.fonts(|f| {
-                        f.layout_no_wrap(
-                            egui_phosphor::regular::DOTS_SIX_VERTICAL.to_string(),
-                            egui::FontId::proportional(11.0),
-                            weak,
-                        )
-                    });
-                    ui.painter().galley(
-                        egui::pos2(row.min.x + 4.0, row.center().y - handle_g.size().y / 2.0),
-                        handle_g,
-                        weak,
-                    );
-
-                    let hovered =
-                        row.contains(ui.input(|i| i.pointer.hover_pos()).unwrap_or_default());
-                    let is_kb = kb_sel.is_some_and(|k| k == idx);
-                    // Same hover treatment as the favorites column rows:
-                    // translucent selection tint, square corners.
-                    if hovered || is_kb {
-                        ui.painter().rect_filled(
-                            row,
-                            0.0,
-                            egui::Color32::from_rgba_unmultiplied(sel.r(), sel.g(), sel.b(), 90),
-                        );
-                    }
-                    let g = ui.fonts(|f| {
-                        f.layout_no_wrap(cmd.clone(), egui::FontId::monospace(11.0), fg)
-                    });
-                    ui.set_clip_rect(egui::Rect::from_min_max(
-                        row.min,
-                        egui::pos2(row.max.x - 22.0, row.max.y),
-                    ));
-                    ui.painter().galley(
-                        egui::pos2(row.min.x + 24.0, row.center().y - g.size().y / 2.0),
-                        g,
-                        fg,
-                    );
-                    ui.set_clip_rect(rect.expand(1.0));
-                    let rresp = ui.interact(
-                        row,
-                        egui::Id::new(("fav_sub_row", fid, idx)),
-                        egui::Sense::click_and_drag(),
-                    );
-                    // Drag start: ONLY from the leading handle zone —
-                    // the command text stays click-to-send and the delete
-                    // button keeps its clicks.
-                    let press = ui.input(|i| i.pointer.press_origin());
-                    let in_handle =
-                        press.is_some_and(|p| row.contains(p) && p.x < row.min.x + 22.0);
-                    if in_handle
-                        && ui.input(|i| i.pointer.primary_down())
-                        && self.fav_item_drag.is_none()
-                    {
-                        self.fav_item_drag = Some((fid, idx));
-                    }
-                    if rresp.clicked() {
-                        send = Some(cmd.clone());
-                    }
-                    if rresp.hovered() {
-                        new_sel = Some(idx);
-                    }
-                    // Delete button (hover or keyboard-selected row):
-                    // TEXT button matching the history rows' 删除; the
-                    // drag start excludes this trailing gutter so the
-                    // click is never swallowed by the row's drag sense.
-                    if hovered || is_kb {
-                        let del_txt = self.texts.terminal.delete.clone();
-                        let dg = ui.fonts(|f| {
-                            f.layout_no_wrap(
-                                del_txt.clone(),
-                                egui::FontId::proportional(11.0),
-                                weak,
-                            )
-                        });
-                        let dw = dg.size().x;
-                        let drect = egui::Rect::from_min_max(
-                            egui::pos2(row.max.x - 8.0 - dw, row.center().y - 8.0),
-                            egui::pos2(row.max.x - 8.0, row.center().y + 8.0),
-                        );
-                        let dresp = ui.interact(
-                            drect,
-                            egui::Id::new(("fav_sub_del", fid, idx)),
-                            egui::Sense::click(),
-                        );
-                        let dhot = if dresp.contains_pointer() {
-                            app.danger.to_egui()
-                        } else {
-                            weak
-                        };
-                        let dg2 = ui.fonts(|f| {
-                            f.layout_no_wrap(del_txt, egui::FontId::proportional(11.0), dhot)
-                        });
-                        ui.painter()
-                            .galley(drect.center() - dg2.size() / 2.0, dg2, dhot);
-                        let _ = dg;
-                        if dresp.clicked() {
-                            self.history_db.fav_item_remove(fid, cmd);
-                            self.fav_folders = self.history_db.fav_folders();
-                            let fresh = self.history_db.fav_items(fid);
-                            if fresh.is_empty() {
-                                self.fav_submenu = None;
-                                return;
-                            }
-                            self.fav_submenu = Some((fid, anchor, fresh, kb_sel));
-                        }
-                    }
-                }
-
-                // ---- In-flight item drag: insertion line + drop ----
-                if let Some((src_fid, src_idx)) = self.fav_item_drag {
-                    let pointer = ui.input(|i| i.pointer.hover_pos());
-                    let released = ui.input(|i| i.pointer.any_released());
-                    if released {
-                        if let Some((dst_fid, dst_idx, after)) = self.fav_item_drop.take() {
-                            if dst_fid == src_fid {
-                                // Same folder: reorder.
-                                let mut items = self.history_db.fav_items(src_fid);
-                                if src_idx < items.len() {
-                                    let dst =
-                                        drag_drop_destination(src_idx, dst_idx, after, items.len());
-                                    if src_idx != dst {
-                                        let moved = items.remove(src_idx);
-                                        items.insert(dst, moved);
-                                        self.history_db.fav_item_reorder(src_fid, &items);
-                                    }
-                                }
-                            } else {
-                                // Different folder (or folder-row drop):
-                                // MOVE the command, appended at the end.
-                                let items = self.history_db.fav_items(src_fid);
-                                if let Some(cmd) = items.get(src_idx).cloned() {
-                                    if dst_fid == src_fid && dst_idx == usize::MAX {
-                                        // Dropped back onto its own folder
-                                        // row: reorder to the end.
-                                        let mut items = items.clone();
-                                        if src_idx < items.len() {
-                                            let moved = items.remove(src_idx);
-                                            items.push(moved);
-                                            self.history_db.fav_item_reorder(src_fid, &items);
-                                        }
-                                    } else {
-                                        self.history_db.fav_item_move(src_fid, dst_fid, &cmd);
-                                    }
-                                }
-                            }
-                            self.fav_folders = self.history_db.fav_folders();
-                            // Refresh the open submenu snapshot.
-                            let fresh = self.history_db.fav_items(fid);
-                            if fresh.is_empty() {
-                                self.fav_submenu = None;
-                            } else {
-                                let sel = kb_sel.unwrap_or(0).min(fresh.len() - 1);
-                                self.fav_submenu = Some((fid, anchor, fresh, Some(sel)));
-                            }
-                        }
-                        self.fav_item_drag = None;
-                    } else if let Some(p) = pointer {
-                        // Target: a row inside THIS submenu. (Only one
-                        // submenu is visible at a time; a cross-folder
-                        // drop is resolved by the folder-column hover
-                        // switching the submenu — see below.)
-                        if rect.contains(p) {
-                            let idx = (((p.y - rect.min.y) / row_h) as usize)
-                                .min(items.len().saturating_sub(1));
-                            let after = p.y > rect.min.y + idx as f32 * row_h + row_h / 2.0;
-                            self.fav_item_drop = Some((fid, idx, after));
-                            let iy = if after {
-                                rect.min.y + (idx + 1) as f32 * row_h
-                            } else {
-                                rect.min.y + idx as f32 * row_h
-                            };
-                            ui.painter().line_segment(
-                                [
-                                    egui::pos2(rect.min.x + 2.0, iy),
-                                    egui::pos2(rect.max.x - 2.0, iy),
-                                ],
-                                egui::Stroke::new(2.0, sel),
-                            );
-                        } else {
-                            self.fav_item_drop = None;
-                        }
-                    }
-                }
-                let _ = resp;
-                // tiny hint line
-                let hint = self.texts.stats.copied_toast.clone();
-                let _ = hint; // (reserved; keep the menu clean)
-                let _ = weak;
-            });
-
-        // Close only when the pointer leaves BOTH the submenu AND the
-        // folder column region (moving from the folder row toward the
-        // submenu crosses empty space — closing there would make the
-        // submenu unhoverable). Esc also closes.
-        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
-            self.fav_submenu = None;
-            return;
-        }
-        let hover = ctx.input(|i| i.pointer.hover_pos());
-        let sub_rect = egui::Rect::from_min_size(anchor, egui::vec2(w, h));
-        let col_rect = self.fav_column_rect;
-        let inside = hover.is_some_and(|p| sub_rect.contains(p) || col_rect.contains(p));
-        if !inside && ctx.input(|i| i.pointer.any_down()) {
-            self.fav_submenu = None;
-            return;
-        }
-
-        // Keyboard: Up/Down move within the submenu; Enter sends.
-        let (up, down, enter) = ctx.input(|i| {
-            (
-                i.key_pressed(egui::Key::ArrowUp),
-                i.key_pressed(egui::Key::ArrowDown),
-                i.key_pressed(egui::Key::Enter),
-            )
-        });
-        let _ = up;
-        let _ = down;
-        if let Some(sel) = new_sel {
-            self.fav_submenu = Some((fid, anchor, items.clone(), new_sel));
-            let _ = sel;
-        } else {
-            self.fav_submenu = Some((fid, anchor, items.clone(), kb_sel));
-        }
-        if enter {
-            if let Some(sel) = self.fav_submenu.as_ref().and_then(|(_, _, _, s)| *s) {
-                if let Some(cmd) = items.get(sel) {
-                    send = Some(cmd.clone());
-                }
-            }
-        }
-        if let Some(cmd) = send {
-            if let Some(tab) = self.focused_terminal.clone() {
-                if let Some(td) = self.terminals.get_mut(&tab) {
-                    td.instance.write(format!("{cmd}\r").as_bytes());
-                    td.instance.history_nav = None;
-                }
-                self.history_menu_just_closed.insert(tab.clone(), true);
-            }
-            self.fav_submenu = None;
-        }
-    }
-
     /// Name dialog for favorite folders (create when folder id is None,
     /// rename otherwise). Modal with text input, Enter confirms, Esc
     /// cancels.
@@ -6308,15 +6251,8 @@ impl eframe::App for App {
                                     if let Some((fid, _)) = self.fav_folders.get(nav.fav_selected) {
                                         let items = self.history_db.fav_items(*fid);
                                         if !items.is_empty() {
-                                            self.fav_submenu = Some((
-                                                *fid,
-                                                egui::pos2(
-                                                    self.fav_column_rect.max.x + 2.0,
-                                                    self.fav_column_rect.min.y + 4.0,
-                                                ),
-                                                items,
-                                                Some(0),
-                                            ));
+                                            self.fav_submenu =
+                                                Some((*fid, egui::Pos2::ZERO, items, Some(0)));
                                         }
                                     }
                                 }
@@ -6457,11 +6393,18 @@ impl eframe::App for App {
                             } else if next && nav.fav_selected + 1 < folder_count {
                                 nav.fav_selected += 1;
                             }
-                            // NOTE: moving the folder cursor does NOT
-                            // auto-open its submenu — the cursor stays on
-                            // the folder list until Right is pressed (which
-                            // switches into the submenu). Mouse hover still
-                            // opens it; that is pointer-driven only.
+                            // Keyboard selection OPENS the selected
+                            // folder's submenu (the third column shows its
+                            // commands) — same as hover. Right then moves
+                            // the CURSOR into the third column.
+                            if let Some((fid, _)) = self.fav_folders.get(nav.fav_selected) {
+                                let items = self.history_db.fav_items(*fid);
+                                if !items.is_empty() {
+                                    self.fav_submenu = Some((*fid, egui::Pos2::ZERO, items, None));
+                                } else {
+                                    self.fav_submenu = None;
+                                }
+                            }
                             // Selection changed: bring it into view THIS
                             // frame, mirroring the main-list follow logic.
                             let fav_scroll_id = egui::Id::new(("hist_fav_scroll", tab.as_str()));
@@ -7794,7 +7737,6 @@ impl eframe::App for App {
         self.render_fav_name_dialog(ctx);
         self.render_fav_cmd_dialog(ctx);
         self.render_fav_delete_confirm(ctx);
-        self.render_fav_submenu(ctx);
 
         // Terminal close confirmation
         if let Some(ref tab_id) = self.pending_close_confirm.clone() {
