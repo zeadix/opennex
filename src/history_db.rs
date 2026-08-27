@@ -126,13 +126,18 @@ impl HistoryDb {
             )
             .map(|n| n > 0)?;
         if !has_position_col {
-            // Seed from the current id-DESC display order: the LAST row
-            // by id is displayed FIRST, so it gets position 1.
+            // Seed display order from the legacy id-DESC listing, then
+            // PIN the default folder to the very top (position 0): it is
+            // where legacy favorites land and where the star button
+            // sends commands, so it must always be visible — hiding at
+            // the list tail looked like "the default folder vanished".
             conn.execute_batch(
                 "ALTER TABLE favorite_folders ADD COLUMN position INTEGER;
                  UPDATE favorite_folders SET position =
-                   (SELECT COUNT(*) + 1 FROM favorite_folders f2
-                    WHERE f2.id > favorite_folders.id);",
+                   2 + (SELECT COUNT(*) FROM favorite_folders f2
+                        WHERE f2.id > favorite_folders.id);
+                 UPDATE favorite_folders SET position = 1
+                   WHERE name = '默认收藏';",
             )?;
         }
         let default_folder: i64 = conn
@@ -384,7 +389,13 @@ impl HistoryDb {
                 params![trimmed, next_pos],
             )
             .ok()?;
-        Some(self.conn.last_insert_rowid())
+        let id = self.conn.last_insert_rowid();
+        // Keep the default folder pinned above whatever was just created.
+        let _ = self.conn.execute(
+            "UPDATE favorite_folders SET position = 0 WHERE name = ?1",
+            params![Self::DEFAULT_FAVORITE_FOLDER],
+        );
+        Some(id)
     }
 
     pub fn fav_folder_rename(&self, folder_id: i64, new_name: &str) -> bool {
@@ -428,6 +439,18 @@ impl HistoryDb {
     /// mapping, but SQLite rows have no order — the UI keeps Vec order
     /// and we materialize it with a position column-less approach:
     pub fn fav_folder_reorder(&self, ordered_ids: &[i64]) {
+        // The default folder stays PINNED to the top regardless of the
+        // drag: after applying the user order, force it back to
+        // position 0 (favorite-star commands land there; it must never
+        // be buried).
+        let default_id: Option<i64> = self
+            .conn
+            .query_row(
+                "SELECT id FROM favorite_folders WHERE name = ?1",
+                params![Self::DEFAULT_FAVORITE_FOLDER],
+                |r| r.get(0),
+            )
+            .ok();
         let Ok(tx) = self.conn.unchecked_transaction() else {
             return;
         };
@@ -442,6 +465,12 @@ impl HistoryDb {
                 let _ = tx.rollback();
                 return;
             }
+        }
+        if let Some(def) = default_id {
+            let _ = tx.execute(
+                "UPDATE favorite_folders SET position = 0 WHERE id = ?1",
+                params![def],
+            );
         }
         let _ = tx.commit();
     }
@@ -736,10 +765,14 @@ mod tests {
         let fid2 = db.fav_folder_create("zzz-other").unwrap();
         db.fav_folder_reorder(&[fid2, fid]);
         let names: Vec<String> = db.fav_folders().into_iter().map(|(_, n)| n).collect();
-        // fid was renamed to build-all and reordered AFTER fid2? No —
-        // the Vec is [fid2, fid], so fid2 (zzz-other) displays first.
-        assert_eq!(names.first().map(String::as_str), Some("zzz-other"));
-        assert_eq!(names.get(1).map(String::as_str), Some("build-all"));
+        // The DEFAULT folder is PINNED to the top; the drag order
+        // applies to the rest: 默认收藏, zzz-other, build-all.
+        assert_eq!(
+            names.first().map(String::as_str),
+            Some(HistoryDb::DEFAULT_FAVORITE_FOLDER)
+        );
+        assert_eq!(names.get(1).map(String::as_str), Some("zzz-other"));
+        assert_eq!(names.get(2).map(String::as_str), Some("build-all"));
 
         // Cross-folder move (rowid) BEFORE the folder delete: move
         // "make -j8" (still in fid) to a fresh folder.

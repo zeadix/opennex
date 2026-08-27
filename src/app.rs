@@ -4338,7 +4338,22 @@ impl App {
         // The folder's command list renders as a THIRD column in the
         // same window (flush against the folder column, same style) —
         // not a floating popup.
-        let sub_open = self.fav_submenu.is_some();
+        // WIDTH LOOK-AHEAD: the hover-open writes fav_submenu DURING the
+        // row loop below, so reading it here lags one frame — the third
+        // column then painted INSIDE the folder column's width for one
+        // frame (covering the folder rows: the "default folder vanishes
+        // and flickers when hovering the first row" bug). Decide the
+        // width from what THIS frame will open: pointer over a folder
+        // row (last frame's rects), the keyboard-selected folder, or an
+        // already-open column.
+        let hover_pos_pre = ctx.input(|i| i.pointer.hover_pos());
+        let sub_open = show_favs && {
+            let already = self.fav_submenu.is_some();
+            let hover_hit =
+                hover_pos_pre.is_some_and(|p| self.fav_folder_rects.iter().any(|r| r.contains(p)));
+            let kb_hit = nav.fav_focused;
+            already || hover_hit || kb_hit
+        };
         let sub_w = 200.0f32;
         let total_w = list_w
             + if show_favs { fav_w } else { 0.0 }
