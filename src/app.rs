@@ -6521,20 +6521,27 @@ impl eframe::App for App {
                                     self.fav_submenu = None;
                                 }
                             }
-                            // Selection changed: bring it into view THIS
-                            // frame, mirroring the main-list follow logic.
-                            let fav_scroll_id = egui::Id::new(("hist_fav_scroll", tab.as_str()));
-                            let mv = 10usize.min(nav.favorites.len());
-                            let max_sc = nav.favorites.len().saturating_sub(mv);
+                            // Selection changed: bring the highlighted
+                            // FOLDER into view this frame — same follow
+                            // semantics as the main list, but against the
+                            // folder column's scroll (the old code wrote
+                            // the legacy flat-favorites scroll id, so the
+                            // column never followed). Capacity accounts
+                            // for the 24px column header.
+                            let col_scroll_id = egui::Id::new(("hist_favcol_scroll", tab.as_str()));
+                            let header_h = 24.0f32;
+                            let row_h = 20.0f32;
+                            let mv = (((200.0f32 - header_h).max(row_h)) / row_h) as usize;
+                            let max_sc = folder_count.saturating_sub(mv);
                             let mut sc = ctx
-                                .memory(|m| m.data.get_temp(fav_scroll_id).unwrap_or(0))
+                                .memory(|m| m.data.get_temp(col_scroll_id).unwrap_or(0))
                                 .min(max_sc);
                             if nav.fav_selected < sc {
                                 sc = nav.fav_selected;
                             } else if nav.fav_selected >= sc + mv {
                                 sc = nav.fav_selected + 1 - mv;
                             }
-                            ctx.memory_mut(|m| m.data.insert_temp(fav_scroll_id, sc));
+                            ctx.memory_mut(|m| m.data.insert_temp(col_scroll_id, sc));
                         }
                     }
                 }
