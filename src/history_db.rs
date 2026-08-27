@@ -15,7 +15,7 @@ const SCHEMA_SQL: &str = "CREATE TABLE IF NOT EXISTS favorite_folders (
             CREATE INDEX IF NOT EXISTS idx_terminal ON command_history(terminal_id);
             CREATE TABLE IF NOT EXISTS favorite_commands (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                command TEXT NOT NULL UNIQUE,
+                command TEXT NOT NULL,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             );";
 
@@ -87,6 +87,34 @@ impl HistoryDb {
                    REFERENCES favorite_folders(id) ON DELETE CASCADE;
                  ALTER TABLE favorite_commands ADD COLUMN sort_key INTEGER;
                  UPDATE favorite_commands SET sort_key = id;",
+            )?;
+        }
+        // Drop the legacy UNIQUE(command) constraint: the same command
+        // may now exist in several folders AND multiple times in one
+        // folder (rowid-addressed item ops). SQLite can't drop a
+        // table-level UNIQUE, so rebuild the table once.
+        let cmd_unique: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_index_list('favorite_commands') \
+                 WHERE [unique] = 1 AND [origin] = 'u'",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .map(|n| n > 0)
+            .unwrap_or(false);
+        if cmd_unique {
+            conn.execute_batch(
+                "CREATE TABLE favorite_commands_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    command TEXT NOT NULL,
+                    folder_id INTEGER REFERENCES favorite_folders(id) ON DELETE CASCADE,
+                    sort_key INTEGER,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                 );
+                 INSERT INTO favorite_commands_new (id, command, folder_id, sort_key, created_at)
+                   SELECT id, command, folder_id, sort_key, created_at FROM favorite_commands;
+                 DROP TABLE favorite_commands;
+                 ALTER TABLE favorite_commands_new RENAME TO favorite_commands;",
             )?;
         }
         let has_position_col: bool = conn
@@ -275,18 +303,14 @@ impl HistoryDb {
                 |r| r.get(0),
             )
             .unwrap_or(1);
+        // Duplicates are ALLOWED (same command in several folders and
+        // multiple times in one folder); rows are addressed by rowid.
         if tx
             .execute(
-                "DELETE FROM favorite_commands WHERE folder_id = ?1 AND command = ?2",
-                params![folder_id, trimmed],
+                "INSERT INTO favorite_commands (command, folder_id, sort_key) VALUES (?1, ?2, ?3)",
+                params![trimmed, folder_id, next_key],
             )
             .is_err()
-            || tx
-                .execute(
-                    "INSERT INTO favorite_commands (command, folder_id, sort_key) VALUES (?1, ?2, ?3)",
-                    params![trimmed, folder_id, next_key],
-                )
-                .is_err()
         {
             let _ = tx.rollback();
             return;
@@ -422,6 +446,22 @@ impl HistoryDb {
         let _ = tx.commit();
     }
 
+    /// Folder rows in drag order WITH their rowids — the stable handle
+    /// for delete/move/reorder when duplicate commands exist.
+    pub fn fav_items_with_ids(&self, folder_id: i64) -> Vec<(i64, String)> {
+        let Ok(mut stmt) = self.conn.prepare(
+            "SELECT id, command FROM favorite_commands \
+             WHERE folder_id = ?1 ORDER BY sort_key ASC, id ASC",
+        ) else {
+            return Vec::new();
+        };
+        stmt.query_map(params![folder_id], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })
+        .map(|rows| rows.flatten().collect())
+        .unwrap_or_default()
+    }
+
     /// Commands of a folder in the user's drag order (ascending
     /// sort_key) — the order "assemble" concatenates.
     pub fn fav_items(&self, folder_id: i64) -> Vec<String> {
@@ -436,21 +476,17 @@ impl HistoryDb {
             .unwrap_or_default()
     }
 
-    /// Remove one command from a folder.
-    pub fn fav_item_remove(&self, folder_id: i64, command: &str) {
+    /// Remove ONE row (rowid-addressed: only that duplicate goes away).
+    pub fn fav_item_remove_row(&self, rowid: i64) {
         let _ = self.conn.execute(
-            "DELETE FROM favorite_commands WHERE folder_id = ?1 AND command = ?2",
-            params![folder_id, command],
+            "DELETE FROM favorite_commands WHERE id = ?1",
+            params![rowid],
         );
     }
 
-    /// Move a command from one folder to another, appended at the END
-    /// of the destination (next sort_key). Used by the submenu's
-    /// cross-folder drag.
-    pub fn fav_item_move(&self, from_folder: i64, to_folder: i64, command: &str) {
-        if from_folder == to_folder {
-            return;
-        }
+    /// Move ONE row (rowid-addressed) to another folder, appended at
+    /// the END of the destination (next sort_key).
+    pub fn fav_item_move_row(&self, rowid: i64, to_folder: i64) {
         let Ok(tx) = self.conn.unchecked_transaction() else {
             return;
         };
@@ -463,16 +499,10 @@ impl HistoryDb {
             .unwrap_or(1);
         let ok = tx
             .execute(
-                "DELETE FROM favorite_commands WHERE folder_id = ?1 AND command = ?2",
-                params![from_folder, command],
+                "UPDATE favorite_commands SET folder_id = ?2, sort_key = ?3 WHERE id = ?1",
+                params![rowid, to_folder, next_key],
             )
-            .is_ok()
-            && tx
-                .execute(
-                    "INSERT INTO favorite_commands (command, folder_id, sort_key) VALUES (?1, ?2, ?3)",
-                    params![command, to_folder, next_key],
-                )
-                .is_ok();
+            .is_ok();
         if ok {
             let _ = tx.commit();
         } else {
@@ -480,19 +510,19 @@ impl HistoryDb {
         }
     }
 
-    /// Persist a new drag order for a folder's items by rewriting
-    /// sort_key to 1..=N in the given order.
-    pub fn fav_item_reorder(&self, folder_id: i64, ordered: &[String]) {
+    /// Persist a new drag order by rewriting sort_key to 1..=N over the
+    /// given ROWID order (duplicate commands each keep their own slot).
+    pub fn fav_item_reorder_rows(&self, folder_id: i64, ordered_rowids: &[i64]) {
         let Ok(tx) = self.conn.unchecked_transaction() else {
             return;
         };
         let mut ok = true;
-        for (idx, cmd) in ordered.iter().enumerate() {
+        for (idx, rid) in ordered_rowids.iter().enumerate() {
             if tx
                 .execute(
                     "UPDATE favorite_commands SET sort_key = ?3 \
-                     WHERE folder_id = ?1 AND command = ?2",
-                    params![folder_id, cmd, (idx + 1) as i64],
+                     WHERE folder_id = ?1 AND id = ?2",
+                    params![folder_id, rid, (idx + 1) as i64],
                 )
                 .is_err()
             {
@@ -673,15 +703,13 @@ mod tests {
             vec!["cmake .", "make -j8", "sudo make install"]
         );
 
-        // Drag reorder: move the last item to the front.
-        db.fav_item_reorder(
-            fid,
-            &[
-                "sudo make install".into(),
-                "cmake .".into(),
-                "make -j8".into(),
-            ],
-        );
+        // Drag reorder (rowid-addressed): last item to the front.
+        let ids: Vec<i64> = db
+            .fav_items_with_ids(fid)
+            .into_iter()
+            .map(|(r, _)| r)
+            .collect();
+        db.fav_item_reorder_rows(fid, &[ids[2], ids[0], ids[1]]);
         assert_eq!(
             db.fav_items(fid),
             vec!["sudo make install", "cmake .", "make -j8"]
@@ -693,8 +721,14 @@ mod tests {
             "sudo make install && cmake . && make -j8"
         );
 
-        // Item remove.
-        db.fav_item_remove(fid, "cmake .");
+        // Item remove (rowid).
+        let cmake_id = db
+            .fav_items_with_ids(fid)
+            .into_iter()
+            .find(|(_, c)| c == "cmake .")
+            .unwrap()
+            .0;
+        db.fav_item_remove_row(cmake_id);
         assert_eq!(db.fav_items(fid).len(), 2);
 
         // Rename + folder reorder persistence: Vec order = display order.
@@ -707,19 +741,63 @@ mod tests {
         assert_eq!(names.first().map(String::as_str), Some("zzz-other"));
         assert_eq!(names.get(1).map(String::as_str), Some("build-all"));
 
-        // Delete cascades the items away.
+        // Cross-folder move (rowid) BEFORE the folder delete: move
+        // "make -j8" (still in fid) to a fresh folder.
+        let fid3 = db.fav_folder_create("third").unwrap();
+        let mv_id = db
+            .fav_items_with_ids(fid)
+            .into_iter()
+            .find(|(_, c)| c == "make -j8")
+            .unwrap()
+            .0;
+        db.fav_item_move_row(mv_id, fid3);
+        assert!(!db.fav_items(fid).contains(&"make -j8".to_string()));
+        let third = db.fav_items(fid3);
+        assert_eq!(third.last().map(String::as_str), Some("make -j8"));
+
+        // Delete cascades the remaining items away.
         assert!(db.fav_folder_delete(fid));
         assert!(db.fav_items(fid).is_empty());
 
-        // Cross-folder move appends at the destination's end.
-        let fid3 = db.fav_folder_create("third").unwrap();
-        db.fav_item_move(fid2, fid3, "make -j8");
-        assert!(!db.fav_items(fid2).contains(&"make -j8".to_string()));
-        let third = db.fav_items(fid3);
-        assert_eq!(third.last().map(String::as_str), Some("make -j8"));
-        // Moving within the same folder is a no-op.
-        db.fav_item_move(fid3, fid3, "make -j8");
-        assert_eq!(db.fav_items(fid3), third);
+        // Duplicates are ALLOWED: same command twice in one folder
+        // (fid3 already holds ONE "make -j8" from the move above).
+        db.fav_add_to(fid3, "make -j8");
+        db.fav_add_to(fid3, "make -j8");
+        let with_ids = db.fav_items_with_ids(fid3);
+        assert_eq!(
+            with_ids.iter().filter(|(_, c)| c == "make -j8").count(),
+            3,
+            "duplicate rows must all exist"
+        );
+        // Rowid delete removes exactly ONE of them.
+        let first_id = with_ids.iter().find(|(_, c)| c == "make -j8").unwrap().0;
+        db.fav_item_remove_row(first_id);
+        let after: Vec<String> = db
+            .fav_items_with_ids(fid3)
+            .into_iter()
+            .map(|(_, c)| c)
+            .collect();
+        assert_eq!(
+            after.iter().filter(|c| *c == "make -j8").count(),
+            2,
+            "rowid delete removes exactly one duplicate"
+        );
+        // Rowid move takes exactly one copy over to fid.
+        let second_id = db
+            .fav_items_with_ids(fid3)
+            .into_iter()
+            .find(|(_, c)| c == "make -j8")
+            .unwrap()
+            .0;
+        db.fav_item_move_row(second_id, fid2);
+        assert_eq!(
+            db.fav_items(fid3)
+                .iter()
+                .filter(|c| *c == "make -j8")
+                .count(),
+            1
+        );
+        assert!(db.fav_items(fid2).contains(&"make -j8".to_string()));
 
         // The default folder can never be deleted.
         let (def_id, _) = db
