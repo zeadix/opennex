@@ -6273,6 +6273,18 @@ impl eframe::App for App {
                                 if !nav.fav_focused {
                                     nav.fav_focused = true;
                                     nav.fav_selected = 0;
+                                    // Entering the folder list PREVIEWS the
+                                    // first folder's command column right
+                                    // away (parity with Up/Down moves and
+                                    // mouse hover) — it used to stay closed
+                                    // until the cursor moved.
+                                    if let Some((fid, _)) = self.fav_folders.get(nav.fav_selected) {
+                                        let items = self.history_db.fav_items(*fid);
+                                        if !items.is_empty() {
+                                            self.fav_submenu =
+                                                Some((*fid, egui::Pos2::ZERO, items, None));
+                                        }
+                                    }
                                 } else if !self.fav_sub_focused && self.fav_submenu.is_some() {
                                     // Right moves INTO the visible command
                                     // column: now Up/Down/Enter operate on
