@@ -616,6 +616,72 @@ fn consume_exact_key(ctx: &egui::Context, key: egui::Key, modifiers: egui::Modif
     matched
 }
 
+/// Keyboard model for hand-drawn two-button confirm dialogs that
+/// already draw their own buttons: CANCEL default, Left/Right toggle,
+/// Enter activates. `draw` renders nothing; callers wire the returned
+/// flags into their existing button click logic. The ids must also be
+/// attached to the drawn buttons via `ui.interact(rect, id, ...)` —
+/// callers without stable ids can treat this purely as a key router.
+fn confirm_dialog_keys(
+    ui: &mut egui::Ui,
+    confirm_id: egui::Id,
+    cancel_id: egui::Id,
+) -> (bool, bool) {
+    let ctx = ui.ctx().clone();
+    let focused = ctx.memory(|m| m.focused());
+    if focused != Some(confirm_id) && focused != Some(cancel_id) {
+        ctx.memory_mut(|m| m.request_focus(cancel_id));
+    }
+    let left = ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft));
+    let right = ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight));
+    if left || right {
+        let to = if focused == Some(confirm_id) {
+            cancel_id
+        } else {
+            confirm_id
+        };
+        ctx.memory_mut(|m| m.request_focus(to));
+    }
+    let enter = ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+    let on_confirm = enter && focused == Some(confirm_id);
+    let on_cancel = enter && focused == Some(cancel_id);
+    (on_confirm, on_cancel)
+}
+
+/// SINGLE source of truth for "a modal dialog owns the UI right now".
+/// Every keyboard-consumer (history-menu key block, terminal focus
+/// grants, global shortcuts) must defer to whatever modal is topmost —
+/// previously each consumer knew its own subset of dialogs, so keys
+/// leaked: arrow keys drove the menu BEHIND a confirm popup, and the
+/// terminal re-claimed focus from text inputs.
+///
+/// REGISTRY — when adding a NEW modal dialog, add its flag HERE (and
+/// only here; the three consumers below all read this function):
+///   settings, about, theme editor, pw popup, unlock popup,
+///   theme dialogs (copy/new/rename/delete/switch),
+///   workspace close confirm, terminal close confirm,
+///   history clear confirm, favorites clear confirm,
+///   favorite folder dialogs (name/command/delete).
+fn any_modal_open(app: &App) -> bool {
+    app.show_settings
+        || app.show_about
+        || app.theme_editor_open
+        || app.pw_popup.is_some()
+        || app.unlock_popup.is_some()
+        || app.theme_dialog.show_copy_dialog
+        || app.theme_dialog.show_new_dialog
+        || app.theme_dialog.show_rename_dialog
+        || app.theme_dialog.show_delete_confirm
+        || app.theme_dialog.show_switch_confirm
+        || app.close_confirm_panel.is_some()
+        || app.pending_close_confirm.is_some()
+        || app.history_clear_confirm.is_some()
+        || app.show_clear_favorites_confirm
+        || app.fav_name_dialog.is_some()
+        || app.fav_cmd_dialog.is_some()
+        || app.fav_delete_confirm.is_some()
+}
+
 fn global_shortcuts_allowed(app: &App) -> bool {
     !app.show_settings
         && !app.show_about
@@ -5822,6 +5888,15 @@ impl App {
             .fixed_size([dlg_w, dlg_h])
             .frame(egui::Frame::window(&ctx.style()).inner_margin(egui::Margin::same(12)))
             .show(ctx, |ui| {
+                // Keyboard model: CANCEL default, Left/Right toggle,
+                // Enter activates.
+                let (k_confirm, k_cancel) = confirm_dialog_keys(
+                    ui,
+                    egui::Id::new("hist_clear_confirm_btn"),
+                    egui::Id::new("hist_clear_cancel_btn"),
+                );
+                confirmed |= k_confirm;
+                cancelled |= k_cancel;
                 ui.style_mut().spacing.item_spacing = egui::vec2(6.0, 4.0);
                 ui.style_mut().spacing.interact_size.y = 24.0;
                 ui.style_mut().spacing.button_padding = egui::vec2(10.0, 3.0);
@@ -6005,7 +6080,7 @@ impl App {
                         ui,
                         confirm_id,
                         cancel_id,
-                        &self.texts.theme_editor.confirm.clone(),
+                        &self.texts.theme_editor.dialog_confirm.clone(),
                         &self.texts.theme_editor.cancel.clone(),
                         confirm_id,
                     );
@@ -6090,7 +6165,7 @@ impl App {
                         ui,
                         confirm_id,
                         cancel_id,
-                        &self.texts.theme_editor.confirm.clone(),
+                        &self.texts.theme_editor.dialog_confirm.clone(),
                         &self.texts.theme_editor.cancel.clone(),
                         confirm_id,
                     );
@@ -6153,7 +6228,7 @@ impl App {
                         ui,
                         confirm_id,
                         cancel_id,
-                        &self.texts.theme_editor.confirm.clone(),
+                        &self.texts.theme_editor.dialog_confirm.clone(),
                         &self.texts.theme_editor.cancel.clone(),
                         cancel_id,
                     );
@@ -6317,21 +6392,11 @@ impl eframe::App for App {
     }
 
     fn raw_input_hook(&mut self, ctx: &egui::Context, _raw_input: &mut egui::RawInput) {
-        let any_theme_dialog = self.theme_dialog.show_copy_dialog
-            || self.theme_dialog.show_new_dialog
-            || self.theme_dialog.show_rename_dialog
-            || self.theme_dialog.show_delete_confirm
-            || self.theme_dialog.show_switch_confirm;
         if let Some(id) = self.terminal_focus_id {
             if terminal_focus_lock_allowed(
                 self.renaming_panel.is_some(),
                 self.renaming_terminal.is_some(),
-            ) && !any_theme_dialog
-                && !self.show_settings
-                && self.pw_popup.is_none()
-                && self.fav_name_dialog.is_none()
-                && self.fav_cmd_dialog.is_none()
-                && self.fav_delete_confirm.is_none()
+            ) && !any_modal_open(self)
             {
                 ctx.memory_mut(|memory| {
                     memory.set_focus_lock_filter(id, egui_term::terminal_focus_event_filter())
@@ -6499,7 +6564,13 @@ impl eframe::App for App {
             .is_some_and(|td| td.instance.history_nav.is_some());
 
         let mut history_menu_handled = false;
-        if !workspace_renaming && history_menu_active {
+        // MODAL ARBITRATION: while ANY modal dialog is open, the history
+        // menu's entire keyboard block stays silent — its Esc/Enter/
+        // arrows/Delete/Insert must not consume or act behind a popup
+        // (arrow keys used to drive the menu AND the popup's buttons at
+        // once). The keys belong to the topmost modal.
+        let modal_hijack = any_modal_open(self);
+        if !workspace_renaming && !modal_hijack && history_menu_active {
             let close =
                 ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
             // Space is a plain input character: it participates in the
@@ -7781,6 +7852,15 @@ impl eframe::App for App {
                 .fixed_size([dlg_w, dlg_h])
                 .frame(egui::Frame::window(&ctx.style()).inner_margin(egui::Margin::same(12)))
                 .show(ctx, |ui| {
+                    // Keyboard model: CANCEL default, Left/Right toggle,
+                    // Enter activates.
+                    let (k_confirm, k_cancel) = confirm_dialog_keys(
+                        ui,
+                        egui::Id::new("fav_clear_confirm_btn"),
+                        egui::Id::new("fav_clear_cancel_btn"),
+                    );
+                    confirmed |= k_confirm;
+                    cancelled |= k_cancel;
                     ui.style_mut().spacing.item_spacing = egui::vec2(6.0, 4.0);
                     ui.style_mut().spacing.interact_size.y = 24.0;
                     ui.style_mut().spacing.button_padding = egui::vec2(10.0, 3.0);
@@ -9049,6 +9129,12 @@ impl eframe::App for App {
         // The sidebar can enter rename mode during this frame. Read the state again so the
         // terminal view cannot reclaim focus after the rename input requests it.
         let renaming = self.is_renaming();
+        // Modal arbiter, computed BEFORE the dock tree borrow (the viewer
+        // needs it, but self can't be immutably borrowed inside).
+        let modal_open_flag = {
+            let app: &App = &*self;
+            any_modal_open(app)
+        };
         let terminal_count = self
             .dock_states
             .get(&self.active_panel)
@@ -9333,11 +9419,7 @@ impl eframe::App for App {
                                 active_tab,
                                 focused_terminal: &mut self.focused_terminal,
                                 terminal_focus_id: &mut self.terminal_focus_id,
-                                show_settings: self.show_settings,
-                                pw_popup_open: self.pw_popup.is_some(),
-                                fav_dialogs_open: self.fav_name_dialog.is_some()
-                                    || self.fav_cmd_dialog.is_some()
-                                    || self.fav_delete_confirm.is_some(),
+                                modal_open: modal_open_flag,
                                 fav_submenu_slot: &mut self.fav_submenu,
                                 fav_sub_focus_slot: &mut self.fav_sub_focused,
                                 auto_match: self.settings_edit.auto_match_command,
@@ -10049,10 +10131,11 @@ struct TerminalTabViewer<'a> {
     active_tab: Option<String>,
     focused_terminal: &'a mut Option<String>,
     terminal_focus_id: &'a mut Option<egui::Id>,
-    show_settings: bool,
-    pw_popup_open: bool,
-    /// Favorite-folder dialogs open: the terminal must not steal focus.
-    fav_dialogs_open: bool,
+    /// ANY modal dialog is open: the terminal must not claim/keep
+    /// keyboard focus while one owns the UI (single arbiter flag,
+    /// replaces the previous per-dialog-family booleans that each knew
+    /// only their own subset).
+    modal_open: bool,
     /// Manual-menu transient column state, so the auto-match overlay
     /// (opened inside tab_ui) can clear it.
     fav_submenu_slot: &'a mut Option<(i64, egui::Pos2, Vec<String>, Option<usize>)>,
@@ -10202,11 +10285,7 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                 let hit = |ui: &egui::Ui, b: &ShortcutBinding| -> bool {
                     mk(b).is_some_and(|(key, mods)| ui.input_mut(|i| i.consume_key(mods, key)))
                 };
-                if is_focused
-                    && !self.show_settings
-                    && !self.pw_popup_open
-                    && !self.fav_dialogs_open
-                {
+                if is_focused && !self.modal_open {
                     if let Some(b) = self.clipboard_binds.get("terminal_interrupt") {
                         if hit(ui, b) {
                             td.instance.write(&[0x03]);
@@ -10271,10 +10350,7 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                 // protection as the settings popups: without it the
                 // terminal re-claims keyboard focus every frame and the
                 // dialog's text field can never hold focus.
-                let terminal_may_focus = is_focused
-                    && !self.show_settings
-                    && !self.pw_popup_open
-                    && !self.fav_dialogs_open;
+                let terminal_may_focus = is_focused && !self.modal_open;
                 tv = tv.set_focus(terminal_may_focus);
                 // Override keys handled by app-level history UI
                 tv = tv.add_bindings(vec![
