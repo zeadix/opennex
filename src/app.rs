@@ -632,6 +632,24 @@ fn confirm_dialog_keys(
     if focused != Some(confirm_id) && focused != Some(cancel_id) {
         ctx.memory_mut(|m| m.request_focus(cancel_id));
     }
+    // CRITICAL: egui's OWN directional focus navigation (Memory::
+    // begin_pass) moves focus to spatially-adjacent widgets whenever an
+    // arrow key doesn't match the focused widget's lock filter — that
+    // navigation is what kept bouncing the focus and rerouting Enter to
+    // the terminal. Locking arrows+escape to OUR buttons makes the keys
+    // "act on the widget": egui skips its navigation and the consume
+    // logic below sees them.
+    let lock = egui::EventFilter {
+        tab: false,
+        horizontal_arrows: true,
+        vertical_arrows: true,
+        escape: true,
+    };
+    if let Some(id) = ctx.memory(|m| m.focused()) {
+        if id == confirm_id || id == cancel_id {
+            ctx.memory_mut(|m| m.set_focus_lock_filter(id, lock));
+        }
+    }
     let left = ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft));
     let right = ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight));
     if left || right {
@@ -5975,6 +5993,21 @@ impl App {
         // Seed the default focus once (when nothing of ours is focused).
         if focused_now != Some(confirm_id) && focused_now != Some(cancel_id) {
             ctx.memory_mut(|m| m.request_focus(initial));
+        }
+        // Lock arrows/escape to our buttons: without the lock, egui's
+        // built-in directional focus navigation (Memory::begin_pass)
+        // hijacks the arrows and moves focus to whatever is spatially
+        // adjacent — bouncing our selection and rerouting Enter.
+        let lock = egui::EventFilter {
+            tab: false,
+            horizontal_arrows: true,
+            vertical_arrows: true,
+            escape: true,
+        };
+        if let Some(id) = ctx.memory(|m| m.focused()) {
+            if id == confirm_id || id == cancel_id {
+                ctx.memory_mut(|m| m.set_focus_lock_filter(id, lock));
+            }
         }
         let arrows_on_buttons = Self::focus_probe(&ctx, confirm_id, cancel_id);
         let left = arrows_on_buttons
