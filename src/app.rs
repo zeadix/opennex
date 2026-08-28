@@ -1580,6 +1580,12 @@ pub struct App {
     /// history menu is open and restored on reopen: WHICH panel was
     /// active (history / folders / commands) and each cursor position.
     menu_cursors: HashMap<String, (usize, usize, bool, usize, bool, i64)>,
+    /// True on the exact frame a modal dialog OPENED: the opening click
+    /// itself must not fall through to the terminal (its Text event
+    /// used to land in the PTY before the modal took over the UI).
+    modal_just_opened: bool,
+    /// last frame's any_modal_open (for the rising-edge detection).
+    prev_modal_open: bool,
     /// Tabs whose menu just (re)opened and still need the cursor
     /// snapshot restored on the FIRST render frame — restoring in the
     /// open block itself lost to state resets running in between
@@ -1992,6 +1998,8 @@ impl App {
             fav_sub_focused: false,
             fav_cursor: 0,
             menu_cursors: HashMap::new(),
+            modal_just_opened: false,
+            prev_modal_open: false,
             menu_pending_restore: Default::default(),
             fav_drag_src: None,
             fav_drag_dst: None,
@@ -5860,7 +5868,6 @@ impl App {
         let Some(tab) = self.history_clear_confirm.clone() else {
             return;
         };
-        let mut open = true;
         let mut confirmed = false;
         let mut cancelled = false;
         let title = self.texts.stats.clear_history_title.clone();
@@ -5879,15 +5886,12 @@ impl App {
         let dlg_h = 96.0f32;
         let center = ctx.screen_rect().center();
         let pos = egui::pos2(center.x - dlg_w / 2.0, center.y - dlg_h / 2.0);
-        egui::Window::new(title)
-            .id(egui::Id::new("hist_clear_confirm"))
-            .open(&mut open)
-            .resizable(false)
-            .collapsible(false)
-            .fixed_pos(pos)
-            .fixed_size([dlg_w, dlg_h])
+        let _ = pos;
+        let modal = egui::Modal::new(egui::Id::new("hist_clear_confirm"))
             .frame(egui::Frame::window(&ctx.style()).inner_margin(egui::Margin::same(12)))
             .show(ctx, |ui| {
+                ui.set_min_size(egui::vec2(dlg_w, dlg_h));
+                ui.heading(title);
                 // Keyboard model: CANCEL default, Left/Right toggle,
                 // Enter activates.
                 let (k_confirm, k_cancel) = confirm_dialog_keys(
@@ -5929,13 +5933,17 @@ impl App {
                 // Body fills the remaining central area (top-aligned).
                 ui.label(egui::RichText::new(body).size(13.0).color(text_col));
             });
+        // Backdrop click cancels.
+        if modal.backdrop_response.clicked() {
+            cancelled = true;
+        }
         if confirmed {
             self.history_db.clear(&tab);
             if let Some(td) = self.terminals.get_mut(&tab) {
                 td.instance.history_nav = None;
             }
             self.history_clear_confirm = None;
-        } else if cancelled || !open {
+        } else if cancelled {
             self.history_clear_confirm = None;
         }
     }
@@ -6040,13 +6048,11 @@ impl App {
         let mut cancel = false;
         let confirm_id = egui::Id::new("fav_name_confirm_btn");
         let cancel_id = egui::Id::new("fav_name_cancel_btn");
-        egui::Window::new(title)
-            .id(egui::Id::new("fav_name_dialog"))
-            .fixed_pos(screen_center(ctx) - egui::vec2(160.0, 40.0))
-            .resizable(false)
-            .collapsible(false)
+        egui::Modal::new(egui::Id::new("fav_name_dialog"))
+            .frame(egui::Frame::window(&ctx.style()))
             .show(ctx, |ui| {
                 ui.set_min_width(280.0);
+                ui.heading(title);
                 ui.add_space(4.0);
                 ui.label(self.texts.terminal.fav_name_label.clone());
                 let input_id = egui::Id::new("fav_name_input");
@@ -6129,13 +6135,11 @@ impl App {
         let mut cancel = false;
         let confirm_id = egui::Id::new("fav_cmd_confirm_btn");
         let cancel_id = egui::Id::new("fav_cmd_cancel_btn");
-        egui::Window::new(self.texts.terminal.fav_cmd_dialog_title.clone())
-            .id(egui::Id::new("fav_cmd_dialog"))
-            .fixed_pos(screen_center(ctx) - egui::vec2(160.0, 40.0))
-            .resizable(false)
-            .collapsible(false)
+        egui::Modal::new(egui::Id::new("fav_cmd_dialog"))
+            .frame(egui::Frame::window(&ctx.style()))
             .show(ctx, |ui| {
                 ui.set_min_width(320.0);
+                ui.heading(self.texts.terminal.fav_cmd_dialog_title.clone());
                 ui.add_space(4.0);
                 ui.label(self.texts.terminal.fav_cmd_dialog_label.clone());
                 let resp = ui.text_edit_singleline(&mut self.fav_cmd_dialog.as_mut().unwrap().1);
@@ -6205,20 +6209,16 @@ impl App {
         }
         let mut confirm = false;
         let mut cancel = false;
-        let mut open = true;
         // Keyboard focus model (same as the close-terminal confirm):
         // CANCEL is the safe default; Left/Right toggle; Enter activates
         // the focused button.
         let confirm_id = egui::Id::new("fav_del_confirm_btn");
         let cancel_id = egui::Id::new("fav_del_cancel_btn");
-        egui::Window::new(self.texts.terminal.fav_delete_title.clone())
-            .id(egui::Id::new("fav_delete_confirm"))
-            .fixed_pos(screen_center(ctx) - egui::vec2(180.0, 50.0))
-            .resizable(false)
-            .collapsible(false)
-            .open(&mut open)
+        let modal = egui::Modal::new(egui::Id::new("fav_delete_confirm"))
+            .frame(egui::Frame::window(&ctx.style()))
             .show(ctx, |ui| {
                 ui.set_min_width(320.0);
+                ui.heading(self.texts.terminal.fav_delete_title.clone());
                 ui.add_space(4.0);
                 ui.strong(format!("\u{201c}{name}\u{201d}"));
                 ui.label(self.texts.terminal.fav_delete_body.clone());
@@ -6236,9 +6236,12 @@ impl App {
                     cancel |= x;
                 });
             });
-        if !open {
+        // Clicking the backdrop (outside the dialog) cancels — the modal
+        // blocks every other interaction anyway.
+        if modal.backdrop_response.clicked() {
             cancel = true;
         }
+        let _ = modal.is_top_modal;
         if confirm || cancel {
             if confirm {
                 self.history_db.fav_folder_delete(fid);
@@ -6402,13 +6405,27 @@ impl eframe::App for App {
                     memory.set_focus_lock_filter(id, egui_term::terminal_focus_event_filter())
                 });
             } else {
-                ctx.memory_mut(|memory| memory.surrender_focus(id));
+                // Surrender the focus AND neutralize the lock filter:
+                // set_focus_lock_filter only takes effect while focused,
+                // but a stale filter from the focused frames used to keep
+                // swallowing arrows/escape for the terminal's tab
+                // navigation while a modal dialog owned the UI.
+                ctx.memory_mut(|memory| {
+                    memory.surrender_focus(id);
+                });
                 self.terminal_focus_id = None;
             }
         }
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Rising-edge latch: the frame a modal goes from none to some,
+        // the opening click's own events must not reach the terminal.
+        {
+            let now_open = any_modal_open(self);
+            self.modal_just_opened = now_open && !self.prev_modal_open;
+            self.prev_modal_open = now_open;
+        }
         // Drain one queued startup warning per frame into the toast
         // channel so corruption notices are actually seen.
         if !self.startup_warnings.is_empty() {
@@ -7830,7 +7847,6 @@ impl eframe::App for App {
         // Confirm-dialog for clearing ALL global favorite commands.
         // Same fixed-size danger dialog as the history clear above.
         if self.show_clear_favorites_confirm {
-            let mut open = self.show_clear_favorites_confirm;
             let mut confirmed = false;
             let mut cancelled = false;
             let title = self.texts.terminal.clear_favorites_title.clone();
@@ -7843,15 +7859,12 @@ impl eframe::App for App {
             let dlg_h = 96.0f32;
             let center = ctx.screen_rect().center();
             let pos = egui::pos2(center.x - dlg_w / 2.0, center.y - dlg_h / 2.0);
-            egui::Window::new(title)
-                .id(egui::Id::new("fav_clear_confirm"))
-                .open(&mut open)
-                .resizable(false)
-                .collapsible(false)
-                .fixed_pos(pos)
-                .fixed_size([dlg_w, dlg_h])
+            let _ = pos;
+            let modal = egui::Modal::new(egui::Id::new("fav_clear_confirm"))
                 .frame(egui::Frame::window(&ctx.style()).inner_margin(egui::Margin::same(12)))
                 .show(ctx, |ui| {
+                    ui.set_min_size(egui::vec2(dlg_w, dlg_h));
+                    ui.heading(title);
                     // Keyboard model: CANCEL default, Left/Right toggle,
                     // Enter activates.
                     let (k_confirm, k_cancel) = confirm_dialog_keys(
@@ -7907,7 +7920,9 @@ impl eframe::App for App {
                     }
                 }
                 self.show_clear_favorites_confirm = false;
-            } else if !open {
+            }
+            // Backdrop click cancels.
+            if modal.backdrop_response.clicked() {
                 self.show_clear_favorites_confirm = false;
             }
         }
@@ -9133,7 +9148,7 @@ impl eframe::App for App {
         // needs it, but self can't be immutably borrowed inside).
         let modal_open_flag = {
             let app: &App = &*self;
-            any_modal_open(app)
+            any_modal_open(app) || app.modal_just_opened
         };
         let terminal_count = self
             .dock_states
