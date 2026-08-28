@@ -6240,7 +6240,8 @@ impl App {
         if left_or_right {
             self.fav_del_kb_confirm = !self.fav_del_kb_confirm;
         }
-        let enter_delete = ctx.input(|i| i.key_pressed(egui::Key::Enter));
+        let enter_delete =
+            ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
         let confirm_id = egui::Id::new("fav_del_confirm_btn");
         let cancel_id = egui::Id::new("fav_del_cancel_btn");
         let modal = egui::Modal::new(egui::Id::new("fav_delete_confirm"))
@@ -8842,7 +8843,9 @@ impl eframe::App for App {
                                         })
                                         .response;
                                     self.panel_rects[i] = response.rect;
-                                    let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
+                                    let enter = ui.input_mut(|i| {
+                                        i.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
+                                    });
                                     let escape = ui.input_mut(|i| {
                                         i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
                                     });
@@ -10232,7 +10235,8 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                         .id_source("tab_rename"),
                 );
                 ui.memory_mut(|mem| mem.request_focus(response.id));
-                let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
+                let enter =
+                    ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
                 let escape = ui.input(|i| i.key_pressed(egui::Key::Escape));
                 // Confirm / cancel buttons next to the input so renaming
                 // can always be applied or exited with the mouse.
