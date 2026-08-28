@@ -1587,6 +1587,10 @@ pub struct App {
     /// Floating submenu for one folder's commands: (folder id, anchor
     /// top-left, items snapshot, keyboard-selected index).
     fav_submenu: Option<(i64, egui::Pos2, Vec<String>, Option<usize>)>,
+    /// Delete-confirm keyboard cursor: true = the CONFIRM (danger)
+    /// button is selected by Left/Right, false = Cancel. Fully self-
+    /// managed — egui's focus system is deliberately bypassed here.
+    fav_del_kb_confirm: bool,
     /// True only after Right pressed into the command column — then
     /// Up/Down/Enter operate on commands; before that the column merely
     /// PREVIEW while the folder list keeps focus.
@@ -2030,6 +2034,7 @@ impl App {
             hist_drag_cmd: None,
             hist_drop_folder: None,
             fav_delete_confirm: None,
+            fav_del_kb_confirm: false,
         };
 
         app.fav_folders = app.history_db.fav_folders();
@@ -5973,7 +5978,12 @@ impl App {
         let f = ctx.memory(|m| m.focused());
         f == Some(confirm_id) || f == Some(cancel_id)
     }
-
+    /// Keyboard focus model shared by the favorite dialogs' button rows.
+    /// `initial` is the default-focused button. Left/Right toggle between
+    /// the two; Enter activates whichever holds focus (clicks work as
+    /// usual). Draws manual buttons under STABLE ids so focus requests
+    /// land exactly on them (egui Buttons have no id() in 0.31).
+    /// Returns (confirm_clicked, cancel_clicked).
     /// Keyboard focus model shared by the favorite dialogs' button rows.
     /// `initial` is the default-focused button. Left/Right toggle between
     /// the two; Enter activates whichever holds focus (clicks work as
@@ -5994,26 +6004,8 @@ impl App {
         if focused_now != Some(confirm_id) && focused_now != Some(cancel_id) {
             ctx.memory_mut(|m| m.request_focus(initial));
         }
-        // Lock arrows/escape to our buttons: without the lock, egui's
-        // built-in directional focus navigation (Memory::begin_pass)
-        // hijacks the arrows and moves focus to whatever is spatially
-        // adjacent — bouncing our selection and rerouting Enter.
-        let lock = egui::EventFilter {
-            tab: false,
-            horizontal_arrows: true,
-            vertical_arrows: true,
-            escape: true,
-        };
-        if let Some(id) = ctx.memory(|m| m.focused()) {
-            if id == confirm_id || id == cancel_id {
-                ctx.memory_mut(|m| m.set_focus_lock_filter(id, lock));
-            }
-        }
-        let arrows_on_buttons = Self::focus_probe(&ctx, confirm_id, cancel_id);
-        let left = arrows_on_buttons
-            && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft));
-        let right = arrows_on_buttons
-            && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight));
+        let left = ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft));
+        let right = ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight));
         if left || right {
             let to = if focused_now == Some(confirm_id) {
                 cancel_id
@@ -6022,13 +6014,9 @@ impl App {
             };
             ctx.memory_mut(|m| m.request_focus(to));
         }
-        // Consume Enter ONLY while a button holds focus — while the
-        // dialog's INPUT owns it, Enter belongs to the input (its own
-        // confirm path) and must not be swallowed here.
-        let focus_on_buttons = ctx.memory(|m| m.focused()) == Some(confirm_id)
-            || ctx.memory(|m| m.focused()) == Some(cancel_id);
-        let enter = focus_on_buttons
-            && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+        // Enter activates the focused button (interact()
+        // clicks need the key consumed against the terminal).
+        let enter = ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
 
         let draw = |ui: &mut egui::Ui, id: egui::Id, label: &str| -> bool {
             let font = egui::FontId::proportional(13.0);
@@ -6036,9 +6024,10 @@ impl App {
                 ui.fonts(|f| f.layout_no_wrap(label.to_string(), font, ui.visuals().text_color()));
             let size = egui::vec2(72.0, 22.0);
             let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+            // Register the widget under our stable id so
+            // memory focus calls address it.
             let resp = ui.interact(rect, id, egui::Sense::click());
-            let is_focused = ctx.memory(|m| m.focused()) == Some(id);
-            let visuals = if resp.contains_pointer() || is_focused {
+            let visuals = if resp.contains_pointer() {
                 &ui.style().visuals.widgets.hovered
             } else {
                 &ui.style().visuals.widgets.inactive
@@ -6056,15 +6045,16 @@ impl App {
                 galley,
                 ui.visuals().text_color(),
             );
-            resp.clicked() || (enter && is_focused)
+            resp.clicked() || (enter && ui.ctx().memory(|m| m.has_focus(id)))
         };
 
-        let c = draw(ui, confirm_id, confirm_label);
-        ui.add_space(8.0);
-        let x = draw(ui, cancel_id, cancel_label);
-        (c, x)
+        ui.horizontal(|ui| {
+            let c = draw(ui, confirm_id, confirm_label);
+            ui.add_space(8.0);
+            let x = draw(ui, cancel_id, cancel_label);
+            (c, x)
+        })
     }
-
     fn render_fav_name_dialog(&mut self, ctx: &egui::Context) {
         let Some((folder_id, _)) = self.fav_name_dialog.clone() else {
             return;
@@ -6242,9 +6232,20 @@ impl App {
         }
         let mut confirm = false;
         let mut cancel = false;
-        // Keyboard focus model (same as the close-terminal confirm):
-        // CANCEL is the safe default; Left/Right toggle; Enter activates
-        // the focused button.
+        // Keyboard model is FULLY self-managed (fav_del_kb_confirm): we
+        // deliberately do NOT use egui's focus system for these buttons —
+        // the focused terminal's lock filter and egui's own directional
+        // navigation kept interfering. Left/Right toggle the selection,
+        // Enter activates it; backdrop click cancels; clicks set the
+        // selection (no immediate action until Enter).
+        let left_or_right = ctx.input_mut(|i| {
+            i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft)
+                || i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight)
+        });
+        if left_or_right {
+            self.fav_del_kb_confirm = !self.fav_del_kb_confirm;
+        }
+        let enter_delete = ctx.input(|i| i.key_pressed(egui::Key::Enter));
         let confirm_id = egui::Id::new("fav_del_confirm_btn");
         let cancel_id = egui::Id::new("fav_del_cancel_btn");
         let modal = egui::Modal::new(egui::Id::new("fav_delete_confirm"))
@@ -6275,6 +6276,14 @@ impl App {
             cancel = true;
         }
         let _ = modal.is_top_modal;
+        // Keyboard Enter activates the KB-selected button.
+        if enter_delete {
+            if self.fav_del_kb_confirm {
+                confirm = true;
+            } else {
+                cancel = true;
+            }
+        }
         if confirm || cancel {
             if confirm {
                 self.history_db.fav_folder_delete(fid);
@@ -10711,5 +10720,119 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
 
     fn scroll_bars(&self, _tab: &Self::Tab) -> [bool; 2] {
         [false, false]
+    }
+}
+
+#[cfg(test)]
+mod modal_focus_tests {
+    /// Headless reproduction of the delete-confirm focus chain: Modal
+    /// container + two manual (Sense::click) buttons, cancel seeded via
+    /// request_focus, then Enter/ArrowRight delivered as raw input.
+    /// Proves egui's OWN behaviour independent of our render code.
+    #[test]
+    fn modal_buttons_receive_enter_and_arrows() {
+        let ctx = egui::Context::default();
+        let confirm_id = egui::Id::new("t_confirm");
+        let cancel_id = egui::Id::new("t_cancel");
+
+        let run_frame = |ctx: &egui::Context, events: Vec<egui::Event>| {
+            let mut raw = egui::RawInput::default();
+            raw.events = events;
+            ctx.begin_pass(raw);
+            let mut focus_after_widgets = None;
+            egui::Modal::new(egui::Id::new("m"))
+                .frame(egui::Frame::window(&ctx.style()))
+                .show(ctx, |ui| {
+                    // Seed focus on CANCEL (like the real dialog).
+                    let f = ui.ctx().memory(|m| m.focused());
+                    if f != Some(confirm_id) && f != Some(cancel_id) {
+                        ui.ctx().memory_mut(|m| m.request_focus(cancel_id));
+                    }
+                    // Two manual clickable rows (Sense::click, like ours).
+                    for id in [confirm_id, cancel_id] {
+                        let (rect, _) =
+                            ui.allocate_exact_size(egui::vec2(60.0, 20.0), egui::Sense::click());
+                        let r = ui.interact(rect, id, egui::Sense::click());
+                        if r.has_focus() {
+                            focus_after_widgets = Some(id);
+                        }
+                    }
+                });
+            ctx.end_pass();
+            focus_after_widgets
+        };
+
+        // Frame 1: open (no keys) — request_focus applies at END of
+        // pass, so has_focus only turns true from frame 2 on.
+        let _ = run_frame(&ctx, vec![]);
+        let f = run_frame(&ctx, vec![]);
+        assert_eq!(f, Some(cancel_id), "cancel must hold focus after open");
+
+        // Frame 2: ArrowRight. WITHOUT a lock filter on the focused
+        // button, egui's native focus navigation moves focus OFF the
+        // buttons (this is the real-dialog bug). WITH the lock, focus
+        // stays and the key is delivered as a normal event.
+        ctx.memory_mut(|m| {
+            m.set_focus_lock_filter(
+                cancel_id,
+                egui::EventFilter {
+                    horizontal_arrows: true,
+                    vertical_arrows: true,
+                    escape: true,
+                    ..Default::default()
+                },
+            );
+        });
+        let raw = egui::RawInput {
+            events: vec![egui::Event::Key {
+                key: egui::Key::ArrowRight,
+                pressed: true,
+                repeat: false,
+                physical_key: None,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            ..Default::default()
+        };
+        ctx.begin_pass(raw);
+        egui::CentralPanel::default().show(&ctx, |ui| {
+            for id in [confirm_id, cancel_id] {
+                let (rect, _) =
+                    ui.allocate_exact_size(egui::vec2(60.0, 20.0), egui::Sense::hover());
+                ui.interact(rect, id, egui::Sense::click());
+            }
+        });
+        let after_right = ctx.memory(|m| m.focused());
+        ctx.end_pass();
+        assert_eq!(
+            after_right,
+            Some(cancel_id),
+            "lock must keep focus on cancel through ArrowRight, got {after_right:?}"
+        );
+
+        // Frame 3: Enter while cancel focused.
+        let raw = egui::RawInput {
+            events: vec![egui::Event::Key {
+                key: egui::Key::Enter,
+                pressed: true,
+                repeat: false,
+                physical_key: None,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            ..Default::default()
+        };
+        ctx.begin_pass(raw);
+        let mut enter_seen_by_us = false;
+        egui::CentralPanel::default().show(&ctx, |ui| {
+            for id in [confirm_id, cancel_id] {
+                let (rect, _) =
+                    ui.allocate_exact_size(egui::vec2(60.0, 20.0), egui::Sense::hover());
+                let r = ui.interact(rect, id, egui::Sense::click());
+                if r.clicked() && id == cancel_id {
+                    enter_seen_by_us = true;
+                }
+            }
+        });
+        ctx.end_pass();
+        assert!(enter_seen_by_us, "Enter must click the focused button");
     }
 }
