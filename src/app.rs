@@ -5867,6 +5867,88 @@ impl App {
     /// Name dialog for favorite folders (create when folder id is None,
     /// rename otherwise). Modal with text input, Enter confirms, Esc
     /// cancels.
+    /// True when one of the dialog's two buttons holds keyboard focus.
+    fn focus_probe(ctx: &egui::Context, confirm_id: egui::Id, cancel_id: egui::Id) -> bool {
+        let f = ctx.memory(|m| m.focused());
+        f == Some(confirm_id) || f == Some(cancel_id)
+    }
+
+    /// Keyboard focus model shared by the favorite dialogs' button rows.
+    /// `initial` is the default-focused button. Left/Right toggle between
+    /// the two; Enter activates whichever holds focus (clicks work as
+    /// usual). Draws manual buttons under STABLE ids so focus requests
+    /// land exactly on them (egui Buttons have no id() in 0.31).
+    /// Returns (confirm_clicked, cancel_clicked).
+    fn fav_dialog_button_row(
+        ui: &mut egui::Ui,
+        confirm_id: egui::Id,
+        cancel_id: egui::Id,
+        confirm_label: &str,
+        cancel_label: &str,
+        initial: egui::Id,
+    ) -> (bool, bool) {
+        let ctx = ui.ctx().clone();
+        let focused_now = ctx.memory(|m| m.focused());
+        // Seed the default focus once (when nothing of ours is focused).
+        if focused_now != Some(confirm_id) && focused_now != Some(cancel_id) {
+            ctx.memory_mut(|m| m.request_focus(initial));
+        }
+        let arrows_on_buttons = Self::focus_probe(&ctx, confirm_id, cancel_id);
+        let left = arrows_on_buttons
+            && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft));
+        let right = arrows_on_buttons
+            && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight));
+        if left || right {
+            let to = if focused_now == Some(confirm_id) {
+                cancel_id
+            } else {
+                confirm_id
+            };
+            ctx.memory_mut(|m| m.request_focus(to));
+        }
+        // Consume Enter ONLY while a button holds focus — while the
+        // dialog's INPUT owns it, Enter belongs to the input (its own
+        // confirm path) and must not be swallowed here.
+        let focus_on_buttons = ctx.memory(|m| m.focused()) == Some(confirm_id)
+            || ctx.memory(|m| m.focused()) == Some(cancel_id);
+        let enter = focus_on_buttons
+            && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+
+        let draw = |ui: &mut egui::Ui, id: egui::Id, label: &str| -> bool {
+            let font = egui::FontId::proportional(13.0);
+            let galley =
+                ui.fonts(|f| f.layout_no_wrap(label.to_string(), font, ui.visuals().text_color()));
+            let size = egui::vec2(72.0, 22.0);
+            let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+            let resp = ui.interact(rect, id, egui::Sense::click());
+            let is_focused = ctx.memory(|m| m.focused()) == Some(id);
+            let visuals = if resp.contains_pointer() || is_focused {
+                &ui.style().visuals.widgets.hovered
+            } else {
+                &ui.style().visuals.widgets.inactive
+            };
+            ui.painter()
+                .rect_filled(rect, visuals.corner_radius, visuals.weak_bg_fill);
+            ui.painter().rect_stroke(
+                rect,
+                visuals.corner_radius,
+                visuals.bg_stroke,
+                egui::StrokeKind::Middle,
+            );
+            ui.painter().galley(
+                rect.center() - galley.size() / 2.0,
+                galley,
+                ui.visuals().text_color(),
+            );
+            resp.clicked() || (enter && is_focused)
+        };
+
+        let c = draw(ui, confirm_id, confirm_label);
+        ui.add_space(8.0);
+        let x = draw(ui, cancel_id, cancel_label);
+        (c, x)
+    }
+
     fn render_fav_name_dialog(&mut self, ctx: &egui::Context) {
         let Some((folder_id, _)) = self.fav_name_dialog.clone() else {
             return;
@@ -5881,6 +5963,8 @@ impl App {
         };
         let mut confirm = false;
         let mut cancel = false;
+        let confirm_id = egui::Id::new("fav_name_confirm_btn");
+        let cancel_id = egui::Id::new("fav_name_cancel_btn");
         egui::Window::new(title)
             .id(egui::Id::new("fav_name_dialog"))
             .fixed_pos(screen_center(ctx) - egui::vec2(160.0, 40.0))
@@ -5890,21 +5974,45 @@ impl App {
                 ui.set_min_width(280.0);
                 ui.add_space(4.0);
                 ui.label(self.texts.terminal.fav_name_label.clone());
+                let input_id = egui::Id::new("fav_name_input");
                 let resp = ui.text_edit_singleline(&mut self.fav_name_dialog.as_mut().unwrap().1);
-                if !resp.has_focus() {
-                    resp.request_focus();
+                let _ = input_id;
+                let input_focused = resp.has_focus();
+                // Default focus: the INPUT (typing is the primary action).
+                // Down/Tab hand focus to the button row (Confirm first).
+                if !input_focused
+                    && ui.ctx().memory(|m| m.focused()) != Some(confirm_id)
+                    && ui.ctx().memory(|m| m.focused()) != Some(cancel_id)
+                {
+                    // Only claim when NOTHING of ours holds focus (first
+                    // frames and after a button click).
+                    let none_of_ours = ui.ctx().memory(|m| m.focused()).is_none();
+                    if none_of_ours {
+                        resp.request_focus();
+                    }
                 }
-                let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
+                let down_or_tab = ui.input_mut(|i| {
+                    i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown)
+                        || i.consume_key(egui::Modifiers::NONE, egui::Key::Tab)
+                });
+                if input_focused && down_or_tab {
+                    ui.ctx().memory_mut(|m| m.request_focus(confirm_id));
+                }
+                let enter_in_input = input_focused && ui.input(|i| i.key_pressed(egui::Key::Enter));
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
-                    if ui.button(self.texts.theme_editor.confirm.clone()).clicked() {
-                        confirm = true;
-                    }
-                    if ui.button(self.texts.theme_editor.cancel.clone()).clicked() {
-                        cancel = true;
-                    }
+                    let (c, x) = Self::fav_dialog_button_row(
+                        ui,
+                        confirm_id,
+                        cancel_id,
+                        &self.texts.theme_editor.confirm.clone(),
+                        &self.texts.theme_editor.cancel.clone(),
+                        confirm_id,
+                    );
+                    confirm |= c;
+                    cancel |= x;
                 });
-                if enter {
+                if enter_in_input {
                     confirm = true;
                 }
             });
@@ -5944,6 +6052,8 @@ impl App {
         }
         let mut confirm = false;
         let mut cancel = false;
+        let confirm_id = egui::Id::new("fav_cmd_confirm_btn");
+        let cancel_id = egui::Id::new("fav_cmd_cancel_btn");
         egui::Window::new(self.texts.terminal.fav_cmd_dialog_title.clone())
             .id(egui::Id::new("fav_cmd_dialog"))
             .fixed_pos(screen_center(ctx) - egui::vec2(160.0, 40.0))
@@ -5954,20 +6064,40 @@ impl App {
                 ui.add_space(4.0);
                 ui.label(self.texts.terminal.fav_cmd_dialog_label.clone());
                 let resp = ui.text_edit_singleline(&mut self.fav_cmd_dialog.as_mut().unwrap().1);
-                if !resp.has_focus() {
-                    resp.request_focus();
+                let input_focused = resp.has_focus();
+                // Default focus: the INPUT. Down/Tab hand focus to the
+                // button row (Confirm first).
+                if !input_focused
+                    && ui.ctx().memory(|m| m.focused()) != Some(confirm_id)
+                    && ui.ctx().memory(|m| m.focused()) != Some(cancel_id)
+                {
+                    let none_of_ours = ui.ctx().memory(|m| m.focused()).is_none();
+                    if none_of_ours {
+                        resp.request_focus();
+                    }
                 }
-                let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
+                let down_or_tab = ui.input_mut(|i| {
+                    i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown)
+                        || i.consume_key(egui::Modifiers::NONE, egui::Key::Tab)
+                });
+                if input_focused && down_or_tab {
+                    ui.ctx().memory_mut(|m| m.request_focus(confirm_id));
+                }
+                let enter_in_input = input_focused && ui.input(|i| i.key_pressed(egui::Key::Enter));
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
-                    if ui.button(self.texts.theme_editor.confirm.clone()).clicked() {
-                        confirm = true;
-                    }
-                    if ui.button(self.texts.theme_editor.cancel.clone()).clicked() {
-                        cancel = true;
-                    }
+                    let (c, x) = Self::fav_dialog_button_row(
+                        ui,
+                        confirm_id,
+                        cancel_id,
+                        &self.texts.theme_editor.confirm.clone(),
+                        &self.texts.theme_editor.cancel.clone(),
+                        confirm_id,
+                    );
+                    confirm |= c;
+                    cancel |= x;
                 });
-                if enter {
+                if enter_in_input {
                     confirm = true;
                 }
             });
@@ -6001,6 +6131,11 @@ impl App {
         let mut confirm = false;
         let mut cancel = false;
         let mut open = true;
+        // Keyboard focus model (same as the close-terminal confirm):
+        // CANCEL is the safe default; Left/Right toggle; Enter activates
+        // the focused button.
+        let confirm_id = egui::Id::new("fav_del_confirm_btn");
+        let cancel_id = egui::Id::new("fav_del_cancel_btn");
         egui::Window::new(self.texts.terminal.fav_delete_title.clone())
             .id(egui::Id::new("fav_delete_confirm"))
             .fixed_pos(screen_center(ctx) - egui::vec2(180.0, 50.0))
@@ -6014,12 +6149,16 @@ impl App {
                 ui.label(self.texts.terminal.fav_delete_body.clone());
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
-                    if ui.button(self.texts.theme_editor.confirm.clone()).clicked() {
-                        confirm = true;
-                    }
-                    if ui.button(self.texts.theme_editor.cancel.clone()).clicked() {
-                        cancel = true;
-                    }
+                    let (c, x) = Self::fav_dialog_button_row(
+                        ui,
+                        confirm_id,
+                        cancel_id,
+                        &self.texts.theme_editor.confirm.clone(),
+                        &self.texts.theme_editor.cancel.clone(),
+                        cancel_id,
+                    );
+                    confirm |= c;
+                    cancel |= x;
                 });
             });
         if !open {
