@@ -1,6 +1,7 @@
 use alacritty_terminal::vte::ansi::{self, NamedColor};
 use egui::Color32;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub struct ColorPalette {
@@ -92,20 +93,94 @@ impl Default for TerminalVisualColors {
     }
 }
 
-#[derive(Debug, Clone)]
+/// A terminal theme whose heavyweight parts (palette, ANSI-256 table,
+/// and the pre-parsed palette colors) are shared behind an `Arc`. Cloning
+/// a `TerminalTheme` is therefore O(1) — the terminal view does it every
+/// frame, so a deep clone would rebuild 28 strings + a 256-entry HashMap
+/// + 27 color parses per terminal per frame.
+#[derive(Debug)]
 pub struct TerminalTheme {
-    palette: Box<ColorPalette>,
+    inner: Arc<TerminalThemeInner>,
+}
+
+#[derive(Debug)]
+struct TerminalThemeInner {
     visual: TerminalVisualColors,
     ansi256_colors: HashMap<u8, Color32>,
+    resolved: ResolvedColors,
+}
+
+/// Palette colors pre-parsed to `Color32` once at construction. This
+/// removes the per-cell `hex_to_color` (a string→int parse) from the hot
+/// render path — previously every visible cell did 2 parses per frame.
+#[derive(Debug)]
+struct ResolvedColors {
+    foreground: Color32,
+    background: Color32,
+    normal: [Color32; 8],
+    bright: [Color32; 8],
+    bright_foreground: Color32,
+    dim_foreground: Color32,
+    dim: [Color32; 8],
+}
+
+impl ResolvedColors {
+    fn from_palette(p: &ColorPalette) -> Self {
+        let h = |s: &str| hex_to_color(s).unwrap_or(Color32::WHITE);
+        Self {
+            foreground: h(&p.foreground),
+            background: h(&p.background),
+            normal: [
+                h(&p.black),
+                h(&p.red),
+                h(&p.green),
+                h(&p.yellow),
+                h(&p.blue),
+                h(&p.magenta),
+                h(&p.cyan),
+                h(&p.white),
+            ],
+            bright: [
+                h(&p.bright_black),
+                h(&p.bright_red),
+                h(&p.bright_green),
+                h(&p.bright_yellow),
+                h(&p.bright_blue),
+                h(&p.bright_magenta),
+                h(&p.bright_cyan),
+                h(&p.bright_white),
+            ],
+            bright_foreground: p
+                .bright_foreground
+                .as_deref()
+                .map(h)
+                .unwrap_or_else(|| h(&p.foreground)),
+            dim_foreground: h(&p.dim_foreground),
+            dim: [
+                h(&p.dim_black),
+                h(&p.dim_red),
+                h(&p.dim_green),
+                h(&p.dim_yellow),
+                h(&p.dim_blue),
+                h(&p.dim_magenta),
+                h(&p.dim_cyan),
+                h(&p.dim_white),
+            ],
+        }
+    }
+}
+
+impl Clone for TerminalTheme {
+    fn clone(&self) -> Self {
+        Self {
+            inner: Arc::clone(&self.inner),
+        }
+    }
 }
 
 impl Default for TerminalTheme {
     fn default() -> Self {
-        Self {
-            palette: Box::<ColorPalette>::default(),
-            visual: TerminalVisualColors::default(),
-            ansi256_colors: TerminalTheme::get_ansi256_colors(),
-        }
+        Self::from_palette(Box::<ColorPalette>::default())
     }
 }
 
@@ -114,10 +189,13 @@ impl TerminalTheme {
         palette: Box<ColorPalette>,
         visual: TerminalVisualColors,
     ) -> Self {
+        let resolved = ResolvedColors::from_palette(&palette);
         Self {
-            palette,
-            visual,
-            ansi256_colors: TerminalTheme::get_ansi256_colors(),
+            inner: Arc::new(TerminalThemeInner {
+                visual,
+                ansi256_colors: TerminalTheme::get_ansi256_colors(),
+                resolved,
+            }),
         }
     }
 
@@ -136,19 +214,19 @@ impl TerminalTheme {
     }
 
     pub fn cursor_color(&self) -> Color32 {
-        self.visual.cursor
+        self.inner.visual.cursor
     }
 
     pub fn selection_bg_color(&self) -> Color32 {
-        self.visual.selection_bg
+        self.inner.visual.selection_bg
     }
 
     pub fn selection_text_color(&self) -> Color32 {
-        self.visual.selection_text
+        self.inner.visual.selection_text
     }
 
     pub fn link_color(&self) -> Color32 {
-        self.visual.link
+        self.inner.visual.link
     }
 
     fn get_ansi256_colors() -> HashMap<u8, Color32> {
@@ -184,81 +262,53 @@ impl TerminalTheme {
             ansi::Color::Spec(rgb) => Color32::from_rgb(rgb.r, rgb.g, rgb.b),
             ansi::Color::Indexed(index) => {
                 if index <= 15 {
-                    let color = match index {
-                        // Normal terminal colors
-                        0 => &self.palette.black,
-                        1 => &self.palette.red,
-                        2 => &self.palette.green,
-                        3 => &self.palette.yellow,
-                        4 => &self.palette.blue,
-                        5 => &self.palette.magenta,
-                        6 => &self.palette.cyan,
-                        7 => &self.palette.white,
-                        // Bright terminal colors
-                        8 => &self.palette.bright_black,
-                        9 => &self.palette.bright_red,
-                        10 => &self.palette.bright_green,
-                        11 => &self.palette.bright_yellow,
-                        12 => &self.palette.bright_blue,
-                        13 => &self.palette.bright_magenta,
-                        14 => &self.palette.bright_cyan,
-                        15 => &self.palette.bright_white,
-                        _ => &self.palette.background,
-                    };
-
-                    return hex_to_color(color)
-                        .unwrap_or_else(|_| panic!("invalid color {}", color));
-                }
-
-                // Other colors
-                match self.ansi256_colors.get(&index) {
-                    Some(color) => *color,
-                    None => Color32::from_rgb(0, 0, 0),
+                    let i = index as usize;
+                    if i < 8 {
+                        self.inner.resolved.normal[i]
+                    } else {
+                        self.inner.resolved.bright[i - 8]
+                    }
+                } else {
+                    self.inner
+                        .ansi256_colors
+                        .get(&index)
+                        .copied()
+                        .unwrap_or(Color32::from_rgb(0, 0, 0))
                 }
             },
             ansi::Color::Named(c) => {
-                let color = match c {
-                    NamedColor::Foreground => &self.palette.foreground,
-                    NamedColor::Background => &self.palette.background,
-                    // Normal terminal colors
-                    NamedColor::Black => &self.palette.black,
-                    NamedColor::Red => &self.palette.red,
-                    NamedColor::Green => &self.palette.green,
-                    NamedColor::Yellow => &self.palette.yellow,
-                    NamedColor::Blue => &self.palette.blue,
-                    NamedColor::Magenta => &self.palette.magenta,
-                    NamedColor::Cyan => &self.palette.cyan,
-                    NamedColor::White => &self.palette.white,
-                    // Bright terminal colors
-                    NamedColor::BrightBlack => &self.palette.bright_black,
-                    NamedColor::BrightRed => &self.palette.bright_red,
-                    NamedColor::BrightGreen => &self.palette.bright_green,
-                    NamedColor::BrightYellow => &self.palette.bright_yellow,
-                    NamedColor::BrightBlue => &self.palette.bright_blue,
-                    NamedColor::BrightMagenta => &self.palette.bright_magenta,
-                    NamedColor::BrightCyan => &self.palette.bright_cyan,
-                    NamedColor::BrightWhite => &self.palette.bright_white,
-                    NamedColor::BrightForeground => {
-                        match &self.palette.bright_foreground {
-                            Some(color) => color,
-                            None => &self.palette.foreground,
-                        }
-                    },
-                    // Dim terminal colors
-                    NamedColor::DimForeground => &self.palette.dim_foreground,
-                    NamedColor::DimBlack => &self.palette.dim_black,
-                    NamedColor::DimRed => &self.palette.dim_red,
-                    NamedColor::DimGreen => &self.palette.dim_green,
-                    NamedColor::DimYellow => &self.palette.dim_yellow,
-                    NamedColor::DimBlue => &self.palette.dim_blue,
-                    NamedColor::DimMagenta => &self.palette.dim_magenta,
-                    NamedColor::DimCyan => &self.palette.dim_cyan,
-                    NamedColor::DimWhite => &self.palette.dim_white,
-                    _ => &self.palette.background,
-                };
-
-                hex_to_color(color)
-                    .unwrap_or_else(|_| panic!("invalid color {}", color))
+                let r = &self.inner.resolved;
+                match c {
+                    NamedColor::Foreground => r.foreground,
+                    NamedColor::Background => r.background,
+                    NamedColor::Black => r.normal[0],
+                    NamedColor::Red => r.normal[1],
+                    NamedColor::Green => r.normal[2],
+                    NamedColor::Yellow => r.normal[3],
+                    NamedColor::Blue => r.normal[4],
+                    NamedColor::Magenta => r.normal[5],
+                    NamedColor::Cyan => r.normal[6],
+                    NamedColor::White => r.normal[7],
+                    NamedColor::BrightBlack => r.bright[0],
+                    NamedColor::BrightRed => r.bright[1],
+                    NamedColor::BrightGreen => r.bright[2],
+                    NamedColor::BrightYellow => r.bright[3],
+                    NamedColor::BrightBlue => r.bright[4],
+                    NamedColor::BrightMagenta => r.bright[5],
+                    NamedColor::BrightCyan => r.bright[6],
+                    NamedColor::BrightWhite => r.bright[7],
+                    NamedColor::BrightForeground => r.bright_foreground,
+                    NamedColor::DimForeground => r.dim_foreground,
+                    NamedColor::DimBlack => r.dim[0],
+                    NamedColor::DimRed => r.dim[1],
+                    NamedColor::DimGreen => r.dim[2],
+                    NamedColor::DimYellow => r.dim[3],
+                    NamedColor::DimBlue => r.dim[4],
+                    NamedColor::DimMagenta => r.dim[5],
+                    NamedColor::DimCyan => r.dim[6],
+                    NamedColor::DimWhite => r.dim[7],
+                    _ => r.background,
+                }
             },
         }
     }

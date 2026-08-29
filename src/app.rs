@@ -323,6 +323,9 @@ fn binding_to_key(b: &ShortcutBinding) -> Option<egui::Key> {
         "Q" => Some(egui::Key::Q),
         "E" => Some(egui::Key::E),
         "S" => Some(egui::Key::S),
+        "C" => Some(egui::Key::C),
+        "V" => Some(egui::Key::V),
+        "X" => Some(egui::Key::X),
         "ArrowUp" => Some(egui::Key::ArrowUp),
         "ArrowDown" => Some(egui::Key::ArrowDown),
         "ArrowLeft" => Some(egui::Key::ArrowLeft),
@@ -1513,6 +1516,15 @@ pub struct App {
     update_state: crate::updater::UpdateState,
     active_theme: crate::theme::ThemeDefinition,
     theme_edit: crate::theme::ThemeDefinition,
+    /// Cached `TerminalTheme` shared across every terminal. Rebuilt only
+    /// when the active/edit theme changes; per-frame per-terminal use just
+    /// clones the `Arc` (O(1)) instead of re-allocating a `ColorPalette`
+    /// box + a 256-entry ANSI table + 27 color parses.
+    terminal_theme_cache: std::sync::Arc<egui_term::TerminalTheme>,
+    /// Snapshot of the theme the cache was built from (for change detection).
+    terminal_theme_cache_theme: crate::theme::ThemeDefinition,
+    /// Whether the cached theme was built from the settings EDIT draft.
+    terminal_theme_cache_edit: bool,
     available_themes: Vec<crate::theme::ThemeDefinition>,
     theme_message: Option<Result<String, String>>,
     pending_import_theme: bool,
@@ -1985,7 +1997,10 @@ impl App {
             workspace_sidebar_visible: true,
             update_state: crate::updater::UpdateState::Idle,
             active_theme: active_theme.clone(),
-            theme_edit: active_theme,
+            theme_edit: active_theme.clone(),
+            terminal_theme_cache: std::sync::Arc::new(crate::theme::terminal_theme(&active_theme)),
+            terminal_theme_cache_theme: active_theme.clone(),
+            terminal_theme_cache_edit: false,
             available_themes,
             theme_message: None,
             pending_import_theme: false,
@@ -2223,9 +2238,26 @@ impl App {
     fn create_terminal_inner(&mut self, ctx: &egui::Context) -> Option<String> {
         self.tab_counter += 1;
         let id = format!("terminal-{}", self.tab_counter);
-        let cwd = std::env::current_dir()
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_default();
+        // New terminals inherit the FOCUSED terminal's working directory
+        // (clicking "+" or splitting should land in the same folder). Poll
+        // the focused terminal's cwd first so a fresh `cd` is picked up,
+        // then fall back to the app's own cwd when there is none yet.
+        if let Some(tab) = self.focused_terminal.clone() {
+            if let Some(data) = self.terminals.get_mut(&tab) {
+                data.instance.poll_cwd();
+            }
+        }
+        let cwd = self
+            .focused_terminal
+            .as_ref()
+            .and_then(|tab| self.terminals.get(tab))
+            .map(|data| data.instance.cwd.clone())
+            .filter(|c| !c.is_empty())
+            .unwrap_or_else(|| {
+                std::env::current_dir()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_default()
+            });
         // Remember which shell id this terminal uses (scene persistence);
         // create_terminal consumes the option.
         self.pending_shell_last = self.pending_shell.as_ref().map(|s| s.id.to_string());
@@ -4524,36 +4556,12 @@ impl App {
         let show_favs = nav.auto_word.is_none();
         // The folder's command list renders as a THIRD column in the
         // same window (flush against the folder column, same style) —
-        // not a floating popup.
-        // WIDTH LOOK-AHEAD: the hover-open writes fav_submenu DURING the
-        // row loop below, so reading it here lags one frame — the third
-        // column then painted INSIDE the folder column's width for one
-        // frame (covering the folder rows: the "default folder vanishes
-        // and flickers when hovering the first row" bug). Decide the
-        // width from what THIS frame will open: pointer over a folder
-        // row (last frame's rects), the keyboard-selected folder, or an
-        // already-open column.
-        let hover_pos_pre = ctx.input(|i| i.pointer.hover_pos());
-        let sub_open = show_favs && {
-            // An EMPTY folder must not open a column at all.
-            let folder_has_items = |fid: i64| !self.history_db.fav_items(fid).is_empty();
-            let already = self
-                .fav_submenu
-                .as_ref()
-                .is_some_and(|(fid, _, _, _)| folder_has_items(*fid));
-            let hover_hit =
-                hover_pos_pre.is_some_and(|p| self.fav_folder_rects.iter().any(|r| r.contains(p)));
-            let kb_hit = nav.fav_focused
-                && self
-                    .fav_folders
-                    .get(nav.fav_selected)
-                    .is_some_and(|(fid, _)| folder_has_items(*fid));
-            already || hover_hit || kb_hit
-        };
+        // not a floating popup. The command column is a PERMANENT
+        // fixture in the manual menu: always shown, even for an empty
+        // favorites list (empty column = no rows, just background).
         let sub_w = 200.0f32;
-        let total_w = list_w
-            + if show_favs { fav_w } else { 0.0 }
-            + if show_favs && sub_open { sub_w } else { 0.0 };
+        let total_w =
+            list_w + if show_favs { fav_w } else { 0.0 } + if show_favs { sub_w } else { 0.0 };
         let total = nav.entries.len();
         let fav_total = nav.favorites.len();
 
@@ -5153,7 +5161,9 @@ impl App {
                                         .as_ref()
                                         .is_some_and(|(sid, _, _, _)| *sid == fid)
                                     {
-                                        self.fav_submenu = None;
+                                        // Keep the column open, now empty.
+                                        self.fav_submenu =
+                                            Some((fid, egui::Pos2::ZERO, Vec::new(), None));
                                     }
                                     menu_ui.close_menu();
                                 }
@@ -5224,9 +5234,10 @@ impl App {
                                     .is_none_or(|(sid, _, _, _)| *sid != fid)
                             {
                                 let items = folder_items[fidx].clone();
-                                if !items.is_empty() {
-                                    self.fav_submenu = Some((fid, egui::Pos2::ZERO, items, None));
-                                }
+                                // Always open the column — even an empty
+                                // folder shows an empty command list now
+                                // (the column is a permanent fixture).
+                                self.fav_submenu = Some((fid, egui::Pos2::ZERO, items, None));
                             }
                             // hover 3 buttons: assemble / rename / delete
                             if row_hover && self.fav_drag_src.is_none() {
@@ -5385,26 +5396,28 @@ impl App {
                     // folder column, same row style (this replaces the
                     // old floating-popup submenu). Items are read LIVE
                     // from the DB so deletes/reorders reflect instantly.
-                    if let Some((fid, _, _, kb_sel)) = self.fav_submenu.clone() {
-                        // Row-addressed: duplicate commands are distinct
-                        // rows; delete/move/reorder go by rowid.
-                        let with_ids = self.history_db.fav_items_with_ids(fid);
-                        let items: Vec<String> = with_ids.iter().map(|(_, c)| c.clone()).collect();
-                        let row_ids: Vec<i64> = with_ids.iter().map(|(rid, _)| *rid).collect();
-                        if items.is_empty() {
-                            self.fav_submenu = None;
-                        } else {
-                            let sub_x0 = fx0 + col_w;
+                    // The column is a permanent fixture: always rendered,
+                    // even for an empty favorites list (empty column = no
+                    // rows, just the background).
+                    if show_favs {
+                        let sub_x0 = fx0 + col_w;
+                        ui.painter().rect_filled(
+                            egui::Rect::from_min_size(
+                                egui::pos2(sub_x0, frame_rect.min.y),
+                                egui::vec2(sub_w, rows_h + footer_h),
+                            ),
+                            0.0,
+                            menu_bg,
+                        );
+                        if let Some((fid, _, _, kb_sel)) = self.fav_submenu.clone() {
+                            // Row-addressed: duplicate commands are distinct
+                            // rows; delete/move/reorder go by rowid.
+                            let with_ids = self.history_db.fav_items_with_ids(fid);
+                            let items: Vec<String> =
+                                with_ids.iter().map(|(_, c)| c.clone()).collect();
+                            let row_ids: Vec<i64> = with_ids.iter().map(|(rid, _)| *rid).collect();
                             let mut send_cmd: Option<String> = None;
                             let mut remove_idx: Option<usize> = None;
-                            ui.painter().rect_filled(
-                                egui::Rect::from_min_size(
-                                    egui::pos2(sub_x0, frame_rect.min.y),
-                                    egui::vec2(sub_w, rows_h + footer_h),
-                                ),
-                                0.0,
-                                menu_bg,
-                            );
                             let pointer = ui.input(|i| i.pointer.hover_pos());
                             // Sub-column scroll (wheel + scrollbar), same
                             // style as the main list.
@@ -5700,17 +5713,21 @@ impl App {
                                     // now empty, and clamp the keyboard
                                     // selection.
                                     let fresh = self.history_db.fav_items_with_ids(fid);
-                                    if fresh.is_empty() {
-                                        self.fav_submenu = None;
-                                    } else if let Some((f, a, _, sel)) = self.fav_submenu.clone() {
-                                        let sel = sel.unwrap_or(0).min(fresh.len() - 1);
-                                        self.fav_submenu = Some((
-                                            f,
-                                            a,
-                                            fresh.into_iter().map(|(_, c)| c).collect(),
-                                            Some(sel),
-                                        ));
-                                    }
+                                    // Keep the column open (permanent
+                                    // fixture) — an emptied folder now
+                                    // shows an empty command list.
+                                    let sel = self
+                                        .fav_submenu
+                                        .as_ref()
+                                        .and_then(|(_, _, _, s)| *s)
+                                        .unwrap_or(0)
+                                        .min(fresh.len().saturating_sub(1));
+                                    self.fav_submenu = Some((
+                                        fid,
+                                        egui::Pos2::ZERO,
+                                        fresh.iter().map(|(_, c)| c.clone()).collect(),
+                                        Some(sel),
+                                    ));
                                 }
                             }
                             let _ = pointer;
@@ -5884,16 +5901,16 @@ impl App {
                         ],
                         egui::Stroke::new(1.0, border),
                     );
-                    if self.fav_submenu.is_some() {
-                        let x = frame_rect.min.x + list_w + fav_w;
-                        ui.painter().line_segment(
-                            [
-                                egui::pos2(x, frame_rect.min.y),
-                                egui::pos2(x, frame_rect.min.y + rows_h + footer_h),
-                            ],
-                            egui::Stroke::new(1.0, border),
-                        );
-                    }
+                    // favorites|commands separator: always drawn — the
+                    // command column is a permanent fixture now.
+                    let x = frame_rect.min.x + list_w + fav_w;
+                    ui.painter().line_segment(
+                        [
+                            egui::pos2(x, frame_rect.min.y),
+                            egui::pos2(x, frame_rect.min.y + rows_h + footer_h),
+                        ],
+                        egui::Stroke::new(1.0, border),
+                    );
                 }
                 ui.painter().rect_stroke(
                     frame_rect,
@@ -6972,11 +6989,9 @@ impl eframe::App for App {
                             // the CURSOR into the third column.
                             if let Some((fid, _)) = self.fav_folders.get(nav.fav_selected) {
                                 let items = self.history_db.fav_items(*fid);
-                                if !items.is_empty() {
-                                    self.fav_submenu = Some((*fid, egui::Pos2::ZERO, items, None));
-                                } else {
-                                    self.fav_submenu = None;
-                                }
+                                // Always open the selected folder's column
+                                // (even an empty folder shows an empty list).
+                                self.fav_submenu = Some((*fid, egui::Pos2::ZERO, items, None));
                             }
                             // Selection changed: bring the highlighted
                             // FOLDER into view this frame — same follow
@@ -9229,6 +9244,23 @@ impl eframe::App for App {
             let app: &App = &*self;
             any_modal_open(app) || app.modal_just_opened
         };
+        // Rebuild the shared TerminalTheme cache only when the active/edit
+        // theme changes; every terminal then just clones the Arc per frame.
+        {
+            let current = if self.show_settings {
+                &self.theme_edit
+            } else {
+                &self.active_theme
+            };
+            if self.terminal_theme_cache_edit != self.show_settings
+                || &self.terminal_theme_cache_theme != current
+            {
+                self.terminal_theme_cache =
+                    std::sync::Arc::new(crate::theme::terminal_theme(current));
+                self.terminal_theme_cache_theme = current.clone();
+                self.terminal_theme_cache_edit = self.show_settings;
+            }
+        }
         let terminal_count = self
             .dock_states
             .get(&self.active_panel)
@@ -9525,11 +9557,7 @@ impl eframe::App for App {
                                 clipboard_mirror: &mut self.clipboard_mirror,
                                 pending_shell: &mut self.pending_shell,
                                 default_shell_id: &self.settings.default_shell,
-                                theme: if self.show_settings {
-                                    &self.theme_edit
-                                } else {
-                                    &self.active_theme
-                                },
+                                theme: self.terminal_theme_cache.clone(),
                                 texts: &self.texts,
                             },
                         );
@@ -9908,6 +9936,16 @@ mod tests {
             binding_to_key(&binds["history_delete"]),
             Some(egui::Key::Delete)
         );
+        // Clipboard/interrupt keys MUST resolve through the egui key
+        // mapping too — a missing mapping silently disabled the terminal
+        // interrupt (Ctrl+Shift+C) and remapped copy/paste/cut.
+        assert_eq!(
+            binding_to_key(&binds["terminal_interrupt"]),
+            Some(egui::Key::C)
+        );
+        assert_eq!(binding_to_key(&binds["terminal_copy"]), Some(egui::Key::C));
+        assert_eq!(binding_to_key(&binds["terminal_paste"]), Some(egui::Key::V));
+        assert_eq!(binding_to_key(&binds["terminal_cut"]), Some(egui::Key::X));
     }
 
     #[test]
@@ -10247,7 +10285,7 @@ struct TerminalTabViewer<'a> {
     /// Shell id chosen as default in settings (labels the menu's
     /// default entry; the actual spawn resolves in create_terminal).
     default_shell_id: &'a str,
-    theme: &'a crate::theme::ThemeDefinition,
+    theme: std::sync::Arc<egui_term::TerminalTheme>,
     texts: &'a crate::i18n::Texts,
 }
 
@@ -10382,7 +10420,28 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                 };
                 if is_focused && !self.modal_open {
                     if let Some(b) = self.clipboard_binds.get("terminal_interrupt") {
-                        if hit(ui, b) {
+                        let mut interrupted = hit(ui, b);
+                        if !interrupted {
+                            // egui-winit's `is_copy_command` ignores Shift:
+                            // Ctrl+Shift+C arrives as `Event::Copy`, not
+                            // `Event::Key{C}`. Detect that and treat it as
+                            // the interrupt, consuming the Copy so it can't
+                            // also copy the terminal selection.
+                            let is_ctrl_shift_c = b.key == "C" && b.ctrl && b.shift && !b.alt;
+                            if is_ctrl_shift_c {
+                                interrupted = ui.input_mut(|i| {
+                                    let has_copy =
+                                        i.events.iter().any(|e| matches!(e, egui::Event::Copy));
+                                    if has_copy && i.modifiers.shift {
+                                        i.events.retain(|e| !matches!(e, egui::Event::Copy));
+                                        true
+                                    } else {
+                                        false
+                                    }
+                                });
+                            }
+                        }
+                        if interrupted {
                             td.instance.write(&[0x03]);
                         }
                     }
@@ -10433,7 +10492,7 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
 
             let terminal_view = {
                 let mut tv = egui_term::TerminalView::new(ui, &mut td.instance.backend);
-                tv = tv.set_theme(crate::theme::terminal_theme(self.theme));
+                tv = tv.set_theme((*self.theme).clone());
                 tv = tv.set_font(egui_term::TerminalFont::new(egui_term::FontSettings {
                     font_type: egui::FontId::monospace(td.font_size),
                 }));
