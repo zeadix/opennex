@@ -1587,9 +1587,12 @@ pub struct App {
     /// Floating submenu for one folder's commands: (folder id, anchor
     /// top-left, items snapshot, keyboard-selected index).
     fav_submenu: Option<(i64, egui::Pos2, Vec<String>, Option<usize>)>,
-    /// Delete-confirm keyboard cursor: true = the CONFIRM (danger)
-    /// button is selected by Left/Right, false = Cancel. Fully self-
-    /// managed — egui's focus system is deliberately bypassed here.
+    /// Self-managed keyboard cursor for ALL three favorite dialogs
+    /// (name / cmd / delete-confirm). `true` = the CONFIRM button is
+    /// selected, `false` = the Cancel button. Left/Right toggles; Enter
+    /// activates. We deliberately bypass egui's focus system: even with
+    /// lock filter, egui 0.31's directional navigation kept yanking
+    /// focus off the buttons in the modal's first frames.
     fav_del_kb_confirm: bool,
     /// True only after Right pressed into the command column — then
     /// Up/Down/Enter operate on commands; before that the column merely
@@ -4497,7 +4500,7 @@ impl App {
         let row_h = 20.0f32;
         let max_visible = 10usize;
         let footer_h = 24.0f32;
-        let list_w = 320.0f32;
+        let list_w = 250.0f32;
         let fav_w = 200.0f32;
         let visible_rows = nav.entries.len().min(max_visible).max(1);
         // Column height must fit BOTH columns: the main history list and
@@ -4510,6 +4513,11 @@ impl App {
         // The columns scroll internally when content overflows.
         let rows_h = max_visible as f32 * row_h;
         let list_h = rows_h + footer_h;
+        // History column header (24px, aligned with the favorites column's
+        // "new folder" header): the "clear history" button lives on its
+        // right, so the history rows start below it.
+        let hist_header_h = 24.0f32;
+        let hist_visible_rows = ((rows_h - hist_header_h) / row_h).floor() as usize;
         // The folder column is ALWAYS visible in the manual menu (even
         // with zero legacy favorites or after clear-favorites) — the
         // folders themselves are the feature now.
@@ -4542,7 +4550,7 @@ impl App {
                     .is_some_and(|(fid, _)| folder_has_items(*fid));
             already || hover_hit || kb_hit
         };
-        let sub_w = 140.0f32;
+        let sub_w = 200.0f32;
         let total_w = list_w
             + if show_favs { fav_w } else { 0.0 }
             + if show_favs && sub_open { sub_w } else { 0.0 };
@@ -4552,7 +4560,7 @@ impl App {
         // Independent scroll offsets for the two columns.
         let scroll_id = egui::Id::new(("hist_menu_scroll", tab.as_str()));
         let fav_scroll_id = egui::Id::new(("hist_fav_scroll", tab.as_str()));
-        let max_scroll = total.saturating_sub(visible_rows);
+        let max_scroll = total.saturating_sub(hist_visible_rows);
         let fav_max_scroll = fav_total.saturating_sub(visible_rows);
         let mut scroll: usize = ctx
             .memory(|m| m.data.get_temp(scroll_id).unwrap_or(0))
@@ -4651,11 +4659,57 @@ impl App {
                     }
                 }
 
+                // ---- History column header: "clear history" button on
+                // the right (moved out of the shared footer). ----
+                {
+                    let htxt = self.texts.terminal.clear_history.clone();
+                    let hg = ui.fonts(|f| {
+                        f.layout_no_wrap(htxt.clone(), egui::FontId::proportional(11.0), weak)
+                    });
+                    let hw = hg.size().x + 10.0;
+                    let h_rect = egui::Rect::from_min_size(
+                        egui::pos2(frame_rect.min.x + list_w - 8.0 - hw, frame_rect.min.y + 4.0),
+                        egui::vec2(hw, 16.0),
+                    );
+                    let hresp = ui.interact(
+                        h_rect,
+                        egui::Id::new(("hist_clear", tab.as_str())),
+                        egui::Sense::click(),
+                    );
+                    let hcol = if hresp.hovered() {
+                        app.danger.to_egui()
+                    } else {
+                        weak
+                    };
+                    let hbg = if hresp.contains_pointer() {
+                        egui::Color32::from_rgba_unmultiplied(
+                            sel_bg.r(),
+                            sel_bg.g(),
+                            sel_bg.b(),
+                            90,
+                        )
+                    } else {
+                        egui::Color32::TRANSPARENT
+                    };
+                    ui.painter().rect_filled(h_rect, 3.0, hbg);
+                    let hg2 = ui.fonts(|f| {
+                        f.layout_no_wrap(htxt.clone(), egui::FontId::proportional(11.0), hcol)
+                    });
+                    ui.painter()
+                        .galley(h_rect.center() - hg2.size() / 2.0, hg2, hcol);
+                    if hresp.clicked() {
+                        clear_history_clicked = true;
+                    }
+                }
+
                 // ---- Empty state: actionable hint instead of a bare
                 // empty list (v0.1.37 UI audit P3-12). ----
                 if total == 0 {
                     ui.painter().text(
-                        egui::pos2(frame_rect.min.x + 12.0, frame_rect.min.y + row_h * 0.5),
+                        egui::pos2(
+                            frame_rect.min.x + 12.0,
+                            frame_rect.min.y + hist_header_h + row_h * 0.5,
+                        ),
                         egui::Align2::LEFT_CENTER,
                         self.texts.terminal.history_empty.clone(),
                         egui::FontId::proportional(11.0),
@@ -4664,11 +4718,11 @@ impl App {
                 }
 
                 // ---- Main rows ----
-                for i in scroll..(scroll + visible_rows).min(total) {
+                for i in scroll..(scroll + hist_visible_rows).min(total) {
                     let row = egui::Rect::from_min_size(
                         egui::pos2(
                             frame_rect.min.x,
-                            frame_rect.min.y + (i - scroll) as f32 * row_h,
+                            frame_rect.min.y + hist_header_h + (i - scroll) as f32 * row_h,
                         ),
                         egui::vec2(list_w, row_h),
                     );
@@ -4757,16 +4811,18 @@ impl App {
                         self.hist_drop_folder = None;
                     }
                     // Per-row actions (manual menu only): hover or
-                    // keyboard selection shows 收藏 / 删除 on the right.
+                    // keyboard selection shows icon buttons (star = favorite,
+                    // trash = delete) on the right.
                     if nav.auto_word.is_none() && (row_hovered || is_sel) {
-                        let act_font = egui::FontId::proportional(11.0);
-                        let star_txt = self.texts.terminal.favorite.clone();
-                        let del_txt = self.texts.terminal.delete.clone();
-                        let measure = |txt: &str, col| {
-                            ui.fonts(|f| f.layout_no_wrap(txt.to_string(), act_font.clone(), col))
-                        };
-                        let del_g = measure(&del_txt, weak);
-                        let star_g = measure(&star_txt, weak);
+                        let icon_font = egui::FontId::proportional(13.0);
+                        let del_glyph = egui_phosphor::regular::TRASH.to_string();
+                        let star_glyph = egui_phosphor::regular::STAR.to_string();
+                        let del_g = ui.fonts(|f| {
+                            f.layout_no_wrap(del_glyph.clone(), icon_font.clone(), weak)
+                        });
+                        let star_g = ui.fonts(|f| {
+                            f.layout_no_wrap(star_glyph.clone(), icon_font.clone(), weak)
+                        });
                         let pad = 6.0;
                         let del_rect = egui::Rect::from_min_max(
                             egui::pos2(row.max.x - 8.0 - del_g.size().x, row.center().y - 8.0),
@@ -4799,8 +4855,12 @@ impl App {
                         } else {
                             weak
                         };
-                        let del_g2 = measure(&del_txt, del_col);
-                        let star_g2 = measure(&star_txt, star_col);
+                        let del_g2 = ui.fonts(|f| {
+                            f.layout_no_wrap(del_glyph.clone(), icon_font.clone(), del_col)
+                        });
+                        let star_g2 = ui.fonts(|f| {
+                            f.layout_no_wrap(star_glyph.clone(), icon_font.clone(), star_col)
+                        });
                         ui.painter().galley(
                             del_rect.center() - del_g2.size() / 2.0,
                             del_g2,
@@ -4821,15 +4881,20 @@ impl App {
                 }
 
                 // ---- Main scrollbar ----
-                if total > visible_rows {
+                if total > hist_visible_rows {
                     let sb_track = egui::Rect::from_min_max(
-                        egui::pos2(frame_rect.min.x + list_w - 6.0, frame_rect.min.y),
+                        egui::pos2(
+                            frame_rect.min.x + list_w - 6.0,
+                            frame_rect.min.y + hist_header_h,
+                        ),
                         egui::pos2(frame_rect.min.x + list_w, frame_rect.min.y + rows_h),
                     );
-                    let thumb_h = (visible_rows as f32 / total as f32 * rows_h).max(16.0);
-                    let scrollable = (rows_h - thumb_h).max(1.0);
-                    let thumb_y =
-                        frame_rect.min.y + scrollable * (scroll as f32 / max_scroll as f32);
+                    let track_h = rows_h - hist_header_h;
+                    let thumb_h = (hist_visible_rows as f32 / total as f32 * track_h).max(16.0);
+                    let scrollable = (track_h - thumb_h).max(1.0);
+                    let thumb_y = frame_rect.min.y
+                        + hist_header_h
+                        + scrollable * (scroll as f32 / max_scroll as f32);
                     let sb_col =
                         egui::Color32::from_rgba_unmultiplied(weak.r(), weak.g(), weak.b(), 110);
                     let track_col =
@@ -4929,6 +4994,49 @@ impl App {
                         .galley(btn_rect.center() - ng.size() / 2.0, ng, menu_fg);
                     if nresp.clicked() {
                         self.fav_name_dialog = Some((None, String::new()));
+                    }
+
+                    // --- "Clear favorites" button, right-aligned in the
+                    // column header (moved out of the shared footer). ---
+                    {
+                        let ctxt = t.clear_favorites.clone();
+                        let cg = ui.fonts(|f| {
+                            f.layout_no_wrap(ctxt.clone(), egui::FontId::proportional(11.0), weak)
+                        });
+                        let cw = cg.size().x + 10.0;
+                        let c_rect = egui::Rect::from_min_size(
+                            egui::pos2(fx0 + col_w - 8.0 - cw, frame_rect.min.y + 4.0),
+                            egui::vec2(cw, 16.0),
+                        );
+                        let cresp = ui.interact(
+                            c_rect,
+                            egui::Id::new(("hist_clear_favs", tab.as_str())),
+                            egui::Sense::click(),
+                        );
+                        let ccol = if cresp.hovered() {
+                            app.danger.to_egui()
+                        } else {
+                            weak
+                        };
+                        let cbg = if cresp.contains_pointer() {
+                            egui::Color32::from_rgba_unmultiplied(
+                                sel_bg.r(),
+                                sel_bg.g(),
+                                sel_bg.b(),
+                                90,
+                            )
+                        } else {
+                            egui::Color32::TRANSPARENT
+                        };
+                        ui.painter().rect_filled(c_rect, 3.0, cbg);
+                        let cg2 = ui.fonts(|f| {
+                            f.layout_no_wrap(ctxt.clone(), egui::FontId::proportional(11.0), ccol)
+                        });
+                        ui.painter()
+                            .galley(c_rect.center() - cg2.size() / 2.0, cg2, ccol);
+                        if cresp.clicked() {
+                            clear_favs_clicked = true;
+                        }
                     }
 
                     // --- Folder & item rows ---
@@ -5695,6 +5803,34 @@ impl App {
                     egui::FontId::proportional(11.0),
                     weak,
                 );
+                // Favorites column count, left-aligned in its own column.
+                if show_favs {
+                    let fx0 = frame_rect.min.x + list_w;
+                    ui.painter().text(
+                        egui::pos2(fx0 + 8.0, footer.center().y),
+                        egui::Align2::LEFT_CENTER,
+                        format!(
+                            "{}{}",
+                            self.fav_folders.len(),
+                            self.texts.terminal.fav_folder_count
+                        ),
+                        egui::FontId::proportional(11.0),
+                        weak,
+                    );
+                    // Submenu (command) column count, when that column is
+                    // open (its x starts at the favorites column's right).
+                    if let Some((fid, _, _, _)) = self.fav_submenu.clone() {
+                        let sub_x0 = fx0 + fav_w;
+                        let item_count = self.history_db.fav_items(fid).len();
+                        ui.painter().text(
+                            egui::pos2(sub_x0 + 8.0, footer.center().y),
+                            egui::Align2::LEFT_CENTER,
+                            format!("{}{}", item_count, self.texts.terminal.fav_item_count),
+                            egui::FontId::proportional(11.0),
+                            weak,
+                        );
+                    }
+                }
                 // X close pinned at the far right.
                 let x_rect = egui::Rect::from_min_size(
                     egui::pos2(footer.max.x - 8.0 - 18.0, footer.center().y - 9.0),
@@ -5718,68 +5854,10 @@ impl App {
                 if xresp.clicked() {
                     close_clicked = true;
                 }
-                // Text buttons laid right-to-left from X: 清除收藏 (only
-                // when favorites are shown), then per-terminal 清空.
-                let mut cursor_x = x_rect.min.x - 10.0;
-                if show_favs {
-                    let txt = self.texts.terminal.clear_favorites.clone();
-                    let g = ui.fonts(|f| {
-                        f.layout_no_wrap(txt.to_string(), egui::FontId::proportional(11.0), weak)
-                    });
-                    let w = g.size().x + 10.0;
-                    let rect = egui::Rect::from_min_max(
-                        egui::pos2(cursor_x - w, footer.center().y - 9.0),
-                        egui::pos2(cursor_x, footer.center().y + 9.0),
-                    );
-                    let resp = ui.interact(
-                        rect,
-                        egui::Id::new(("hist_clear_favs", tab.as_str())),
-                        egui::Sense::click(),
-                    );
-                    let col = if resp.hovered() {
-                        app.danger.to_egui()
-                    } else {
-                        weak
-                    };
-                    let g2 = ui.fonts(|f| {
-                        f.layout_no_wrap(txt.to_string(), egui::FontId::proportional(11.0), col)
-                    });
-                    ui.painter()
-                        .galley(rect.center() - g2.size() / 2.0, g2, col);
-                    if resp.clicked() {
-                        clear_favs_clicked = true;
-                    }
-                    cursor_x = rect.min.x - 10.0;
-                }
-                {
-                    let txt = self.texts.terminal.clear_history.clone();
-                    let g = ui.fonts(|f| {
-                        f.layout_no_wrap(txt.clone(), egui::FontId::proportional(11.0), weak)
-                    });
-                    let w = g.size().x + 10.0;
-                    let rect = egui::Rect::from_min_max(
-                        egui::pos2(cursor_x - w, footer.center().y - 9.0),
-                        egui::pos2(cursor_x, footer.center().y + 9.0),
-                    );
-                    let resp = ui.interact(
-                        rect,
-                        egui::Id::new(("hist_clear", tab.as_str())),
-                        egui::Sense::click(),
-                    );
-                    let col = if resp.hovered() {
-                        app.danger.to_egui()
-                    } else {
-                        weak
-                    };
-                    let g2 = ui.fonts(|f| {
-                        f.layout_no_wrap(txt.clone(), egui::FontId::proportional(11.0), col)
-                    });
-                    ui.painter()
-                        .galley(rect.center() - g2.size() / 2.0, g2, col);
-                    if resp.clicked() {
-                        clear_history_clicked = true;
-                    }
-                }
+                // The clear-history and clear-favorites buttons were moved
+                // into their respective column headers (history column and
+                // favorites column), so the footer now only holds the
+                // count on the left and the X close on the right.
 
                 // Lines painted LAST: rows, alternating bands,
                 // scrollbars and the footer can never cover them.
@@ -5984,67 +6062,63 @@ impl App {
     /// Returns (confirm_clicked, cancel_clicked).
     fn fav_dialog_button_row(
         ui: &mut egui::Ui,
+        kb_confirm: &mut bool,
         confirm_id: egui::Id,
         cancel_id: egui::Id,
         confirm_label: &str,
         cancel_label: &str,
-        initial: egui::Id,
     ) -> (bool, bool) {
-        let ctx = ui.ctx().clone();
-        let focused_now = ctx.memory(|m| m.focused());
-        // Seed the default focus once (when nothing of ours is focused).
-        if focused_now != Some(confirm_id) && focused_now != Some(cancel_id) {
-            ctx.memory_mut(|m| m.request_focus(initial));
-        }
+        // Self-managed keyboard model. We DO NOT touch egui's focus
+        // system at all here: request_focus is frame-end, lock-filter
+        // still lets Tab/arrow nav pop focus to neighbouring widgets in
+        // the first frame of the modal, and the cycle is observable to
+        // the user. Instead the caller owns `kb_confirm` (which button
+        // is the "focused" one), and we visually highlight the
+        // currently-selected button + bind Enter to activate it.
         let left = ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft));
         let right = ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight));
         if left || right {
-            let to = if focused_now == Some(confirm_id) {
-                cancel_id
-            } else {
-                confirm_id
-            };
-            ctx.memory_mut(|m| m.request_focus(to));
+            *kb_confirm = !*kb_confirm;
         }
-        // Enter activates the focused button (interact()
-        // clicks need the key consumed against the terminal).
-        let enter = ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+        // Enter is handled by the caller (fav_delete_confirm /
+        // fav_name_dialog / fav_cmd_dialog) BEFORE this row runs, so the
+        // Modal can't swallow it. Visual highlight is all we need here.
 
-        let draw = |ui: &mut egui::Ui, id: egui::Id, label: &str| -> bool {
+        let draw = |ui: &mut egui::Ui, id: egui::Id, label: &str, is_selected: bool| -> bool {
             let font = egui::FontId::proportional(13.0);
             let galley =
                 ui.fonts(|f| f.layout_no_wrap(label.to_string(), font, ui.visuals().text_color()));
             let size = egui::vec2(72.0, 22.0);
             let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
-            // Register the widget under our stable id so
-            // memory focus calls address it.
             let resp = ui.interact(rect, id, egui::Sense::click());
-            let visuals = if resp.contains_pointer() {
-                &ui.style().visuals.widgets.hovered
+            // Visuals: selected button uses a brighter border so the
+            // user sees which one Enter will activate.
+            let base = &ui.style().visuals.widgets.inactive;
+            let hovered = &ui.style().visuals.widgets.hovered;
+            let (fill, stroke) = if is_selected {
+                (hovered.weak_bg_fill, hovered.bg_stroke)
+            } else if resp.contains_pointer() {
+                (hovered.weak_bg_fill, base.bg_stroke)
             } else {
-                &ui.style().visuals.widgets.inactive
+                (base.weak_bg_fill, base.bg_stroke)
             };
+            let corner = if is_selected { 3.0 } else { 0.0 };
+            ui.painter().rect_filled(rect, corner, fill);
             ui.painter()
-                .rect_filled(rect, visuals.corner_radius, visuals.weak_bg_fill);
-            ui.painter().rect_stroke(
-                rect,
-                visuals.corner_radius,
-                visuals.bg_stroke,
-                egui::StrokeKind::Middle,
-            );
+                .rect_stroke(rect, corner, stroke, egui::StrokeKind::Middle);
             ui.painter().galley(
                 rect.center() - galley.size() / 2.0,
                 galley,
                 ui.visuals().text_color(),
             );
-            resp.clicked() || (enter && ui.ctx().memory(|m| m.has_focus(id)))
+            resp.clicked()
         };
 
         let (c, x) = ui
             .horizontal(|ui| {
-                let c = draw(ui, confirm_id, confirm_label);
+                let c = draw(ui, confirm_id, confirm_label, *kb_confirm);
                 ui.add_space(8.0);
-                let x = draw(ui, cancel_id, cancel_label);
+                let x = draw(ui, cancel_id, cancel_label, !*kb_confirm);
                 (c, x)
             })
             .inner;
@@ -6058,11 +6132,16 @@ impl App {
             self.fav_name_dialog = None;
             return;
         }
+        // TextEdit (singleline) doesn't react to Enter; consume it
+        // here at the top of the function so the Modal can't grab it
+        // first. The Modal still owns the click & arrow-key model.
+        let enter_pressed =
+            ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+        let mut confirm = enter_pressed;
         let title = match folder_id {
             Some(_) => self.texts.terminal.fav_rename_title.clone(),
             None => self.texts.terminal.fav_new_title.clone(),
         };
-        let mut confirm = false;
         let mut cancel = false;
         let confirm_id = egui::Id::new("fav_name_confirm_btn");
         let cancel_id = egui::Id::new("fav_name_cancel_btn");
@@ -6073,47 +6152,26 @@ impl App {
                 ui.heading(title);
                 ui.add_space(4.0);
                 ui.label(self.texts.terminal.fav_name_label.clone());
-                let input_id = egui::Id::new("fav_name_input");
                 let resp = ui.text_edit_singleline(&mut self.fav_name_dialog.as_mut().unwrap().1);
-                let _ = input_id;
-                let input_focused = resp.has_focus();
-                // Default focus: the INPUT (typing is the primary action).
-                // Down/Tab hand focus to the button row (Confirm first).
-                if !input_focused
-                    && ui.ctx().memory(|m| m.focused()) != Some(confirm_id)
-                    && ui.ctx().memory(|m| m.focused()) != Some(cancel_id)
-                {
-                    // Only claim when NOTHING of ours holds focus (first
-                    // frames and after a button click).
-                    let none_of_ours = ui.ctx().memory(|m| m.focused()).is_none();
-                    if none_of_ours {
-                        resp.request_focus();
-                    }
-                }
-                let down_or_tab = ui.input_mut(|i| {
-                    i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown)
-                        || i.consume_key(egui::Modifiers::NONE, egui::Key::Tab)
-                });
-                if input_focused && down_or_tab {
-                    ui.ctx().memory_mut(|m| m.request_focus(confirm_id));
-                }
-                let enter_in_input = input_focused && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                // Focus the input every frame the modal is open, so
+                // external focus changes (terminal pointer focus, egui's
+                // first-frame nav, etc.) cannot pull it away. This is
+                // cheaper and more robust than the previous
+                // "first frame seeds, then surrender" dance.
+                resp.request_focus();
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
                     let (c, x) = Self::fav_dialog_button_row(
                         ui,
+                        &mut self.fav_del_kb_confirm,
                         confirm_id,
                         cancel_id,
                         &self.texts.theme_editor.dialog_confirm.clone(),
                         &self.texts.theme_editor.cancel.clone(),
-                        confirm_id,
                     );
                     confirm |= c;
                     cancel |= x;
                 });
-                if enter_in_input {
-                    confirm = true;
-                }
             });
         if confirm || cancel {
             if confirm {
@@ -6149,7 +6207,11 @@ impl App {
             self.fav_cmd_dialog = None;
             return;
         }
-        let mut confirm = false;
+        // TextEdit doesn't react to Enter — consume at the top so the
+        // Modal can't grab it first.
+        let enter_pressed =
+            ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+        let mut confirm = enter_pressed;
         let mut cancel = false;
         let confirm_id = egui::Id::new("fav_cmd_confirm_btn");
         let cancel_id = egui::Id::new("fav_cmd_cancel_btn");
@@ -6161,42 +6223,22 @@ impl App {
                 ui.add_space(4.0);
                 ui.label(self.texts.terminal.fav_cmd_dialog_label.clone());
                 let resp = ui.text_edit_singleline(&mut self.fav_cmd_dialog.as_mut().unwrap().1);
-                let input_focused = resp.has_focus();
-                // Default focus: the INPUT. Down/Tab hand focus to the
-                // button row (Confirm first).
-                if !input_focused
-                    && ui.ctx().memory(|m| m.focused()) != Some(confirm_id)
-                    && ui.ctx().memory(|m| m.focused()) != Some(cancel_id)
-                {
-                    let none_of_ours = ui.ctx().memory(|m| m.focused()).is_none();
-                    if none_of_ours {
-                        resp.request_focus();
-                    }
-                }
-                let down_or_tab = ui.input_mut(|i| {
-                    i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown)
-                        || i.consume_key(egui::Modifiers::NONE, egui::Key::Tab)
-                });
-                if input_focused && down_or_tab {
-                    ui.ctx().memory_mut(|m| m.request_focus(confirm_id));
-                }
-                let enter_in_input = input_focused && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                // Keep the input focused every frame the modal is open —
+                // cheaper and more robust than first-frame seeding.
+                resp.request_focus();
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
                     let (c, x) = Self::fav_dialog_button_row(
                         ui,
+                        &mut self.fav_del_kb_confirm,
                         confirm_id,
                         cancel_id,
                         &self.texts.theme_editor.dialog_confirm.clone(),
                         &self.texts.theme_editor.cancel.clone(),
-                        confirm_id,
                     );
                     confirm |= c;
                     cancel |= x;
                 });
-                if enter_in_input {
-                    confirm = true;
-                }
             });
         if confirm || cancel {
             if confirm {
@@ -6225,23 +6267,17 @@ impl App {
             self.fav_delete_confirm = None;
             return;
         }
+        // The Modal's own Area may consume Enter before our button row
+        // sees it, so we ALWAYS detect Enter at the top of this function
+        // and apply it to the KB-selected button.
+        let enter_pressed =
+            ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
         let mut confirm = false;
         let mut cancel = false;
-        // Keyboard model is FULLY self-managed (fav_del_kb_confirm): we
-        // deliberately do NOT use egui's focus system for these buttons —
-        // the focused terminal's lock filter and egui's own directional
-        // navigation kept interfering. Left/Right toggle the selection,
-        // Enter activates it; backdrop click cancels; clicks set the
-        // selection (no immediate action until Enter).
-        let left_or_right = ctx.input_mut(|i| {
-            i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft)
-                || i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight)
-        });
-        if left_or_right {
-            self.fav_del_kb_confirm = !self.fav_del_kb_confirm;
-        }
-        let enter_delete =
-            ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+        // The fav_dialog_button_row is fully self-managed: it owns
+        // fav_del_kb_confirm (Left/Right toggles, Enter activates), and
+        // does NOT touch egui's focus system. Modal + backdrop click
+        // handle the rest.
         let confirm_id = egui::Id::new("fav_del_confirm_btn");
         let cancel_id = egui::Id::new("fav_del_cancel_btn");
         let modal = egui::Modal::new(egui::Id::new("fav_delete_confirm"))
@@ -6256,11 +6292,11 @@ impl App {
                 ui.horizontal(|ui| {
                     let (c, x) = Self::fav_dialog_button_row(
                         ui,
+                        &mut self.fav_del_kb_confirm,
                         confirm_id,
                         cancel_id,
                         &self.texts.theme_editor.dialog_confirm.clone(),
                         &self.texts.theme_editor.cancel.clone(),
-                        cancel_id,
                     );
                     confirm |= c;
                     cancel |= x;
@@ -6272,8 +6308,9 @@ impl App {
             cancel = true;
         }
         let _ = modal.is_top_modal;
-        // Keyboard Enter activates the KB-selected button.
-        if enter_delete {
+        // Apply the Enter that was consumed at the top of this function
+        // to the currently KB-selected button.
+        if enter_pressed {
             if self.fav_del_kb_confirm {
                 confirm = true;
             } else {
@@ -7075,6 +7112,7 @@ impl eframe::App for App {
         if !workspace_renaming
             && !history_menu_handled
             && !self.locked_panels.contains(&self.active_panel)
+            && !modal_hijack
             && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter))
         {
             if let Some(tab) = &self.focused_terminal.clone() {
@@ -7114,6 +7152,7 @@ impl eframe::App for App {
         // Escape: close history menu
         if !workspace_renaming
             && !history_menu_handled
+            && !modal_hijack
             && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
         {
             if let Some(tab) = &self.focused_terminal.clone() {

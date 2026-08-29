@@ -327,6 +327,10 @@ pub struct TerminalTexts {
     pub clear_favorites: String,
     /// Footer count, e.g. "42 history commands" (number appended by code).
     pub history_count: String,
+    /// Folder-column footer count, e.g. "3 folders" (number prepended).
+    pub fav_folder_count: String,
+    /// Submenu-column footer count, e.g. "5 commands" (number prepended).
+    pub fav_item_count: String,
     /// Confirmation dialog for clearing global favorites.
     pub clear_favorites_title: String,
     pub clear_favorites_body: String,
@@ -725,6 +729,8 @@ impl Texts {
                 delete: "删除".into(),
                 clear_favorites: "清除收藏".into(),
                 history_count: "条历史指令".into(),
+                fav_folder_count: "个指令收藏夹".into(),
+                fav_item_count: "条收藏指令".into(),
                 clear_favorites_title: "清除全部收藏指令".into(),
                 clear_favorites_body: "确认清除全部收藏指令？此操作不可恢复。".into(),
             },

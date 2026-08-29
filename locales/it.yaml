@@ -187,6 +187,8 @@ terminal:
   delete: Elimina
   clear_favorites: Cancella preferiti
   history_count:  comandi cronologici
+  fav_folder_count:  cartelle
+  fav_item_count:  comandi
   clear_favorites_title: Cancella tutti i preferiti
   clear_favorites_body: Cancellare tutti i comandi preferiti? Operazione irreversibile.
   history_empty: 'Nessun comando'

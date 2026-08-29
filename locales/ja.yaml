@@ -187,6 +187,8 @@ terminal:
   delete: 削除
   clear_favorites: お気に入りを消去
   history_count: 件の履歴コマンド
+  fav_folder_count: 個のフォルダ
+  fav_item_count: 件のコマンド
   clear_favorites_title: お気に入りコマンドを全消去
   clear_favorites_body: お気に入りコマンドをすべて消去します？元に戻せません。
   history_empty: 'コマンド履歴なし'

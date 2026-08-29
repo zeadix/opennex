@@ -187,6 +187,8 @@ terminal:
   delete: 삭제
   clear_favorites: 즐겨찾기 삭제
   history_count: 개의 명령 기록
+  fav_folder_count: 개의 폴더
+  fav_item_count: 개의 명령
   clear_favorites_title: 모든 즐겨찾기 명령 삭제
   clear_favorites_body: 모든 즐겨찾기 명령을 삭제할까요? 되돌릴 수 없습니다.
   history_empty: '명령 기록 없음'

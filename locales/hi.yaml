@@ -187,6 +187,8 @@ terminal:
   delete: हटाएं
   clear_favorites: पसंदीदा हटाएं
   history_count:  इतिहास कमांड
+  fav_folder_count:  फ़ोल्डर
+  fav_item_count:  कमांड
   clear_favorites_title: सभी पसंदीदा कमांड हटाएं
   clear_favorites_body: सभी पसंदीदा कमांड हटाएं? यह पूर्ववत नहीं हो सकता।
   history_empty: 'अभी कोई कमांड नहीं'

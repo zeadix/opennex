@@ -187,6 +187,8 @@ terminal:
   delete: Delete
   clear_favorites: Clear Favorites
   history_count:  history commands
+  fav_folder_count:  favorite folders
+  fav_item_count:  favorite commands
   clear_favorites_title: Clear All Favorite Commands
   clear_favorites_body: Clear all favorite commands? This cannot be undone.
   history_empty: 'No commands yet'

@@ -187,6 +187,8 @@ terminal:
   delete: 刪除
   clear_favorites: 清除收藏
   history_count: 條歷史指令
+  fav_folder_count: 個指令收藏夾
+  fav_item_count: 條收藏指令
   clear_favorites_title: 清除全部收藏指令
   clear_favorites_body: 確認清除全部收藏指令？此操作不可復原。
   history_empty: '暫無指令'

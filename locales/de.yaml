@@ -187,6 +187,8 @@ terminal:
   delete: Löschen
   clear_favorites: Favoriten löschen
   history_count:  Befehle im Verlauf
+  fav_folder_count:  Ordner
+  fav_item_count:  Befehle
   clear_favorites_title: Alle Favoriten löschen
   clear_favorites_body: Alle Favoriten löschen? Dies kann nicht rückgängig gemacht werden.
   history_empty: 'Noch keine Befehle'
