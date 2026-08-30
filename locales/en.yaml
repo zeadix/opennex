@@ -47,6 +47,7 @@ settings:
     smooth_rendering: Edge Smoothing
 
     smooth_level: Smoothing Level
+    prod_banner: PROD warning banner
   appearance:
     heading: Appearance
     terminal_section: Terminal Appearance
@@ -368,3 +369,34 @@ stats:
   terminals: terminals
   clear_history_title: Delete All Command History
   clear_history_body: Delete command history of all terminals? This cannot be undone.
+ssh:
+  section: SSH Hosts
+  add: + Add Host
+  search_hint: Search hosts...
+  empty_hint: No hosts yet, click + to add one
+  connect: Connect
+  edit: Edit
+  duplicate: Duplicate
+  delete: Delete
+  delete_title: Delete SSH Host
+  delete_body: 'Delete host "{}"? Open connections are not affected.'
+  dialog_new_title: Add SSH Host
+  dialog_edit_title: Edit SSH Host
+  label_name: 'Name:'
+  label_group: 'Group:'
+  label_host: 'Host:'
+  label_port: 'Port:'
+  label_user: 'User:'
+  label_auth: 'Auth:'
+  label_key_path: 'Key path:'
+  label_prod: Production (PROD)
+  auth_agent: ssh-agent
+  auth_key: Key file
+  auth_password: Interactive password
+  error_required: Name and host are required
+  browse: 'Browse...'
+  prod_banner: PROD
+  close_remote_message: Close this remote connection?
+  ssh_unavailable: ssh not found — please install an OpenSSH client
+  host_missing_fallback: 'Host "{}" was deleted; terminal fell back to a local shell'
+  menu_entry: SSH Connection...

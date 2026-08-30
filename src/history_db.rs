@@ -17,6 +17,19 @@ const SCHEMA_SQL: &str = "CREATE TABLE IF NOT EXISTS favorite_folders (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 command TEXT NOT NULL,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS ssh_hosts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                group_name TEXT NOT NULL DEFAULT '',
+                host TEXT NOT NULL,
+                port INTEGER NOT NULL DEFAULT 22,
+                user TEXT NOT NULL DEFAULT '',
+                auth TEXT NOT NULL DEFAULT 'agent',
+                key_path TEXT NOT NULL DEFAULT '',
+                prod INTEGER NOT NULL DEFAULT 0,
+                sort_key INTEGER,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             );";
 
 /// Rows this old are considered truly orphaned by `prune`; younger rows
@@ -580,6 +593,129 @@ impl HistoryDb {
         self.fav_items(folder_id).join(separator)
     }
 
+    // ---- SSH host book (v0.1.50) ----
+
+    const SSH_HOST_COLUMNS: &str =
+        "id, name, group_name, host, port, user, auth, key_path, prod, sort_key";
+
+    fn row_to_ssh_host(row: &rusqlite::Row) -> rusqlite::Result<crate::hosts::SshHost> {
+        Ok(crate::hosts::SshHost {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            group: row.get(2)?,
+            host: row.get(3)?,
+            port: row.get::<_, i64>(4)?.clamp(1, u16::MAX.into()) as u16,
+            user: row.get(5)?,
+            auth: crate::hosts::SshAuth::from_db(
+                &row.get::<_, String>(6)?,
+                &row.get::<_, String>(7)?,
+            ),
+            prod: row.get::<_, i64>(8)? != 0,
+            sort_key: row.get::<_, Option<i64>>(9)?.unwrap_or(0),
+        })
+    }
+
+    /// All saved hosts in display order (ascending sort_key, ties by id).
+    pub fn ssh_hosts(&self) -> Vec<crate::hosts::SshHost> {
+        let Ok(mut stmt) = self.conn.prepare(&format!(
+            "SELECT {} FROM ssh_hosts ORDER BY sort_key IS NULL, sort_key ASC, id ASC",
+            Self::SSH_HOST_COLUMNS
+        )) else {
+            return Vec::new();
+        };
+        stmt.query_map([], Self::row_to_ssh_host)
+            .map(|rows| rows.flatten().collect())
+            .unwrap_or_default()
+    }
+
+    pub fn ssh_host_get(&self, id: i64) -> Option<crate::hosts::SshHost> {
+        let sql = format!(
+            "SELECT {} FROM ssh_hosts WHERE id = ?1",
+            Self::SSH_HOST_COLUMNS
+        );
+        self.conn
+            .query_row(&sql, params![id], Self::row_to_ssh_host)
+            .ok()
+    }
+
+    /// Insert a NEW host (the struct's id is ignored); returns the rowid.
+    pub fn ssh_host_insert(&self, host: &crate::hosts::SshHost) -> Option<i64> {
+        let next_key: i64 = self
+            .conn
+            .query_row(
+                "SELECT COALESCE(MAX(sort_key), 0) + 1 FROM ssh_hosts",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(1);
+        self.conn
+            .execute(
+                "INSERT INTO ssh_hosts \
+                 (name, group_name, host, port, user, auth, key_path, prod, sort_key) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                params![
+                    host.name,
+                    host.group,
+                    host.host,
+                    host.port as i64,
+                    host.user,
+                    host.auth.to_db(),
+                    host.auth.key_path().unwrap_or(""),
+                    host.prod as i64,
+                    next_key,
+                ],
+            )
+            .ok()?;
+        Some(self.conn.last_insert_rowid())
+    }
+
+    /// Update an EXISTING host row (id-addressed).
+    pub fn ssh_host_update(&self, host: &crate::hosts::SshHost) -> bool {
+        self.conn
+            .execute(
+                "UPDATE ssh_hosts SET name = ?2, group_name = ?3, host = ?4, port = ?5, \
+                 user = ?6, auth = ?7, key_path = ?8, prod = ?9 WHERE id = ?1",
+                params![
+                    host.id,
+                    host.name,
+                    host.group,
+                    host.host,
+                    host.port as i64,
+                    host.user,
+                    host.auth.to_db(),
+                    host.auth.key_path().unwrap_or(""),
+                    host.prod as i64,
+                ],
+            )
+            .is_ok()
+    }
+
+    pub fn ssh_host_delete(&self, id: i64) -> bool {
+        self.conn
+            .execute("DELETE FROM ssh_hosts WHERE id = ?1", params![id])
+            .is_ok()
+    }
+
+    /// Persist a sidebar drag order by rewriting sort_key to 1..=N.
+    pub fn ssh_host_reorder(&self, ordered_ids: &[i64]) {
+        let Ok(tx) = self.conn.unchecked_transaction() else {
+            return;
+        };
+        for (idx, id) in ordered_ids.iter().enumerate() {
+            if tx
+                .execute(
+                    "UPDATE ssh_hosts SET sort_key = ?2 WHERE id = ?1",
+                    params![id, (idx + 1) as i64],
+                )
+                .is_err()
+            {
+                let _ = tx.rollback();
+                return;
+            }
+        }
+        let _ = tx.commit();
+    }
+
     /// Delete ONE occurrence of a command from a terminal's history
     /// (the row currently visible at that position in newest-first order).
     pub fn remove_entry(&self, terminal_id: &str, index_from_newest: usize) {
@@ -883,6 +1019,48 @@ mod tests {
         // Drop before cleanup renames for the same Windows reason.
         drop(recovered);
         let _ = std::fs::remove_file(quarantined);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn ssh_host_crud_reorder_and_update() {
+        let (db, path) = test_db();
+        let host = crate::hosts::SshHost {
+            id: 0,
+            name: "web-1".into(),
+            group: "prod".into(),
+            host: "203.0.113.7".into(),
+            port: 2222,
+            user: "deploy".into(),
+            auth: crate::hosts::SshAuth::Key {
+                path: "/tmp/id_ed25519".into(),
+            },
+            prod: true,
+            sort_key: 0,
+        };
+        let id = db.ssh_host_insert(&host).expect("insert");
+        let mut loaded = db.ssh_host_get(id).expect("loaded");
+        assert_eq!(loaded.name, "web-1");
+        assert_eq!(loaded.group, "prod");
+        assert_eq!(loaded.port, 2222);
+        assert_eq!(loaded.auth, host.auth, "key auth roundtrips with path");
+        assert!(loaded.prod);
+
+        loaded.name = "web-1-renamed".into();
+        loaded.auth = crate::hosts::SshAuth::Password;
+        assert!(db.ssh_host_update(&loaded));
+        let reloaded = db.ssh_host_get(id).unwrap();
+        assert_eq!(reloaded.name, "web-1-renamed");
+        assert_eq!(reloaded.auth, crate::hosts::SshAuth::Password);
+
+        let id2 = db.ssh_host_insert(&host).unwrap();
+        db.ssh_host_reorder(&[id2, id]);
+        let order: Vec<i64> = db.ssh_hosts().into_iter().map(|h| h.id).collect();
+        assert_eq!(order, vec![id2, id], "drag order persists");
+
+        assert!(db.ssh_host_delete(id));
+        assert!(db.ssh_host_get(id).is_none());
+        assert_eq!(db.ssh_hosts().len(), 1);
         let _ = std::fs::remove_file(path);
     }
 }

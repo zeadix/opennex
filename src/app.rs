@@ -48,6 +48,9 @@ struct AppSettings {
     /// 1.0 is the epaint default; larger = blurrier edges.
     #[serde(default = "default_smooth_level")]
     smooth_level: f32,
+    /// Red warning banner on terminals connected to PROD-marked SSH hosts.
+    #[serde(default = "default_true")]
+    ssh_prod_banner: bool,
 }
 
 fn default_smooth_level() -> f32 {
@@ -619,54 +622,56 @@ fn consume_exact_key(ctx: &egui::Context, key: egui::Key, modifiers: egui::Modif
     matched
 }
 
-/// Keyboard model for hand-drawn two-button confirm dialogs that
-/// already draw their own buttons: CANCEL default, Left/Right toggle,
-/// Enter activates. `draw` renders nothing; callers wire the returned
-/// flags into their existing button click logic. The ids must also be
-/// attached to the drawn buttons via `ui.interact(rect, id, ...)` —
-/// callers without stable ids can treat this purely as a key router.
-fn confirm_dialog_keys(
-    ui: &mut egui::Ui,
-    confirm_id: egui::Id,
-    cancel_id: egui::Id,
-) -> (bool, bool) {
-    let ctx = ui.ctx().clone();
-    let focused = ctx.memory(|m| m.focused());
-    if focused != Some(confirm_id) && focused != Some(cancel_id) {
-        ctx.memory_mut(|m| m.request_focus(cancel_id));
-    }
-    // CRITICAL: egui's OWN directional focus navigation (Memory::
-    // begin_pass) moves focus to spatially-adjacent widgets whenever an
-    // arrow key doesn't match the focused widget's lock filter — that
-    // navigation is what kept bouncing the focus and rerouting Enter to
-    // the terminal. Locking arrows+escape to OUR buttons makes the keys
-    // "act on the widget": egui skips its navigation and the consume
-    // logic below sees them.
-    let lock = egui::EventFilter {
-        tab: false,
-        horizontal_arrows: true,
-        vertical_arrows: true,
-        escape: true,
-    };
-    if let Some(id) = ctx.memory(|m| m.focused()) {
-        if id == confirm_id || id == cancel_id {
-            ctx.memory_mut(|m| m.set_focus_lock_filter(id, lock));
+/// UNIFIED dialog keyboard protocol (self-managed cursor).
+///
+/// One protocol for EVERY two-button confirm dialog in the app. The
+/// dialog owns a `kb_confirm: bool` cursor (which button is selected),
+/// drawn as a highlight by the caller. This function implements:
+///   - Escape  -> returns `close` (caller closes the dialog)
+///   - Enter   -> activates the selected side (returns confirm/cancel)
+///   - Left/Right (optional, `toggle: true`) -> flips the cursor
+///
+/// All keys are CONSUMED here - the single most common historical bug
+/// was a dialog reading `key_pressed` (non-consuming) and letting the
+/// same Enter also fall through to the terminal.
+///
+/// Why self-managed instead of egui's focus system: egui 0.31's
+/// `begin_pass` runs directional focus-navigation BEFORE any app code,
+/// and `set_focus_lock_filter` only takes effect from the second frame
+/// (it requires `had_focus_last_frame`). A modal's first frames could
+/// therefore bounce focus to spatially-adjacent widgets. Measured,
+/// reproduced in headless tests, and the reason the favorite dialogs
+/// moved to this model (commit 5624965).
+///
+/// Call this BEFORE creating the dialog's Window/Modal so nothing can
+/// swallow the keys earlier in the frame.
+fn dialog_keys(ctx: &egui::Context, kb_confirm: &mut bool, toggle: bool) -> DialogKeysOutcome {
+    let escape = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+    let enter = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+    if toggle {
+        let left = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft));
+        let right = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight));
+        if left || right {
+            *kb_confirm = !*kb_confirm;
         }
     }
-    let left = ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft));
-    let right = ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight));
-    if left || right {
-        let to = if focused == Some(confirm_id) {
-            cancel_id
-        } else {
-            confirm_id
-        };
-        ctx.memory_mut(|m| m.request_focus(to));
+    DialogKeysOutcome {
+        close: escape,
+        confirm: enter && *kb_confirm,
+        cancel: enter && !*kb_confirm,
+        enter,
     }
-    let enter = ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
-    let on_confirm = enter && focused == Some(confirm_id);
-    let on_cancel = enter && focused == Some(cancel_id);
-    (on_confirm, on_cancel)
+}
+
+/// Result of [`dialog_keys`]. `enter` is exposed separately for
+/// input-style dialogs (name/command) where Enter means "confirm"
+/// regardless of the button cursor.
+#[derive(Debug, Default, Clone, Copy)]
+struct DialogKeysOutcome {
+    close: bool,
+    confirm: bool,
+    cancel: bool,
+    enter: bool,
 }
 
 /// SINGLE source of truth for "a modal dialog owns the UI right now".
@@ -701,19 +706,9 @@ fn any_modal_open(app: &App) -> bool {
         || app.fav_name_dialog.is_some()
         || app.fav_cmd_dialog.is_some()
         || app.fav_delete_confirm.is_some()
-}
-
-fn global_shortcuts_allowed(app: &App) -> bool {
-    !app.show_settings
-        && !app.show_about
-        && app.pw_popup.is_none()
-        && app.unlock_popup.is_none()
-        && app.fav_name_dialog.is_none()
-        && app.fav_cmd_dialog.is_none()
-        && app.fav_delete_confirm.is_none()
-        && app.binding_recording.is_none()
-        && app.close_confirm_panel.is_none()
-        && app.pending_close_confirm.is_none()
+        || app.ssh_dialog.is_some()
+        || app.ssh_delete_confirm.is_some()
+        || matches!(app.update_state, crate::updater::UpdateState::Ready(_))
 }
 
 fn history_menu_shortcut_released(
@@ -1285,6 +1280,7 @@ impl Default for AppSettings {
             theme_id: default_theme_id(),
             apply_theme_typography: true,
             auto_copy_selection: true,
+            ssh_prod_banner: true,
             auto_match_command: true,
             default_shell: default_shell_pref(),
             smooth_rendering: true,
@@ -1392,6 +1388,10 @@ struct TerminalStatePersist {
     /// Shell id the terminal was spawned with (restored on scene load).
     #[serde(default)]
     shell: String,
+    /// SSH host row the terminal is connected to (0 = local shell).
+    /// Restored sessions reconnect through the host book.
+    #[serde(default)]
+    host_id: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1599,13 +1599,23 @@ pub struct App {
     /// Floating submenu for one folder's commands: (folder id, anchor
     /// top-left, items snapshot, keyboard-selected index).
     fav_submenu: Option<(i64, egui::Pos2, Vec<String>, Option<usize>)>,
-    /// Self-managed keyboard cursor for ALL three favorite dialogs
-    /// (name / cmd / delete-confirm). `true` = the CONFIRM button is
-    /// selected, `false` = the Cancel button. Left/Right toggles; Enter
-    /// activates. We deliberately bypass egui's focus system: even with
-    /// lock filter, egui 0.31's directional navigation kept yanking
-    /// focus off the buttons in the modal's first frames.
-    fav_del_kb_confirm: bool,
+    /// Self-managed keyboard cursor for EVERY two-button dialog driven by
+    /// [`dialog_keys`]: `true` = the CONFIRM button is selected, `false` =
+    /// Cancel (the safe default for danger dialogs). Left/Right toggles;
+    /// Enter activates. Reset to `false` whenever a dialog opens so the
+    /// cursor never carries over from a previously-open dialog.
+    dialog_kb_confirm: bool,
+    /// Rising-edge latches: set the frame a dialog OPENS so the renderer
+    /// can reset `dialog_kb_confirm` to the safe side (cancel). Taken by
+    /// the renderer on the first frame it sees the dialog.
+    fav_name_just_opened: bool,
+    fav_cmd_just_opened: bool,
+    fav_del_just_opened: bool,
+    hist_clear_just_opened: bool,
+    fav_clear_just_opened: bool,
+    close_confirm_just_opened: bool,
+    ws_close_just_opened: bool,
+    settings_clear_just_opened: bool,
     /// True only after Right pressed into the command column — then
     /// Up/Down/Enter operate on commands; before that the column merely
     /// PREVIEW while the folder list keeps focus.
@@ -1658,6 +1668,18 @@ pub struct App {
     hist_drop_folder: Option<i64>,
     /// Delete-folder confirmation target.
     fav_delete_confirm: Option<(i64, String)>,
+    /// Cached SSH host book (mirror of history_db, refreshed on change).
+    ssh_hosts: Vec<crate::hosts::SshHost>,
+    /// Sidebar search filter for the host section.
+    ssh_host_filter: String,
+    /// SSH host create/edit form dialog.
+    ssh_dialog: Option<SshHostDialog>,
+    ssh_dialog_just_opened: bool,
+    /// Delete-host confirmation target: (row id, host name).
+    ssh_delete_confirm: Option<(i64, String)>,
+    ssh_del_just_opened: bool,
+    /// Host chosen in the tab "+" popup; consumed by process_pending.
+    pending_ssh_connect: Option<i64>,
 }
 
 struct TerminalData {
@@ -1666,6 +1688,56 @@ struct TerminalData {
     font_size: f32,
     /// Shell id this terminal was spawned with (scene persistence).
     shell_id: String,
+    /// Set when the terminal runs the ssh client for a saved host.
+    host: Option<crate::hosts::SshHostRef>,
+}
+
+/// Create/edit form state for the SSH host dialog.
+struct SshHostDialog {
+    /// Some(id) = editing that row; None = creating a new host.
+    edit_id: Option<i64>,
+    name: String,
+    group: String,
+    host: String,
+    port: u16,
+    user: String,
+    auth: crate::hosts::SshAuth,
+    key_path: String,
+    prod: bool,
+    /// Set when a confirm attempt failed validation (missing name/host).
+    error: bool,
+}
+
+impl SshHostDialog {
+    fn new() -> Self {
+        Self {
+            edit_id: None,
+            name: String::new(),
+            group: String::new(),
+            host: String::new(),
+            port: 22,
+            user: String::new(),
+            auth: crate::hosts::SshAuth::default(),
+            key_path: String::new(),
+            prod: false,
+            error: false,
+        }
+    }
+
+    fn from_host(host: &crate::hosts::SshHost) -> Self {
+        Self {
+            edit_id: Some(host.id),
+            name: host.name.clone(),
+            group: host.group.clone(),
+            host: host.host.clone(),
+            port: host.port,
+            user: host.user.clone(),
+            auth: host.auth.clone(),
+            key_path: host.auth.key_path().unwrap_or("").to_string(),
+            prod: host.prod,
+            error: false,
+        }
+    }
 }
 
 fn create_terminal(
@@ -1731,6 +1803,34 @@ fn create_terminal(
     )
 }
 
+/// Spawn the terminal described by a persisted scene state. SSH-marked
+/// states reconnect through the host book; a deleted host or a missing
+/// ssh binary degrades to a plain local shell (the caller surfaces a
+/// toast) so a scene always loads completely.
+fn restore_terminal_for_state(
+    ctx: &egui::Context,
+    tstate: &TerminalStatePersist,
+    id_counter: &mut u64,
+    db: &crate::history_db::HistoryDb,
+    scrollback: usize,
+) -> (Option<TerminalInstance>, Option<crate::hosts::SshHostRef>) {
+    if tstate.host_id != 0 {
+        if let Some(host) = db.ssh_host_get(tstate.host_id) {
+            let snapshot = host.ref_snapshot();
+            *id_counter += 1;
+            if let Some(instance) =
+                crate::hosts::spawn_ssh_instance(ctx, *id_counter, &host, scrollback)
+            {
+                return (Some(instance), Some(snapshot));
+            }
+        }
+    }
+    (
+        create_terminal(ctx, &tstate.working_directory, id_counter, None, scrollback),
+        None,
+    )
+}
+
 fn build_panel_state(app: &mut App, panel_idx: usize) -> Option<WorkspaceState> {
     let panel = app.panels.get(panel_idx)?;
     let dock_state = app.dock_states.get(&panel_idx)?.clone();
@@ -1744,6 +1844,7 @@ fn build_panel_state(app: &mut App, panel_idx: usize) -> Option<WorkspaceState> 
                 font_size: data.font_size,
                 working_directory: data.instance.cwd.clone(),
                 shell: data.shell_id.clone(),
+                host_id: data.host.as_ref().map(|h| h.id).unwrap_or(0),
             },
         );
     }
@@ -1801,6 +1902,7 @@ fn build_scene_state(app: &mut App) -> SceneState {
                     font_size: data.font_size,
                     working_directory: data.instance.cwd.clone(),
                     shell: data.shell_id.clone(),
+                    host_id: data.host.as_ref().map(|h| h.id).unwrap_or(0),
                 },
             );
         }
@@ -2052,10 +2154,26 @@ impl App {
             hist_drag_cmd: None,
             hist_drop_folder: None,
             fav_delete_confirm: None,
-            fav_del_kb_confirm: false,
+            ssh_hosts: Vec::new(),
+            ssh_host_filter: String::new(),
+            ssh_dialog: None,
+            ssh_dialog_just_opened: false,
+            ssh_delete_confirm: None,
+            ssh_del_just_opened: false,
+            pending_ssh_connect: None,
+            dialog_kb_confirm: false,
+            fav_name_just_opened: false,
+            fav_cmd_just_opened: false,
+            fav_del_just_opened: false,
+            hist_clear_just_opened: false,
+            fav_clear_just_opened: false,
+            close_confirm_just_opened: false,
+            ws_close_just_opened: false,
+            settings_clear_just_opened: false,
         };
 
         app.fav_folders = app.history_db.fav_folders();
+        app.ssh_hosts = app.history_db.ssh_hosts();
 
         // Register fonts (system + embedded + theme choices) now that the
         // App and its active theme exist. rebuild_fonts reuses the scanned
@@ -2081,15 +2199,25 @@ impl App {
                 for panel in &scene.panels {
                     let idx = app.panels.len();
                     for (_id, tstate) in &panel.terminals {
-                        let Some(instance) = create_terminal(
+                        let (instance, host_ref) = restore_terminal_for_state(
                             ctx,
-                            &tstate.working_directory,
+                            tstate,
                             &mut app.terminal_id_counter,
-                            None,
+                            &app.history_db,
                             app.settings.scrollback,
-                        ) else {
+                        );
+                        let Some(instance) = instance else {
                             continue;
                         };
+                        if host_ref.is_none() && tstate.host_id != 0 {
+                            app.update_toast = Some((
+                                app.texts
+                                    .ssh
+                                    .host_missing_fallback
+                                    .replace("{}", &tstate.name),
+                                std::time::Instant::now() + std::time::Duration::from_secs(8),
+                            ));
+                        }
                         app.terminals.insert(
                             _id.clone(),
                             TerminalData {
@@ -2097,6 +2225,7 @@ impl App {
                                 name: tstate.name.clone(),
                                 font_size: tstate.font_size,
                                 shell_id: tstate.shell.clone(),
+                                host: host_ref,
                             },
                         );
                         if let Some(n) = _id
@@ -2205,13 +2334,14 @@ impl App {
         let panel_idx = self.panels.len();
         for (id, tstate) in &state.terminals {
             if !self.terminals.contains_key(id) {
-                let Some(instance) = create_terminal(
+                let (instance, host_ref) = restore_terminal_for_state(
                     ctx,
-                    &tstate.working_directory,
+                    tstate,
                     &mut self.terminal_id_counter,
-                    None,
+                    &self.history_db,
                     self.settings.scrollback,
-                ) else {
+                );
+                let Some(instance) = instance else {
                     continue;
                 };
                 self.terminals.insert(
@@ -2221,6 +2351,7 @@ impl App {
                         name: tstate.name.clone(),
                         font_size: tstate.font_size,
                         shell_id: tstate.shell.clone(),
+                        host: host_ref,
                     },
                 );
             }
@@ -2285,6 +2416,7 @@ impl App {
                 name: format!("terminal-{random_suffix}"),
                 font_size: DEFAULT_FONT_SIZE,
                 shell_id: shell_id_used,
+                host: None,
             },
         );
         if self.focused_terminal.is_none() {
@@ -2293,11 +2425,69 @@ impl App {
         Some(id)
     }
 
+    /// Create and register an SSH session tab for a saved host WITHOUT
+    /// docking it — the caller decides where the tab lands. Returns None
+    /// (and surfaces a toast) when no ssh client is available.
+    fn connect_ssh_host_inner(&mut self, ctx: &egui::Context, host_id: i64) -> Option<String> {
+        let host = self.ssh_hosts.iter().find(|h| h.id == host_id).cloned()?;
+        self.terminal_id_counter += 1;
+        let Some(instance) = crate::hosts::spawn_ssh_instance(
+            ctx,
+            self.terminal_id_counter,
+            &host,
+            self.settings.scrollback,
+        ) else {
+            self.update_toast = Some((
+                self.texts.ssh.ssh_unavailable.clone(),
+                std::time::Instant::now() + std::time::Duration::from_secs(8),
+            ));
+            return None;
+        };
+        self.tab_counter += 1;
+        let tab_id = format!("terminal-{}", self.tab_counter);
+        let snapshot = host.ref_snapshot();
+        let name = host.name.clone();
+        self.terminals.insert(
+            tab_id.clone(),
+            TerminalData {
+                instance,
+                name,
+                font_size: DEFAULT_FONT_SIZE,
+                shell_id: String::new(),
+                host: Some(snapshot),
+            },
+        );
+        if self.focused_terminal.is_none() {
+            self.focused_terminal = Some(tab_id.clone());
+        }
+        Some(tab_id)
+    }
+
+    /// Sidebar entry point: connect to a host in the ACTIVE workspace's
+    /// focused leaf (the leaf holding the current tab).
+    fn connect_ssh_host(&mut self, ctx: &egui::Context, host_id: i64) {
+        let Some(tab_id) = self.connect_ssh_host_inner(ctx, host_id) else {
+            return;
+        };
+        if let Some(tree) = self.dock_states.get_mut(&self.active_panel) {
+            tree.push_to_focused_leaf(tab_id.clone());
+        }
+        self.focused_terminal = Some(tab_id);
+    }
+
     fn process_pending(&mut self, ctx: &egui::Context) {
         if let Some((panel_idx, surface_idx, node_idx)) = self.pending_new_terminal.take() {
             let split_after = self.pending_split_after.take();
             let split_vertical = self.pending_split_vertical;
-            let Some(tab_id) = self.create_terminal_inner(ctx) else {
+            // An SSH host chosen in the "+" popup spawns the ssh client
+            // instead of the default shell; everything downstream (dock
+            // placement) is identical.
+            let tab_id = if let Some(host_id) = self.pending_ssh_connect.take() {
+                self.connect_ssh_host_inner(ctx, host_id)
+            } else {
+                self.create_terminal_inner(ctx)
+            };
+            let Some(tab_id) = tab_id else {
                 return;
             };
             if let Some(tree) = self.dock_states.get_mut(&panel_idx) {
@@ -2372,13 +2562,14 @@ impl App {
                     for panel in &scene.panels {
                         let idx = self.panels.len();
                         for (_id, tstate) in &panel.terminals {
-                            if let Some(instance) = create_terminal(
+                            let (instance, host_ref) = restore_terminal_for_state(
                                 ctx,
-                                &tstate.working_directory,
+                                tstate,
                                 &mut self.terminal_id_counter,
-                                None,
+                                &self.history_db,
                                 self.settings.scrollback,
-                            ) {
+                            );
+                            if let Some(instance) = instance {
                                 self.terminals.insert(
                                     _id.clone(),
                                     TerminalData {
@@ -2386,6 +2577,7 @@ impl App {
                                         name: tstate.name.clone(),
                                         font_size: tstate.font_size,
                                         shell_id: tstate.shell.clone(),
+                                        host: host_ref,
                                     },
                                 );
                             }
@@ -2754,6 +2946,16 @@ impl App {
         let mut close_after = false;
         let mut do_action = false;
 
+        // Unified key protocol, BEFORE the Modal: Enter in an input
+        // dialog means CONFIRM (consumed - the old `key_pressed` read
+        // let the same Enter also fall through to the terminal).
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter)) {
+            do_action = true;
+        }
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+            close_after = true;
+        }
+
         // Render the dialog as a Modal. The Modal sets the topmost
         // modal layer so the TextEdit can reliably capture focus.
         let modal = egui::Modal::new(egui::Id::new(modal_id))
@@ -2780,17 +2982,10 @@ impl App {
             // Body
             match kind {
                 DialogKind::New | DialogKind::Copy | DialogKind::Rename => {
-                    let _resp = ui.add(
+                    ui.add(
                         egui::TextEdit::singleline(&mut self.theme_dialog.name_input)
                             .id(input_id)
                             .desired_width(340.0),
-                    );
-                    eprintln!(
-                        "FOCUS_DEBUG: modal={:?} input_id={:?} has_focus={} value='{}'",
-                        modal_id,
-                        input_id,
-                        _resp.has_focus(),
-                        self.theme_dialog.name_input
                     );
                 }
                 DialogKind::Delete => {
@@ -2810,13 +3005,6 @@ impl App {
             ui.horizontal(|ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button(&self.texts.theme_editor.confirm).clicked() {
-                        do_action = true;
-                    }
-                    if matches!(
-                        kind,
-                        DialogKind::New | DialogKind::Copy | DialogKind::Rename
-                    ) && ui.input(|i| i.key_pressed(egui::Key::Enter))
-                    {
                         do_action = true;
                     }
                     if ui.button(&self.texts.theme_editor.cancel).clicked() {
@@ -3165,7 +3353,6 @@ impl App {
 
     fn close_dialog(&mut self, kind: DialogKind) {
         self.theme_dialog.name_input.clear();
-        self.theme_dialog.focus_requested = false;
         match kind {
             DialogKind::New => self.theme_dialog.show_new_dialog = false,
             DialogKind::Copy => self.theme_dialog.show_copy_dialog = false,
@@ -3327,6 +3514,13 @@ impl App {
             self.settings_edit.smooth_level = level;
         }
 
+        // Red warning banner on PROD-marked SSH host terminals.
+        let mut prod_banner = self.settings_edit.ssh_prod_banner;
+        self.settings_row(ui, &t.prod_banner, |ui| {
+            ui.checkbox(&mut prod_banner, "");
+        });
+        self.settings_edit.ssh_prod_banner = prod_banner;
+
         self.settings_group(ui, &b.data_section);
         let mut max_h = self.settings_edit.max_history;
         let mut sb = self.settings_edit.scrollback;
@@ -3387,9 +3581,11 @@ impl App {
         });
         if clear {
             self.show_clear_history_confirm = true;
+            self.settings_clear_just_opened = true;
         }
         if clear_favs {
             self.show_clear_favorites_confirm = true;
+            self.fav_clear_just_opened = true;
         }
 
         // Group footer: path hints as weak, wrapping small text.
@@ -5002,6 +5198,7 @@ impl App {
                         .galley(btn_rect.center() - ng.size() / 2.0, ng, menu_fg);
                     if nresp.clicked() {
                         self.fav_name_dialog = Some((None, String::new()));
+                        self.fav_name_just_opened = true;
                     }
 
                     // --- "Clear favorites" button, right-aligned in the
@@ -5176,6 +5373,7 @@ impl App {
                                         .clicked()
                                 {
                                     self.fav_delete_confirm = Some((fid, folders[fidx].1.clone()));
+                                    self.fav_del_just_opened = true;
                                     menu_ui.close_menu();
                                 }
                             });
@@ -5322,6 +5520,7 @@ impl App {
                                 }
                                 if add_cmd_clicked {
                                     self.fav_cmd_dialog = Some((fid, String::new()));
+                                    self.fav_cmd_just_opened = true;
                                 }
                                 if rename_clicked {
                                     self.fav_name_dialog =
@@ -5329,6 +5528,7 @@ impl App {
                                 }
                                 if delete_clicked && !is_default_folder {
                                     self.fav_delete_confirm = Some((fid, folders[fidx].1.clone()));
+                                    self.fav_del_just_opened = true;
                                 }
                             }
 
@@ -5970,9 +6170,11 @@ impl App {
         // Footer: clear global favorites (same confirm dialog as settings).
         if clear_favs_clicked {
             self.show_clear_favorites_confirm = true;
+            self.fav_clear_just_opened = true;
         }
         if clear_history_clicked {
             self.history_clear_confirm = Some(tab.clone());
+            self.hist_clear_just_opened = true;
         }
         if close_clicked {
             self.close_history_menu(&tab);
@@ -5986,8 +6188,19 @@ impl App {
         let Some(tab) = self.history_clear_confirm.clone() else {
             return;
         };
-        let mut confirmed = false;
-        let mut cancelled = false;
+        // Rising edge: start on the safe side (CANCEL).
+        if std::mem::take(&mut self.hist_clear_just_opened) {
+            self.dialog_kb_confirm = false;
+        }
+        // Unified protocol, BEFORE the Modal.
+        let keys = dialog_keys(ctx, &mut self.dialog_kb_confirm, true);
+        let mut confirmed = keys.confirm;
+        let mut cancelled = keys.cancel;
+        if keys.close {
+            self.history_clear_confirm = None;
+            return;
+        }
+        let mut kb = self.dialog_kb_confirm;
         let title = self.texts.stats.clear_history_title.clone();
         let body = self.texts.stats.clear_history_body.clone();
         let confirm_txt = self.texts.theme_editor.dialog_confirm.clone();
@@ -6010,15 +6223,6 @@ impl App {
             .show(ctx, |ui| {
                 ui.set_min_size(egui::vec2(dlg_w, dlg_h));
                 ui.heading(title);
-                // Keyboard model: CANCEL default, Left/Right toggle,
-                // Enter activates.
-                let (k_confirm, k_cancel) = confirm_dialog_keys(
-                    ui,
-                    egui::Id::new("hist_clear_confirm_btn"),
-                    egui::Id::new("hist_clear_cancel_btn"),
-                );
-                confirmed |= k_confirm;
-                cancelled |= k_cancel;
                 ui.style_mut().spacing.item_spacing = egui::vec2(6.0, 4.0);
                 ui.style_mut().spacing.interact_size.y = 24.0;
                 ui.style_mut().spacing.button_padding = egui::vec2(10.0, 3.0);
@@ -6028,28 +6232,20 @@ impl App {
                     .exact_height(44.0)
                     .show_inside(ui, |ui| {
                         ui.add_space(20.0);
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui
-                                .add(
-                                    egui::Button::new(
-                                        egui::RichText::new(confirm_txt)
-                                            .strong()
-                                            .color(egui::Color32::WHITE),
-                                    )
-                                    .fill(danger),
-                                )
-                                .clicked()
-                            {
-                                confirmed = true;
-                            }
-                            ui.add_space(16.0);
-                            if ui.button(&cancel_txt).clicked() {
-                                cancelled = true;
-                            }
-                        });
+                        let (c, x) = Self::dialog_button_row(
+                            ui,
+                            &mut kb,
+                            egui::Id::new("hist_clear_confirm_btn"),
+                            egui::Id::new("hist_clear_cancel_btn"),
+                            &confirm_txt,
+                            &cancel_txt,
+                        );
+                        confirmed |= c;
+                        cancelled |= x;
                     });
                 // Body fills the remaining central area (top-aligned).
                 ui.label(egui::RichText::new(body).size(13.0).color(text_col));
+                let _ = danger;
             });
         // Backdrop click cancels.
         if modal.backdrop_response.clicked() {
@@ -6065,19 +6261,13 @@ impl App {
             self.history_clear_confirm = None;
         }
     }
-    /// Keyboard focus model shared by the favorite dialogs' button rows.
-    /// `initial` is the default-focused button. Left/Right toggle between
-    /// the two; Enter activates whichever holds focus (clicks work as
-    /// usual). Draws manual buttons under STABLE ids so focus requests
-    /// land exactly on them (egui Buttons have no id() in 0.31).
-    /// Returns (confirm_clicked, cancel_clicked).
-    /// Keyboard focus model shared by the favorite dialogs' button rows.
-    /// `initial` is the default-focused button. Left/Right toggle between
-    /// the two; Enter activates whichever holds focus (clicks work as
-    /// usual). Draws manual buttons under STABLE ids so focus requests
-    /// land exactly on them (egui Buttons have no id() in 0.31).
-    /// Returns (confirm_clicked, cancel_clicked).
-    fn fav_dialog_button_row(
+    /// Draw the two-button row for any [`dialog_keys`]-driven dialog.
+    /// Pure rendering + click detection: the keyboard cursor lives in
+    /// `dialog_kb_confirm` (toggled by `dialog_keys` BEFORE the dialog
+    /// is created), and the selected side is highlighted so the user
+    /// sees which button Enter will activate. Returns
+    /// (confirm_clicked, cancel_clicked).
+    fn dialog_button_row(
         ui: &mut egui::Ui,
         kb_confirm: &mut bool,
         confirm_id: egui::Id,
@@ -6085,22 +6275,6 @@ impl App {
         confirm_label: &str,
         cancel_label: &str,
     ) -> (bool, bool) {
-        // Self-managed keyboard model. We DO NOT touch egui's focus
-        // system at all here: request_focus is frame-end, lock-filter
-        // still lets Tab/arrow nav pop focus to neighbouring widgets in
-        // the first frame of the modal, and the cycle is observable to
-        // the user. Instead the caller owns `kb_confirm` (which button
-        // is the "focused" one), and we visually highlight the
-        // currently-selected button + bind Enter to activate it.
-        let left = ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft));
-        let right = ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight));
-        if left || right {
-            *kb_confirm = !*kb_confirm;
-        }
-        // Enter is handled by the caller (fav_delete_confirm /
-        // fav_name_dialog / fav_cmd_dialog) BEFORE this row runs, so the
-        // Modal can't swallow it. Visual highlight is all we need here.
-
         let draw = |ui: &mut egui::Ui, id: egui::Id, label: &str, is_selected: bool| -> bool {
             let font = egui::FontId::proportional(13.0);
             let galley =
@@ -6141,25 +6315,415 @@ impl App {
             .inner;
         (c, x)
     }
+    fn refresh_ssh_hosts(&mut self) {
+        self.ssh_hosts = self.history_db.ssh_hosts();
+    }
+
+    /// Sidebar SSH host section: header + search + one row per host.
+    /// A row click connects in the active workspace's focused leaf.
+    fn render_ssh_hosts_section(&mut self, ui: &mut egui::Ui) {
+        ui.add_space(6.0);
+        ui.separator();
+        ui.add_space(2.0);
+
+        // Header: section label left, add button right.
+        ui.horizontal(|ui| {
+            ui.label(
+                egui::RichText::new(&self.texts.ssh.section)
+                    .size(10.0)
+                    .color(self.active_theme.app.weak_text.to_egui()),
+            );
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let add_btn = ui.add(
+                    egui::Button::new(egui::RichText::new(egui_phosphor::regular::PLUS).size(11.0))
+                        .frame(false),
+                );
+                if add_btn.clicked() {
+                    self.ssh_dialog = Some(SshHostDialog::new());
+                    self.ssh_dialog_just_opened = true;
+                }
+                let _ = add_btn.on_hover_text(&self.texts.ssh.add);
+            });
+        });
+
+        if self.ssh_hosts.is_empty() {
+            ui.label(
+                egui::RichText::new(&self.texts.ssh.empty_hint)
+                    .size(11.0)
+                    .color(self.active_theme.app.weak_text.to_egui()),
+            );
+            return;
+        }
+
+        // Search only earns its space once there is something to search.
+        ui.add(
+            egui::TextEdit::singleline(&mut self.ssh_host_filter)
+                .hint_text(&self.texts.ssh.search_hint)
+                .desired_width(ui.available_width())
+                .font(egui::FontId::proportional(12.0)),
+        );
+
+        let filter = self.ssh_host_filter.trim().to_lowercase();
+        let hosts = self.ssh_hosts.clone();
+        let danger = self.active_theme.app.danger.to_egui();
+        let text = self.active_theme.app.text.to_egui();
+        let weak_text = self.active_theme.app.weak_text.to_egui();
+        let hover_fill = ui.visuals().widgets.hovered.weak_bg_fill;
+        let mut connect_target = None;
+        for host in &hosts {
+            if !filter.is_empty()
+                && !host.name.to_lowercase().contains(&filter)
+                && !host.group.to_lowercase().contains(&filter)
+                && !host.host.to_lowercase().contains(&filter)
+            {
+                continue;
+            }
+            let row_h = ui.spacing().interact_size.y;
+            let (rect, resp) = ui.allocate_exact_size(
+                egui::vec2(ui.available_width(), row_h),
+                egui::Sense::click(),
+            );
+            ui.painter().rect_filled(
+                rect,
+                3.0,
+                if resp.hovered() {
+                    hover_fill
+                } else {
+                    egui::Color32::TRANSPARENT
+                },
+            );
+
+            let child = ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(rect)
+                    .layout(egui::Layout::left_to_right(egui::Align::Center)),
+            );
+            let icon = if host.prod {
+                egui_phosphor::regular::WARNING
+            } else {
+                egui_phosphor::regular::PLUG
+            };
+            child.painter().text(
+                egui::pos2(rect.min.x + 8.0, rect.center().y),
+                egui::Align2::LEFT_CENTER,
+                icon,
+                egui::FontId::proportional(12.0),
+                if host.prod { danger } else { weak_text },
+            );
+            child.painter().text(
+                egui::pos2(rect.min.x + 26.0, rect.center().y),
+                egui::Align2::LEFT_CENTER,
+                host.name.clone(),
+                egui::FontId::proportional(13.0),
+                if host.prod { danger } else { text },
+            );
+            if resp.clicked() {
+                connect_target = Some(host.id);
+            }
+            // on_hover_text / context_menu consume the response by value.
+            let resp = if resp.hovered() {
+                resp.on_hover_text(format!(
+                    "{} · {}",
+                    crate::hosts::ssh_target(host),
+                    host.group
+                ))
+            } else {
+                resp
+            };
+            resp.context_menu(|ui| {
+                if ui.button(&self.texts.ssh.connect).clicked() {
+                    connect_target = Some(host.id);
+                    ui.close_menu();
+                }
+                if ui.button(&self.texts.ssh.edit).clicked() {
+                    self.ssh_dialog = Some(SshHostDialog::from_host(host));
+                    self.ssh_dialog_just_opened = true;
+                    ui.close_menu();
+                }
+                if ui.button(&self.texts.ssh.duplicate).clicked() {
+                    let mut copy = host.clone();
+                    copy.id = 0;
+                    copy.name = format!("{} copy", host.name);
+                    copy.prod = false;
+                    if self.history_db.ssh_host_insert(&copy).is_some() {
+                        self.refresh_ssh_hosts();
+                    }
+                    ui.close_menu();
+                }
+                ui.separator();
+                if ui.button(&self.texts.ssh.delete).clicked() {
+                    self.ssh_delete_confirm = Some((host.id, host.name.clone()));
+                    self.ssh_del_just_opened = true;
+                    ui.close_menu();
+                }
+            });
+        }
+        if let Some(host_id) = connect_target {
+            self.connect_ssh_host(ui.ctx(), host_id);
+        }
+    }
+
+    /// SSH host create/edit form. Enter confirms (with inline validation),
+    /// Esc cancels — same keyboard protocol as the favorite dialogs.
+    fn render_ssh_host_dialog(&mut self, ctx: &egui::Context) {
+        if self.ssh_dialog.is_none() {
+            return;
+        }
+        // Rising edge: a freshly-opened dialog starts on the safe side.
+        if std::mem::take(&mut self.ssh_dialog_just_opened) {
+            self.dialog_kb_confirm = false;
+        }
+        // Unified protocol, BEFORE the Modal so nothing swallows the keys.
+        let keys = dialog_keys(ctx, &mut self.dialog_kb_confirm, true);
+        let mut confirm = keys.enter || keys.confirm;
+        let mut cancel = keys.cancel;
+        if keys.close {
+            self.ssh_dialog = None;
+            return;
+        }
+        let t = self.texts.ssh.clone();
+        let editing = self
+            .ssh_dialog
+            .as_ref()
+            .is_some_and(|d| d.edit_id.is_some());
+        let title = if editing {
+            t.dialog_edit_title
+        } else {
+            t.dialog_new_title
+        };
+        let confirm_id = egui::Id::new("ssh_host_confirm_btn");
+        let cancel_id = egui::Id::new("ssh_host_cancel_btn");
+        let mut browse_clicked = false;
+        egui::Modal::new(egui::Id::new("ssh_host_dialog"))
+            .frame(egui::Frame::window(&ctx.style()))
+            .show(ctx, |ui| {
+                ui.set_min_width(340.0);
+                ui.heading(title);
+                ui.add_space(6.0);
+                egui::Grid::new("ssh_host_form")
+                    .num_columns(2)
+                    .spacing([8.0, 6.0])
+                    .show(ui, |ui| {
+                        let field_w = 210.0;
+                        ui.label(&t.label_name);
+                        ui.add_sized(
+                            [field_w, 20.0],
+                            egui::TextEdit::singleline(&mut self.ssh_dialog.as_mut().unwrap().name),
+                        );
+                        ui.end_row();
+                        ui.label(&t.label_group);
+                        ui.add_sized(
+                            [field_w, 20.0],
+                            egui::TextEdit::singleline(
+                                &mut self.ssh_dialog.as_mut().unwrap().group,
+                            ),
+                        );
+                        ui.end_row();
+                        ui.label(&t.label_host);
+                        ui.add_sized(
+                            [field_w, 20.0],
+                            egui::TextEdit::singleline(&mut self.ssh_dialog.as_mut().unwrap().host),
+                        );
+                        ui.end_row();
+                        ui.label(&t.label_port);
+                        ui.add_sized(
+                            [field_w, 20.0],
+                            egui::DragValue::new(&mut self.ssh_dialog.as_mut().unwrap().port)
+                                .range(1..=65535),
+                        );
+                        ui.end_row();
+                        ui.label(&t.label_user);
+                        ui.add_sized(
+                            [field_w, 20.0],
+                            egui::TextEdit::singleline(&mut self.ssh_dialog.as_mut().unwrap().user),
+                        );
+                        ui.end_row();
+                        ui.label(&t.label_auth);
+                        ui.horizontal(|ui| {
+                            let auth = &mut self.ssh_dialog.as_mut().unwrap().auth;
+                            ui.radio_value(auth, crate::hosts::SshAuth::Agent, &t.auth_agent);
+                            ui.radio_value(auth, crate::hosts::SshAuth::Password, &t.auth_password);
+                            ui.radio_value(
+                                auth,
+                                crate::hosts::SshAuth::Key {
+                                    path: String::new(),
+                                },
+                                &t.auth_key,
+                            );
+                        });
+                        ui.end_row();
+                        if self
+                            .ssh_dialog
+                            .as_ref()
+                            .is_some_and(|d| matches!(d.auth, crate::hosts::SshAuth::Key { .. }))
+                        {
+                            ui.label(&t.label_key_path);
+                            ui.horizontal(|ui| {
+                                ui.add_sized(
+                                    [field_w - 70.0, 20.0],
+                                    egui::TextEdit::singleline(
+                                        &mut self.ssh_dialog.as_mut().unwrap().key_path,
+                                    ),
+                                );
+                                if ui.button(&t.browse).clicked() {
+                                    browse_clicked = true;
+                                }
+                            });
+                            ui.end_row();
+                        }
+                        ui.label("");
+                        ui.checkbox(&mut self.ssh_dialog.as_mut().unwrap().prod, &t.label_prod);
+                        ui.end_row();
+                    });
+                if self.ssh_dialog.as_ref().is_some_and(|d| d.error) {
+                    ui.label(
+                        egui::RichText::new(&t.error_required)
+                            .size(11.0)
+                            .color(self.active_theme.app.danger.to_egui()),
+                    );
+                }
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    let (c, x) = Self::dialog_button_row(
+                        ui,
+                        &mut self.dialog_kb_confirm,
+                        confirm_id,
+                        cancel_id,
+                        &self.texts.theme_editor.dialog_confirm,
+                        &self.texts.theme_editor.cancel,
+                    );
+                    confirm |= c;
+                    cancel |= x;
+                });
+            });
+        if browse_clicked {
+            if let Some(path) = rfd::FileDialog::new().pick_file() {
+                if let Some(dlg) = self.ssh_dialog.as_mut() {
+                    dlg.key_path = path.to_string_lossy().to_string();
+                }
+            }
+        }
+        if confirm || cancel {
+            if confirm {
+                let Some(dlg) = self.ssh_dialog.take() else {
+                    return;
+                };
+                let name = dlg.name.trim().to_string();
+                let host_addr = dlg.host.trim().to_string();
+                if name.is_empty() || host_addr.is_empty() {
+                    self.ssh_dialog = Some(SshHostDialog { error: true, ..dlg });
+                } else {
+                    let mut host = crate::hosts::SshHost {
+                        id: dlg.edit_id.unwrap_or(0),
+                        name,
+                        group: dlg.group.trim().to_string(),
+                        host: host_addr,
+                        port: dlg.port.max(1),
+                        user: dlg.user.trim().to_string(),
+                        auth: match dlg.auth {
+                            crate::hosts::SshAuth::Key { .. } => crate::hosts::SshAuth::Key {
+                                path: dlg.key_path.clone(),
+                            },
+                            other => other,
+                        },
+                        prod: dlg.prod,
+                        sort_key: 0,
+                    };
+                    match dlg.edit_id {
+                        Some(id) => {
+                            host.id = id;
+                            self.history_db.ssh_host_update(&host);
+                        }
+                        None => {
+                            if let Some(new_id) = self.history_db.ssh_host_insert(&host) {
+                                host.id = new_id;
+                            }
+                        }
+                    }
+                    self.refresh_ssh_hosts();
+                }
+            } else {
+                self.ssh_dialog = None;
+            }
+        }
+    }
+
+    /// Delete-host confirmation (a stray Enter must NOT kill the entry).
+    fn render_ssh_delete_confirm(&mut self, ctx: &egui::Context) {
+        let Some((host_id, host_name)) = self.ssh_delete_confirm.clone() else {
+            return;
+        };
+        if std::mem::take(&mut self.ssh_del_just_opened) {
+            self.dialog_kb_confirm = false;
+        }
+        let keys = dialog_keys(ctx, &mut self.dialog_kb_confirm, true);
+        let mut confirmed = keys.confirm;
+        let mut cancelled = keys.cancel;
+        let mut open = true;
+        let title = self.texts.ssh.delete_title.clone();
+        let body = self.texts.ssh.delete_body.replace("{}", &host_name);
+        let mut kb = self.dialog_kb_confirm;
+        let inner = egui::Window::new(title)
+            .id(egui::Id::new("ssh_delete_confirm_window"))
+            .open(&mut open)
+            .resizable(false)
+            .collapsible(false)
+            .default_pos(screen_center(ctx))
+            .pivot(egui::Align2::CENTER_CENTER)
+            .show(ctx, |ui| {
+                ui.label(body);
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    Self::dialog_button_row(
+                        ui,
+                        &mut kb,
+                        egui::Id::new("ssh_del_confirm"),
+                        egui::Id::new("ssh_del_cancel"),
+                        &self.texts.close_confirm.confirm,
+                        &self.texts.close_confirm.cancel,
+                    )
+                })
+                .inner
+            })
+            .and_then(|r| r.inner);
+        if let Some((c, x)) = inner {
+            confirmed |= c;
+            cancelled |= x;
+        }
+        if keys.close {
+            cancelled = true;
+        }
+        if confirmed {
+            self.history_db.ssh_host_delete(host_id);
+            self.refresh_ssh_hosts();
+            self.ssh_delete_confirm = None;
+        }
+        if cancelled || !open {
+            self.ssh_delete_confirm = None;
+        }
+    }
+
     fn render_fav_name_dialog(&mut self, ctx: &egui::Context) {
         let Some((folder_id, _)) = self.fav_name_dialog.clone() else {
             return;
         };
-        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+        // Rising edge: a freshly-opened dialog starts on the safe side.
+        if std::mem::take(&mut self.fav_name_just_opened) {
+            self.dialog_kb_confirm = false;
+        }
+        // Unified protocol, BEFORE the Modal so nothing swallows the keys.
+        // Enter in an input dialog means CONFIRM regardless of cursor.
+        let keys = dialog_keys(ctx, &mut self.dialog_kb_confirm, true);
+        let mut confirm = keys.enter || keys.confirm;
+        let mut cancel = keys.cancel;
+        if keys.close {
             self.fav_name_dialog = None;
             return;
         }
-        // TextEdit (singleline) doesn't react to Enter; consume it
-        // here at the top of the function so the Modal can't grab it
-        // first. The Modal still owns the click & arrow-key model.
-        let enter_pressed =
-            ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
-        let mut confirm = enter_pressed;
         let title = match folder_id {
             Some(_) => self.texts.terminal.fav_rename_title.clone(),
             None => self.texts.terminal.fav_new_title.clone(),
         };
-        let mut cancel = false;
         let confirm_id = egui::Id::new("fav_name_confirm_btn");
         let cancel_id = egui::Id::new("fav_name_cancel_btn");
         egui::Modal::new(egui::Id::new("fav_name_dialog"))
@@ -6178,9 +6742,9 @@ impl App {
                 resp.request_focus();
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
-                    let (c, x) = Self::fav_dialog_button_row(
+                    let (c, x) = Self::dialog_button_row(
                         ui,
-                        &mut self.fav_del_kb_confirm,
+                        &mut self.dialog_kb_confirm,
                         confirm_id,
                         cancel_id,
                         &self.texts.theme_editor.dialog_confirm.clone(),
@@ -6220,16 +6784,19 @@ impl App {
         if self.fav_cmd_dialog.is_none() {
             return;
         }
-        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+        // Rising edge: a freshly-opened dialog starts on the safe side.
+        if std::mem::take(&mut self.fav_cmd_just_opened) {
+            self.dialog_kb_confirm = false;
+        }
+        // Unified protocol, BEFORE the Modal. Enter in an input dialog
+        // means CONFIRM regardless of cursor.
+        let keys = dialog_keys(ctx, &mut self.dialog_kb_confirm, true);
+        let mut confirm = keys.enter || keys.confirm;
+        let mut cancel = keys.cancel;
+        if keys.close {
             self.fav_cmd_dialog = None;
             return;
         }
-        // TextEdit doesn't react to Enter — consume at the top so the
-        // Modal can't grab it first.
-        let enter_pressed =
-            ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
-        let mut confirm = enter_pressed;
-        let mut cancel = false;
         let confirm_id = egui::Id::new("fav_cmd_confirm_btn");
         let cancel_id = egui::Id::new("fav_cmd_cancel_btn");
         egui::Modal::new(egui::Id::new("fav_cmd_dialog"))
@@ -6245,9 +6812,9 @@ impl App {
                 resp.request_focus();
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
-                    let (c, x) = Self::fav_dialog_button_row(
+                    let (c, x) = Self::dialog_button_row(
                         ui,
-                        &mut self.fav_del_kb_confirm,
+                        &mut self.dialog_kb_confirm,
                         confirm_id,
                         cancel_id,
                         &self.texts.theme_editor.dialog_confirm.clone(),
@@ -6280,21 +6847,20 @@ impl App {
         let Some((fid, name)) = self.fav_delete_confirm.clone() else {
             return;
         };
-        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+        // Rising edge: a freshly-opened dialog starts on the safe side
+        // (CANCEL - a stray Enter must not delete the folder).
+        if std::mem::take(&mut self.fav_del_just_opened) {
+            self.dialog_kb_confirm = false;
+        }
+        // Unified protocol, BEFORE the Modal: Enter activates whichever
+        // side the cursor is on.
+        let keys = dialog_keys(ctx, &mut self.dialog_kb_confirm, true);
+        let mut confirm = keys.confirm;
+        let mut cancel = keys.cancel;
+        if keys.close {
             self.fav_delete_confirm = None;
             return;
         }
-        // The Modal's own Area may consume Enter before our button row
-        // sees it, so we ALWAYS detect Enter at the top of this function
-        // and apply it to the KB-selected button.
-        let enter_pressed =
-            ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
-        let mut confirm = false;
-        let mut cancel = false;
-        // The fav_dialog_button_row is fully self-managed: it owns
-        // fav_del_kb_confirm (Left/Right toggles, Enter activates), and
-        // does NOT touch egui's focus system. Modal + backdrop click
-        // handle the rest.
         let confirm_id = egui::Id::new("fav_del_confirm_btn");
         let cancel_id = egui::Id::new("fav_del_cancel_btn");
         let modal = egui::Modal::new(egui::Id::new("fav_delete_confirm"))
@@ -6307,9 +6873,9 @@ impl App {
                 ui.label(self.texts.terminal.fav_delete_body.clone());
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
-                    let (c, x) = Self::fav_dialog_button_row(
+                    let (c, x) = Self::dialog_button_row(
                         ui,
-                        &mut self.fav_del_kb_confirm,
+                        &mut self.dialog_kb_confirm,
                         confirm_id,
                         cancel_id,
                         &self.texts.theme_editor.dialog_confirm.clone(),
@@ -6325,15 +6891,6 @@ impl App {
             cancel = true;
         }
         let _ = modal.is_top_modal;
-        // Apply the Enter that was consumed at the top of this function
-        // to the currently KB-selected button.
-        if enter_pressed {
-            if self.fav_del_kb_confirm {
-                confirm = true;
-            } else {
-                cancel = true;
-            }
-        }
         if confirm || cancel {
             if confirm {
                 self.history_db.fav_folder_delete(fid);
@@ -6444,10 +7001,14 @@ impl App {
 /// memory under the "restart_popup_choice" id so the App update loop can
 /// read and clear it without borrowing self.
 fn render_restart_popup(ctx: &egui::Context, texts: &crate::i18n::Texts) {
+    // Unified protocol, BEFORE the Window. Default cursor = CANCEL
+    // (restarting is disruptive; a stray Enter must not restart).
+    let mut kb = false;
+    let keys = dialog_keys(ctx, &mut kb, true);
+    let mut restart = keys.confirm;
+    let mut cancel = keys.cancel || keys.close;
     let mut open = true;
-    let mut restart = false;
-    let mut cancel = false;
-    egui::Window::new(&texts.update.restart_title)
+    let inner = egui::Window::new(&texts.update.restart_title)
         .open(&mut open)
         .resizable(false)
         .collapsible(false)
@@ -6458,15 +7019,24 @@ fn render_restart_popup(ctx: &egui::Context, texts: &crate::i18n::Texts) {
                 ui.label(&texts.update.restart_body);
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
-                    if ui.button(&texts.update.restart_confirm).clicked() {
-                        restart = true;
-                    }
-                    if ui.button(&texts.theme_editor.cancel).clicked() {
-                        cancel = true;
-                    }
-                });
-            });
-        });
+                    App::dialog_button_row(
+                        ui,
+                        &mut kb,
+                        egui::Id::new("restart_confirm_btn"),
+                        egui::Id::new("restart_cancel_btn"),
+                        &texts.update.restart_confirm,
+                        &texts.theme_editor.cancel,
+                    )
+                })
+                .inner
+            })
+            .inner
+        })
+        .and_then(|r| r.inner);
+    if let Some((c, x)) = inner {
+        restart |= c;
+        cancel |= x;
+    }
     if !open {
         cancel = true;
     }
@@ -6861,6 +7431,7 @@ impl eframe::App for App {
                         if let Some((fid, name)) = target {
                             if name != crate::history_db::HistoryDb::DEFAULT_FAVORITE_FOLDER {
                                 self.fav_delete_confirm = Some((fid, name));
+                                self.fav_del_just_opened = true;
                             }
                         }
                     } else {
@@ -7115,11 +7686,13 @@ impl eframe::App for App {
             }
         }
 
-        if !workspace_renaming
-            && global_shortcuts_allowed(self)
-            && !binding_was_recording
-            && consume_exact_shortcut(ctx, &binds, "toggle_workspace_sidebar")
-        {
+        // Unified shortcut gate: no shortcuts while ANY modal dialog owns
+        // the UI or a key-binding recording is in progress. This replaces
+        // the old `global_shortcuts_allowed`, whose dialog list had
+        // drifted from `any_modal_open` (theme editor etc. were missing).
+        let shortcuts_allowed = !workspace_renaming && !modal_hijack && !binding_was_recording;
+
+        if shortcuts_allowed && consume_exact_shortcut(ctx, &binds, "toggle_workspace_sidebar") {
             self.workspace_sidebar_visible = !self.workspace_sidebar_visible;
         }
 
@@ -7225,7 +7798,7 @@ impl eframe::App for App {
 
         // Configurable shortcuts
 
-        if !workspace_renaming && check_shortcut(ctx, &binds, "new_terminal") {
+        if shortcuts_allowed && check_shortcut(ctx, &binds, "new_terminal") {
             if let Some(tree) = self.dock_states.get_mut(&self.active_panel) {
                 if let Some((surface, node)) = tree.focused_leaf() {
                     self.pending_new_terminal = Some((self.active_panel, surface, node));
@@ -7234,7 +7807,7 @@ impl eframe::App for App {
         }
         // Cycle to the next terminal tab within the CURRENT panel's
         // focused leaf (wraps from the last back to the first).
-        if !workspace_renaming && check_shortcut(ctx, &binds, "next_terminal") {
+        if shortcuts_allowed && check_shortcut(ctx, &binds, "next_terminal") {
             if let Some(tree) = self.dock_states.get_mut(&self.active_panel) {
                 if let Some((surface, node)) = tree.focused_leaf() {
                     let tabs: Vec<String> = tree
@@ -7261,12 +7834,12 @@ impl eframe::App for App {
             }
         }
         // Cycle the SPLIT PANES (leaves) inside the current workspace.
-        if !workspace_renaming && check_shortcut(ctx, &binds, "next_panel") {
+        if shortcuts_allowed && check_shortcut(ctx, &binds, "next_panel") {
             self.focus_adjacent_panel(1);
         }
         // Cycle FOCUS across workspaces (wraps last → first) and focus
         // the workspace's active terminal.
-        if !workspace_renaming
+        if shortcuts_allowed
             && check_shortcut(ctx, &binds, "next_workspace")
             && self.panels.len() > 1
         {
@@ -7274,37 +7847,36 @@ impl eframe::App for App {
             self.restore_workspace_focus(self.active_panel);
         }
         // Save the current layout (menu Workspace > Save).
-        if !workspace_renaming && check_shortcut(ctx, &binds, "save_scene") {
+        if shortcuts_allowed && check_shortcut(ctx, &binds, "save_scene") {
             self.save_scene();
         }
-        if !workspace_renaming && check_shortcut(ctx, &binds, "close_terminal") {
+        if shortcuts_allowed && check_shortcut(ctx, &binds, "close_terminal") {
             // Same confirmation dialog as the mouse-close path (on_close):
             // the shortcut must not bypass it.
             if let Some(tab) = &self.focused_terminal.clone() {
                 if self.pending_close_confirm.is_none() {
                     self.pending_close_confirm = Some(tab.clone());
+                    self.close_confirm_just_opened = true;
                 }
             }
         }
-        if !workspace_renaming
-            && check_shortcut(ctx, &binds, "workspace_up")
-            && self.active_panel > 0
+        if shortcuts_allowed && check_shortcut(ctx, &binds, "workspace_up") && self.active_panel > 0
         {
             self.active_panel -= 1;
         }
-        if !workspace_renaming
+        if shortcuts_allowed
             && check_shortcut(ctx, &binds, "workspace_down")
             && self.active_panel + 1 < self.panels.len()
         {
             self.active_panel += 1;
         }
-        if !workspace_renaming && check_shortcut(ctx, &binds, "panel_left") {
+        if shortcuts_allowed && check_shortcut(ctx, &binds, "panel_left") {
             self.focus_adjacent_panel(-1);
         }
-        if !workspace_renaming && check_shortcut(ctx, &binds, "panel_right") {
+        if shortcuts_allowed && check_shortcut(ctx, &binds, "panel_right") {
             self.focus_adjacent_panel(1);
         }
-        if !workspace_renaming && check_shortcut(ctx, &binds, "lock_workspace") {
+        if shortcuts_allowed && check_shortcut(ctx, &binds, "lock_workspace") {
             if self.locked_panels.contains(&self.active_panel) {
                 // Already locked: overlay already shows password input.
                 self.lock_password_input.clear();
@@ -7315,11 +7887,11 @@ impl eframe::App for App {
         }
 
         // Global UI zoom (Ctrl +/- by default, user-configurable).
-        if !workspace_renaming && check_shortcut(ctx, &binds, "zoom_in") {
+        if shortcuts_allowed && check_shortcut(ctx, &binds, "zoom_in") {
             let z = ctx.zoom_factor();
             ctx.set_zoom_factor((z + 0.1).min(3.0));
         }
-        if !workspace_renaming && check_shortcut(ctx, &binds, "zoom_out") {
+        if shortcuts_allowed && check_shortcut(ctx, &binds, "zoom_out") {
             let z = ctx.zoom_factor();
             ctx.set_zoom_factor((z - 0.1).max(0.5));
         }
@@ -7871,14 +8443,24 @@ impl eframe::App for App {
         // Confirm-dialog for deleting ALL terminal command history.
         // Styled like the password popups: compact metrics, danger confirm.
         if self.show_clear_history_confirm {
+            // Rising edge: start on the safe side (CANCEL).
+            if std::mem::take(&mut self.settings_clear_just_opened) {
+                self.dialog_kb_confirm = false;
+            }
+            // Unified protocol, BEFORE the Window.
+            let keys = dialog_keys(ctx, &mut self.dialog_kb_confirm, true);
+            let mut confirmed = keys.confirm;
+            let mut cancelled = keys.cancel;
+            if keys.close {
+                self.show_clear_history_confirm = false;
+                return;
+            }
+            let mut kb = self.dialog_kb_confirm;
             let mut open = self.show_clear_history_confirm;
-            let mut confirmed = false;
-            let mut cancelled = false;
             let title = self.texts.stats.clear_history_title.clone();
             let body = self.texts.stats.clear_history_body.clone();
             let confirm_txt = self.texts.theme_editor.dialog_confirm.clone();
             let cancel_txt = self.texts.theme_editor.cancel.clone();
-            let danger = self.active_theme.app.danger.to_egui();
             let text_col = self.active_theme.app.text.to_egui();
             // Same fixed 360x300 dialog: bottom panel pins the centered
             // button row 20px above the bottom edge; finite height kills
@@ -7904,25 +8486,16 @@ impl eframe::App for App {
                         .exact_height(44.0)
                         .show_inside(ui, |ui| {
                             ui.add_space(20.0);
-                            ui.horizontal_centered(|ui| {
-                                if ui
-                                    .add(
-                                        egui::Button::new(
-                                            egui::RichText::new(confirm_txt)
-                                                .strong()
-                                                .color(egui::Color32::WHITE),
-                                        )
-                                        .fill(danger),
-                                    )
-                                    .clicked()
-                                {
-                                    confirmed = true;
-                                }
-                                ui.add_space(16.0);
-                                if ui.button(&cancel_txt).clicked() {
-                                    cancelled = true;
-                                }
-                            });
+                            let (c, x) = Self::dialog_button_row(
+                                ui,
+                                &mut kb,
+                                egui::Id::new("settings_clear_confirm_btn"),
+                                egui::Id::new("settings_clear_cancel_btn"),
+                                &confirm_txt,
+                                &cancel_txt,
+                            );
+                            confirmed |= c;
+                            cancelled |= x;
                         });
                     ui.label(egui::RichText::new(body).size(13.0).color(text_col));
                 });
@@ -7939,8 +8512,19 @@ impl eframe::App for App {
         // Confirm-dialog for clearing ALL global favorite commands.
         // Same fixed-size danger dialog as the history clear above.
         if self.show_clear_favorites_confirm {
-            let mut confirmed = false;
-            let mut cancelled = false;
+            // Rising edge: start on the safe side (CANCEL).
+            if std::mem::take(&mut self.fav_clear_just_opened) {
+                self.dialog_kb_confirm = false;
+            }
+            // Unified protocol, BEFORE the Modal.
+            let keys = dialog_keys(ctx, &mut self.dialog_kb_confirm, true);
+            let mut confirmed = keys.confirm;
+            let mut cancelled = keys.cancel;
+            if keys.close {
+                self.show_clear_favorites_confirm = false;
+                return;
+            }
+            let mut kb = self.dialog_kb_confirm;
             let title = self.texts.terminal.clear_favorites_title.clone();
             let body = self.texts.terminal.clear_favorites_body.clone();
             let confirm_txt = self.texts.theme_editor.dialog_confirm.clone();
@@ -7957,15 +8541,6 @@ impl eframe::App for App {
                 .show(ctx, |ui| {
                     ui.set_min_size(egui::vec2(dlg_w, dlg_h));
                     ui.heading(title);
-                    // Keyboard model: CANCEL default, Left/Right toggle,
-                    // Enter activates.
-                    let (k_confirm, k_cancel) = confirm_dialog_keys(
-                        ui,
-                        egui::Id::new("fav_clear_confirm_btn"),
-                        egui::Id::new("fav_clear_cancel_btn"),
-                    );
-                    confirmed |= k_confirm;
-                    cancelled |= k_cancel;
                     ui.style_mut().spacing.item_spacing = egui::vec2(6.0, 4.0);
                     ui.style_mut().spacing.interact_size.y = 24.0;
                     ui.style_mut().spacing.button_padding = egui::vec2(10.0, 3.0);
@@ -7974,31 +8549,20 @@ impl eframe::App for App {
                         .exact_height(44.0)
                         .show_inside(ui, |ui| {
                             ui.add_space(20.0);
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    if ui
-                                        .add(
-                                            egui::Button::new(
-                                                egui::RichText::new(confirm_txt)
-                                                    .strong()
-                                                    .color(egui::Color32::WHITE),
-                                            )
-                                            .fill(danger),
-                                        )
-                                        .clicked()
-                                    {
-                                        confirmed = true;
-                                    }
-                                    ui.add_space(16.0);
-                                    if ui.button(&cancel_txt).clicked() {
-                                        cancelled = true;
-                                    }
-                                },
+                            let (c, x) = Self::dialog_button_row(
+                                ui,
+                                &mut kb,
+                                egui::Id::new("fav_clear_confirm_btn"),
+                                egui::Id::new("fav_clear_cancel_btn"),
+                                &confirm_txt,
+                                &cancel_txt,
                             );
+                            confirmed |= c;
+                            cancelled |= x;
                         });
                     ui.label(egui::RichText::new(body).size(13.0).color(text_col));
                 });
+            let _ = danger;
             if cancelled {
                 self.show_clear_favorites_confirm = false;
             } else if confirmed {
@@ -8020,9 +8584,10 @@ impl eframe::App for App {
         }
 
         if self.show_about {
+            // Esc consumed first; no early return (the old `return` skipped
+            // the rest of the frame's UI - sidebar/terminal - flashing it).
             if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
                 self.show_about = false;
-                return;
             }
             let mut open = self.show_about;
             let mut clicked_close = false;
@@ -8264,17 +8829,22 @@ impl eframe::App for App {
 
         // Close workspace confirmation
         if let Some(panel_idx) = self.close_confirm_panel {
-            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
-                self.close_confirm_panel = None;
-                return;
+            // Rising edge: start on the safe side (CANCEL).
+            if std::mem::take(&mut self.ws_close_just_opened) {
+                self.dialog_kb_confirm = false;
             }
+            // Unified protocol, BEFORE the Window.
+            let keys = dialog_keys(ctx, &mut self.dialog_kb_confirm, true);
+            let mut confirmed = keys.confirm;
+            let mut cancelled = keys.cancel || keys.close;
             let mut open = true;
+            let mut kb = self.dialog_kb_confirm;
             let panel_name = self
                 .panels
                 .get(panel_idx)
                 .map(|p| p.name.clone())
                 .unwrap_or_default();
-            egui::Window::new(&self.texts.close_confirm.confirm)
+            let inner = egui::Window::new(&self.texts.close_confirm.confirm)
                 .open(&mut open)
                 .resizable(false)
                 .collapsible(false)
@@ -8289,16 +8859,27 @@ impl eframe::App for App {
                     ));
                     ui.add_space(10.0);
                     ui.horizontal(|ui| {
-                        if ui.button(&self.texts.close_confirm.confirm).clicked() {
-                            self.close_workspace(panel_idx);
-                            self.close_confirm_panel = None;
-                        }
-                        if ui.button(&self.texts.close_confirm.cancel).clicked() {
-                            self.close_confirm_panel = None;
-                        }
-                    });
-                });
-            if !open {
+                        Self::dialog_button_row(
+                            ui,
+                            &mut kb,
+                            egui::Id::new("ws_close_confirm_btn"),
+                            egui::Id::new("ws_close_cancel_btn"),
+                            &self.texts.close_confirm.confirm,
+                            &self.texts.close_confirm.cancel,
+                        )
+                    })
+                    .inner
+                })
+                .and_then(|r| r.inner);
+            if let Some((c, x)) = inner {
+                confirmed |= c;
+                cancelled |= x;
+            }
+            if confirmed {
+                self.close_workspace(panel_idx);
+                self.close_confirm_panel = None;
+            }
+            if cancelled || !open {
                 self.close_confirm_panel = None;
             }
         }
@@ -8349,20 +8930,24 @@ impl eframe::App for App {
         self.render_fav_name_dialog(ctx);
         self.render_fav_cmd_dialog(ctx);
         self.render_fav_delete_confirm(ctx);
+        self.render_ssh_host_dialog(ctx);
+        self.render_ssh_delete_confirm(ctx);
 
         // Terminal close confirmation
         if let Some(ref tab_id) = self.pending_close_confirm.clone() {
+            // Rising edge: start on the safe side (CANCEL - a stray
+            // Enter must not kill the terminal).
+            if std::mem::take(&mut self.close_confirm_just_opened) {
+                self.dialog_kb_confirm = false;
+            }
+            // Unified protocol, BEFORE the Window. Esc now closes too.
+            let keys = dialog_keys(ctx, &mut self.dialog_kb_confirm, true);
+            let mut confirmed = keys.confirm;
+            let mut cancelled = keys.cancel;
             let mut open = true;
-            let mut confirmed = false;
-            let mut cancelled = false;
             let tab_id = tab_id.clone();
-            // Keyboard focus model: CANCEL is the safe default (a stray
-            // Enter must not kill the terminal). Left/Right move the
-            // focus between the two buttons; Enter activates whichever
-            // holds it.
-            let cancel_btn_id = egui::Id::new("close_confirm_cancel");
-            let confirm_btn_id = egui::Id::new("close_confirm_confirm");
-            egui::Window::new(&self.texts.close_confirm.terminal_title)
+            let mut kb = self.dialog_kb_confirm;
+            let inner = egui::Window::new(&self.texts.close_confirm.terminal_title)
                 .id(egui::Id::new("close_confirm_window"))
                 .open(&mut open)
                 .resizable(false)
@@ -8370,91 +8955,38 @@ impl eframe::App for App {
                 .default_pos(screen_center(ctx))
                 .pivot(egui::Align2::CENTER_CENTER)
                 .show(ctx, |ui| {
-                    ui.label(&self.texts.close_confirm.terminal_message);
-                    ui.add_space(10.0);
-                    // Keyboard focus model: CANCEL is the safe default
-                    // (a stray Enter must not kill the terminal).
-                    // Left/Right toggle focus between the two buttons;
-                    // Enter activates the focused one. Buttons are drawn
-                    // manually with STABLE interact ids so focus requests
-                    // land on exactly them.
-                    let focused_now = ui.ctx().memory(|m| m.focused());
-                    let target_is_cancel = focused_now != Some(confirm_btn_id);
-                    if focused_now != Some(confirm_btn_id) && focused_now != Some(cancel_btn_id) {
-                        ui.ctx().memory_mut(|m| m.request_focus(cancel_btn_id));
-                    }
-                    let left = ui
-                        .input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft));
-                    let right = ui
-                        .input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight));
-                    if left || right {
-                        let to = if focused_now == Some(confirm_btn_id) {
-                            cancel_btn_id
-                        } else {
-                            confirm_btn_id
-                        };
-                        ui.ctx().memory_mut(|m| m.request_focus(to));
-                    }
-                    // Enter activates the focused button (interact()
-                    // clicks need the key consumed against the terminal).
-                    let enter =
-                        ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
-
-                    let draw_btn = |ui: &mut egui::Ui,
-                                    id: egui::Id,
-                                    label: &str,
-                                    focus_hint: bool|
-                     -> bool {
-                        let font = egui::FontId::proportional(14.0);
-                        let galley = ui.fonts(|f| {
-                            f.layout_no_wrap(label.to_string(), font, ui.visuals().text_color())
-                        });
-                        let size = egui::vec2(90.0, 24.0);
-                        let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
-                        // Register the widget under our stable id so
-                        // memory focus calls address it.
-                        let resp = ui.interact(rect, id, egui::Sense::click());
-                        let visuals = if resp.contains_pointer() || focus_hint {
-                            &ui.style().visuals.widgets.hovered
-                        } else {
-                            &ui.style().visuals.widgets.inactive
-                        };
-                        ui.painter()
-                            .rect_filled(rect, visuals.corner_radius, visuals.weak_bg_fill);
-                        ui.painter().rect_stroke(
-                            rect,
-                            visuals.corner_radius,
-                            visuals.bg_stroke,
-                            egui::StrokeKind::Middle,
-                        );
-                        ui.painter().galley(
-                            rect.center() - galley.size() / 2.0,
-                            galley,
-                            ui.visuals().text_color(),
-                        );
-                        resp.clicked() || (enter && ui.ctx().memory(|m| m.has_focus(id)))
+                    let is_remote = self
+                        .terminals
+                        .get(&tab_id)
+                        .and_then(|d| d.host.as_ref())
+                        .is_some();
+                    let message = if is_remote {
+                        &self.texts.ssh.close_remote_message
+                    } else {
+                        &self.texts.close_confirm.terminal_message
                     };
-
+                    ui.label(message);
+                    ui.add_space(10.0);
                     ui.horizontal(|ui| {
-                        if draw_btn(
+                        Self::dialog_button_row(
                             ui,
-                            confirm_btn_id,
+                            &mut kb,
+                            egui::Id::new("close_confirm_confirm"),
+                            egui::Id::new("close_confirm_cancel"),
                             &self.texts.close_confirm.confirm,
-                            focused_now == Some(confirm_btn_id),
-                        ) {
-                            confirmed = true;
-                        }
-                        if draw_btn(
-                            ui,
-                            cancel_btn_id,
                             &self.texts.close_confirm.cancel,
-                            focused_now == Some(cancel_btn_id),
-                        ) {
-                            cancelled = true;
-                        }
-                    });
-                    let _ = target_is_cancel;
-                });
+                        )
+                    })
+                    .inner
+                })
+                .and_then(|r| r.inner);
+            if let Some((c, x)) = inner {
+                confirmed |= c;
+                cancelled |= x;
+            }
+            if keys.close {
+                cancelled = true;
+            }
             if confirmed {
                 self.pending_close_confirm = None;
                 self.pending_close = Some(tab_id);
@@ -8464,13 +8996,17 @@ impl eframe::App for App {
             }
         }
 
-        // Password popup windows
+        // Password popup windows. Escape is consumed BEFORE the if-let
+        // so closing the popup does NOT early-return from update() (the
+        // old return skipped the sidebar/terminal rendering for a frame,
+        // flashing the layout); the if-let simply matches None below.
+        if self.pw_popup.is_some_and(|_| {
+            ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+        }) {
+            self.pw_popup = None;
+            self.pw_message.clear();
+        }
         if let Some(popup) = self.pw_popup {
-            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
-                self.pw_popup = None;
-                self.pw_message.clear();
-                return;
-            }
             let mut open = true;
             let title = match popup {
                 "set" => self.texts.password.set_title.as_str(),
@@ -9048,6 +9584,7 @@ impl eframe::App for App {
                                         ui.separator();
                                         if ui.button(&self.texts.settings.buttons.close).clicked() {
                                             self.close_confirm_panel = Some(i);
+                                            self.ws_close_just_opened = true;
                                             ui.close_menu();
                                         }
                                     });
@@ -9231,6 +9768,10 @@ impl eframe::App for App {
                                     }
                                 }
                             }
+
+                            // SSH host book: below the workspace list, in the
+                            // same scroll area. Clicking a row connects.
+                            self.render_ssh_hosts_section(ui);
                         }); // ScrollArea (workspace list)
                 }); // sidebar SidePanel show
         }
@@ -9533,6 +10074,7 @@ impl eframe::App for App {
                                 max_history: self.settings.max_history,
                                 pending_close: &mut self.pending_close,
                                 pending_close_confirm: &mut self.pending_close_confirm,
+                                close_confirm_just_opened: &mut self.close_confirm_just_opened,
                                 pending_new_terminal: &mut self.pending_new_terminal,
                                 pending_split_after: &mut self.pending_split_after,
                                 pending_split_vertical: &mut self.pending_split_vertical,
@@ -9559,6 +10101,10 @@ impl eframe::App for App {
                                 default_shell_id: &self.settings.default_shell,
                                 theme: self.terminal_theme_cache.clone(),
                                 texts: &self.texts,
+                                prod_banner_enabled: self.settings.ssh_prod_banner,
+                                danger: self.active_theme.app.danger.to_egui(),
+                                ssh_hosts: &self.ssh_hosts,
+                                pending_ssh_connect: &mut self.pending_ssh_connect,
                             },
                         );
                 } else {
@@ -9619,6 +10165,114 @@ mod tests {
         ShortcutBinding, TerminalStatePersist,
     };
     use egui_dock::DockState;
+
+    /// The unified dialog keyboard protocol: a fresh dialog starts on
+    /// CANCEL, Enter activates the selected side, Escape closes, and the
+    /// cursor toggles only when `toggle` is on.
+    #[test]
+    fn dialog_keys_protocol_behavior() {
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput::default(), |_ctx| {});
+
+        // Escape with no cursor set: close, no confirm/cancel.
+        let mut kb = false;
+        let _ = ctx.run(
+            egui::RawInput {
+                events: vec![egui::Event::Key {
+                    key: egui::Key::Escape,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                    repeat: false,
+                    physical_key: None,
+                }],
+                ..Default::default()
+            },
+            |ctx| {
+                let out = super::dialog_keys(ctx, &mut kb, true);
+                assert!(out.close);
+                assert!(!out.confirm && !out.cancel && !out.enter);
+            },
+        );
+
+        // Enter with cursor on CANCEL (safe default) -> cancel only.
+        let mut kb = false;
+        let _ = ctx.run(
+            egui::RawInput {
+                events: vec![egui::Event::Key {
+                    key: egui::Key::Enter,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                    repeat: false,
+                    physical_key: None,
+                }],
+                ..Default::default()
+            },
+            |ctx| {
+                let out = super::dialog_keys(ctx, &mut kb, true);
+                assert!(out.enter && out.cancel);
+                assert!(!out.confirm && !out.close);
+            },
+        );
+
+        // ArrowRight flips to CONFIRM; the next Enter confirms.
+        let mut kb = false;
+        let _ = ctx.run(
+            egui::RawInput {
+                events: vec![
+                    egui::Event::Key {
+                        key: egui::Key::ArrowRight,
+                        pressed: true,
+                        modifiers: egui::Modifiers::NONE,
+                        repeat: false,
+                        physical_key: None,
+                    },
+                    egui::Event::Key {
+                        key: egui::Key::Enter,
+                        pressed: true,
+                        modifiers: egui::Modifiers::NONE,
+                        repeat: false,
+                        physical_key: None,
+                    },
+                ],
+                ..Default::default()
+            },
+            |ctx| {
+                let out = super::dialog_keys(ctx, &mut kb, true);
+                assert!(out.confirm);
+                assert!(!out.cancel && !out.close);
+            },
+        );
+
+        // toggle=false: arrows do NOT flip the cursor (input-style
+        // dialogs where Enter means confirm regardless).
+        let mut kb = false;
+        let _ = ctx.run(
+            egui::RawInput {
+                events: vec![
+                    egui::Event::Key {
+                        key: egui::Key::ArrowRight,
+                        pressed: true,
+                        modifiers: egui::Modifiers::NONE,
+                        repeat: false,
+                        physical_key: None,
+                    },
+                    egui::Event::Key {
+                        key: egui::Key::Enter,
+                        pressed: true,
+                        modifiers: egui::Modifiers::NONE,
+                        repeat: false,
+                        physical_key: None,
+                    },
+                ],
+                ..Default::default()
+            },
+            |ctx| {
+                let out = super::dialog_keys(ctx, &mut kb, false);
+                // Arrow ignored; Enter still reported raw.
+                assert!(out.enter && out.cancel && !out.confirm);
+            },
+        );
+    }
 
     #[test]
     fn auto_match_keeps_only_prefix_matches() {
@@ -9865,6 +10519,7 @@ mod tests {
                             font_size: 14.0,
                             working_directory: ".".into(),
                             shell: String::new(),
+                            host_id: 0,
                         },
                     )]
                     .into_iter()
@@ -9880,6 +10535,7 @@ mod tests {
                             font_size: 14.0,
                             working_directory: ".".into(),
                             shell: String::new(),
+                            host_id: 0,
                         },
                     )]
                     .into_iter()
@@ -10099,6 +10755,7 @@ mod tests {
             font_size: 14.0,
             working_directory: "/tmp".into(),
             shell: String::new(),
+            host_id: 0,
         };
 
         let value = serde_json::to_value(state).unwrap();
@@ -10249,6 +10906,7 @@ struct TerminalTabViewer<'a> {
     #[allow(dead_code)]
     pending_close: &'a mut Option<String>,
     pending_close_confirm: &'a mut Option<String>,
+    close_confirm_just_opened: &'a mut bool,
     pending_new_terminal: &'a mut Option<(usize, SurfaceIndex, NodeIndex)>,
     #[allow(dead_code)]
     pending_split_after: &'a mut Option<String>,
@@ -10287,16 +10945,37 @@ struct TerminalTabViewer<'a> {
     default_shell_id: &'a str,
     theme: std::sync::Arc<egui_term::TerminalTheme>,
     texts: &'a crate::i18n::Texts,
+    /// PROD-marked SSH hosts show a red warning banner above the terminal.
+    prod_banner_enabled: bool,
+    /// Theme danger color for the PROD tab-title tint and banner.
+    danger: egui::Color32,
+    /// Saved SSH hosts for the "+" popup connection entries.
+    ssh_hosts: &'a [crate::hosts::SshHost],
+    /// Host chosen in the "+" popup; consumed by process_pending.
+    pending_ssh_connect: &'a mut Option<i64>,
 }
 
 impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
     type Tab = String;
 
     fn title(&mut self, tab: &mut Self::Tab) -> egui::WidgetText {
-        self.terminals
-            .get(tab)
-            .map(|d| d.name.clone().into())
-            .unwrap_or_else(|| tab.clone().into())
+        match self.terminals.get(tab) {
+            Some(d) => {
+                // PROD hosts: the title itself carries the danger tint so
+                // the wrong-window risk is visible even on tiny tabs.
+                if d.host.as_ref().is_some_and(|h| h.prod) {
+                    return egui::RichText::new(format!(
+                        "{} {}",
+                        egui_phosphor::regular::WARNING,
+                        d.name
+                    ))
+                    .color(self.danger)
+                    .into();
+                }
+                d.name.clone().into()
+            }
+            None => tab.clone().into(),
+        }
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab) {
@@ -10314,7 +10993,8 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                 ui.memory_mut(|mem| mem.request_focus(response.id));
                 let enter =
                     ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
-                let escape = ui.input(|i| i.key_pressed(egui::Key::Escape));
+                let escape =
+                    ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
                 // Confirm / cancel buttons next to the input so renaming
                 // can always be applied or exited with the mouse.
                 if ui.button(&self.texts.workspace.rename_confirm).clicked() || enter {
@@ -10488,6 +11168,30 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                         }
                     }
                 }
+            }
+
+            // PROD banner: an unmissable production-machine warning above
+            // the terminal viewport (wrong-window protection for ops).
+            if self.prod_banner_enabled && td.host.as_ref().is_some_and(|h| h.prod) {
+                let host = td.host.as_ref().unwrap();
+                let label = format!(
+                    "{}  {} ({})",
+                    self.texts.ssh.prod_banner, host.name, host.addr
+                );
+                let bar_h = 18.0;
+                let (rect, _) = ui.allocate_exact_size(
+                    egui::vec2(ui.available_width(), bar_h),
+                    egui::Sense::hover(),
+                );
+                ui.painter()
+                    .rect_filled(rect, 0.0, self.danger.gamma_multiply(0.18));
+                ui.painter().text(
+                    rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    label,
+                    egui::FontId::proportional(11.0),
+                    self.danger,
+                );
             }
 
             let terminal_view = {
@@ -10716,6 +11420,7 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
 
     fn on_close(&mut self, tab: &mut Self::Tab) -> bool {
         *self.pending_close_confirm = Some(tab.clone());
+        *self.close_confirm_just_opened = true;
         false
     }
 
@@ -10784,6 +11489,23 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                 }
                 *self.pending_new_terminal = Some((self.active_panel, surface, node));
                 ui.close_menu();
+            }
+        }
+        // Saved SSH hosts: connection entries below the shell list.
+        if !self.ssh_hosts.is_empty() {
+            ui.separator();
+            for host in self.ssh_hosts.iter() {
+                let marker = if host.prod {
+                    egui_phosphor::regular::WARNING.to_string()
+                } else {
+                    String::new()
+                };
+                let label = format!("{} {}{}", egui_phosphor::regular::PLUG, marker, host.name);
+                if ui.button(label).clicked() {
+                    *self.pending_ssh_connect = Some(host.id);
+                    *self.pending_new_terminal = Some((self.active_panel, surface, node));
+                    ui.close_menu();
+                }
             }
         }
     }

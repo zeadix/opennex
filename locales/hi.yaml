@@ -47,6 +47,7 @@ settings:
     smooth_rendering: किनारा स्मूदिंग
 
     smooth_level: स्मूदिंग स्तर
+    prod_banner: PROD चेतावनी बैनर
   appearance:
     heading: रूप
     terminal_section: टर्मिनल रूप
@@ -368,3 +369,34 @@ stats:
   terminals: टर्मिनल
   clear_history_title: सारा इतिहास मिटाएँ
   clear_history_body: सभी टर्मिनल का इतिहास मिटाएँ? यह पूर्ववत नहीं होगा।
+ssh:
+  section: SSH होस्ट
+  add: + होस्ट जोड़ें
+  search_hint: होस्ट खोजें...
+  empty_hint: कोई होस्ट नहीं, जोड़ने के लिए + दबाएँ
+  connect: कनेक्ट
+  edit: संपादित करें
+  duplicate: प्रतिलिपि बनाएँ
+  delete: हटाएँ
+  delete_title: SSH होस्ट हटाएँ
+  delete_body: होस्ट "{}" हटाएँ? खुले कनेक्शन प्रभावित नहीं होंगे।
+  dialog_new_title: SSH होस्ट जोड़ें
+  dialog_edit_title: SSH होस्ट संपादित करें
+  label_name: 'नाम:'
+  label_group: 'समूह:'
+  label_host: 'होस्ट:'
+  label_port: 'पोर्ट:'
+  label_user: 'उपयोगकर्ता:'
+  label_auth: 'प्रमाणीकरण:'
+  label_key_path: 'कुंजी पथ:'
+  label_prod: प्रोडक्शन (PROD)
+  auth_agent: ssh-agent
+  auth_key: कुंजी फ़ाइल
+  auth_password: पासवर्ड इंटरैक्टिव दर्ज करें
+  error_required: नाम और होस्ट आवश्यक हैं
+  browse: 'ब्राउज़...'
+  prod_banner: PROD
+  close_remote_message: इस रिमोट कनेक्शन को बंद करें?
+  ssh_unavailable: ssh नहीं मिला — कृपया OpenSSH क्लाइंट इंस्टॉल करें
+  host_missing_fallback: होस्ट "{}" हटा दिया गया; टर्मिनल लोकल shell पर लौटा
+  menu_entry: SSH कनेक्शन...

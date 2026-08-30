@@ -47,6 +47,7 @@ settings:
     smooth_rendering: Kantenglättung
 
     smooth_level: Glättungsstufe
+    prod_banner: PROD-Warnbanner
   appearance:
     heading: Darstellung
     terminal_section: Terminal-Darstellung
@@ -368,3 +369,34 @@ stats:
   terminals: Terminals
   clear_history_title: Gesamten Befehlsverlauf löschen
   clear_history_body: Befehlsverlauf aller Terminals löschen? Kann nicht rückgängig gemacht werden.
+ssh:
+  section: SSH-Hosts
+  add: + Host hinzufügen
+  search_hint: Hosts suchen...
+  empty_hint: Noch keine Hosts – auf + klicken
+  connect: Verbinden
+  edit: Bearbeiten
+  duplicate: Duplizieren
+  delete: Löschen
+  delete_title: SSH-Host löschen
+  delete_body: Host "{}" löschen? Offene Verbindungen sind nicht betroffen.
+  dialog_new_title: SSH-Host hinzufügen
+  dialog_edit_title: SSH-Host bearbeiten
+  label_name: 'Name:'
+  label_group: 'Gruppe:'
+  label_host: 'Host:'
+  label_port: 'Port:'
+  label_user: 'Benutzer:'
+  label_auth: 'Authentifizierung:'
+  label_key_path: 'Schlüsselpfad:'
+  label_prod: Produktion (PROD)
+  auth_agent: ssh-agent
+  auth_key: Schlüsseldatei
+  auth_password: Passwort interaktiv
+  error_required: Name und Host sind erforderlich
+  browse: 'Durchsuchen...'
+  prod_banner: PROD
+  close_remote_message: Diese Remote-Verbindung schließen?
+  ssh_unavailable: ssh nicht gefunden – bitte OpenSSH-Client installieren
+  host_missing_fallback: Host "{}" wurde gelöscht; Terminal fällt auf lokale Shell zurück
+  menu_entry: SSH-Verbindung...

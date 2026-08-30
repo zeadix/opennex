@@ -47,6 +47,7 @@ settings:
     smooth_rendering: Smussatura bordi
 
     smooth_level: Livello smussatura
+    prod_banner: Banner di avviso PROD
   appearance:
     heading: Aspetto
     terminal_section: Aspetto terminale
@@ -368,3 +369,34 @@ stats:
   terminals: terminali
   clear_history_title: Elimina tutta la cronologia
   clear_history_body: Eliminare la cronologia comandi di tutti i terminali? Irreversibile.
+ssh:
+  section: Host SSH
+  add: + Aggiungi host
+  search_hint: Cerca host...
+  empty_hint: Nessun host, clicca + per aggiungerne uno
+  connect: Connetti
+  edit: Modifica
+  duplicate: Duplica
+  delete: Elimina
+  delete_title: Elimina host SSH
+  delete_body: Eliminare l'host "{}"? Le connessioni aperte non sono influenzate.
+  dialog_new_title: Aggiungi host SSH
+  dialog_edit_title: Modifica host SSH
+  label_name: 'Nome:'
+  label_group: 'Gruppo:'
+  label_host: 'Host:'
+  label_port: 'Porta:'
+  label_user: 'Utente:'
+  label_auth: 'Autenticazione:'
+  label_key_path: 'Percorso chiave:'
+  label_prod: Produzione (PROD)
+  auth_agent: ssh-agent
+  auth_key: File chiave
+  auth_password: Password interattiva
+  error_required: Nome e host sono obbligatori
+  browse: 'Sfoglia...'
+  prod_banner: PROD
+  close_remote_message: Chiudere questa connessione remota?
+  ssh_unavailable: ssh non trovato — installa un client OpenSSH
+  host_missing_fallback: Host "{}" eliminato; il terminale è tornato a una shell locale
+  menu_entry: Connessione SSH...

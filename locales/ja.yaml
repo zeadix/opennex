@@ -47,6 +47,7 @@ settings:
     smooth_rendering: エッジ平滑
 
     smooth_level: 平滑レベル
+    prod_banner: 本番環境警告バナー (PROD)
   appearance:
     heading: 外観
     terminal_section: ターミナル外観
@@ -367,3 +368,34 @@ stats:
   terminals: ターミナル
   clear_history_title: 全コマンド履歴を削除
   clear_history_body: 全ターミナルのコマンド履歴を削除しますか？取り消せません。
+ssh:
+  section: SSH ホスト
+  add: + ホストを追加
+  search_hint: ホストを検索...
+  empty_hint: ホストがありません。+ で追加
+  connect: 接続
+  edit: 編集
+  duplicate: 複製
+  delete: 削除
+  delete_title: SSH ホストを削除
+  delete_body: ホスト「{}」を削除しますか？開いている接続には影響しません。
+  dialog_new_title: SSH ホストを追加
+  dialog_edit_title: SSH ホストを編集
+  label_name: '名前:'
+  label_group: 'グループ:'
+  label_host: 'ホスト:'
+  label_port: 'ポート:'
+  label_user: 'ユーザー:'
+  label_auth: '認証方式:'
+  label_key_path: '鍵のパス:'
+  label_prod: 本番環境 (PROD)
+  auth_agent: ssh-agent
+  auth_key: 鍵ファイル
+  auth_password: パスワードを対話入力
+  error_required: 名前とホストは必須です
+  browse: '参照...'
+  prod_banner: PROD
+  close_remote_message: このリモート接続を閉じますか？
+  ssh_unavailable: ssh が見つかりません。OpenSSH クライアントをインストールしてください
+  host_missing_fallback: ホスト「{}」は削除済みのため、ローカル shell で起動しました
+  menu_entry: SSH 接続...

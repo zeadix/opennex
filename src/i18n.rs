@@ -20,6 +20,7 @@ pub struct Texts {
     pub update: UpdateTexts,
     pub theme_editor: ThemeEditorTexts,
     pub stats: StatsTexts,
+    pub ssh: SshTexts,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -101,6 +102,9 @@ pub struct SettingsGeneralTexts {
     pub auto_match: String,
     pub smooth_rendering: String,
     pub smooth_level: String,
+    /// PROD warning banner switch (SSH hosts marked as production).
+    #[serde(default)]
+    pub prod_banner: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -506,6 +510,43 @@ pub struct StatsTexts {
     pub clear_history_body: String,
 }
 
+/// Sidebar SSH host book + connection dialogs.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SshTexts {
+    pub section: String,
+    pub add: String,
+    pub search_hint: String,
+    pub empty_hint: String,
+    pub connect: String,
+    pub edit: String,
+    pub duplicate: String,
+    pub delete: String,
+    pub delete_title: String,
+    /// "{}" is replaced with the host name.
+    pub delete_body: String,
+    pub dialog_new_title: String,
+    pub dialog_edit_title: String,
+    pub label_name: String,
+    pub label_group: String,
+    pub label_host: String,
+    pub label_port: String,
+    pub label_user: String,
+    pub label_auth: String,
+    pub label_key_path: String,
+    pub label_prod: String,
+    pub auth_agent: String,
+    pub auth_key: String,
+    pub auth_password: String,
+    pub error_required: String,
+    pub browse: String,
+    pub prod_banner: String,
+    pub close_remote_message: String,
+    pub ssh_unavailable: String,
+    /// "{}" is replaced with the host name.
+    pub host_missing_fallback: String,
+    pub menu_entry: String,
+}
+
 impl Texts {
     pub fn zh_default() -> Self {
         Self {
@@ -561,6 +602,7 @@ impl Texts {
                 auto_match: "自动匹配指令".into(),
                 smooth_rendering: "边缘平滑".into(),
                 smooth_level: "平滑等级".into(),
+                prod_banner: "生产环境警示横幅 (PROD)".into(),
                 },
                 appearance: SettingsAppearanceTexts {
                     heading: "外观".into(),
@@ -884,6 +926,38 @@ impl Texts {
                 terminals: "终端".into(),
                 clear_history_title: "删除所有指令记录".into(),
                 clear_history_body: "确认删除所有终端的指令记录？此操作不可恢复。".into(),
+            },
+            ssh: SshTexts {
+                section: "SSH 主机".into(),
+                add: "+ 添加主机".into(),
+                search_hint: "搜索主机...".into(),
+                empty_hint: "暂无主机，点击 + 添加".into(),
+                connect: "连接".into(),
+                edit: "编辑".into(),
+                duplicate: "创建副本".into(),
+                delete: "删除".into(),
+                delete_title: "删除 SSH 主机".into(),
+                delete_body: "确认删除主机「{}」？已打开的连接不受影响。".into(),
+                dialog_new_title: "添加 SSH 主机".into(),
+                dialog_edit_title: "编辑 SSH 主机".into(),
+                label_name: "名称:".into(),
+                label_group: "分组:".into(),
+                label_host: "主机:".into(),
+                label_port: "端口:".into(),
+                label_user: "用户名:".into(),
+                label_auth: "认证方式:".into(),
+                label_key_path: "密钥路径:".into(),
+                label_prod: "生产环境 (PROD)".into(),
+                auth_agent: "ssh-agent".into(),
+                auth_key: "密钥文件".into(),
+                auth_password: "交互输入密码".into(),
+                error_required: "名称和主机不能为空".into(),
+                browse: "浏览...".into(),
+                prod_banner: "PROD".into(),
+                close_remote_message: "确定要关闭此远程连接吗？".into(),
+                ssh_unavailable: "未找到 ssh 程序，请先安装 OpenSSH 客户端".into(),
+                host_missing_fallback: "主机「{}」已删除，终端已回退为本地 shell".into(),
+                menu_entry: "SSH 连接...".into(),
             },
         }
     }

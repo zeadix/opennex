@@ -47,6 +47,7 @@ settings:
     smooth_rendering: 가장자리 부드럽게
 
     smooth_level: 부드러움 수준
+    prod_banner: 프로덕션 경고 배너 (PROD)
   appearance:
     heading: 외관
     terminal_section: 터미널 외관
@@ -367,3 +368,34 @@ stats:
   terminals: 터미널
   clear_history_title: 모든 명령 기록 삭제
   clear_history_body: 모든 터미널의 명령 기록을 삭제할까요? 되돌릴 수 없습니다.
+ssh:
+  section: SSH 호스트
+  add: + 호스트 추가
+  search_hint: 호스트 검색...
+  empty_hint: 호스트가 없습니다. + 를 눌러 추가하세요
+  connect: 연결
+  edit: 편집
+  duplicate: 복제
+  delete: 삭제
+  delete_title: SSH 호스트 삭제
+  delete_body: 호스트 "{}"을(를) 삭제할까요? 열린 연결에는 영향이 없습니다.
+  dialog_new_title: SSH 호스트 추가
+  dialog_edit_title: SSH 호스트 편집
+  label_name: '이름:'
+  label_group: '그룹:'
+  label_host: '호스트:'
+  label_port: '포트:'
+  label_user: '사용자:'
+  label_auth: '인증 방식:'
+  label_key_path: '키 경로:'
+  label_prod: 프로덕션 (PROD)
+  auth_agent: ssh-agent
+  auth_key: 키 파일
+  auth_password: 비밀번호 직접 입력
+  error_required: 이름과 호스트는 필수입니다
+  browse: '찾아보기...'
+  prod_banner: PROD
+  close_remote_message: 이 원격 연결을 닫을까요?
+  ssh_unavailable: ssh 를 찾을 수 없습니다. OpenSSH 클라이언트를 설치해 주세요
+  host_missing_fallback: 호스트 "{}"이(가) 삭제되어 로컬 shell 로 시작했습니다
+  menu_entry: SSH 연결...

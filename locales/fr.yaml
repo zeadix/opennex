@@ -47,6 +47,7 @@ settings:
     smooth_rendering: Lissage des bords
 
     smooth_level: Niveau de lissage
+    prod_banner: Bannière d'avertissement PROD
   appearance:
     heading: Apparence
     terminal_section: Apparence du terminal
@@ -368,3 +369,34 @@ stats:
   terminals: terminaux
   clear_history_title: Supprimer tout l'historique
   clear_history_body: Supprimer l'historique des commandes de tous les terminaux ? Irréversible.
+ssh:
+  section: Hôtes SSH
+  add: + Ajouter un hôte
+  search_hint: Rechercher des hôtes...
+  empty_hint: Aucun hôte – cliquez sur + pour en ajouter
+  connect: Connexion
+  edit: Modifier
+  duplicate: Dupliquer
+  delete: Supprimer
+  delete_title: Supprimer l'hôte SSH
+  delete_body: Supprimer l'hôte « {} » ? Les connexions ouvertes ne sont pas affectées.
+  dialog_new_title: Ajouter un hôte SSH
+  dialog_edit_title: Modifier l'hôte SSH
+  label_name: 'Nom :'
+  label_group: 'Groupe :'
+  label_host: 'Hôte :'
+  label_port: 'Port :'
+  label_user: 'Utilisateur :'
+  label_auth: 'Authentification :'
+  label_key_path: 'Chemin de la clé :'
+  label_prod: Production (PROD)
+  auth_agent: ssh-agent
+  auth_key: Fichier de clé
+  auth_password: Mot de passe interactif
+  error_required: Le nom et l'hôte sont requis
+  browse: 'Parcourir...'
+  prod_banner: PROD
+  close_remote_message: Fermer cette connexion distante ?
+  ssh_unavailable: ssh introuvable — installez un client OpenSSH
+  host_missing_fallback: Hôte « {} » supprimé ; retour à un shell local
+  menu_entry: Connexion SSH...

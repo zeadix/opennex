@@ -47,6 +47,7 @@ settings:
     smooth_rendering: 邊緣平滑
 
     smooth_level: 平滑等級
+    prod_banner: 生產環境警示橫幅 (PROD)
   appearance:
     heading: 外觀
     terminal_section: 終端機外觀
@@ -367,3 +368,34 @@ stats:
   terminals: 終端
   clear_history_title: 刪除所有指令記錄
   clear_history_body: 確認刪除所有終端的指令記錄？此操作不可恢復。
+ssh:
+  section: SSH 主機
+  add: + 新增主機
+  search_hint: 搜尋主機...
+  empty_hint: 尚無主機，點擊 + 新增
+  connect: 連線
+  edit: 編輯
+  duplicate: 建立副本
+  delete: 刪除
+  delete_title: 刪除 SSH 主機
+  delete_body: 確認刪除主機「{}」？已開啟的連線不受影響。
+  dialog_new_title: 新增 SSH 主機
+  dialog_edit_title: 編輯 SSH 主機
+  label_name: '名稱:'
+  label_group: '群組:'
+  label_host: '主機:'
+  label_port: '連接埠:'
+  label_user: '使用者:'
+  label_auth: '驗證方式:'
+  label_key_path: '金鑰路徑:'
+  label_prod: 生產環境 (PROD)
+  auth_agent: ssh-agent
+  auth_key: 金鑰檔案
+  auth_password: 互動輸入密碼
+  error_required: 名稱與主機不可為空
+  browse: '瀏覽...'
+  prod_banner: PROD
+  close_remote_message: 確定要關閉此遠端連線嗎？
+  ssh_unavailable: 找不到 ssh 程式，請先安裝 OpenSSH 用戶端
+  host_missing_fallback: 主機「{}」已刪除，終端已回退為本地 shell
+  menu_entry: SSH 連線...

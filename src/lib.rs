@@ -1,5 +1,6 @@
 pub mod app;
 pub mod history_db;
+pub mod hosts;
 pub mod i18n;
 pub mod persist;
 pub mod proc_stats;
