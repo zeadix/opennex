@@ -195,6 +195,11 @@ terminal:
   clear_favorites_body: Effacer toutes les commandes favorites ? Cette action est irréversible.
   broadcast_join: Rejoindre la saisie groupée
   broadcast_leave: Quitter la saisie groupée
+  snippet_fill_title: Remplir les paramètres du snippet
+  snippet_fill_hint: 'Ce snippet contient des {paramètres} — remplissez-les et confirmez pour insérer (rien n''est exécuté automatiquement).'
+  startup_cmd: Commande de démarrage...
+  startup_cmd_title: Commande de démarrage
+  startup_cmd_hint: 'Exécutée à chaque création ou restauration de ce terminal ; laisser vide et confirmer pour effacer.'
   history_empty: 'Pas encore de commandes'
   fav_assemble: Assembler
   fav_delete_body: Le dossier et TOUTES ses commandes seront supprimés. Irréversible.

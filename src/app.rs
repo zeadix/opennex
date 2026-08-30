@@ -729,6 +729,8 @@ fn any_modal_open(app: &App) -> bool {
         || app.ssh_dialog.is_some()
         || app.ssh_delete_confirm.is_some()
         || app.show_ai_panel
+        || app.snippet_fill.is_some()
+        || app.startup_cmd_dialog.is_some()
         || matches!(app.update_state, crate::updater::UpdateState::Ready(_))
 }
 
@@ -1417,6 +1419,9 @@ struct TerminalStatePersist {
     /// Restored sessions reconnect through the host book.
     #[serde(default)]
     host_id: i64,
+    /// Command executed when the terminal is (re)created (empty = none).
+    #[serde(default)]
+    startup_command: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1714,6 +1719,21 @@ pub struct App {
     ai_error: Option<String>,
     ai_busy: bool,
     ai_rx: Option<std::sync::mpsc::Receiver<Result<String, String>>>,
+    /// Fill-in dialog for a snippet containing `{placeholder}` tokens.
+    snippet_fill: Option<SnippetFillState>,
+    snippet_fill_just_opened: bool,
+    /// Per-terminal startup command editor: (tab id, buffer).
+    startup_cmd_dialog: Option<(String, String)>,
+    startup_cmd_just_opened: bool,
+}
+
+/// Fill-in state for a snippet with `{placeholder}` tokens: the target
+/// tab, the raw template and one input per unique token.
+struct SnippetFillState {
+    tab: String,
+    template: String,
+    tokens: Vec<String>,
+    values: Vec<String>,
 }
 
 struct TerminalData {
@@ -1724,6 +1744,9 @@ struct TerminalData {
     shell_id: String,
     /// Set when the terminal runs the ssh client for a saved host.
     host: Option<crate::hosts::SshHostRef>,
+    /// Command executed automatically when this terminal is created and
+    /// on every scene restore (empty = none). Persisted per terminal.
+    startup_command: String,
 }
 
 /// Create/edit form state for the SSH host dialog.
@@ -1837,6 +1860,52 @@ fn create_terminal(
     )
 }
 
+/// Execute a terminal's startup command by typing it into the PTY with
+/// a trailing CR (the tty buffers input until the shell reads it, so
+/// writing right after spawn is safe). Empty = no-op.
+fn run_startup_command(instance: &mut TerminalInstance, command: &str) {
+    let cmd = command.trim();
+    if cmd.is_empty() {
+        return;
+    }
+    instance.write(format!("{cmd}\r").as_bytes());
+}
+
+/// Field-wise [`App::open_snippet_fill`] for rendering closures that
+/// already borrow parts of `self` (egui's disjoint closure captures
+/// cannot express a `&mut self` method call there).
+#[allow(clippy::too_many_arguments)]
+fn open_snippet_fill_fields(
+    terminals: &mut HashMap<String, TerminalData>,
+    fav_submenu: &mut Option<(i64, egui::Pos2, Vec<String>, Option<usize>)>,
+    fav_sub_focused: &mut bool,
+    history_menu_just_closed: &mut HashMap<String, bool>,
+    snippet_fill: &mut Option<SnippetFillState>,
+    snippet_fill_just_opened: &mut bool,
+    tab: &str,
+    template: String,
+) -> bool {
+    let tokens = snippet_tokens(&template);
+    if tokens.is_empty() {
+        return false;
+    }
+    let values = vec![String::new(); tokens.len()];
+    if let Some(td) = terminals.get_mut(tab) {
+        td.instance.history_nav = None;
+    }
+    *fav_submenu = None;
+    *fav_sub_focused = false;
+    history_menu_just_closed.insert(tab.to_string(), true);
+    *snippet_fill = Some(SnippetFillState {
+        tab: tab.to_string(),
+        template,
+        tokens,
+        values,
+    });
+    *snippet_fill_just_opened = true;
+    true
+}
+
 /// Spawn the terminal described by a persisted scene state. SSH-marked
 /// states reconnect through the host book; a deleted host or a missing
 /// ssh binary degrades to a plain local shell (the caller surfaces a
@@ -1878,6 +1947,7 @@ fn build_panel_state(app: &mut App, panel_idx: usize) -> Option<WorkspaceState> 
                 font_size: data.font_size,
                 working_directory: data.instance.cwd.clone(),
                 shell: data.shell_id.clone(),
+                startup_command: data.startup_command.clone(),
                 host_id: data.host.as_ref().map(|h| h.id).unwrap_or(0),
             },
         );
@@ -1936,6 +2006,7 @@ fn build_scene_state(app: &mut App) -> SceneState {
                     font_size: data.font_size,
                     working_directory: data.instance.cwd.clone(),
                     shell: data.shell_id.clone(),
+                    startup_command: data.startup_command.clone(),
                     host_id: data.host.as_ref().map(|h| h.id).unwrap_or(0),
                 },
             );
@@ -2202,6 +2273,10 @@ impl App {
             ai_error: None,
             ai_busy: false,
             ai_rx: None,
+            snippet_fill: None,
+            snippet_fill_just_opened: false,
+            startup_cmd_dialog: None,
+            startup_cmd_just_opened: false,
             dialog_kb_confirm: false,
             fav_name_just_opened: false,
             fav_cmd_just_opened: false,
@@ -2247,9 +2322,10 @@ impl App {
                             &app.history_db,
                             app.settings.scrollback,
                         );
-                        let Some(instance) = instance else {
+                        let Some(mut instance) = instance else {
                             continue;
                         };
+                        run_startup_command(&mut instance, &tstate.startup_command);
                         if host_ref.is_none() && tstate.host_id != 0 {
                             app.update_toast = Some((
                                 app.texts
@@ -2267,6 +2343,7 @@ impl App {
                                 font_size: tstate.font_size,
                                 shell_id: tstate.shell.clone(),
                                 host: host_ref,
+                                startup_command: tstate.startup_command.clone(),
                             },
                         );
                         if let Some(n) = _id
@@ -2382,9 +2459,10 @@ impl App {
                     &self.history_db,
                     self.settings.scrollback,
                 );
-                let Some(instance) = instance else {
+                let Some(mut instance) = instance else {
                     continue;
                 };
+                run_startup_command(&mut instance, &tstate.startup_command);
                 self.terminals.insert(
                     id.clone(),
                     TerminalData {
@@ -2393,6 +2471,7 @@ impl App {
                         font_size: tstate.font_size,
                         shell_id: tstate.shell.clone(),
                         host: host_ref,
+                        startup_command: tstate.startup_command.clone(),
                     },
                 );
             }
@@ -2458,6 +2537,7 @@ impl App {
                 font_size: DEFAULT_FONT_SIZE,
                 shell_id: shell_id_used,
                 host: None,
+                startup_command: String::new(),
             },
         );
         if self.focused_terminal.is_none() {
@@ -2496,6 +2576,7 @@ impl App {
                 font_size: DEFAULT_FONT_SIZE,
                 shell_id: String::new(),
                 host: Some(snapshot),
+                startup_command: String::new(),
             },
         );
         if self.focused_terminal.is_none() {
@@ -2611,7 +2692,8 @@ impl App {
                                 &self.history_db,
                                 self.settings.scrollback,
                             );
-                            if let Some(instance) = instance {
+                            if let Some(mut instance) = instance {
+                                run_startup_command(&mut instance, &tstate.startup_command);
                                 self.terminals.insert(
                                     _id.clone(),
                                     TerminalData {
@@ -2620,6 +2702,7 @@ impl App {
                                         font_size: tstate.font_size,
                                         shell_id: tstate.shell.clone(),
                                         host: host_ref,
+                                        startup_command: tstate.startup_command.clone(),
                                     },
                                 );
                             }
@@ -5578,7 +5661,18 @@ impl App {
                                         self.terminals.get(&tab).map(|td| td.shell_id.clone())
                                     {
                                         let line = assemble_commands(&cmds, &shell_id);
-                                        if !line.is_empty() {
+                                        if !line.is_empty()
+                                            && !open_snippet_fill_fields(
+                                                &mut self.terminals,
+                                                &mut self.fav_submenu,
+                                                &mut self.fav_sub_focused,
+                                                &mut self.history_menu_just_closed,
+                                                &mut self.snippet_fill,
+                                                &mut self.snippet_fill_just_opened,
+                                                &tab,
+                                                line.clone(),
+                                            )
+                                        {
                                             if let Some(td) = self.terminals.get_mut(&tab) {
                                                 // Type without executing
                                                 // (parity with the history
@@ -5963,11 +6057,22 @@ impl App {
                             // Apply row actions AFTER painting (borrow
                             // discipline): send or live-delete.
                             if let Some(cmd) = send_cmd {
-                                if let Some(td) = self.terminals.get_mut(&tab) {
-                                    // Type without executing (parity with
-                                    // the history list).
-                                    td.instance.write(cmd.as_bytes());
-                                    td.instance.history_nav = None;
+                                if !open_snippet_fill_fields(
+                                    &mut self.terminals,
+                                    &mut self.fav_submenu,
+                                    &mut self.fav_sub_focused,
+                                    &mut self.history_menu_just_closed,
+                                    &mut self.snippet_fill,
+                                    &mut self.snippet_fill_just_opened,
+                                    &tab,
+                                    cmd.clone(),
+                                ) {
+                                    if let Some(td) = self.terminals.get_mut(&tab) {
+                                        // Type without executing (parity
+                                        // with the history list).
+                                        td.instance.write(cmd.as_bytes());
+                                        td.instance.history_nav = None;
+                                    }
                                 }
                                 self.history_menu_just_closed.insert(tab.clone(), true);
                                 self.fav_submenu = None;
@@ -6542,6 +6647,171 @@ impl App {
         if let Some(tab) = self.focused_terminal.clone() {
             if let Some(td) = self.terminals.get_mut(&tab) {
                 td.instance.write(text.as_bytes());
+            }
+        }
+    }
+
+    // ---- Snippet placeholders + startup commands (roadmap batch 3) ----
+
+    /// If `template` contains `{placeholder}` tokens, open the fill dialog
+    /// (closing the history menu first) and return true; otherwise return
+    /// false so the caller inserts the command directly.
+    fn open_snippet_fill(&mut self, tab: &str, template: String) -> bool {
+        open_snippet_fill_fields(
+            &mut self.terminals,
+            &mut self.fav_submenu,
+            &mut self.fav_sub_focused,
+            &mut self.history_menu_just_closed,
+            &mut self.snippet_fill,
+            &mut self.snippet_fill_just_opened,
+            tab,
+            template,
+        )
+    }
+
+    /// One input per `{token}`; confirm writes the expanded command into
+    /// the target terminal WITHOUT executing (same as the history list).
+    fn render_snippet_fill_dialog(&mut self, ctx: &egui::Context) {
+        if self.snippet_fill.is_none() {
+            return;
+        }
+        if std::mem::take(&mut self.snippet_fill_just_opened) {
+            self.dialog_kb_confirm = false;
+        }
+        let keys = dialog_keys(ctx, &mut self.dialog_kb_confirm, false);
+        let mut confirm = keys.enter || keys.confirm;
+        let mut cancel = keys.cancel;
+        if keys.close {
+            self.snippet_fill = None;
+            return;
+        }
+        let title = self.texts.terminal.snippet_fill_title.clone();
+        let hint = self.texts.terminal.snippet_fill_hint.clone();
+        egui::Modal::new(egui::Id::new("snippet_fill_dialog"))
+            .frame(egui::Frame::window(&ctx.style()))
+            .show(ctx, |ui| {
+                ui.set_min_width(340.0);
+                ui.heading(title);
+                ui.add_space(4.0);
+                ui.label(
+                    egui::RichText::new(hint)
+                        .size(11.0)
+                        .color(self.active_theme.app.weak_text.to_egui()),
+                );
+                ui.add_space(4.0);
+                egui::Grid::new("snippet_fill_grid")
+                    .num_columns(2)
+                    .spacing([8.0, 6.0])
+                    .show(ui, |ui| {
+                        let token_count = self.snippet_fill.as_ref().unwrap().tokens.len();
+                        for i in 0..token_count {
+                            let token = self.snippet_fill.as_ref().unwrap().tokens[i].clone();
+                            ui.label(format!("{{{token}}}:"));
+                            ui.add_sized(
+                                [220.0, 20.0],
+                                egui::TextEdit::singleline(
+                                    &mut self.snippet_fill.as_mut().unwrap().values[i],
+                                ),
+                            );
+                            ui.end_row();
+                        }
+                    });
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    let (c, x) = Self::dialog_button_row(
+                        ui,
+                        &mut self.dialog_kb_confirm,
+                        egui::Id::new("snippet_fill_confirm"),
+                        egui::Id::new("snippet_fill_cancel"),
+                        &self.texts.theme_editor.dialog_confirm,
+                        &self.texts.theme_editor.cancel,
+                    );
+                    confirm |= c;
+                    cancel |= x;
+                });
+            });
+        if cancel {
+            self.snippet_fill = None;
+        } else if confirm {
+            let Some(state) = self.snippet_fill.take() else {
+                return;
+            };
+            let values: Vec<(String, String)> = state
+                .tokens
+                .iter()
+                .cloned()
+                .zip(state.values.iter().cloned())
+                .collect();
+            let line = snippet_expand(&state.template, &values);
+            let tab = state.tab;
+            if let Some(td) = self.terminals.get_mut(&tab) {
+                td.instance.write(line.as_bytes());
+            }
+            self.history_menu_just_closed.insert(tab, true);
+        }
+    }
+
+    /// Per-terminal startup command editor. Confirm SAVES and RUNS the
+    /// command immediately (parity with scene restore); an empty value
+    /// clears it.
+    fn render_startup_cmd_dialog(&mut self, ctx: &egui::Context) {
+        if self.startup_cmd_dialog.is_none() {
+            return;
+        }
+        if std::mem::take(&mut self.startup_cmd_just_opened) {
+            self.dialog_kb_confirm = false;
+        }
+        let keys = dialog_keys(ctx, &mut self.dialog_kb_confirm, false);
+        let mut confirm = keys.enter || keys.confirm;
+        let mut cancel = keys.cancel;
+        if keys.close {
+            self.startup_cmd_dialog = None;
+            return;
+        }
+        let title = self.texts.terminal.startup_cmd_title.clone();
+        let hint = self.texts.terminal.startup_cmd_hint.clone();
+        egui::Modal::new(egui::Id::new("startup_cmd_dialog"))
+            .frame(egui::Frame::window(&ctx.style()))
+            .show(ctx, |ui| {
+                ui.set_min_width(360.0);
+                ui.heading(title);
+                ui.add_space(4.0);
+                ui.label(
+                    egui::RichText::new(hint)
+                        .size(11.0)
+                        .color(self.active_theme.app.weak_text.to_egui()),
+                );
+                ui.add_space(4.0);
+                let resp = ui.add(
+                    egui::TextEdit::singleline(&mut self.startup_cmd_dialog.as_mut().unwrap().1)
+                        .desired_width(ui.available_width())
+                        .font(egui::FontId::monospace(13.0)),
+                );
+                resp.request_focus();
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    let (c, x) = Self::dialog_button_row(
+                        ui,
+                        &mut self.dialog_kb_confirm,
+                        egui::Id::new("startup_cmd_confirm"),
+                        egui::Id::new("startup_cmd_cancel"),
+                        &self.texts.theme_editor.dialog_confirm,
+                        &self.texts.theme_editor.cancel,
+                    );
+                    confirm |= c;
+                    cancel |= x;
+                });
+            });
+        if cancel {
+            self.startup_cmd_dialog = None;
+        } else if confirm {
+            let Some((tab, cmd)) = self.startup_cmd_dialog.take() else {
+                return;
+            };
+            let cmd = cmd.trim().to_string();
+            if let Some(td) = self.terminals.get_mut(&tab) {
+                td.startup_command = cmd.clone();
+                run_startup_command(&mut td.instance, &cmd);
             }
         }
     }
@@ -7170,7 +7440,13 @@ impl App {
         // full command): the pending buffer no longer matches the grid.
         self.auto_match_pending.remove(tab);
         if let Some(command) = selected {
-            self.history_db.add(tab, &command);
+            let host = self
+                .terminals
+                .get(tab)
+                .and_then(|td| td.host.as_ref())
+                .map(|h| h.addr.clone())
+                .unwrap_or_default();
+            self.history_db.add(tab, &command, &host);
         }
     }
 
@@ -7869,12 +8145,16 @@ impl eframe::App for App {
                         if let Some((fid, _, items, Some(sel))) = self.fav_submenu.clone() {
                             if let Some(cmd) = items.get(sel).cloned() {
                                 let _ = fid;
-                                if let Some(td) = self.terminals.get_mut(&tab) {
-                                    td.instance.history_nav = None;
-                                    // Type without executing — same as the
-                                    // history list's Enter (the \r made it
-                                    // run immediately).
-                                    td.instance.write(cmd.as_bytes());
+                                // Snippets with {placeholders} open the
+                                // fill dialog instead of inserting raw.
+                                if !self.open_snippet_fill(&tab, cmd.clone()) {
+                                    if let Some(td) = self.terminals.get_mut(&tab) {
+                                        td.instance.history_nav = None;
+                                        // Type without executing — same as
+                                        // the history list's Enter (the \r
+                                        // made it run immediately).
+                                        td.instance.write(cmd.as_bytes());
+                                    }
                                 }
                                 self.history_menu_just_closed.insert(tab.clone(), true);
                                 self.fav_submenu = None;
@@ -7902,9 +8182,11 @@ impl eframe::App for App {
                                 (!line.is_empty()).then_some(line)
                             });
                         if let Some(cmd) = assembled {
-                            if let Some(td) = self.terminals.get_mut(&tab) {
-                                td.instance.history_nav = None;
-                                td.instance.write(cmd.as_bytes());
+                            if !self.open_snippet_fill(&tab, cmd.clone()) {
+                                if let Some(td) = self.terminals.get_mut(&tab) {
+                                    td.instance.history_nav = None;
+                                    td.instance.write(cmd.as_bytes());
+                                }
                             }
                             self.history_menu_just_closed.insert(tab.clone(), true);
                         }
@@ -7935,6 +8217,14 @@ impl eframe::App for App {
             && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter))
         {
             if let Some(tab) = &self.focused_terminal.clone() {
+                // Host label for the history row (ssh addr, "" = local),
+                // captured BEFORE the mutable terminal borrow below.
+                let rec_host = self
+                    .terminals
+                    .get(tab)
+                    .and_then(|td| td.host.as_ref())
+                    .map(|h| h.addr.clone())
+                    .unwrap_or_default();
                 if let Some(td) = self.terminals.get_mut(tab) {
                     if let Some(ref nav) = td.instance.history_nav {
                         let selected = nav.entries.get(nav.selected).cloned();
@@ -7954,7 +8244,7 @@ impl eframe::App for App {
                             .map(|s| s.trim().to_string())
                             .unwrap_or_default();
                         if !cmd.is_empty() {
-                            self.history_db.add(tab, &cmd);
+                            self.history_db.add(tab, &cmd, &rec_host);
                         }
                         // The command was EXECUTED: the pending-keystroke
                         // buffer must not survive into the next prompt —
@@ -9172,6 +9462,8 @@ impl eframe::App for App {
         self.render_ssh_host_dialog(ctx);
         self.render_ssh_delete_confirm(ctx);
         self.render_ai_panel(ctx);
+        self.render_snippet_fill_dialog(ctx);
+        self.render_startup_cmd_dialog(ctx);
 
         // Terminal close confirmation
         if let Some(ref tab_id) = self.pending_close_confirm.clone() {
@@ -10346,6 +10638,8 @@ impl eframe::App for App {
                                 ssh_hosts: &self.ssh_hosts,
                                 pending_ssh_connect: &mut self.pending_ssh_connect,
                                 broadcast_group: &mut self.broadcast_group,
+                                startup_cmd_dialog: &mut self.startup_cmd_dialog,
+                                startup_cmd_just_opened: &mut self.startup_cmd_just_opened,
                             },
                         );
                 } else {
@@ -10761,6 +11055,7 @@ mod tests {
                             working_directory: ".".into(),
                             shell: String::new(),
                             host_id: 0,
+                            startup_command: String::new(),
                         },
                     )]
                     .into_iter()
@@ -10777,6 +11072,7 @@ mod tests {
                             working_directory: ".".into(),
                             shell: String::new(),
                             host_id: 0,
+                            startup_command: String::new(),
                         },
                     )]
                     .into_iter()
@@ -10997,6 +11293,7 @@ mod tests {
             working_directory: "/tmp".into(),
             shell: String::new(),
             host_id: 0,
+            startup_command: String::new(),
         };
 
         let value = serde_json::to_value(state).unwrap();
@@ -11091,6 +11388,66 @@ pub(crate) fn assemble_commands(commands: &[String], shell_id: &str) -> String {
         .map(|c| c.split_whitespace().collect::<Vec<_>>().join(" "))
         .collect::<Vec<_>>()
         .join(assemble_separator(shell_id))
+}
+
+/// Unique `{placeholder}` tokens of a snippet, left to right. A token is
+/// anything except braces between `{` and `}`, trimmed; empty and
+/// duplicate tokens are dropped.
+pub(crate) fn snippet_tokens(template: &str) -> Vec<String> {
+    let mut tokens: Vec<String> = Vec::new();
+    let mut rest = template;
+    while let Some(open) = rest.find('{') {
+        let Some(close_rel) = rest[open + 1..].find('}') else {
+            break;
+        };
+        let token = rest[open + 1..open + 1 + close_rel].trim();
+        if !token.is_empty() && !tokens.iter().any(|t| t == token) {
+            tokens.push(token.to_string());
+        }
+        rest = &rest[open + 1 + close_rel + 1..];
+    }
+    tokens
+}
+
+/// Substitute `{token}` occurrences with their values; unknown or
+/// unfilled tokens are left verbatim so the user can spot them.
+pub(crate) fn snippet_expand(template: &str, values: &[(String, String)]) -> String {
+    let mut out = template.to_string();
+    for (token, value) in values {
+        if !token.is_empty() {
+            out = out.replace(&format!("{{{token}}}"), value);
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod snippet_tests {
+    use super::{snippet_expand, snippet_tokens};
+
+    #[test]
+    fn tokens_are_unique_and_ordered() {
+        assert_eq!(
+            snippet_tokens("ssh {host} -p {port} && ssh {host}"),
+            vec!["host", "port"]
+        );
+        assert!(snippet_tokens("no placeholders").is_empty());
+        // Unclosed brace / empty token are ignored.
+        assert!(snippet_tokens("oops {unclosed").is_empty());
+        assert!(snippet_tokens("empty {} braces").is_empty());
+    }
+
+    #[test]
+    fn expand_fills_known_tokens_and_keeps_unknown() {
+        let values = vec![
+            ("host".to_string(), "10.0.0.1".to_string()),
+            ("port".to_string(), "2222".to_string()),
+        ];
+        assert_eq!(
+            snippet_expand("ssh {host} -p {port} # {unknown}", &values),
+            "ssh 10.0.0.1 -p 2222 # {unknown}"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -11196,6 +11553,9 @@ struct TerminalTabViewer<'a> {
     pending_ssh_connect: &'a mut Option<i64>,
     /// Tabs currently receiving broadcast keystrokes.
     broadcast_group: &'a mut std::collections::HashSet<String>,
+    /// Per-terminal startup command editor: (tab id, buffer).
+    startup_cmd_dialog: &'a mut Option<(String, String)>,
+    startup_cmd_just_opened: &'a mut bool,
 }
 
 impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
@@ -11816,6 +12176,18 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                 *self.terminal_rename_buffer = data.name.clone();
             }
             self.rename_frame_count = 0;
+            ui.close_menu();
+        }
+        // Per-terminal startup command (runs on creation and every
+        // scene restore).
+        if ui.button(&self.texts.terminal.startup_cmd).clicked() {
+            let buffer = self
+                .terminals
+                .get(tab)
+                .map(|d| d.startup_command.clone())
+                .unwrap_or_default();
+            *self.startup_cmd_dialog = Some((tab.clone(), buffer));
+            *self.startup_cmd_just_opened = true;
             ui.close_menu();
         }
         // Broadcast input group: members receive each focused member's

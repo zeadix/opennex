@@ -195,6 +195,11 @@ terminal:
   clear_favorites_body: 모든 즐겨찾기 명령을 삭제할까요? 되돌릴 수 없습니다.
   broadcast_join: 동시 입력 참여
   broadcast_leave: 동시 입력 해제
+  snippet_fill_title: 스니펫 매개변수 입력
+  snippet_fill_hint: '이 스니펫에는 {플레이스홀더} 가 있습니다. 입력 후 확인하면 삽입됩니다(자동 실행 안 함).'
+  startup_cmd: 시작 명령...
+  startup_cmd_title: 시작 명령
+  startup_cmd_hint: '이 터미널을 만들거나 복원할 때마다 자동 실행됩니다. 비워 두고 확인하면 해제됩니다.'
   history_empty: '명령 기록 없음'
   fav_assemble: 조립
   fav_delete_body: 폴더와 그 안의 모든 명령을 삭제합니다. 되돌릴 수 없습니다.

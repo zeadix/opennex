@@ -195,6 +195,11 @@ terminal:
   clear_favorites_body: Cancellare tutti i comandi preferiti? Operazione irreversibile.
   broadcast_join: Partecipa alla digitazione broadcast
   broadcast_leave: Esci dalla digitazione broadcast
+  snippet_fill_title: Compila i parametri dello snippet
+  snippet_fill_hint: 'Questo snippet contiene {segnaposto}: compilali e conferma per inserire (nulla viene eseguito automaticamente).'
+  startup_cmd: Comando di avvio...
+  startup_cmd_title: Comando di avvio
+  startup_cmd_hint: 'Viene eseguito a ogni creazione o ripristino di questo terminale; lascia vuoto e conferma per cancellare.'
   history_empty: 'Nessun comando'
   fav_assemble: Assembla
   fav_delete_body: La cartella e TUTTI i suoi comandi verranno eliminati. Irreversibile.

@@ -171,6 +171,24 @@ impl HistoryDb {
                 [id],
             )?;
         }
+        // --- command_history host/frequency columns (v0.1.50) ------------
+        // `host` records WHERE a command ran (ssh addr, empty = local);
+        // `hits` counts re-runs, feeding future frequency-ranked
+        // completion. Both are added idempotently like the columns above.
+        let has_host_col: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('command_history') \
+                 WHERE name='host'",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .map(|n| n > 0)?;
+        if !has_host_col {
+            conn.execute_batch(
+                "ALTER TABLE command_history ADD COLUMN host TEXT NOT NULL DEFAULT '';
+                 ALTER TABLE command_history ADD COLUMN hits INTEGER NOT NULL DEFAULT 1;",
+            )?;
+        }
         // ------------------------------------------------------------------
 
         // Cheap consistency gate: catches truncated/garbage files that
@@ -185,7 +203,10 @@ impl HistoryDb {
         Ok(conn)
     }
 
-    pub fn add(&self, terminal_id: &str, command: &str) {
+    /// Record a command run. `host` is the ssh address it ran on (empty
+    /// = local shell); re-running the same command bumps its `hits`
+    /// counter instead of resetting it.
+    pub fn add(&self, terminal_id: &str, command: &str, host: &str) {
         let trimmed = command.trim();
         if trimmed.is_empty() || trimmed.len() <= 1 {
             return;
@@ -193,6 +214,15 @@ impl HistoryDb {
         let Ok(tx) = self.conn.unchecked_transaction() else {
             return;
         };
+        // Preserve the re-run count across the delete+insert dedup.
+        let prev_hits: i64 = tx
+            .query_row(
+                "SELECT COALESCE((SELECT hits FROM command_history \
+                 WHERE terminal_id = ?1 AND command = ?2 LIMIT 1), 1)",
+                params![terminal_id, trimmed],
+                |r| r.get(0),
+            )
+            .unwrap_or(1);
         if tx
             .execute(
                 "DELETE FROM command_history WHERE terminal_id = ?1 AND command = ?2",
@@ -201,8 +231,9 @@ impl HistoryDb {
             .is_err()
             || tx
                 .execute(
-                    "INSERT INTO command_history (terminal_id, command) VALUES (?1, ?2)",
-                    params![terminal_id, trimmed],
+                    "INSERT INTO command_history (terminal_id, command, host, hits) \
+                     VALUES (?1, ?2, ?3, ?4)",
+                    params![terminal_id, trimmed, host, prev_hits.saturating_add(1)],
                 )
                 .is_err()
             || tx
@@ -771,8 +802,8 @@ mod tests {
     #[test]
     fn prune_removes_aged_history_of_unknown_terminal_ids() {
         let (db, path) = test_db();
-        db.add("terminal-1", "ls");
-        db.add("terminal-2", "cd");
+        db.add("terminal-1", "ls", "");
+        db.add("terminal-2", "cd", "");
         // Age terminal-1's rows past the prune cutoff; terminal-2 stays fresh.
         db.conn
             .execute(
@@ -804,11 +835,25 @@ mod tests {
     fn adding_existing_command_moves_it_to_the_front_without_duplicates() {
         let (db, path) = test_db();
 
-        db.add("terminal", "first");
-        db.add("terminal", "second");
-        db.add("terminal", "first");
+        db.add("terminal", "first", "");
+        db.add("terminal", "second", "");
+        db.add("terminal", "first", "");
 
         assert_eq!(db.get("terminal", 10), vec!["first", "second"]);
+        // Re-running "first" bumped its hits and recorded the host.
+        db.add("terminal", "first", "ops@10.0.0.5");
+        let (cmd, host, hits): (String, String, i64) = db
+            .conn
+            .query_row(
+                "SELECT command, host, hits FROM command_history WHERE command = 'first'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            (cmd.as_str(), host.as_str(), hits),
+            ("first", "ops@10.0.0.5", 4)
+        );
         let _ = std::fs::remove_file(path);
     }
 
@@ -1004,7 +1049,7 @@ mod tests {
         std::fs::write(&path, b"this is not sqlite").unwrap();
 
         let recovered = HistoryDb::new(&path, 10);
-        recovered.add("terminal", "after-crash");
+        recovered.add("terminal", "after-crash", "");
         assert_eq!(
             recovered.get("terminal", 10),
             vec!["after-crash".to_string()]

@@ -195,6 +195,11 @@ terminal:
   clear_favorites_body: 确认清除全部收藏指令？此操作不可恢复。
   broadcast_join: 加入广播输入
   broadcast_leave: 退出广播输入
+  snippet_fill_title: 填写片段参数
+  snippet_fill_hint: '此片段包含 {参数} 占位符，填写后确认插入（不会自动执行）。'
+  startup_cmd: 启动命令...
+  startup_cmd_title: 启动命令
+  startup_cmd_hint: '每次创建或恢复此终端时自动执行；留空并确认即清除。'
   history_empty: '暂无指令'
   fav_assemble: 组装指令
   fav_delete_body: 将删除该收藏夹及其所有指令，此操作不可恢复。

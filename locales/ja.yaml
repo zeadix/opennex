@@ -195,6 +195,11 @@ terminal:
   clear_favorites_body: お気に入りコマンドをすべて消去します？元に戻せません。
   broadcast_join: 同時入力に参加
   broadcast_leave: 同時入力から退出
+  snippet_fill_title: スニペットのパラメータ入力
+  snippet_fill_hint: 'このスニペットには {プレースホルダー} が含まれます。入力して確認すると挿入されます（自動実行はしません）。'
+  startup_cmd: 起動コマンド...
+  startup_cmd_title: 起動コマンド
+  startup_cmd_hint: 'このターミナルの作成・復元時に毎回自動実行します。空欄で確認すると解除されます。'
   history_empty: 'コマンド履歴なし'
   fav_assemble: 組み合わせ
   fav_delete_body: フォルダーとその中のすべてのコマンドを削除します。元に戻せません。

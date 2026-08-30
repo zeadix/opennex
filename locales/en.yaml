@@ -195,6 +195,11 @@ terminal:
   clear_favorites_body: Clear all favorite commands? This cannot be undone.
   broadcast_join: Join broadcast input
   broadcast_leave: Leave broadcast input
+  snippet_fill_title: Fill Snippet Parameters
+  snippet_fill_hint: 'This snippet contains {placeholder} tokens — fill them in and confirm to insert (nothing is executed automatically).'
+  startup_cmd: Startup command...
+  startup_cmd_title: Startup Command
+  startup_cmd_hint: 'Runs automatically every time this terminal is created or restored; leave empty and confirm to clear.'
   history_empty: 'No commands yet'
   fav_assemble: Assemble
   fav_delete_body: This deletes the folder and ALL commands inside it. This cannot be undone.

@@ -195,6 +195,11 @@ terminal:
   clear_favorites_body: Alle Favoriten löschen? Dies kann nicht rückgängig gemacht werden.
   broadcast_join: Broadcast-Eingabe beitreten
   broadcast_leave: Broadcast-Eingabe verlassen
+  snippet_fill_title: Snippet-Parameter ausfüllen
+  snippet_fill_hint: 'Dieses Snippet enthält {Platzhalter} – ausfüllen und bestätigen zum Einfügen (nichts wird automatisch ausgeführt).'
+  startup_cmd: Startbefehl...
+  startup_cmd_title: Startbefehl
+  startup_cmd_hint: 'Wird bei jeder Erstellung oder Wiederherstellung dieses Terminals ausgeführt; leer lassen und bestätigen zum Löschen.'
   history_empty: 'Noch keine Befehle'
   fav_assemble: Zusammenfügen
   fav_delete_body: Der Ordner und ALLE darin enthaltenen Befehle werden gelöscht. Nicht widerrufbar.

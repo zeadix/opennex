@@ -348,6 +348,18 @@ pub struct TerminalTexts {
     /// Tab context-menu: leave the broadcast-input group.
     #[serde(default)]
     pub broadcast_leave: String,
+    /// Snippet fill-in dialog: title / hint ({} tokens shown per field).
+    #[serde(default)]
+    pub snippet_fill_title: String,
+    #[serde(default)]
+    pub snippet_fill_hint: String,
+    /// Tab context-menu + dialog for the per-terminal startup command.
+    #[serde(default)]
+    pub startup_cmd: String,
+    #[serde(default)]
+    pub startup_cmd_title: String,
+    #[serde(default)]
+    pub startup_cmd_hint: String,
 }
 
 /// Floating AI assistant panel + its settings section.
@@ -808,6 +820,11 @@ impl Texts {
                 clear_favorites_body: "确认清除全部收藏指令？此操作不可恢复。".into(),
                 broadcast_join: "加入广播输入".into(),
                 broadcast_leave: "退出广播输入".into(),
+                snippet_fill_title: "填写片段参数".into(),
+                snippet_fill_hint: "此片段包含 {参数} 占位符，填写后确认插入（不会自动执行）。".into(),
+                startup_cmd: "启动命令...".into(),
+                startup_cmd_title: "启动命令".into(),
+                startup_cmd_hint: "每次创建或恢复此终端时自动执行；留空并确认即清除。".into(),
             },
             theme: ThemeTexts {
                 light: "浅色".into(),
