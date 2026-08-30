@@ -51,6 +51,26 @@ struct AppSettings {
     /// Red warning banner on terminals connected to PROD-marked SSH hosts.
     #[serde(default = "default_true")]
     ssh_prod_banner: bool,
+    /// AI assistant master switch (panel is hidden until enabled).
+    #[serde(default)]
+    ai_enabled: bool,
+    /// OpenAI-compatible endpoint base (Ollama: http://localhost:11434/v1).
+    #[serde(default = "default_ai_base_url")]
+    ai_base_url: String,
+    /// API key. Stored ONLY in the local settings.json and sent ONLY to
+    /// the configured endpoint.
+    #[serde(default)]
+    ai_api_key: String,
+    #[serde(default = "default_ai_model")]
+    ai_model: String,
+}
+
+fn default_ai_base_url() -> String {
+    "https://api.openai.com/v1".into()
+}
+
+fn default_ai_model() -> String {
+    "gpt-4o-mini".into()
 }
 
 fn default_smooth_level() -> f32 {
@@ -708,6 +728,7 @@ fn any_modal_open(app: &App) -> bool {
         || app.fav_delete_confirm.is_some()
         || app.ssh_dialog.is_some()
         || app.ssh_delete_confirm.is_some()
+        || app.show_ai_panel
         || matches!(app.update_state, crate::updater::UpdateState::Ready(_))
 }
 
@@ -1281,6 +1302,10 @@ impl Default for AppSettings {
             apply_theme_typography: true,
             auto_copy_selection: true,
             ssh_prod_banner: true,
+            ai_enabled: false,
+            ai_base_url: default_ai_base_url(),
+            ai_api_key: String::new(),
+            ai_model: default_ai_model(),
             auto_match_command: true,
             default_shell: default_shell_pref(),
             smooth_rendering: true,
@@ -1680,6 +1705,15 @@ pub struct App {
     ssh_del_just_opened: bool,
     /// Host chosen in the tab "+" popup; consumed by process_pending.
     pending_ssh_connect: Option<i64>,
+    /// Tabs receiving broadcast keystrokes from any focused member.
+    broadcast_group: std::collections::HashSet<String>,
+    /// Floating AI assistant panel visibility (视图 menu).
+    show_ai_panel: bool,
+    ai_prompt: String,
+    ai_response: String,
+    ai_error: Option<String>,
+    ai_busy: bool,
+    ai_rx: Option<std::sync::mpsc::Receiver<Result<String, String>>>,
 }
 
 struct TerminalData {
@@ -2161,6 +2195,13 @@ impl App {
             ssh_delete_confirm: None,
             ssh_del_just_opened: false,
             pending_ssh_connect: None,
+            broadcast_group: Default::default(),
+            show_ai_panel: false,
+            ai_prompt: String::new(),
+            ai_response: String::new(),
+            ai_error: None,
+            ai_busy: false,
+            ai_rx: None,
             dialog_kb_confirm: false,
             fav_name_just_opened: false,
             fav_cmd_just_opened: false,
@@ -2530,6 +2571,7 @@ impl App {
             } else {
                 self.history_db.clear(&tab);
                 self.terminals.remove(&tab);
+                self.broadcast_group.remove(&tab);
                 if self.focused_terminal.as_ref() == Some(&tab) {
                     self.focused_terminal = None;
                 }
@@ -3520,6 +3562,37 @@ impl App {
             ui.checkbox(&mut prod_banner, "");
         });
         self.settings_edit.ssh_prod_banner = prod_banner;
+
+        // AI assistant: user-supplied OpenAI-compatible endpoint.
+        let ta = self.texts.ai.clone();
+        self.settings_group(ui, &ta.settings_section);
+        let mut ai_on = self.settings_edit.ai_enabled;
+        self.settings_row(ui, &ta.enable, |ui| {
+            ui.checkbox(&mut ai_on, "");
+        });
+        self.settings_edit.ai_enabled = ai_on;
+        if ai_on {
+            let mut base_url = self.settings_edit.ai_base_url.clone();
+            self.settings_row(ui, &ta.base_url, |ui| {
+                ui.add_sized([280.0, 20.0], egui::TextEdit::singleline(&mut base_url));
+            });
+            self.settings_edit.ai_base_url = base_url;
+
+            let mut api_key = self.settings_edit.ai_api_key.clone();
+            self.settings_row(ui, &ta.api_key, |ui| {
+                ui.add_sized(
+                    [280.0, 20.0],
+                    egui::TextEdit::singleline(&mut api_key).password(true),
+                );
+            });
+            self.settings_edit.ai_api_key = api_key;
+
+            let mut model = self.settings_edit.ai_model.clone();
+            self.settings_row(ui, &ta.model, |ui| {
+                ui.add_sized([280.0, 20.0], egui::TextEdit::singleline(&mut model));
+            });
+            self.settings_edit.ai_model = model;
+        }
 
         self.settings_group(ui, &b.data_section);
         let mut max_h = self.settings_edit.max_history;
@@ -6315,6 +6388,164 @@ impl App {
             .inner;
         (c, x)
     }
+    // ---- AI assistant (roadmap batch 2) ----
+
+    /// Floating AI panel: drains finished background responses, shows the
+    /// transcript and the three actions (send / explain output / insert).
+    fn render_ai_panel(&mut self, ctx: &egui::Context) {
+        // Drain finished responses even while the window is closed, so a
+        // late reply never resurrects stale state on reopen.
+        if let Some(rx) = &self.ai_rx {
+            while let Ok(outcome) = rx.try_recv() {
+                self.ai_busy = false;
+                match outcome {
+                    Ok(answer) => {
+                        self.ai_response = answer;
+                        self.ai_error = None;
+                    }
+                    Err(err) => self.ai_error = Some(err),
+                }
+            }
+        }
+        if !self.show_ai_panel {
+            return;
+        }
+        let mut open = true;
+        egui::Window::new(&self.texts.ai.panel_title)
+            .id(egui::Id::new("ai_panel"))
+            .open(&mut open)
+            .default_width(430.0)
+            .default_pos(screen_center(ctx) + egui::vec2(140.0, -120.0))
+            .show(ctx, |ui| {
+                let t = self.texts.ai.clone();
+                if !self.settings.ai_enabled {
+                    ui.label(&t.not_enabled);
+                    return;
+                }
+                if !self.ai_response.is_empty() {
+                    ui.add(
+                        egui::TextEdit::multiline(&mut self.ai_response)
+                            .desired_rows(7)
+                            .desired_width(ui.available_width()),
+                    );
+                } else {
+                    ui.label(
+                        egui::RichText::new(&t.empty_hint)
+                            .size(11.0)
+                            .color(self.active_theme.app.weak_text.to_egui()),
+                    );
+                }
+                if let Some(err) = &self.ai_error {
+                    ui.label(
+                        egui::RichText::new(format!("{} {err}", t.error_label))
+                            .size(11.0)
+                            .color(self.active_theme.app.danger.to_egui()),
+                    );
+                }
+                ui.separator();
+                ui.add(
+                    egui::TextEdit::multiline(&mut self.ai_prompt)
+                        .hint_text(&t.prompt_hint)
+                        .desired_rows(2)
+                        .desired_width(ui.available_width()),
+                );
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    if self.ai_busy {
+                        ui.label(
+                            egui::RichText::new(&t.generating)
+                                .size(11.0)
+                                .color(self.active_theme.app.weak_text.to_egui()),
+                        );
+                    }
+                    if ui
+                        .add_enabled(!self.ai_busy, egui::Button::new(&t.send))
+                        .clicked()
+                    {
+                        let prompt = self.ai_prompt.clone();
+                        self.ai_send(ctx, crate::ai::CHAT_SYSTEM, prompt);
+                    }
+                    if ui
+                        .add_enabled(!self.ai_busy, egui::Button::new(&t.explain_selection))
+                        .clicked()
+                    {
+                        self.ai_explain_selection(ctx);
+                    }
+                    if ui
+                        .add_enabled(
+                            !self.ai_busy && !self.ai_response.trim().is_empty(),
+                            egui::Button::new(&t.insert_to_terminal),
+                        )
+                        .clicked()
+                    {
+                        self.ai_insert_response();
+                    }
+                    if ui.button(&t.clear).clicked() {
+                        self.ai_response.clear();
+                        self.ai_error = None;
+                    }
+                });
+            });
+        if !open {
+            self.show_ai_panel = false;
+        }
+    }
+
+    /// Fire a background chat-completion request; the reply lands in
+    /// `ai_rx` and is drained on later frames.
+    fn ai_send(&mut self, ctx: &egui::Context, system: &'static str, user: String) {
+        if self.ai_busy || user.trim().is_empty() {
+            return;
+        }
+        let cfg = crate::ai::AiConfig {
+            base_url: self.settings.ai_base_url.clone(),
+            api_key: self.settings.ai_api_key.clone(),
+            model: self.settings.ai_model.clone(),
+        };
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.ai_rx = Some(rx);
+        self.ai_busy = true;
+        std::thread::spawn(move || {
+            let _ = tx.send(crate::ai::complete(&cfg, system, &user, 60));
+        });
+        ctx.request_repaint();
+    }
+
+    /// Ask the model to explain the focused terminal's selected (or all
+    /// visible) output.
+    fn ai_explain_selection(&mut self, ctx: &egui::Context) {
+        let Some(tab) = self.focused_terminal.clone() else {
+            return;
+        };
+        let Some(td) = self.terminals.get(&tab) else {
+            return;
+        };
+        let content = td.instance.backend.selectable_content();
+        let content: String = content.trim().chars().take(4000).collect();
+        if content.is_empty() {
+            return;
+        }
+        self.ai_send(
+            ctx,
+            crate::ai::EXPLAIN_SYSTEM,
+            format!("```\n{content}\n```"),
+        );
+    }
+
+    /// Write the current answer into the FOCUSED terminal (text only —
+    /// the user reviews it before pressing Enter).
+    fn ai_insert_response(&mut self) {
+        let text = self.ai_response.trim().to_string();
+        if text.is_empty() {
+            return;
+        }
+        if let Some(tab) = self.focused_terminal.clone() {
+            if let Some(td) = self.terminals.get_mut(&tab) {
+                td.instance.write(text.as_bytes());
+            }
+        }
+    }
+
     fn refresh_ssh_hosts(&mut self) {
         self.ssh_hosts = self.history_db.ssh_hosts();
     }
@@ -8014,6 +8245,14 @@ impl eframe::App for App {
                             self.workspace_sidebar_visible = !self.workspace_sidebar_visible;
                             ui.close_menu();
                         }
+                        let visible = self.show_ai_panel;
+                        if ui
+                            .selectable_label(visible, &self.texts.view_menu.ai_assistant)
+                            .clicked()
+                        {
+                            self.show_ai_panel = !self.show_ai_panel;
+                            ui.close_menu();
+                        }
                     });
                     let label = self.texts.menu.theme.clone();
                     dropdown(ui, &label, "menu_theme", &mut |ui| {
@@ -8932,6 +9171,7 @@ impl eframe::App for App {
         self.render_fav_delete_confirm(ctx);
         self.render_ssh_host_dialog(ctx);
         self.render_ssh_delete_confirm(ctx);
+        self.render_ai_panel(ctx);
 
         // Terminal close confirmation
         if let Some(ref tab_id) = self.pending_close_confirm.clone() {
@@ -10105,6 +10345,7 @@ impl eframe::App for App {
                                 danger: self.active_theme.app.danger.to_egui(),
                                 ssh_hosts: &self.ssh_hosts,
                                 pending_ssh_connect: &mut self.pending_ssh_connect,
+                                broadcast_group: &mut self.broadcast_group,
                             },
                         );
                 } else {
@@ -10953,28 +11194,34 @@ struct TerminalTabViewer<'a> {
     ssh_hosts: &'a [crate::hosts::SshHost],
     /// Host chosen in the "+" popup; consumed by process_pending.
     pending_ssh_connect: &'a mut Option<i64>,
+    /// Tabs currently receiving broadcast keystrokes.
+    broadcast_group: &'a mut std::collections::HashSet<String>,
 }
 
 impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
     type Tab = String;
 
     fn title(&mut self, tab: &mut Self::Tab) -> egui::WidgetText {
-        match self.terminals.get(tab) {
-            Some(d) => {
-                // PROD hosts: the title itself carries the danger tint so
-                // the wrong-window risk is visible even on tiny tabs.
-                if d.host.as_ref().is_some_and(|h| h.prod) {
-                    return egui::RichText::new(format!(
-                        "{} {}",
-                        egui_phosphor::regular::WARNING,
-                        d.name
-                    ))
-                    .color(self.danger)
-                    .into();
-                }
-                d.name.clone().into()
-            }
-            None => tab.clone().into(),
+        let Some(d) = self.terminals.get(tab) else {
+            return tab.clone().into();
+        };
+        let is_prod = d.host.as_ref().is_some_and(|h| h.prod);
+        let mut prefix = String::new();
+        if self.broadcast_group.contains(tab) {
+            prefix.push_str(egui_phosphor::regular::BROADCAST);
+        }
+        // PROD hosts: the title itself carries the danger tint so
+        // the wrong-window risk is visible even on tiny tabs.
+        if is_prod {
+            prefix.push_str(egui_phosphor::regular::WARNING);
+            return egui::RichText::new(format!("{} {}", prefix, d.name))
+                .color(self.danger)
+                .into();
+        }
+        if prefix.is_empty() {
+            d.name.clone().into()
+        } else {
+            egui::RichText::new(format!("{} {}", prefix, d.name)).into()
         }
     }
 
@@ -11400,6 +11647,52 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                 *self.focused_terminal = Some(tab.clone());
             }
 
+            // ---- Broadcast input (roadmap batch 2) --------------------------
+            // The FOCUSED member replicates its keystrokes to every other
+            // member of the group (ops batch operations). Only text-mode
+            // input is replicated: printable text, paste, Enter, Backspace
+            // and the classic ^C/^D interrupts. Read-only event peek — the
+            // terminal view already delivered the input to its own PTY.
+            if is_focused && !self.modal_open && self.broadcast_group.len() > 1 {
+                let others: Vec<String> = self
+                    .broadcast_group
+                    .iter()
+                    .filter(|t| *t != tab)
+                    .cloned()
+                    .collect();
+                let mut payload: Vec<u8> = Vec::new();
+                ui.ctx().input(|i| {
+                    for event in &i.events {
+                        match event {
+                            egui::Event::Text(text) => payload.extend_from_slice(text.as_bytes()),
+                            egui::Event::Paste(text) => payload.extend_from_slice(text.as_bytes()),
+                            egui::Event::Key {
+                                key,
+                                pressed: true,
+                                modifiers,
+                                ..
+                            } => match key {
+                                egui::Key::Enter => payload.push(b'\r'),
+                                egui::Key::Backspace => payload.push(0x7f),
+                                egui::Key::C if modifiers.ctrl && !modifiers.shift => {
+                                    payload.push(0x03)
+                                }
+                                egui::Key::D if modifiers.ctrl => payload.push(0x04),
+                                _ => {}
+                            },
+                            _ => {}
+                        }
+                    }
+                });
+                if !payload.is_empty() {
+                    for other in others {
+                        if let Some(td) = self.terminals.get_mut(&other) {
+                            td.instance.write(&payload);
+                        }
+                    }
+                }
+            }
+
             // The history / auto-match list renders as a GLOBAL overlay in
             // App::update (see render_history_menu), not clipped by this
             // terminal's rect.
@@ -11523,6 +11816,24 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                 *self.terminal_rename_buffer = data.name.clone();
             }
             self.rename_frame_count = 0;
+            ui.close_menu();
+        }
+        // Broadcast input group: members receive each focused member's
+        // keystrokes (ops batch operations).
+        let in_broadcast = self.broadcast_group.contains(tab);
+        if ui
+            .button(if in_broadcast {
+                &self.texts.terminal.broadcast_leave
+            } else {
+                &self.texts.terminal.broadcast_join
+            })
+            .clicked()
+        {
+            if in_broadcast {
+                self.broadcast_group.remove(tab);
+            } else {
+                self.broadcast_group.insert(tab.clone());
+            }
             ui.close_menu();
         }
         ui.separator();

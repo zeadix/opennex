@@ -21,6 +21,7 @@ pub struct Texts {
     pub theme_editor: ThemeEditorTexts,
     pub stats: StatsTexts,
     pub ssh: SshTexts,
+    pub ai: AiTexts,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -45,6 +46,9 @@ pub struct ViewMenuTexts {
     pub split_down: String,
     pub settings: String,
     pub workspace_toggle: String,
+    /// 视图 menu toggle for the floating AI assistant panel.
+    #[serde(default)]
+    pub ai_assistant: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -338,6 +342,32 @@ pub struct TerminalTexts {
     /// Confirmation dialog for clearing global favorites.
     pub clear_favorites_title: String,
     pub clear_favorites_body: String,
+    /// Tab context-menu: join the broadcast-input group.
+    #[serde(default)]
+    pub broadcast_join: String,
+    /// Tab context-menu: leave the broadcast-input group.
+    #[serde(default)]
+    pub broadcast_leave: String,
+}
+
+/// Floating AI assistant panel + its settings section.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AiTexts {
+    pub panel_title: String,
+    pub settings_section: String,
+    pub enable: String,
+    pub base_url: String,
+    pub api_key: String,
+    pub model: String,
+    pub prompt_hint: String,
+    pub send: String,
+    pub explain_selection: String,
+    pub insert_to_terminal: String,
+    pub generating: String,
+    pub empty_hint: String,
+    pub error_label: String,
+    pub not_enabled: String,
+    pub clear: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -568,6 +598,7 @@ impl Texts {
                 split_down: "向下分屏".into(),
                 settings: "设置".into(),
                 workspace_toggle: "工作区".into(),
+                ai_assistant: "AI 助手".into(),
             },
             settings: SettingsTexts {
                 title: "设置".into(),
@@ -775,6 +806,8 @@ impl Texts {
                 fav_item_count: "条收藏指令".into(),
                 clear_favorites_title: "清除全部收藏指令".into(),
                 clear_favorites_body: "确认清除全部收藏指令？此操作不可恢复。".into(),
+                broadcast_join: "加入广播输入".into(),
+                broadcast_leave: "退出广播输入".into(),
             },
             theme: ThemeTexts {
                 light: "浅色".into(),
@@ -958,6 +991,23 @@ impl Texts {
                 ssh_unavailable: "未找到 ssh 程序，请先安装 OpenSSH 客户端".into(),
                 host_missing_fallback: "主机「{}」已删除，终端已回退为本地 shell".into(),
                 menu_entry: "SSH 连接...".into(),
+            },
+            ai: AiTexts {
+                panel_title: "AI 助手".into(),
+                settings_section: "AI 助手".into(),
+                enable: "启用 AI 助手（OpenAI 兼容接口 / 本地 Ollama）".into(),
+                base_url: "API 地址:".into(),
+                api_key: "API Key:".into(),
+                model: "模型:".into(),
+                prompt_hint: "输入问题或描述任务...".into(),
+                send: "发送".into(),
+                explain_selection: "解释终端输出".into(),
+                insert_to_terminal: "插入到终端".into(),
+                generating: "正在思考...".into(),
+                empty_hint: "回答会显示在这里。可先选中终端输出再点击「解释终端输出」。".into(),
+                error_label: "请求失败:".into(),
+                not_enabled: "请先在 设置 → 通用 中启用 AI 助手并填写 API 地址与 Key。".into(),
+                clear: "清空".into(),
             },
         }
     }

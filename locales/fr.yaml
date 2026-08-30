@@ -14,6 +14,7 @@ view_menu:
   split_down: Diviser vers le bas
   settings: Paramètres
   workspace_toggle: Espace de travail
+  ai_assistant: Assistant IA
 settings:
   title: Paramètres
   tabs:
@@ -192,6 +193,8 @@ terminal:
   fav_item_count:  commandes
   clear_favorites_title: Effacer toutes les commandes favorites
   clear_favorites_body: Effacer toutes les commandes favorites ? Cette action est irréversible.
+  broadcast_join: Rejoindre la saisie groupée
+  broadcast_leave: Quitter la saisie groupée
   history_empty: 'Pas encore de commandes'
   fav_assemble: Assembler
   fav_delete_body: Le dossier et TOUTES ses commandes seront supprimés. Irréversible.
@@ -400,3 +403,19 @@ ssh:
   ssh_unavailable: ssh introuvable — installez un client OpenSSH
   host_missing_fallback: Hôte « {} » supprimé ; retour à un shell local
   menu_entry: Connexion SSH...
+ai:
+  panel_title: Assistant IA
+  settings_section: Assistant IA
+  enable: Activer l'assistant IA (compatible OpenAI / Ollama local)
+  base_url: 'URL API :'
+  api_key: 'Clé API :'
+  model: 'Modèle :'
+  prompt_hint: Posez une question ou décrivez une tâche...
+  send: Envoyer
+  explain_selection: Expliquer la sortie du terminal
+  insert_to_terminal: Insérer dans le terminal
+  generating: Réflexion...
+  empty_hint: Les réponses apparaissent ici. Sélectionnez la sortie du terminal puis cliquez sur « Expliquer la sortie du terminal ».
+  error_label: 'Échec de la requête :'
+  not_enabled: Activez l'assistant IA dans Paramètres → Général et renseignez l'URL et la clé API.
+  clear: Effacer

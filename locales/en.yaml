@@ -14,6 +14,7 @@ view_menu:
   split_down: Split Down
   settings: Settings
   workspace_toggle: Workspace
+  ai_assistant: AI Assistant
 settings:
   title: Settings
   tabs:
@@ -192,6 +193,8 @@ terminal:
   fav_item_count:  favorite commands
   clear_favorites_title: Clear All Favorite Commands
   clear_favorites_body: Clear all favorite commands? This cannot be undone.
+  broadcast_join: Join broadcast input
+  broadcast_leave: Leave broadcast input
   history_empty: 'No commands yet'
   fav_assemble: Assemble
   fav_delete_body: This deletes the folder and ALL commands inside it. This cannot be undone.
@@ -400,3 +403,19 @@ ssh:
   ssh_unavailable: ssh not found — please install an OpenSSH client
   host_missing_fallback: 'Host "{}" was deleted; terminal fell back to a local shell'
   menu_entry: SSH Connection...
+ai:
+  panel_title: AI Assistant
+  settings_section: AI Assistant
+  enable: Enable AI assistant (OpenAI-compatible / local Ollama)
+  base_url: 'API URL:'
+  api_key: 'API Key:'
+  model: 'Model:'
+  prompt_hint: Ask a question or describe a task...
+  send: Send
+  explain_selection: Explain terminal output
+  insert_to_terminal: Insert to terminal
+  generating: Thinking...
+  empty_hint: Answers appear here. Select terminal output and click "Explain terminal output".
+  error_label: 'Request failed:'
+  not_enabled: Enable the AI assistant in Settings → General and fill in the API URL and Key.
+  clear: Clear

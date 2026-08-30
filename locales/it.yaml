@@ -14,6 +14,7 @@ view_menu:
   split_down: Dividi in basso
   settings: Impostazioni
   workspace_toggle: Area di lavoro
+  ai_assistant: Assistente AI
 settings:
   title: Impostazioni
   tabs:
@@ -192,6 +193,8 @@ terminal:
   fav_item_count:  comandi
   clear_favorites_title: Cancella tutti i preferiti
   clear_favorites_body: Cancellare tutti i comandi preferiti? Operazione irreversibile.
+  broadcast_join: Partecipa alla digitazione broadcast
+  broadcast_leave: Esci dalla digitazione broadcast
   history_empty: 'Nessun comando'
   fav_assemble: Assembla
   fav_delete_body: La cartella e TUTTI i suoi comandi verranno eliminati. Irreversibile.
@@ -400,3 +403,19 @@ ssh:
   ssh_unavailable: ssh non trovato — installa un client OpenSSH
   host_missing_fallback: Host "{}" eliminato; il terminale è tornato a una shell locale
   menu_entry: Connessione SSH...
+ai:
+  panel_title: Assistente AI
+  settings_section: Assistente AI
+  enable: Abilita assistente AI (compatibile OpenAI / Ollama locale)
+  base_url: 'URL API:'
+  api_key: 'Chiave API:'
+  model: 'Modello:'
+  prompt_hint: Fai una domanda o descrivi un compito...
+  send: Invia
+  explain_selection: Spiega l'output del terminale
+  insert_to_terminal: Inserisci nel terminale
+  generating: Sto pensando...
+  empty_hint: Le risposte appaiono qui. Seleziona l'output del terminale e clicca «Spiega l'output del terminale».
+  error_label: 'Richiesta fallita:'
+  not_enabled: Abilita l'assistente AI in Impostazioni → Generali e inserisci URL e chiave API.
+  clear: Pulisci

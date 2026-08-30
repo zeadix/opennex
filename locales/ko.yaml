@@ -14,6 +14,7 @@ view_menu:
   split_down: 아래로 분할
   settings: 설정
   workspace_toggle: 작업공간
+  ai_assistant: AI 어시스턴트
 settings:
   title: 설정
   tabs:
@@ -192,6 +193,8 @@ terminal:
   fav_item_count: 개의 명령
   clear_favorites_title: 모든 즐겨찾기 명령 삭제
   clear_favorites_body: 모든 즐겨찾기 명령을 삭제할까요? 되돌릴 수 없습니다.
+  broadcast_join: 동시 입력 참여
+  broadcast_leave: 동시 입력 해제
   history_empty: '명령 기록 없음'
   fav_assemble: 조립
   fav_delete_body: 폴더와 그 안의 모든 명령을 삭제합니다. 되돌릴 수 없습니다.
@@ -399,3 +402,19 @@ ssh:
   ssh_unavailable: ssh 를 찾을 수 없습니다. OpenSSH 클라이언트를 설치해 주세요
   host_missing_fallback: 호스트 "{}"이(가) 삭제되어 로컬 shell 로 시작했습니다
   menu_entry: SSH 연결...
+ai:
+  panel_title: AI 어시스턴트
+  settings_section: AI 어시스턴트
+  enable: AI 어시스턴트 사용 (OpenAI 호환 / 로컬 Ollama)
+  base_url: 'API URL:'
+  api_key: 'API Key:'
+  model: '모델:'
+  prompt_hint: 질문이나 작업을 입력...
+  send: 보내기
+  explain_selection: 터미널 출력 설명
+  insert_to_terminal: 터미널에 삽입
+  generating: 생각하는 중...
+  empty_hint: 답변이 여기에 표시됩니다. 터미널 출력을 선택하고 "터미널 출력 설명"을 클릭하세요.
+  error_label: '요청 실패:'
+  not_enabled: 설정 → 일반 에서 AI 어시스턴트를 활성화하고 API URL 과 Key 를 입력하세요.
+  clear: 지우기

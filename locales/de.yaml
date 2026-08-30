@@ -14,6 +14,7 @@ view_menu:
   split_down: Nach unten teilen
   settings: Einstellungen
   workspace_toggle: Arbeitsbereich
+  ai_assistant: KI-Assistent
 settings:
   title: Einstellungen
   tabs:
@@ -192,6 +193,8 @@ terminal:
   fav_item_count:  Befehle
   clear_favorites_title: Alle Favoriten löschen
   clear_favorites_body: Alle Favoriten löschen? Dies kann nicht rückgängig gemacht werden.
+  broadcast_join: Broadcast-Eingabe beitreten
+  broadcast_leave: Broadcast-Eingabe verlassen
   history_empty: 'Noch keine Befehle'
   fav_assemble: Zusammenfügen
   fav_delete_body: Der Ordner und ALLE darin enthaltenen Befehle werden gelöscht. Nicht widerrufbar.
@@ -400,3 +403,19 @@ ssh:
   ssh_unavailable: ssh nicht gefunden – bitte OpenSSH-Client installieren
   host_missing_fallback: Host "{}" wurde gelöscht; Terminal fällt auf lokale Shell zurück
   menu_entry: SSH-Verbindung...
+ai:
+  panel_title: KI-Assistent
+  settings_section: KI-Assistent
+  enable: KI-Assistent aktivieren (OpenAI-kompatibel / lokales Ollama)
+  base_url: 'API-URL:'
+  api_key: 'API-Key:'
+  model: 'Modell:'
+  prompt_hint: Frage stellen oder Aufgabe beschreiben...
+  send: Senden
+  explain_selection: Terminalausgabe erklären
+  insert_to_terminal: Ins Terminal einfügen
+  generating: Denkt nach...
+  empty_hint: Antworten erscheinen hier. Terminalausgabe markieren und auf „Terminalausgabe erklären" klicken.
+  error_label: 'Anfrage fehlgeschlagen:'
+  not_enabled: KI-Assistent in Einstellungen → Allgemein aktivieren und API-URL sowie Key eintragen.
+  clear: Leeren

@@ -14,6 +14,7 @@ view_menu:
   split_down: 下に分割
   settings: 設定
   workspace_toggle: ワークスペース
+  ai_assistant: AI アシスタント
 settings:
   title: 設定
   tabs:
@@ -192,6 +193,8 @@ terminal:
   fav_item_count: 件のコマンド
   clear_favorites_title: お気に入りコマンドを全消去
   clear_favorites_body: お気に入りコマンドをすべて消去します？元に戻せません。
+  broadcast_join: 同時入力に参加
+  broadcast_leave: 同時入力から退出
   history_empty: 'コマンド履歴なし'
   fav_assemble: 組み合わせ
   fav_delete_body: フォルダーとその中のすべてのコマンドを削除します。元に戻せません。
@@ -399,3 +402,19 @@ ssh:
   ssh_unavailable: ssh が見つかりません。OpenSSH クライアントをインストールしてください
   host_missing_fallback: ホスト「{}」は削除済みのため、ローカル shell で起動しました
   menu_entry: SSH 接続...
+ai:
+  panel_title: AI アシスタント
+  settings_section: AI アシスタント
+  enable: AI アシスタントを有効化（OpenAI 互換 / ローカル Ollama）
+  base_url: 'API URL:'
+  api_key: 'API Key:'
+  model: 'モデル:'
+  prompt_hint: 質問やタスクを入力...
+  send: 送信
+  explain_selection: ターミナル出力を説明
+  insert_to_terminal: ターミナルへ挿入
+  generating: 考えています...
+  empty_hint: 回答はここに表示されます。ターミナル出力を選択して「ターミナル出力を説明」をクリック。
+  error_label: 'リクエスト失敗:'
+  not_enabled: 設定 → 一般 で AI アシスタントを有効にし、API URL と Key を入力してください。
+  clear: クリア

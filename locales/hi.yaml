@@ -14,6 +14,7 @@ view_menu:
   split_down: नीचे विभाजित करें
   settings: सेटिंग्स
   workspace_toggle: कार्यक्षेत्र
+  ai_assistant: AI सहायक
 settings:
   title: सेटिंग्स
   tabs:
@@ -192,6 +193,8 @@ terminal:
   fav_item_count:  कमांड
   clear_favorites_title: सभी पसंदीदा कमांड हटाएं
   clear_favorites_body: सभी पसंदीदा कमांड हटाएं? यह पूर्ववत नहीं हो सकता।
+  broadcast_join: ब्रॉडकास्ट इनपुट में शामिल हों
+  broadcast_leave: ब्रॉडकास्ट इनपुट छोड़ें
   history_empty: 'अभी कोई कमांड नहीं'
   fav_assemble: जोड़ें
   fav_delete_body: फ़ोल्डर और उसके सभी कमांड हटाए जाएँगे। इसे पूर्ववत नहीं किया जा सकता।
@@ -400,3 +403,19 @@ ssh:
   ssh_unavailable: ssh नहीं मिला — कृपया OpenSSH क्लाइंट इंस्टॉल करें
   host_missing_fallback: होस्ट "{}" हटा दिया गया; टर्मिनल लोकल shell पर लौटा
   menu_entry: SSH कनेक्शन...
+ai:
+  panel_title: AI सहायक
+  settings_section: AI सहायक
+  enable: AI सहायक सक्षम करें (OpenAI-संगत / लोकल Ollama)
+  base_url: 'API URL:'
+  api_key: 'API Key:'
+  model: 'मॉडल:'
+  prompt_hint: प्रश्न पूछें या कार्य बताएं...
+  send: भेजें
+  explain_selection: टर्मिनल आउटपुट समझाएँ
+  insert_to_terminal: टर्मिनल में डालें
+  generating: सोच रहा है...
+  empty_hint: उत्तर यहाँ दिखेंगे। टर्मिनल आउटपुट चुनें और "टर्मिनल आउटपुट समझाएँ" पर क्लिक करें।
+  error_label: 'अनुरोध विफल:'
+  not_enabled: सेटिंग्स → सामान्य में AI सहायक सक्षम करें और API URL व Key भरें।
+  clear: साफ़ करें
