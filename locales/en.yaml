@@ -15,6 +15,7 @@ view_menu:
   settings: Settings
   workspace_toggle: Workspace
   ai_assistant: AI Assistant
+  monitor: Monitor
 settings:
   title: Settings
   tabs:
@@ -200,6 +201,7 @@ terminal:
   startup_cmd: Startup command...
   startup_cmd_title: Startup Command
   startup_cmd_hint: 'Runs automatically every time this terminal is created or restored; leave empty and confirm to clear.'
+  term_search_hint: Search...
   history_empty: 'No commands yet'
   fav_assemble: Assemble
   fav_delete_body: This deletes the folder and ALL commands inside it. This cannot be undone.
@@ -424,3 +426,9 @@ ai:
   error_label: 'Request failed:'
   not_enabled: Enable the AI assistant in Settings → General and fill in the API URL and Key.
   clear: Clear
+monitor:
+  title: Monitor
+  global: Global
+  cpu: CPU
+  memory: MEM
+  empty_hint: No samples yet, waiting for the next tick…

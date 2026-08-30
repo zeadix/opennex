@@ -15,6 +15,7 @@ view_menu:
   settings: 설정
   workspace_toggle: 작업공간
   ai_assistant: AI 어시스턴트
+  monitor: 모니터
 settings:
   title: 설정
   tabs:
@@ -200,6 +201,7 @@ terminal:
   startup_cmd: 시작 명령...
   startup_cmd_title: 시작 명령
   startup_cmd_hint: '이 터미널을 만들거나 복원할 때마다 자동 실행됩니다. 비워 두고 확인하면 해제됩니다.'
+  term_search_hint: 검색...
   history_empty: '명령 기록 없음'
   fav_assemble: 조립
   fav_delete_body: 폴더와 그 안의 모든 명령을 삭제합니다. 되돌릴 수 없습니다.
@@ -423,3 +425,9 @@ ai:
   error_label: '요청 실패:'
   not_enabled: 설정 → 일반 에서 AI 어시스턴트를 활성화하고 API URL 과 Key 를 입력하세요.
   clear: 지우기
+monitor:
+  title: 모니터
+  global: 전체
+  cpu: CPU
+  memory: 메모리
+  empty_hint: 아직 샘플이 없습니다. 다음 주기를 기다리는 중…

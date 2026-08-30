@@ -1,3 +1,8 @@
+use alacritty_terminal::grid::Dimensions;
+use alacritty_terminal::grid::Grid;
+use alacritty_terminal::index::{Column, Line, Point};
+use alacritty_terminal::term::cell::{self, Cell};
+use alacritty_terminal::term::point_to_viewport;
 use egui_dock::{DockArea, DockState, NodeIndex, Style, SurfaceIndex};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -731,6 +736,7 @@ fn any_modal_open(app: &App) -> bool {
         || app.show_ai_panel
         || app.snippet_fill.is_some()
         || app.startup_cmd_dialog.is_some()
+        || app.terminal_search.is_some()
         || matches!(app.update_state, crate::updater::UpdateState::Ready(_))
 }
 
@@ -946,15 +952,19 @@ enum StartCheckResult {
 
 /// Process-tree sample job: pid roots for (all terminals, active
 /// workspace, focused terminal).
-type ProcSampleJob = (Vec<u32>, Vec<u32>, Vec<u32>);
+/// (all, active-workspace, focused) root pid groups + per-terminal
+/// (tab id, root pid) pairs for the monitor panel.
+type ProcSampleJob = (Vec<u32>, Vec<u32>, Vec<u32>, Vec<(String, u32)>);
 
 /// Aggregated status-bar metrics, computed OFF the UI thread by the
 /// persistent sampler worker and delivered through the egui temp store.
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Default)]
 struct ProcSampleResult {
     all: (Option<f32>, Option<u64>),
     workspace: (Option<f32>, Option<u64>),
     focused: (Option<f32>, Option<u64>),
+    /// (tab id, cpu%, rss bytes) per sampled terminal.
+    per_terminal: Vec<(String, Option<f32>, Option<u64>)>,
 }
 
 fn proc_sample_id() -> egui::Id {
@@ -972,9 +982,9 @@ fn spawn_proc_sampler(ctx: egui::Context) -> std::sync::mpsc::Sender<ProcSampleJ
         .name("opennex-proc-sampler".into())
         .spawn(move || {
             let mut sampler = crate::proc_stats::ProcSampler::new();
-            while let Ok((all_roots, ws_roots, focused_roots)) = rx.recv() {
+            while let Ok((all_roots, ws_roots, focused_roots, per_terminal)) = rx.recv() {
                 let mut result = ProcSampleResult::default();
-                sampler.refresh_groups(
+                result.per_terminal = sampler.refresh_mixed(
                     [&focused_roots, &ws_roots, &all_roots],
                     [
                         &mut result.focused.0,
@@ -986,6 +996,7 @@ fn spawn_proc_sampler(ctx: egui::Context) -> std::sync::mpsc::Sender<ProcSampleJ
                         &mut result.workspace.1,
                         &mut result.all.1,
                     ],
+                    &per_terminal,
                 );
                 ctx.memory_mut(|mem| {
                     mem.data.insert_temp(proc_sample_id(), result);
@@ -1611,6 +1622,14 @@ pub struct App {
     focused_mem: Option<u64>,
     /// Wall-clock of the last sampling tick.
     last_sample: std::time::Instant,
+    /// Monitor panel rows: (tab id, cpu%, rss bytes) from the last tick.
+    monitor_rows: Vec<(String, Option<f32>, Option<u64>)>,
+    /// Recent global terminal-tree CPU% samples for the sparkline.
+    cpu_history: Vec<f32>,
+    /// Floating monitor panel visibility (视图 menu).
+    show_monitor: bool,
+    /// Terminal scrollback search bar state (Ctrl+F on the focused tab).
+    terminal_search: Option<TerminalSearch>,
     /// Sender to the persistent sampler worker; respawned on failure.
     /// The heavy process-table scan runs OFF the UI thread.
     proc_sample_tx: Option<std::sync::mpsc::Sender<ProcSampleJob>>,
@@ -1858,6 +1877,154 @@ fn create_terminal(
         &shell.args,
         scrollback,
     )
+}
+
+// ---- Terminal scrollback search (roadmap batch 4) ---------------------
+
+/// One search hit: absolute grid line (Line(0) = top of the active
+/// screen, negative = scrollback), the starting column and the number of
+/// grid columns the match spans (wide chars consume two columns).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SearchHit {
+    pub line: Line,
+    pub col_start: usize,
+    pub col_count: usize,
+}
+
+/// State of the floating search bar for ONE terminal.
+pub(crate) struct TerminalSearch {
+    pub tab: String,
+    pub query: String,
+    /// Query the current `matches` were computed against.
+    pub searched: String,
+    pub matches: Vec<SearchHit>,
+    pub current: usize,
+}
+
+impl TerminalSearch {
+    pub fn new(tab: String) -> Self {
+        Self {
+            tab,
+            query: String::new(),
+            searched: String::new(),
+            matches: Vec::new(),
+            current: 0,
+        }
+    }
+}
+
+/// Case-insensitive substring search over pre-extracted grid rows. Rows
+/// come as (row index, (char, grid column) pairs); wide-char spacers are
+/// already skipped by the caller, so a char's column is its cell origin.
+fn hits_in_rows(
+    rows: impl Iterator<Item = (i32, Vec<(char, usize)>)>,
+    query_lower: &str,
+) -> Vec<SearchHit> {
+    let mut hits = Vec::new();
+    if query_lower.is_empty() {
+        return hits;
+    }
+    let qchars: Vec<char> = query_lower.chars().collect();
+    for (row_idx, row) in rows {
+        // Lowercase char stream WITH its grid column, so matches map back
+        // to cell coordinates (row strings would shift on wide chars).
+        let mut stream: Vec<(char, usize)> = row
+            .into_iter()
+            .map(|(c, col)| (c.to_lowercase().next().unwrap_or(c), col))
+            .collect();
+        // Trailing whitespace rarely matters visually and pollutes hits
+        // ("ls" would also match the padded row tail).
+        while stream.last().is_some_and(|(c, _)| c.is_whitespace()) {
+            stream.pop();
+        }
+        if stream.len() < qchars.len() {
+            continue;
+        }
+        let mut start = 0;
+        while start + qchars.len() <= stream.len() {
+            if stream[start..start + qchars.len()]
+                .iter()
+                .map(|(c, _)| *c)
+                .eq(qchars.iter().copied())
+            {
+                let first = stream[start].1;
+                let last = stream[start + qchars.len() - 1].1;
+                // A wide char spans its own column PLUS the (skipped)
+                // spacer column: the pixel width covers both.
+                let hit = SearchHit {
+                    line: Line(row_idx),
+                    col_start: first,
+                    col_count: last - first + 1,
+                };
+                hits.push(hit);
+                start += qchars.len();
+            } else {
+                start += 1;
+            }
+        }
+    }
+    hits
+}
+
+/// Search the WHOLE scrollback (history + screen) of a grid. Rows are
+/// extracted as (char, column) pairs; wide-char spacer cells are skipped
+/// so a wide char maps to its own origin column.
+fn find_search_hits(grid: &Grid<Cell>, query_lower: &str) -> Vec<SearchHit> {
+    let screen = grid.screen_lines() as i32;
+    let history = grid.total_lines() as i32 - screen;
+    let rows = (-history..screen).map(|l| {
+        let row = &grid[Line(l)];
+        let filtered: Vec<(char, usize)> = (0..grid.columns())
+            .map(|col| {
+                let c = &row[Column(col)];
+                (c.c, c.flags, col)
+            })
+            .filter(|(_, flags, _)| !flags.contains(cell::Flags::WIDE_CHAR_SPACER))
+            .map(|(ch, _, col)| (ch, col))
+            .collect();
+        (l, filtered)
+    });
+    hits_in_rows(rows, query_lower)
+}
+
+#[cfg(test)]
+mod search_tests {
+    use super::hits_in_rows;
+
+    fn row(idx: i32, s: &str) -> (i32, Vec<(char, usize)>) {
+        (idx, s.chars().enumerate().map(|(i, c)| (c, i)).collect())
+    }
+
+    #[test]
+    fn finds_all_matches_case_insensitively() {
+        let rows = [
+            row(0, "Error: not found"),
+            row(1, "no ERROR here"),
+            row(2, "errors"),
+        ];
+        let hits = hits_in_rows(rows.into_iter(), "error");
+        assert_eq!(hits.len(), 3);
+        assert_eq!(hits[0].line.0, 0);
+        assert_eq!(hits[0].col_start, 0);
+        assert_eq!(hits[0].col_count, 5);
+        assert_eq!(hits[1].line.0, 1);
+        assert_eq!(hits[1].col_start, 3);
+    }
+
+    #[test]
+    fn empty_query_and_no_match_yield_nothing() {
+        assert!(hits_in_rows([row(0, "abc")].into_iter(), "").is_empty());
+        assert!(hits_in_rows([row(0, "abc")].into_iter(), "zzz").is_empty());
+    }
+
+    #[test]
+    fn trailing_padding_is_not_part_of_a_match() {
+        // Padded row tail: "ls        " — searching "ls" must match at 0.
+        let hits = hits_in_rows([row(0, "ls       ")].into_iter(), "ls");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].col_start, 0);
+        assert_eq!(hits[0].col_count, 2);
+    }
 }
 
 /// Execute a terminal's startup command by typing it into the PTY with
@@ -2236,6 +2403,10 @@ impl App {
             focused_cpu: None,
             focused_mem: None,
             last_sample: std::time::Instant::now(),
+            monitor_rows: Vec::new(),
+            cpu_history: Vec::new(),
+            show_monitor: false,
+            terminal_search: None,
             proc_sample_tx: None,
             font_asset_cache: None,
             startup_warnings: Vec::new(),
@@ -2653,6 +2824,9 @@ impl App {
                 self.history_db.clear(&tab);
                 self.terminals.remove(&tab);
                 self.broadcast_group.remove(&tab);
+                if self.terminal_search.as_ref().is_some_and(|s| s.tab == tab) {
+                    self.terminal_search = None;
+                }
                 if self.focused_terminal.as_ref() == Some(&tab) {
                     self.focused_terminal = None;
                 }
@@ -6493,6 +6667,253 @@ impl App {
             .inner;
         (c, x)
     }
+    // ---- Terminal scrollback search UI (roadmap batch 4) ----
+
+    /// Jump to the next/previous hit (wraps) and scroll it into view.
+    fn search_navigate(&mut self, forward: bool) {
+        let Some(search) = self.terminal_search.as_ref() else {
+            return;
+        };
+        if search.matches.is_empty() {
+            return;
+        }
+        let n = search.matches.len();
+        let next = if forward {
+            (search.current + 1) % n
+        } else {
+            (search.current + n - 1) % n
+        };
+        let line = search.matches[next].line;
+        let tab = search.tab.clone();
+        self.terminal_search.as_mut().unwrap().current = next;
+        self.scroll_to_search_hit(&tab, line);
+    }
+
+    /// Scroll the terminal so `line` sits ~2 rows below the viewport top.
+    fn scroll_to_search_hit(&mut self, tab: &str, line: Line) {
+        let Some(td) = self.terminals.get(tab) else {
+            return;
+        };
+        let grid = &td.instance.backend.last_content().grid;
+        let history = (grid.total_lines() - grid.screen_lines()) as i32;
+        let current = grid.display_offset() as i32;
+        let target = (2 - line.0).clamp(0, history);
+        let delta = target - current;
+        if delta != 0 {
+            let td = self.terminals.get_mut(tab).unwrap();
+            td.instance
+                .backend
+                .process_command(egui_term::BackendCommand::Scroll(delta));
+            td.instance.backend.set_dirty();
+        }
+    }
+
+    /// Floating search bar anchored to the top-right of the searched
+    /// terminal's viewport. Enter = next, Shift+Enter = previous, Esc
+    /// (while the input holds focus) closes.
+    fn render_search_bar(&mut self, ctx: &egui::Context) {
+        // Recompute matches whenever the query changed (whole-scrollback
+        // scan; the sampler cadence does NOT refresh it).
+        if let Some(search) = self.terminal_search.as_ref() {
+            if search.query != search.searched {
+                let tab = search.tab.clone();
+                let q = search.query.trim().to_lowercase();
+                let hits = if q.is_empty() {
+                    Vec::new()
+                } else {
+                    self.terminals
+                        .get(&tab)
+                        .map(|td| find_search_hits(&td.instance.backend.last_content().grid, &q))
+                        .unwrap_or_default()
+                };
+                let search = self.terminal_search.as_mut().unwrap();
+                search.matches = hits;
+                search.searched = search.query.clone();
+                search.current = 0;
+                if let Some(first) = search.matches.first() {
+                    let line = first.line;
+                    let tab = search.tab.clone();
+                    self.scroll_to_search_hit(&tab, line);
+                }
+            }
+        }
+        let Some(search) = self.terminal_search.as_ref() else {
+            return;
+        };
+        let Some(rect) = self.terminal_view_rects.get(&search.tab).copied() else {
+            return;
+        };
+        if !rect.is_positive() {
+            return;
+        }
+        let tab = search.tab.clone();
+        let hint = self.texts.terminal.term_search_hint.clone();
+        let mut close = false;
+        egui::Area::new(egui::Id::new(("term_search", tab.clone())))
+            .order(egui::Order::Foreground)
+            .current_pos(egui::pos2(rect.right() - 336.0, rect.top() + 4.0))
+            .show(ctx, |ui| {
+                egui::Frame::new()
+                    .fill(ui.visuals().window_fill)
+                    .stroke(ui.visuals().window_stroke)
+                    .inner_margin(egui::Margin::symmetric(6, 3))
+                    .corner_radius(4.0)
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            let resp = ui.add(
+                                egui::TextEdit::singleline(
+                                    &mut self.terminal_search.as_mut().unwrap().query,
+                                )
+                                .hint_text(&hint)
+                                .desired_width(150.0)
+                                .font(egui::FontId::monospace(12.0))
+                                .id(egui::Id::new(("term_search_input", tab.clone()))),
+                            );
+                            resp.request_focus();
+                            if resp.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                                close = true;
+                            }
+                            let search = self.terminal_search.as_ref().unwrap();
+                            let total = search.matches.len();
+                            let count = if total > 0 {
+                                format!("{}/{}", search.current + 1, total)
+                            } else {
+                                "0/0".to_string()
+                            };
+                            ui.monospace(egui::RichText::new(count).size(11.0));
+                            if ui
+                                .button(
+                                    egui::RichText::new(egui_phosphor::regular::CARET_UP)
+                                        .size(11.0),
+                                )
+                                .clicked()
+                            {
+                                self.search_navigate(false);
+                            }
+                            if ui
+                                .button(
+                                    egui::RichText::new(egui_phosphor::regular::CARET_DOWN)
+                                        .size(11.0),
+                                )
+                                .clicked()
+                            {
+                                self.search_navigate(true);
+                            }
+                            if ui
+                                .button(egui::RichText::new(egui_phosphor::regular::X).size(11.0))
+                                .clicked()
+                            {
+                                close = true;
+                            }
+                        });
+                        // Keyboard nav: Enter / Shift+Enter (input holds
+                        // focus while the bar is open — the modal arbiter
+                        // keeps the terminal from reclaiming it).
+                        if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                            let shift = ui.input(|i| i.modifiers.shift);
+                            self.search_navigate(!shift);
+                        }
+                    });
+            });
+        if close {
+            self.terminal_search = None;
+        }
+    }
+
+    // ---- Monitor panel (roadmap batch 4) ----
+
+    /// Floating monitor: global terminal-tree CPU/MEM with a sparkline,
+    /// plus a per-terminal list (process trees) sorted by CPU. Clicking a
+    /// row focuses that terminal.
+    fn render_monitor_panel(&mut self, ctx: &egui::Context) {
+        if !self.show_monitor {
+            return;
+        }
+        let mut open = true;
+        egui::Window::new(&self.texts.monitor.title)
+            .id(egui::Id::new("monitor_panel"))
+            .open(&mut open)
+            .default_width(380.0)
+            .default_pos(screen_center(ctx) + egui::vec2(180.0, 60.0))
+            .show(ctx, |ui| {
+                let t = self.texts.monitor.clone();
+                let weak = self.active_theme.app.weak_text.to_egui();
+                let accent = self.active_theme.app.accent.to_egui();
+
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(&t.global).size(11.0).color(weak));
+                    ui.label(format!("{} {}", t.cpu, format_cpu(self.terminal_cpu)));
+                    ui.label(format!("{} {}", t.memory, format_memory(self.terminal_mem)));
+                });
+
+                // Sparkline of the recent global CPU% samples.
+                let (rect, _) = ui.allocate_exact_size(
+                    egui::vec2(ui.available_width(), 48.0),
+                    egui::Sense::hover(),
+                );
+                ui.painter()
+                    .rect_filled(rect, 2.0, ui.visuals().extreme_bg_color);
+                let history = &self.cpu_history;
+                if history.len() >= 2 {
+                    let max = 100.0f32.max(history.iter().cloned().fold(0.0f32, f32::max));
+                    let last = history.len() - 1;
+                    let pts: Vec<egui::Pos2> = history
+                        .iter()
+                        .enumerate()
+                        .map(|(i, v)| {
+                            let x = rect.left() + rect.width() * (i as f32 / last.max(1) as f32);
+                            let y = rect.bottom() - rect.height() * (v / max).clamp(0.0, 1.0);
+                            egui::pos2(x, y)
+                        })
+                        .collect();
+                    ui.painter()
+                        .add(egui::Shape::line(pts, egui::Stroke::new(1.5, accent)));
+                }
+
+                ui.separator();
+                let mut rows = self.monitor_rows.clone();
+                rows.sort_by(|a, b| {
+                    b.1.unwrap_or(0.0)
+                        .partial_cmp(&a.1.unwrap_or(0.0))
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+                egui::ScrollArea::vertical()
+                    .max_height(260.0)
+                    .show(ui, |ui| {
+                        for (tab_id, cpu, mem) in &rows {
+                            let name = self
+                                .terminals
+                                .get(tab_id)
+                                .map(|td| td.name.clone())
+                                .unwrap_or_else(|| tab_id.clone());
+                            ui.horizontal(|ui| {
+                                if ui.selectable_label(false, &name).clicked() {
+                                    for (idx, tree) in self.dock_states.clone() {
+                                        if tree.find_tab(tab_id).is_some() {
+                                            self.active_panel = idx;
+                                            break;
+                                        }
+                                    }
+                                    self.focused_terminal = Some(tab_id.clone());
+                                }
+                                let frac = (cpu.unwrap_or(0.0) / 100.0).clamp(0.0, 1.0);
+                                ui.add_sized(
+                                    [ui.available_width() - 92.0, 14.0],
+                                    egui::ProgressBar::new(frac).show_percentage(),
+                                );
+                                ui.monospace(format_memory(*mem));
+                            });
+                        }
+                        if rows.is_empty() {
+                            ui.label(egui::RichText::new(&t.empty_hint).size(11.0).color(weak));
+                        }
+                    });
+            });
+        if !open {
+            self.show_monitor = false;
+        }
+    }
+
     // ---- AI assistant (roadmap batch 2) ----
 
     /// Floating AI panel: drains finished background responses, shows the
@@ -7615,6 +8036,23 @@ impl eframe::App for App {
             }
         }
 
+        // Ctrl+F: scrollback search on the focused terminal. Consumed at
+        // app level (browser convention) and gated on modals like other
+        // shortcuts; the terminal no longer sees Ctrl+F while this build.
+        if let Some(tab) = self.focused_terminal.clone() {
+            let search_open = self.terminal_search.as_ref().map(|s| &s.tab) == Some(&tab);
+            if !any_modal_open(self)
+                && !self.is_renaming()
+                && ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::F))
+            {
+                if search_open {
+                    self.terminal_search = None;
+                } else {
+                    self.terminal_search = Some(TerminalSearch::new(tab.clone()));
+                }
+            }
+        }
+
         // Status-bar sample: every 2 seconds, hand the pid groups to the
         // persistent sampler worker (off-thread) and apply whatever
         // results have arrived through the temp store.
@@ -7645,7 +8083,13 @@ impl eframe::App for App {
                 .filter(|&pid| pid != 0)
                 .into_iter()
                 .collect();
-            let job: ProcSampleJob = (all_roots, ws_roots, focused_roots);
+            let per_terminal: Vec<(String, u32)> = self
+                .terminals
+                .iter()
+                .map(|(id, td)| (id.clone(), td.instance.backend.child_pid()))
+                .filter(|(_, pid)| *pid != 0)
+                .collect();
+            let job: ProcSampleJob = (all_roots, ws_roots, focused_roots, per_terminal);
             match self.proc_sample_tx.as_ref() {
                 Some(tx) => {
                     if let Err(err) = tx.send(job) {
@@ -7673,6 +8117,15 @@ impl eframe::App for App {
             self.workspace_mem = result.workspace.1;
             self.focused_cpu = result.focused.0;
             self.focused_mem = result.focused.1;
+            self.monitor_rows = result.per_terminal;
+            if let Some(cpu) = result.all.0 {
+                self.cpu_history.push(cpu);
+                let cap = 120;
+                if self.cpu_history.len() > cap {
+                    let overflow = self.cpu_history.len() - cap;
+                    self.cpu_history.drain(0..overflow);
+                }
+            }
         }
         let renaming = self.is_renaming();
         if renaming {
@@ -8541,6 +8994,14 @@ impl eframe::App for App {
                             .clicked()
                         {
                             self.show_ai_panel = !self.show_ai_panel;
+                            ui.close_menu();
+                        }
+                        let visible = self.show_monitor;
+                        if ui
+                            .selectable_label(visible, &self.texts.view_menu.monitor)
+                            .clicked()
+                        {
+                            self.show_monitor = !self.show_monitor;
                             ui.close_menu();
                         }
                     });
@@ -9462,6 +9923,8 @@ impl eframe::App for App {
         self.render_ssh_host_dialog(ctx);
         self.render_ssh_delete_confirm(ctx);
         self.render_ai_panel(ctx);
+        self.render_monitor_panel(ctx);
+        self.render_search_bar(ctx);
         self.render_snippet_fill_dialog(ctx);
         self.render_startup_cmd_dialog(ctx);
 
@@ -10640,6 +11103,7 @@ impl eframe::App for App {
                                 broadcast_group: &mut self.broadcast_group,
                                 startup_cmd_dialog: &mut self.startup_cmd_dialog,
                                 startup_cmd_just_opened: &mut self.startup_cmd_just_opened,
+                                search: &self.terminal_search,
                             },
                         );
                 } else {
@@ -11556,6 +12020,8 @@ struct TerminalTabViewer<'a> {
     /// Per-terminal startup command editor: (tab id, buffer).
     startup_cmd_dialog: &'a mut Option<(String, String)>,
     startup_cmd_just_opened: &'a mut bool,
+    /// Active scrollback search (highlights are painted per tab).
+    search: &'a Option<TerminalSearch>,
 }
 
 impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
@@ -11861,6 +12327,39 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
             let terminal_response = ui.add(terminal_view);
             self.terminal_view_rects
                 .insert(tab.clone(), terminal_response.rect);
+
+            // Search highlight overlay: rects over the viewport for the
+            // active search's hits (current one emphasized).
+            if let Some(search) = self.search.as_ref() {
+                if search.tab == *tab && !search.matches.is_empty() {
+                    let content = td.instance.backend.last_content();
+                    let display_offset = content.grid.display_offset();
+                    let cw = content.terminal_size.cell_width as f32;
+                    let ch = content.terminal_size.cell_height as f32;
+                    let origin = terminal_response.rect.min;
+                    for (i, hit) in search.matches.iter().enumerate() {
+                        let Some(vp) = point_to_viewport(
+                            display_offset,
+                            Point::new(hit.line, Column(hit.col_start)),
+                        ) else {
+                            continue;
+                        };
+                        let rect = egui::Rect::from_min_size(
+                            egui::pos2(
+                                origin.x + vp.column.0 as f32 * cw,
+                                origin.y + vp.line as f32 * ch,
+                            ),
+                            egui::vec2(hit.col_count as f32 * cw, ch),
+                        );
+                        let fill = if i == search.current {
+                            egui::Color32::from_rgba_unmultiplied(255, 140, 0, 115)
+                        } else {
+                            egui::Color32::from_rgba_unmultiplied(255, 220, 0, 60)
+                        };
+                        ui.painter().rect_filled(rect, 0.0, fill);
+                    }
+                }
+            }
 
             // ---- Auto-match command suggestions --------------------------------
             // Event-driven ONLY (real key edits in the FOCUSED terminal).

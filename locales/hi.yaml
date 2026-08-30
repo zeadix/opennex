@@ -15,6 +15,7 @@ view_menu:
   settings: सेटिंग्स
   workspace_toggle: कार्यक्षेत्र
   ai_assistant: AI सहायक
+  monitor: मॉनिटर
 settings:
   title: सेटिंग्स
   tabs:
@@ -200,6 +201,7 @@ terminal:
   startup_cmd: स्टार्टअप कमांड...
   startup_cmd_title: स्टार्टअप कमांड
   startup_cmd_hint: 'इस टर्मिनल के निर्माण या पुनर्स्थापना पर हर बार चलेगा; साफ़ करने के लिए खाली छोड़कर पुष्टि करें।'
+  term_search_hint: खोजें...
   history_empty: 'अभी कोई कमांड नहीं'
   fav_assemble: जोड़ें
   fav_delete_body: फ़ोल्डर और उसके सभी कमांड हटाए जाएँगे। इसे पूर्ववत नहीं किया जा सकता।
@@ -424,3 +426,9 @@ ai:
   error_label: 'अनुरोध विफल:'
   not_enabled: सेटिंग्स → सामान्य में AI सहायक सक्षम करें और API URL व Key भरें।
   clear: साफ़ करें
+monitor:
+  title: मॉनिटर
+  global: ग्लोबल
+  cpu: CPU
+  memory: मेमोरी
+  empty_hint: अभी कोई सैंपल नहीं, अगले चक्र की प्रतीक्षा…

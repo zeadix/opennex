@@ -22,6 +22,7 @@ pub struct Texts {
     pub stats: StatsTexts,
     pub ssh: SshTexts,
     pub ai: AiTexts,
+    pub monitor: MonitorTexts,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -49,6 +50,9 @@ pub struct ViewMenuTexts {
     /// 视图 menu toggle for the floating AI assistant panel.
     #[serde(default)]
     pub ai_assistant: String,
+    /// 视图 menu toggle for the floating monitor panel.
+    #[serde(default)]
+    pub monitor: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -360,6 +364,19 @@ pub struct TerminalTexts {
     pub startup_cmd_title: String,
     #[serde(default)]
     pub startup_cmd_hint: String,
+    /// Floating scrollback search bar hint text.
+    #[serde(default)]
+    pub term_search_hint: String,
+}
+
+/// Floating monitor panel strings.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct MonitorTexts {
+    pub title: String,
+    pub global: String,
+    pub cpu: String,
+    pub memory: String,
+    pub empty_hint: String,
 }
 
 /// Floating AI assistant panel + its settings section.
@@ -611,6 +628,7 @@ impl Texts {
                 settings: "设置".into(),
                 workspace_toggle: "工作区".into(),
                 ai_assistant: "AI 助手".into(),
+                monitor: "监控面板".into(),
             },
             settings: SettingsTexts {
                 title: "设置".into(),
@@ -825,6 +843,7 @@ impl Texts {
                 startup_cmd: "启动命令...".into(),
                 startup_cmd_title: "启动命令".into(),
                 startup_cmd_hint: "每次创建或恢复此终端时自动执行；留空并确认即清除。".into(),
+                term_search_hint: "搜索...".into(),
             },
             theme: ThemeTexts {
                 light: "浅色".into(),
@@ -1025,6 +1044,13 @@ impl Texts {
                 error_label: "请求失败:".into(),
                 not_enabled: "请先在 设置 → 通用 中启用 AI 助手并填写 API 地址与 Key。".into(),
                 clear: "清空".into(),
+            },
+            monitor: MonitorTexts {
+                title: "监控面板".into(),
+                global: "全局".into(),
+                cpu: "CPU".into(),
+                memory: "内存".into(),
+                empty_hint: "暂无采样数据，等待下一个采样周期…".into(),
             },
         }
     }

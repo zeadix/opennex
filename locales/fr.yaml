@@ -15,6 +15,7 @@ view_menu:
   settings: Paramètres
   workspace_toggle: Espace de travail
   ai_assistant: Assistant IA
+  monitor: Moniteur
 settings:
   title: Paramètres
   tabs:
@@ -200,6 +201,7 @@ terminal:
   startup_cmd: Commande de démarrage...
   startup_cmd_title: Commande de démarrage
   startup_cmd_hint: 'Exécutée à chaque création ou restauration de ce terminal ; laisser vide et confirmer pour effacer.'
+  term_search_hint: Rechercher...
   history_empty: 'Pas encore de commandes'
   fav_assemble: Assembler
   fav_delete_body: Le dossier et TOUTES ses commandes seront supprimés. Irréversible.
@@ -424,3 +426,9 @@ ai:
   error_label: 'Échec de la requête :'
   not_enabled: Activez l'assistant IA dans Paramètres → Général et renseignez l'URL et la clé API.
   clear: Effacer
+monitor:
+  title: Moniteur
+  global: Global
+  cpu: CPU
+  memory: MÉM
+  empty_hint: Aucun échantillon pour l'instant — attente du prochain cycle…

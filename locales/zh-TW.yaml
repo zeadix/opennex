@@ -15,6 +15,7 @@ view_menu:
   settings: 設定
   workspace_toggle: 工作區
   ai_assistant: AI 助手
+  monitor: 監控面板
 settings:
   title: 設定
   tabs:
@@ -200,6 +201,7 @@ terminal:
   startup_cmd: 啟動命令...
   startup_cmd_title: 啟動命令
   startup_cmd_hint: '每次建立或還原此終端機時自動執行；留空並確認即清除。'
+  term_search_hint: 搜尋...
   history_empty: '暫無指令'
   fav_assemble: 組合指令
   fav_delete_body: 將刪除該收藏夾及其所有指令，此操作無法復原。
@@ -423,3 +425,9 @@ ai:
   error_label: '請求失敗:'
   not_enabled: 請先在 設定 → 一般 中啟用 AI 助手並填寫 API 位址與 Key。
   clear: 清空
+monitor:
+  title: 監控面板
+  global: 全域
+  cpu: CPU
+  memory: 記憶體
+  empty_hint: 尚無取樣資料，等待下一個取樣週期…

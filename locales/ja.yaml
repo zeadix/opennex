@@ -15,6 +15,7 @@ view_menu:
   settings: 設定
   workspace_toggle: ワークスペース
   ai_assistant: AI アシスタント
+  monitor: モニター
 settings:
   title: 設定
   tabs:
@@ -200,6 +201,7 @@ terminal:
   startup_cmd: 起動コマンド...
   startup_cmd_title: 起動コマンド
   startup_cmd_hint: 'このターミナルの作成・復元時に毎回自動実行します。空欄で確認すると解除されます。'
+  term_search_hint: 検索...
   history_empty: 'コマンド履歴なし'
   fav_assemble: 組み合わせ
   fav_delete_body: フォルダーとその中のすべてのコマンドを削除します。元に戻せません。
@@ -423,3 +425,9 @@ ai:
   error_label: 'リクエスト失敗:'
   not_enabled: 設定 → 一般 で AI アシスタントを有効にし、API URL と Key を入力してください。
   clear: クリア
+monitor:
+  title: モニター
+  global: 全体
+  cpu: CPU
+  memory: メモリ
+  empty_hint: まだサンプルがありません。次の周期を待っています…

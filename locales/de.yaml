@@ -15,6 +15,7 @@ view_menu:
   settings: Einstellungen
   workspace_toggle: Arbeitsbereich
   ai_assistant: KI-Assistent
+  monitor: Monitor
 settings:
   title: Einstellungen
   tabs:
@@ -200,6 +201,7 @@ terminal:
   startup_cmd: Startbefehl...
   startup_cmd_title: Startbefehl
   startup_cmd_hint: 'Wird bei jeder Erstellung oder Wiederherstellung dieses Terminals ausgeführt; leer lassen und bestätigen zum Löschen.'
+  term_search_hint: Suchen...
   history_empty: 'Noch keine Befehle'
   fav_assemble: Zusammenfügen
   fav_delete_body: Der Ordner und ALLE darin enthaltenen Befehle werden gelöscht. Nicht widerrufbar.
@@ -424,3 +426,9 @@ ai:
   error_label: 'Anfrage fehlgeschlagen:'
   not_enabled: KI-Assistent in Einstellungen → Allgemein aktivieren und API-URL sowie Key eintragen.
   clear: Leeren
+monitor:
+  title: Monitor
+  global: Global
+  cpu: CPU
+  memory: RAM
+  empty_hint: Noch keine Messwerte – warte auf den nächsten Takt…

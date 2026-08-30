@@ -359,6 +359,75 @@ impl ProcSampler {
         }
         self.last = Some((Instant::now(), sample));
     }
+
+    /// Named per-terminal variant of [`refresh_groups`]: one process-table
+    /// read for the whole monitor panel. Dead shells (pid gone) report
+    /// memory 0 and no CPU.
+    pub fn refresh_named(
+        &mut self,
+        named: &[(String, u32)],
+    ) -> Vec<(String, Option<f32>, Option<u64>)> {
+        let tps = ticks_per_sec();
+        let Some(sample) = read_sample() else {
+            return Vec::new();
+        };
+        let mut rows = Vec::with_capacity(named.len());
+        for (id, root) in named {
+            let (ticks, rss) = aggregate(std::slice::from_ref(root), &sample);
+            let mut cpu = None;
+            if let Some((when, prev_sample)) = &self.last {
+                let (prev_tree_ticks, _) = aggregate(std::slice::from_ref(root), prev_sample);
+                let elapsed = when.elapsed().as_secs_f32();
+                let delta = ticks.saturating_sub(prev_tree_ticks);
+                cpu = Some(cpu_percent(delta, elapsed, tps));
+            }
+            rows.push((id.clone(), cpu, Some(rss)));
+        }
+        self.last = Some((Instant::now(), sample));
+        rows
+    }
+
+    /// One-table-read generalization used by the app worker: the three
+    /// aggregate groups AND the named per-terminal rows are all measured
+    /// against the SAME snapshot and the SAME previous-sample baseline
+    /// (calling the two methods separately would read the table twice and
+    /// make the second call's CPU delta collapse to ~0).
+    pub fn refresh_mixed<const N: usize>(
+        &mut self,
+        groups: [&[u32]; N],
+        out_cpu: [&mut Option<f32>; N],
+        out_mem: [&mut Option<u64>; N],
+        named: &[(String, u32)],
+    ) -> Vec<(String, Option<f32>, Option<u64>)> {
+        let tps = ticks_per_sec();
+        let Some(sample) = read_sample() else {
+            return Vec::new();
+        };
+        let mut rows = Vec::with_capacity(named.len());
+        for (id, root) in named {
+            let (ticks, rss) = aggregate(std::slice::from_ref(root), &sample);
+            let mut cpu = None;
+            if let Some((when, prev_sample)) = &self.last {
+                let (prev_tree_ticks, _) = aggregate(std::slice::from_ref(root), prev_sample);
+                let elapsed = when.elapsed().as_secs_f32();
+                let delta = ticks.saturating_sub(prev_tree_ticks);
+                cpu = Some(cpu_percent(delta, elapsed, tps));
+            }
+            rows.push((id.clone(), cpu, Some(rss)));
+        }
+        for i in 0..N {
+            let (ticks, rss) = aggregate(groups[i], &sample);
+            *out_mem[i] = Some(rss);
+            if let Some((when, prev_sample)) = &self.last {
+                let (prev_tree_ticks, _) = aggregate(groups[i], prev_sample);
+                let elapsed = when.elapsed().as_secs_f32();
+                let delta = ticks.saturating_sub(prev_tree_ticks);
+                *out_cpu[i] = Some(cpu_percent(delta, elapsed, tps));
+            }
+        }
+        self.last = Some((Instant::now(), sample));
+        rows
+    }
 }
 
 #[cfg(test)]

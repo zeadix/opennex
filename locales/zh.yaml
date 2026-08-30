@@ -15,6 +15,7 @@ view_menu:
   settings: 设置
   workspace_toggle: 工作区
   ai_assistant: AI 助手
+  monitor: 监控面板
 settings:
   title: 设置
   tabs:
@@ -200,6 +201,7 @@ terminal:
   startup_cmd: 启动命令...
   startup_cmd_title: 启动命令
   startup_cmd_hint: '每次创建或恢复此终端时自动执行；留空并确认即清除。'
+  term_search_hint: 搜索...
   history_empty: '暂无指令'
   fav_assemble: 组装指令
   fav_delete_body: 将删除该收藏夹及其所有指令，此操作不可恢复。
@@ -423,3 +425,9 @@ ai:
   error_label: '请求失败:'
   not_enabled: 请先在 设置 → 通用 中启用 AI 助手并填写 API 地址与 Key。
   clear: 清空
+monitor:
+  title: 监控面板
+  global: 全局
+  cpu: CPU
+  memory: 内存
+  empty_hint: 暂无采样数据，等待下一个采样周期…

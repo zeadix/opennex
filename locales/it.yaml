@@ -15,6 +15,7 @@ view_menu:
   settings: Impostazioni
   workspace_toggle: Area di lavoro
   ai_assistant: Assistente AI
+  monitor: Monitor
 settings:
   title: Impostazioni
   tabs:
@@ -200,6 +201,7 @@ terminal:
   startup_cmd: Comando di avvio...
   startup_cmd_title: Comando di avvio
   startup_cmd_hint: 'Viene eseguito a ogni creazione o ripristino di questo terminale; lascia vuoto e conferma per cancellare.'
+  term_search_hint: Cerca...
   history_empty: 'Nessun comando'
   fav_assemble: Assembla
   fav_delete_body: La cartella e TUTTI i suoi comandi verranno eliminati. Irreversibile.
@@ -424,3 +426,9 @@ ai:
   error_label: 'Richiesta fallita:'
   not_enabled: Abilita l'assistente AI in Impostazioni → Generali e inserisci URL e chiave API.
   clear: Pulisci
+monitor:
+  title: Monitor
+  global: Globale
+  cpu: CPU
+  memory: MEM
+  empty_hint: Nessun campione ancora, attesa del prossimo ciclo…

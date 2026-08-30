@@ -1,6 +1,6 @@
 [package]
 name = "opennex"
-version = "0.1.49"
+version = "0.1.50"
 edition = "2021"
 description = "AI Terminal Manager"
 license = "MIT"
