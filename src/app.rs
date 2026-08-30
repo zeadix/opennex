@@ -11087,16 +11087,14 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                             }
                         }
                     } else {
-                        let entries = self.history_db.get(tab, self.max_history);
-                        // Whole-text prefix match INCLUDING spaces: typed
-                        // "cd " matches "cd /tmp" but never bare "cd".
-                        // Filter FIRST across the whole history, THEN cap
-                        // the suggestion list at 10.
-                        let matches: Vec<String> = entries
-                            .into_iter()
-                            .filter(|cmd| cmd.starts_with(word.as_str()))
-                            .take(10)
-                            .collect();
+                        // Command completion: the terminal's own history
+                        // ranked by re-run count (hits), then PATH
+                        // executable names matching the word prefix.
+                        // History matches the WHOLE text by prefix —
+                        // typed "cd " matches "cd /tmp" but never "cd".
+                        let ranked = self.history_db.get_ranked(tab, self.max_history);
+                        let matches: Vec<String> =
+                            crate::completion::suggestions(&word, &ranked, 10);
                         let single_exact = matches.len() == 1 && matches[0] == word;
                         if single_exact || matches.is_empty() {
                             if let Some(nav) = td.instance.history_nav.as_mut() {

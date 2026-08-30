@@ -269,6 +269,23 @@ impl HistoryDb {
             .collect()
     }
 
+    /// Unique commands of a terminal ranked by re-run count (hits DESC,
+    /// recency DESC as the tiebreak) — the ranking for command completion.
+    pub fn get_ranked(&self, terminal_id: &str, limit: usize) -> Vec<(String, i64)> {
+        let Ok(mut stmt) = self.conn.prepare(
+            "SELECT command, MAX(hits) FROM command_history \
+             WHERE terminal_id = ?1 GROUP BY command \
+             ORDER BY MAX(hits) DESC, MAX(id) DESC LIMIT ?2",
+        ) else {
+            return Vec::new();
+        };
+        stmt.query_map(params![terminal_id, limit], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })
+        .map(|rows| rows.flatten().collect())
+        .unwrap_or_default()
+    }
+
     pub fn clear(&self, terminal_id: &str) {
         self.conn
             .execute(

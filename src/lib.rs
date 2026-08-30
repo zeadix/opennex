@@ -1,5 +1,6 @@
 pub mod ai;
 pub mod app;
+pub mod completion;
 pub mod history_db;
 pub mod hosts;
 pub mod i18n;
