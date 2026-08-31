@@ -128,6 +128,7 @@ shortcut_labels:
   toggle_workspace_sidebar: कार्यक्षेत्र पट्टी दिखाएँ/छुपाएँ
   zoom_in: बड़ा करें
   zoom_out: छोटा करें
+  stop_agent: AI एजेंट रोकें
   shortcuts_heading: शॉर्टकट
 workspace:
   heading: कार्यक्षेत्र
@@ -426,6 +427,39 @@ ai:
   error_label: 'अनुरोध विफल:'
   not_enabled: सेटिंग्स → सामान्य में AI सहायक सक्षम करें और API URL व Key भरें।
   clear: साफ़ करें
+  ctx_explain: AI से चयन समझाएँ
+  ctx_fix: AI से ठीक करें
+  ctx_translate: AI से अनुवाद करें
+  ctx_explain_screen: AI से स्क्रीन समझाएँ
+  insert_run: डालें और चलाएँ
+  exec_confirm_title: प्रोडक्शन होस्ट पर निष्पादन पुष्टि
+  exec_confirm_body: "PROD होस्ट {} पर चलाने जा रहे हैं:\n{}"
+  save_snippet: स्निपेट के रूप में सहेजें
+  saved_toast: स्निपेट में सहेजा गया
+  agent_section: AI टर्मिनल एजेंट
+  agent_goal_hint: लक्ष्य दर्ज करें, जैसे "8080 पोर्ट पर कब्ज़ा करने वाली प्रक्रिया खोजें और सुझाव दें"…
+  agent_start: एजेंट शुरू करें
+  agent_stop: रोकें
+  agent_close: बंद करें
+  agent_continue: जारी रखें
+  agent_approval: 'अनुमोदन मोड:'
+  agent_max_steps: 'अधिकतम चरण:'
+  agent_manual: हर चरण की पुष्टि
+  agent_allowlist: स्वीकृत-सूची स्वचालित
+  agent_fullauto: पूर्ण स्वचालित
+  agent_phase_thinking: सोच रहा है…
+  agent_phase_waiting: अनुमोदन की प्रतीक्षा…
+  agent_phase_executing: कमांड चल रही है…
+  agent_phase_timed_out: चरण समय-समाप्त, मैनुअल संभाल की प्रतीक्षा
+  agent_phase_need_input: आपके इनपुट की आवश्यकता है
+  agent_phase_done: लक्ष्य प्राप्त
+  agent_phase_failed: रोका गया
+  agent_confirm_title: एजेंट कमांड अनुमोदन
+  agent_confirm_body: 'AI एजेंट चलाना चाहता है:\n{}'
+  agent_confirm_run: चलाएँ
+  agent_confirm_cancel: अस्वीकार करें
+
+
 monitor:
   title: मॉनिटर
   global: ग्लोबल

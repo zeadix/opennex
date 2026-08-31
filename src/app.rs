@@ -7,6 +7,8 @@ use std::path::PathBuf;
 
 use crate::terminal::TerminalInstance;
 
+mod agent;
+mod agent_ui;
 mod ai_ui;
 mod dialogs;
 mod history_menu;
@@ -15,6 +17,8 @@ mod search;
 mod settings_ui;
 mod ssh_ui;
 
+use self::agent_ui::{agent_stop_shortcut_hit, AgentPhase, AgentRun};
+use self::ai_ui::AiCtxAction;
 use self::dialogs::{open_snippet_fill_fields, SnippetFillState};
 use self::history_menu::{history_menu_shortcut_released, toggle_history_menu, AltKeyState};
 use self::monitor::{proc_sample_id, spawn_proc_sampler, ProcSampleJob, ProcSampleResult};
@@ -80,6 +84,20 @@ struct AppSettings {
     ai_api_key: String,
     #[serde(default = "default_ai_model")]
     ai_model: String,
+    /// Agent approval mode id ("manual" | "allowlist" | "full-auto").
+    #[serde(default = "default_agent_approval_mode")]
+    agent_approval_mode: String,
+    /// Hard step cap for one agent run.
+    #[serde(default = "default_agent_max_steps")]
+    agent_max_steps: usize,
+}
+
+fn default_agent_approval_mode() -> String {
+    "allowlist".into()
+}
+
+fn default_agent_max_steps() -> usize {
+    10
 }
 
 fn default_ai_base_url() -> String {
@@ -161,6 +179,15 @@ fn default_key_binds() -> HashMap<String, ShortcutBinding> {
             key: "W".into(),
             ctrl: true,
             shift: false,
+            alt: false,
+        },
+    );
+    m.insert(
+        "stop_agent".into(),
+        ShortcutBinding {
+            key: ".".into(),
+            ctrl: true,
+            shift: true,
             alt: false,
         },
     );
@@ -450,10 +477,11 @@ fn shortcut_display(b: &ShortcutBinding) -> String {
     s
 }
 
-fn shortcut_hint_ids() -> [&'static str; 23] {
+fn shortcut_hint_ids() -> [&'static str; 24] {
     [
         "new_terminal",
         "close_terminal",
+        "stop_agent",
         "workspace_up",
         "workspace_down",
         "panel_left",
@@ -482,6 +510,7 @@ fn shortcut_label_for<'a>(texts: &'a crate::i18n::Texts, id: &str) -> &'a str {
     match id {
         "new_terminal" => &texts.shortcut_labels.new_terminal,
         "close_terminal" => &texts.shortcut_labels.close_terminal,
+        "stop_agent" => &texts.shortcut_labels.stop_agent,
         "workspace_up" => &texts.shortcut_labels.workspace_up,
         "workspace_down" => &texts.shortcut_labels.workspace_down,
         "panel_left" => &texts.shortcut_labels.panel_left,
@@ -749,6 +778,11 @@ fn any_modal_open(app: &App) -> bool {
         || app.snippet_fill.is_some()
         || app.startup_cmd_dialog.is_some()
         || app.terminal_search.is_some()
+        || app.ai_exec_confirm.is_some()
+        || app
+            .agent
+            .as_ref()
+            .is_some_and(|a| a.pending_confirm.is_some())
         || matches!(app.update_state, crate::updater::UpdateState::Ready(_))
 }
 
@@ -1039,6 +1073,12 @@ fn normalize_settings_release_impl(mut settings: AppSettings) -> (AppSettings, b
             defaults.get("toggle_workspace_sidebar").cloned().unwrap(),
         );
     }
+    if !settings.key_binds.contains_key("stop_agent") {
+        settings.key_binds.insert(
+            "stop_agent".into(),
+            defaults.get("stop_agent").cloned().unwrap(),
+        );
+    }
     if !settings.key_binds.contains_key("history_menu") {
         settings.key_binds.insert(
             "history_menu".into(),
@@ -1175,6 +1215,8 @@ impl Default for AppSettings {
             ai_base_url: default_ai_base_url(),
             ai_api_key: String::new(),
             ai_model: default_ai_model(),
+            agent_approval_mode: default_agent_approval_mode(),
+            agent_max_steps: default_agent_max_steps(),
             auto_match_command: true,
             default_shell: default_shell_pref(),
             smooth_rendering: true,
@@ -1584,7 +1626,9 @@ pub struct App {
     /// Floating AI assistant panel visibility (视图 menu).
     show_ai_panel: bool,
     ai_prompt: String,
-    ai_response: String,
+    /// Multi-turn transcript (user/assistant turns; system prompts are
+    /// prepended per-request, not stored).
+    ai_messages: Vec<crate::ai::ChatMessage>,
     ai_error: Option<String>,
     ai_busy: bool,
     ai_rx: Option<std::sync::mpsc::Receiver<Result<String, String>>>,
@@ -1594,6 +1638,18 @@ pub struct App {
     /// Per-terminal startup command editor: (tab id, buffer).
     startup_cmd_dialog: Option<(String, String)>,
     startup_cmd_just_opened: bool,
+    /// PROD guard for "insert & run": (tab id, command) awaiting confirm.
+    ai_exec_confirm: Option<(String, String)>,
+    ai_exec_just_opened: bool,
+    /// Right-click "AI" menu intent recorded by the tab viewer, consumed
+    /// by render_ai_panel on the next dispatch pass.
+    ai_ctx_intent: Option<AiCtxAction>,
+    /// The running terminal agent (None when idle).
+    agent: Option<AgentRun>,
+    /// Goal text of the agent section (persists across the panel's
+    /// open/close while no agent runs).
+    agent_goal: String,
+    agent_confirm_just_opened: bool,
 }
 
 struct TerminalData {
@@ -2046,10 +2102,16 @@ impl App {
             broadcast_group: Default::default(),
             show_ai_panel: false,
             ai_prompt: String::new(),
-            ai_response: String::new(),
+            ai_messages: Vec::new(),
             ai_error: None,
             ai_busy: false,
             ai_rx: None,
+            ai_exec_confirm: None,
+            ai_exec_just_opened: false,
+            ai_ctx_intent: None,
+            agent: None,
+            agent_goal: String::new(),
+            agent_confirm_just_opened: false,
             snippet_fill: None,
             snippet_fill_just_opened: false,
             startup_cmd_dialog: None,
@@ -3952,6 +4014,17 @@ impl eframe::App for App {
         // Auto-copy selected text on mouse release.
         self.handle_selection_auto_copy(ctx);
         self.process_pending(ctx);
+        // Global agent stop key: consumable EVEN while a modal owns the
+        // UI (stopping must always be reachable). Deliberately before
+        // the modal arbiter and any other consumer.
+        if agent_stop_shortcut_hit(ctx, &self.settings.key_binds) {
+            if let Some(agent) = self.agent.as_mut() {
+                agent.request_stop = true;
+            }
+        }
+        // Agent state machine tick (thinking drain / completion wait).
+        self.agent_tick(ctx);
+
         self.cwd_poll_frame = self.cwd_poll_frame.wrapping_add(1);
         if self.cwd_poll_frame >= 15 {
             self.cwd_poll_frame = 0;
@@ -5847,6 +5920,8 @@ impl eframe::App for App {
         self.render_ssh_host_dialog(ctx);
         self.render_ssh_delete_confirm(ctx);
         self.render_ai_panel(ctx);
+        self.render_ai_exec_confirm(ctx);
+        self.render_agent_confirm(ctx);
         self.render_monitor_panel(ctx);
         self.render_search_bar(ctx);
         self.render_snippet_fill_dialog(ctx);
@@ -7028,6 +7103,20 @@ impl eframe::App for App {
                                 startup_cmd_dialog: &mut self.startup_cmd_dialog,
                                 startup_cmd_just_opened: &mut self.startup_cmd_just_opened,
                                 search: &self.terminal_search,
+                                ai_ctx_intent: &mut self.ai_ctx_intent,
+                                agent_tab: self
+                                    .agent
+                                    .as_ref()
+                                    .filter(|a| {
+                                        matches!(
+                                            a.phase,
+                                            AgentPhase::Thinking
+                                                | AgentPhase::WaitingConfirm
+                                                | AgentPhase::Executing
+                                                | AgentPhase::TimedOut
+                                        )
+                                    })
+                                    .map(|a| a.tab.clone()),
                             },
                         );
                 } else {
@@ -7885,6 +7974,11 @@ struct TerminalTabViewer<'a> {
     startup_cmd_just_opened: &'a mut bool,
     /// Active scrollback search (highlights are painted per tab).
     search: &'a Option<TerminalSearch>,
+    /// Right-click AI intent slot (written by the tab, consumed by App).
+    ai_ctx_intent: &'a mut Option<AiCtxAction>,
+    /// The tab the terminal agent is attached to (title icon + broadcast
+    /// pause while the agent drives it).
+    agent_tab: Option<String>,
 }
 
 impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
@@ -7896,6 +7990,9 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
         };
         let is_prod = d.host.as_ref().is_some_and(|h| h.prod);
         let mut prefix = String::new();
+        if self.agent_tab.as_deref() == Some(tab.as_str()) {
+            prefix.push_str(egui_phosphor::regular::ROBOT);
+        }
         if self.broadcast_group.contains(tab) {
             prefix.push_str(egui_phosphor::regular::BROADCAST);
         }
@@ -8373,7 +8470,11 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
             // input is replicated: printable text, paste, Enter, Backspace
             // and the classic ^C/^D interrupts. Read-only event peek — the
             // terminal view already delivered the input to its own PTY.
-            if is_focused && !self.modal_open && self.broadcast_group.len() > 1 {
+            if is_focused
+                && !self.modal_open
+                && self.broadcast_group.len() > 1
+                && self.agent_tab.as_deref() != Some(tab.as_str())
+            {
                 let others: Vec<String> = self
                     .broadcast_group
                     .iter()
@@ -8411,6 +8512,36 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                         }
                     }
                 }
+            }
+
+            // ---- Right-click AI menu ------------------------------------
+            // Records the intent only (the terminal borrow is live here);
+            // render_ai_panel consumes it from the App-side slot. With a
+            // selection the actions run on it; without one, on the visible
+            // screen text.
+            let ai_menu = self.texts.ai.clone();
+            let mut ai_intent: Option<AiCtxAction> = None;
+            terminal_response.clone().context_menu(|ui| {
+                if ui.button(&ai_menu.ctx_explain).clicked() {
+                    ai_intent = Some(AiCtxAction::ExplainSelection);
+                    ui.close_menu();
+                }
+                if ui.button(&ai_menu.ctx_fix).clicked() {
+                    ai_intent = Some(AiCtxAction::FixSelection);
+                    ui.close_menu();
+                }
+                if ui.button(&ai_menu.ctx_translate).clicked() {
+                    ai_intent = Some(AiCtxAction::TranslateSelection);
+                    ui.close_menu();
+                }
+                ui.separator();
+                if ui.button(&ai_menu.ctx_explain_screen).clicked() {
+                    ai_intent = Some(AiCtxAction::ExplainScreen);
+                    ui.close_menu();
+                }
+            });
+            if let Some(action) = ai_intent {
+                *self.ai_ctx_intent = Some(action);
             }
 
             // The history / auto-match list renders as a GLOBAL overlay in

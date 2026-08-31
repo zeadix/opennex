@@ -44,6 +44,13 @@ pub struct TerminalInstance {
     pub cwd: String,
     pub shell_info: adapter::ShellInfo,
     pub history_nav: Option<HistoryNav>,
+    /// Bumped every time a COMPLETE OSC 9 sequence is parsed from the
+    /// screen. bash/zsh emit one per prompt (PROMPT_COMMAND / precmd),
+    /// so a growing count = a fresh prompt = the previous command
+    /// finished - the agent loop's completion signal. Shells WITHOUT
+    /// the integration (SSH, PowerShell, cmd, fish) never bump it; the
+    /// agent falls back to screen-stability heuristics there.
+    pub prompt_seq: u64,
     osc_buffer: String,
 }
 
@@ -258,6 +265,7 @@ impl TerminalInstance {
             cwd: cwd.to_string(),
             shell_info,
             history_nav: None,
+            prompt_seq: 0,
             osc_buffer: String::new(),
         };
 
@@ -295,6 +303,47 @@ impl TerminalInstance {
         let content = self.backend.last_content();
         use alacritty_terminal::grid::Dimensions;
         (content.grid.columns(), content.grid.screen_lines())
+    }
+
+    /// Flush any pending PTY output into the content cache, then read the
+    /// visible screen. The agent calls this before observing so it never
+    /// acts on a stale snapshot.
+    pub fn visible_text_refreshed(&mut self, max_chars: usize) -> String {
+        self.backend.set_dirty();
+        let _ = self.backend.sync();
+        self.visible_text(max_chars)
+    }
+
+    /// The currently visible screen as plain text (one line per grid row,
+    /// trailing spaces trimmed, wide-char spacer cells skipped), capped at
+    /// `max_chars`. Companion to `backend.selectable_content()`, which is
+    /// empty when the user has no selection.
+    pub fn visible_text(&self, max_chars: usize) -> String {
+        use alacritty_terminal::grid::Dimensions;
+        use alacritty_terminal::term::cell::Flags;
+        let content = self.backend.last_content();
+        let grid = &content.grid;
+        let mut out = String::new();
+        for row_idx in 0..grid.screen_lines() {
+            let mut line = String::new();
+            for col_idx in 0..grid.columns() {
+                let point = alacritty_terminal::index::Point {
+                    line: alacritty_terminal::index::Line(row_idx as i32),
+                    column: alacritty_terminal::index::Column(col_idx),
+                };
+                let cell = &grid[point];
+                if cell.flags.contains(Flags::WIDE_CHAR_SPACER) {
+                    continue;
+                }
+                line.push(cell.c);
+            }
+            out.push_str(line.trim_end());
+            out.push('\n');
+            if out.len() >= max_chars {
+                break;
+            }
+        }
+        out.chars().take(max_chars).collect()
     }
 
     pub fn get_current_line(&mut self) -> String {
@@ -491,6 +540,9 @@ impl TerminalInstance {
             let end = rest.find(['\x07', '\x1b']);
             if let Some(end_pos) = end {
                 let path = &rest[..end_pos];
+                // Count EVERY parsed sequence (even an unchanged path):
+                // a new prompt appeared, which is the completion signal.
+                self.prompt_seq = self.prompt_seq.wrapping_add(1);
                 if !path.is_empty() {
                     let cwd_str = path.to_string();
                     if self.cwd != cwd_str {

@@ -222,6 +222,15 @@ impl App {
                 ui.add_sized([280.0, 20.0], egui::TextEdit::singleline(&mut model));
             });
             self.settings_edit.ai_model = model;
+
+            let mut max_steps = self.settings_edit.agent_max_steps;
+            self.settings_row(ui, &ta.agent_max_steps, |ui| {
+                ui.add_sized(
+                    [180.0, 20.0],
+                    egui::DragValue::new(&mut max_steps).range(1..=50),
+                );
+            });
+            self.settings_edit.agent_max_steps = max_steps;
         }
 
         self.settings_group(ui, &b.data_section);

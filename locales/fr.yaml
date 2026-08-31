@@ -128,6 +128,7 @@ shortcut_labels:
   toggle_workspace_sidebar: Afficher/Masquer barre latérale
   zoom_in: Agrandir
   zoom_out: Réduire
+  stop_agent: Arrêter l'agent IA
   shortcuts_heading: Raccourcis
 workspace:
   heading: Espaces de travail
@@ -426,6 +427,39 @@ ai:
   error_label: 'Échec de la requête :'
   not_enabled: Activez l'assistant IA dans Paramètres → Général et renseignez l'URL et la clé API.
   clear: Effacer
+  ctx_explain: Explainer la sélection avec l'IA
+  ctx_fix: Corriger avec l'IA
+  ctx_translate: Traduire avec l'IA
+  ctx_explain_screen: Explainer l'écran avec l'IA
+  insert_run: Insérer et exécuter
+  exec_confirm_title: Exécution sur hôte de production
+  exec_confirm_body: "Exécution imminente sur l'hôte PROD {} :\n{}"
+  save_snippet: Enregistrer comme snippet
+  saved_toast: Enregistré dans les snippets
+  agent_section: Agent terminal IA
+  agent_goal_hint: Saisissez un objectif, ex. « trouver ce qui occupe le port 8080 et proposer un correctif »…
+  agent_start: Démarrer l'agent
+  agent_stop: Arrêter
+  agent_close: Fermer
+  agent_continue: Continuer
+  agent_approval: 'Mode d''approbation :'
+  agent_max_steps: 'Étapes max :'
+  agent_manual: Confirmer chaque étape
+  agent_allowlist: Liste blanche auto
+  agent_fullauto: Automatique total
+  agent_phase_thinking: Réflexion…
+  agent_phase_waiting: En attente d'approbation…
+  agent_phase_executing: Commande en cours…
+  agent_phase_timed_out: Étape expirée, en attente manuelle
+  agent_phase_need_input: A besoin de votre saisie
+  agent_phase_done: Objectif atteint
+  agent_phase_failed: Arrêté
+  agent_confirm_title: Approbation de commande de l'agent
+  agent_confirm_body: 'L''agent IA demande à exécuter :\n{}'
+  agent_confirm_run: Exécuter
+  agent_confirm_cancel: Refuser
+
+
 monitor:
   title: Moniteur
   global: Global

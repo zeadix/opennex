@@ -128,6 +128,7 @@ shortcut_labels:
   toggle_workspace_sidebar: 顯示/隱藏工作區列
   zoom_in: 整體放大
   zoom_out: 整體縮小
+  stop_agent: 停止 AI 代理
   shortcuts_heading: 捷徑
 workspace:
   heading: 工作區
@@ -425,6 +426,39 @@ ai:
   error_label: '請求失敗:'
   not_enabled: 請先在 設定 → 一般 中啟用 AI 助手並填寫 API 位址與 Key。
   clear: 清空
+  ctx_explain: AI 解釋選取
+  ctx_fix: AI 修復
+  ctx_translate: AI 翻譯
+  ctx_explain_screen: AI 解釋螢幕
+  insert_run: 插入並執行
+  exec_confirm_title: 生產環境執行確認
+  exec_confirm_body: "即將在 PROD 主機 {} 上執行：\n{}"
+  save_snippet: 存為片段
+  saved_toast: 已存入片段庫
+  agent_section: AI 終端代理
+  agent_goal_hint: 輸入目標，例如：找出佔用 8080 連接埠的程序並給出修復建議…
+  agent_start: 啟動代理
+  agent_stop: 停止
+  agent_close: 關閉
+  agent_continue: 繼續
+  agent_approval: '審批模式:'
+  agent_max_steps: '最大步數:'
+  agent_manual: 每步確認
+  agent_allowlist: 白名單自動
+  agent_fullauto: 全自動
+  agent_phase_thinking: 思考中…
+  agent_phase_waiting: 等待審批…
+  agent_phase_executing: 命令執行中…
+  agent_phase_timed_out: 執行逾時，等待手動處理
+  agent_phase_need_input: 需要你的輸入
+  agent_phase_done: 目標已達成
+  agent_phase_failed: 已停止
+  agent_confirm_title: 代理命令審批
+  agent_confirm_body: 'AI 代理請求執行：\n{}'
+  agent_confirm_run: 執行
+  agent_confirm_cancel: 拒絕
+
+
 monitor:
   title: 監控面板
   global: 全域

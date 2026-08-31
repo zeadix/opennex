@@ -29,6 +29,21 @@ OpenNex terminal manager. The user will paste terminal output or an error inside
 Explain in 1-3 short sentences what happened, then — if it is an error — give the concrete fix \
 as a copy-pasteable command. Skip preamble. Reply in the language of the pasted content.";
 
+/// System prompt for the "fix selected output" action: the answer IS the
+/// fix, ready to paste into the shell.
+pub const FIX_SYSTEM: &str = "You are a senior terminal and ops assistant embedded in the \
+OpenNex terminal manager. The user pastes failing terminal output inside a code block. Reply \
+with ONLY the sequence of shell commands that fixes it — no explanations, no code fences, no \
+comments. If it cannot be fixed by commands, reply with the single most informative sentence.";
+
+/// One conversation message (multi-turn panel history). `role` is one of
+/// "system" / "user" / "assistant".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatMessage {
+    pub role: &'static str,
+    pub content: String,
+}
+
 /// Join the configured base URL with the chat-completions path,
 /// tolerating a trailing slash.
 pub fn endpoint(base_url: &str) -> String {
@@ -40,17 +55,34 @@ pub fn endpoint(base_url: &str) -> String {
     }
 }
 
-/// Build the chat-completions request body. Exposed for tests.
-pub fn request_body(model: &str, system: &str, user: &str) -> serde_json::Value {
+/// Build the chat-completions request body from a full conversation.
+pub fn request_body_messages(model: &str, messages: &[ChatMessage]) -> serde_json::Value {
     serde_json::json!({
         "model": model,
-        "messages": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
+        "messages": messages
+            .iter()
+            .map(|m| serde_json::json!({"role": m.role, "content": m.content}))
+            .collect::<Vec<_>>(),
         "temperature": 0.2,
         "stream": false,
     })
+}
+
+/// Single-turn convenience wrapper around [`request_body_messages`].
+pub fn request_body(model: &str, system: &str, user: &str) -> serde_json::Value {
+    request_body_messages(
+        model,
+        &[
+            ChatMessage {
+                role: "system",
+                content: system.to_string(),
+            },
+            ChatMessage {
+                role: "user",
+                content: user.to_string(),
+            },
+        ],
+    )
 }
 
 /// Extract the assistant message from a (non-streaming) response.
@@ -65,11 +97,12 @@ pub fn parse_content(json: &serde_json::Value) -> Result<String, String> {
     Ok(content.trim().to_string())
 }
 
-/// Blocking chat completion. NEVER call on the UI thread — spawn it.
-pub fn complete(
+/// Blocking multi-turn chat completion. NEVER call on the UI thread.
+/// `messages` carries the FULL conversation (system first, then alternating
+/// user/assistant turns); token bloat is the caller's responsibility.
+pub fn complete_messages(
     cfg: &AiConfig,
-    system: &str,
-    user: &str,
+    messages: &[ChatMessage],
     timeout_secs: u64,
 ) -> Result<String, String> {
     if cfg.base_url.trim().is_empty() {
@@ -78,7 +111,7 @@ pub fn complete(
     if cfg.api_key.trim().is_empty() {
         return Err("API key is empty".into());
     }
-    let body = request_body(&cfg.model, system, user);
+    let body = request_body_messages(&cfg.model, messages);
     let response = ureq::post(&endpoint(&cfg.base_url))
         .timeout(std::time::Duration::from_secs(timeout_secs.max(1)))
         .set("Authorization", &format!("Bearer {}", cfg.api_key.trim()))
@@ -99,6 +132,30 @@ pub fn complete(
         .into_json()
         .map_err(|e| format!("invalid JSON response: {e}"))?;
     parse_content(&json)
+}
+
+/// Blocking single-turn chat completion (system + user). NEVER call on
+/// the UI thread — spawn it.
+pub fn complete(
+    cfg: &AiConfig,
+    system: &str,
+    user: &str,
+    timeout_secs: u64,
+) -> Result<String, String> {
+    complete_messages(
+        cfg,
+        &[
+            ChatMessage {
+                role: "system",
+                content: system.to_string(),
+            },
+            ChatMessage {
+                role: "user",
+                content: user.to_string(),
+            },
+        ],
+        timeout_secs,
+    )
 }
 
 #[cfg(test)]
@@ -123,6 +180,57 @@ mod tests {
         assert_eq!(
             endpoint("https://x.example/v1/chat/completions"),
             "https://x.example/v1/chat/completions"
+        );
+    }
+
+    #[test]
+    fn multi_turn_body_preserves_conversation_order() {
+        let messages = vec![
+            ChatMessage {
+                role: "system",
+                content: "sys".into(),
+            },
+            ChatMessage {
+                role: "user",
+                content: "q1".into(),
+            },
+            ChatMessage {
+                role: "assistant",
+                content: "a1".into(),
+            },
+            ChatMessage {
+                role: "user",
+                content: "q2".into(),
+            },
+        ];
+        let body = request_body_messages("m", &messages);
+        let msgs = body["messages"].as_array().unwrap();
+        assert_eq!(msgs.len(), 4);
+        assert_eq!(msgs[0]["role"], "system");
+        assert_eq!(msgs[1]["content"], "q1");
+        assert_eq!(msgs[2]["role"], "assistant");
+        assert_eq!(msgs[3]["content"], "q2");
+        assert_eq!(body["stream"], false);
+    }
+
+    #[test]
+    fn single_turn_body_is_the_two_message_special_case() {
+        let body = request_body("m", "sys", "hi");
+        let msgs = body["messages"].as_array().unwrap();
+        assert_eq!(msgs.len(), 2);
+        assert_eq!(
+            (
+                msgs[0]["role"].as_str().unwrap(),
+                msgs[0]["content"].as_str().unwrap()
+            ),
+            ("system", "sys")
+        );
+        assert_eq!(
+            (
+                msgs[1]["role"].as_str().unwrap(),
+                msgs[1]["content"].as_str().unwrap()
+            ),
+            ("user", "hi")
         );
     }
 

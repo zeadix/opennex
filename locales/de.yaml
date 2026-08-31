@@ -128,6 +128,7 @@ shortcut_labels:
   toggle_workspace_sidebar: Arbeitsbereichsleiste ein/ausblenden
   zoom_in: Vergrößern
   zoom_out: Verkleinern
+  stop_agent: KI-Agent stoppen
   shortcuts_heading: Tastenkürzel
 workspace:
   heading: Arbeitsbereiche
@@ -426,6 +427,39 @@ ai:
   error_label: 'Anfrage fehlgeschlagen:'
   not_enabled: KI-Assistent in Einstellungen → Allgemein aktivieren und API-URL sowie Key eintragen.
   clear: Leeren
+  ctx_explain: Auswahl mit KI erklären
+  ctx_fix: Mit KI reparieren
+  ctx_translate: Mit KI übersetzen
+  ctx_explain_screen: Bildschirm mit KI erklären
+  insert_run: Einfügen & ausführen
+  exec_confirm_title: Auf Produktivhost ausführen
+  exec_confirm_body: "Wird auf PROD-Host {} ausgeführt:\n{}"
+  save_snippet: Als Snippet speichern
+  saved_toast: In Snippets gespeichert
+  agent_section: KI-Terminalagent
+  agent_goal_hint: Ziel eingeben, z. B. „Finde, was Port 8080 belegt, und schlage eine Lösung vor"…
+  agent_start: Agent starten
+  agent_stop: Stopp
+  agent_close: Schließen
+  agent_continue: Weiter
+  agent_approval: 'Freigabemodus:'
+  agent_max_steps: 'Max. Schritte:'
+  agent_manual: Jeden Schritt bestätigen
+  agent_allowlist: Allowlist automatisch
+  agent_fullauto: Vollautomatik
+  agent_phase_thinking: Denkt nach…
+  agent_phase_waiting: Warte auf Freigabe…
+  agent_phase_executing: Befehl läuft…
+  agent_phase_timed_out: Schritt-Zeitüberschreitung, manuell fortfahren
+  agent_phase_need_input: Benötigt deine Eingabe
+  agent_phase_done: Ziel erreicht
+  agent_phase_failed: Gestoppt
+  agent_confirm_title: Agent-Befehlsfreigabe
+  agent_confirm_body: 'Der KI-Agent möchte ausführen:\n{}'
+  agent_confirm_run: Ausführen
+  agent_confirm_cancel: Ablehnen
+
+
 monitor:
   title: Monitor
   global: Global

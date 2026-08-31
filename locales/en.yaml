@@ -128,6 +128,7 @@ shortcut_labels:
   toggle_workspace_sidebar: Show/Hide Workspace Sidebar
   zoom_in: Zoom In
   zoom_out: Zoom Out
+  stop_agent: Stop AI agent
   shortcuts_heading: Shortcuts
 workspace:
   heading: Workspaces
@@ -426,6 +427,39 @@ ai:
   error_label: 'Request failed:'
   not_enabled: Enable the AI assistant in Settings → General and fill in the API URL and Key.
   clear: Clear
+  ctx_explain: Explain selection with AI
+  ctx_fix: Fix with AI
+  ctx_translate: Translate with AI
+  ctx_explain_screen: Explain screen with AI
+  insert_run: Insert & run
+  exec_confirm_title: Run on production host
+  exec_confirm_body: "About to run on PROD host {}:\n{}"
+  save_snippet: Save as snippet
+  saved_toast: Saved to snippets
+  agent_section: AI Terminal Agent
+  agent_goal_hint: Enter a goal, e.g. "find what occupies port 8080 and propose a fix"…
+  agent_start: Start agent
+  agent_stop: Stop
+  agent_close: Close
+  agent_continue: Continue
+  agent_approval: 'Approval mode:'
+  agent_max_steps: 'Max steps:'
+  agent_manual: Confirm each step
+  agent_allowlist: Allowlist auto
+  agent_fullauto: Full auto
+  agent_phase_thinking: Thinking…
+  agent_phase_waiting: Awaiting approval…
+  agent_phase_executing: Command running…
+  agent_phase_timed_out: Step timed out, awaiting manual handling
+  agent_phase_need_input: Needs your input
+  agent_phase_done: Goal achieved
+  agent_phase_failed: Stopped
+  agent_confirm_title: Agent command approval
+  agent_confirm_body: 'The AI agent asks to run:\n{}'
+  agent_confirm_run: Run
+  agent_confirm_cancel: Decline
+
+
 monitor:
   title: Monitor
   global: Global

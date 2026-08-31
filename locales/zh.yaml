@@ -128,6 +128,7 @@ shortcut_labels:
   toggle_workspace_sidebar: 显示/隐藏工作区栏
   zoom_in: 整体放大
   zoom_out: 整体缩小
+  stop_agent: 停止 AI 代理
   shortcuts_heading: 快捷键
 workspace:
   heading: 工作区
@@ -425,6 +426,39 @@ ai:
   error_label: '请求失败:'
   not_enabled: 请先在 设置 → 通用 中启用 AI 助手并填写 API 地址与 Key。
   clear: 清空
+  ctx_explain: AI 解释选中
+  ctx_fix: AI 修复
+  ctx_translate: AI 翻译
+  ctx_explain_screen: AI 解释屏幕
+  insert_run: 插入并执行
+  exec_confirm_title: 生产环境执行确认
+  exec_confirm_body: "即将在 PROD 主机 {} 上执行：\n{}"
+  save_snippet: 存为片段
+  saved_toast: 已存入片段库
+  agent_section: AI 终端代理
+  agent_goal_hint: 输入目标，例如：找出占用 8080 端口的进程并给出修复建议…
+  agent_start: 启动代理
+  agent_stop: 停止
+  agent_close: 关闭
+  agent_continue: 继续
+  agent_approval: '审批模式:'
+  agent_max_steps: '最大步数:'
+  agent_manual: 每步确认
+  agent_allowlist: 白名单自动
+  agent_fullauto: 全自动
+  agent_phase_thinking: 思考中…
+  agent_phase_waiting: 等待审批…
+  agent_phase_executing: 命令执行中…
+  agent_phase_timed_out: 执行超时，等待手动处理
+  agent_phase_need_input: 需要你的输入
+  agent_phase_done: 目标已达成
+  agent_phase_failed: 已停止
+  agent_confirm_title: 代理命令审批
+  agent_confirm_body: 'AI 代理请求执行：\n{}'
+  agent_confirm_run: 执行
+  agent_confirm_cancel: 拒绝
+
+
 monitor:
   title: 监控面板
   global: 全局

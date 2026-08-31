@@ -128,6 +128,7 @@ shortcut_labels:
   toggle_workspace_sidebar: Mostra/Nascondi barra laterale
   zoom_in: Ingrandisci
   zoom_out: Riduci
+  stop_agent: Ferma agente AI
   shortcuts_heading: Scorciatoie
 workspace:
   heading: Aree di lavoro
@@ -426,6 +427,39 @@ ai:
   error_label: 'Richiesta fallita:'
   not_enabled: Abilita l'assistente AI in Impostazioni → Generali e inserisci URL e chiave API.
   clear: Pulisci
+  ctx_explain: Spiega selezione con AI
+  ctx_fix: Correggi con AI
+  ctx_translate: Traduci con AI
+  ctx_explain_screen: Spiega schermo con AI
+  insert_run: Inserisci ed esegui
+  exec_confirm_title: Esecuzione su host di produzione
+  exec_confirm_body: "Esecuzione imminente sull'host PROD {}:\n{}"
+  save_snippet: Salva come snippet
+  saved_toast: Salvato negli snippet
+  agent_section: Agente terminale AI
+  agent_goal_hint: Inserisci un obiettivo, es. "trova cosa occupa la porta 8080 e proponi una soluzione"…
+  agent_start: Avvia agente
+  agent_stop: Ferma
+  agent_close: Chiudi
+  agent_continue: Continua
+  agent_approval: 'Modalità approvazione:'
+  agent_max_steps: 'Passi max:'
+  agent_manual: Conferma ogni passo
+  agent_allowlist: Allowlist automatica
+  agent_fullauto: Automatico totale
+  agent_phase_thinking: Sta pensando…
+  agent_phase_waiting: In attesa di approvazione…
+  agent_phase_executing: Comando in esecuzione…
+  agent_phase_timed_out: Passo scaduto, gestione manuale
+  agent_phase_need_input: Serve il tuo input
+  agent_phase_done: Obiettivo raggiunto
+  agent_phase_failed: Fermato
+  agent_confirm_title: Approvazione comando agente
+  agent_confirm_body: "L'agente AI chiede di eseguire:\n{}"
+  agent_confirm_run: Esegui
+  agent_confirm_cancel: Rifiuta
+
+
 monitor:
   title: Monitor
   global: Globale

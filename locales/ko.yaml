@@ -128,6 +128,7 @@ shortcut_labels:
   toggle_workspace_sidebar: 작업공간 표시/숨기기
   zoom_in: 확대
   zoom_out: 축소
+  stop_agent: AI 에이전트 중지
   shortcuts_heading: 단축키
 workspace:
   heading: 작업공간
@@ -425,6 +426,39 @@ ai:
   error_label: '요청 실패:'
   not_enabled: 설정 → 일반 에서 AI 어시스턴트를 활성화하고 API URL 과 Key 를 입력하세요.
   clear: 지우기
+  ctx_explain: AI 로 선택 설명
+  ctx_fix: AI 로 수정
+  ctx_translate: AI 로 번역
+  ctx_explain_screen: AI 로 화면 설명
+  insert_run: 삽입 후 실행
+  exec_confirm_title: 프로덕션 호스트 실행 확인
+  exec_confirm_body: "PROD 호스트 {} 에서 실행합니다:\n{}"
+  save_snippet: 스니펫으로 저장
+  saved_toast: 스니펫에 저장됨
+  agent_section: AI 터미널 에이전트
+  agent_goal_hint: '목표를 입력하세요. 예: "8080 포트를 점유한 프로세스를 찾아 해결책 제안"…'
+  agent_start: 에이전트 시작
+  agent_stop: 중지
+  agent_close: 닫기
+  agent_continue: 계속
+  agent_approval: '승인 모드:'
+  agent_max_steps: '최대 단계:'
+  agent_manual: 단계마다 확인
+  agent_allowlist: 화이트리스트 자동
+  agent_fullauto: 완전 자동
+  agent_phase_thinking: 생각 중…
+  agent_phase_waiting: 승인 대기 중…
+  agent_phase_executing: 명령 실행 중…
+  agent_phase_timed_out: 단계 시간 초과, 수동 처리 대기
+  agent_phase_need_input: 입력이 필요합니다
+  agent_phase_done: 목표 달성
+  agent_phase_failed: 중지됨
+  agent_confirm_title: 에이전트 명령 승인
+  agent_confirm_body: 'AI 에이전트가 실행을 요청합니다:\n{}'
+  agent_confirm_run: 실행
+  agent_confirm_cancel: 거부
+
+
 monitor:
   title: 모니터
   global: 전체

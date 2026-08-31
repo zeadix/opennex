@@ -242,6 +242,9 @@ pub struct ShortcutLabelTexts {
     pub zoom_in: String,
     pub zoom_out: String,
     pub shortcuts_heading: String,
+    /// Stop the running terminal agent (Ctrl+Shift+.).
+    #[serde(default)]
+    pub stop_agent: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -397,6 +400,73 @@ pub struct AiTexts {
     pub error_label: String,
     pub not_enabled: String,
     pub clear: String,
+    /// Terminal right-click AI menu (selection / screen actions).
+    #[serde(default)]
+    pub ctx_explain: String,
+    #[serde(default)]
+    pub ctx_fix: String,
+    #[serde(default)]
+    pub ctx_translate: String,
+    #[serde(default)]
+    pub ctx_explain_screen: String,
+    /// Insert the answer into the terminal AND run it.
+    #[serde(default)]
+    pub insert_run: String,
+    /// PROD execution guard dialog.
+    #[serde(default)]
+    pub exec_confirm_title: String,
+    /// "{}" twice: host address, then the command preview.
+    #[serde(default)]
+    pub exec_confirm_body: String,
+    #[serde(default)]
+    pub save_snippet: String,
+    #[serde(default)]
+    pub saved_toast: String,
+    /// Terminal agent section.
+    #[serde(default)]
+    pub agent_section: String,
+    #[serde(default)]
+    pub agent_goal_hint: String,
+    #[serde(default)]
+    pub agent_start: String,
+    #[serde(default)]
+    pub agent_stop: String,
+    #[serde(default)]
+    pub agent_close: String,
+    #[serde(default)]
+    pub agent_continue: String,
+    #[serde(default)]
+    pub agent_approval: String,
+    #[serde(default)]
+    pub agent_max_steps: String,
+    #[serde(default)]
+    pub agent_manual: String,
+    #[serde(default)]
+    pub agent_allowlist: String,
+    #[serde(default)]
+    pub agent_fullauto: String,
+    #[serde(default)]
+    pub agent_phase_thinking: String,
+    #[serde(default)]
+    pub agent_phase_waiting: String,
+    #[serde(default)]
+    pub agent_phase_executing: String,
+    #[serde(default)]
+    pub agent_phase_timed_out: String,
+    #[serde(default)]
+    pub agent_phase_need_input: String,
+    #[serde(default)]
+    pub agent_phase_done: String,
+    #[serde(default)]
+    pub agent_phase_failed: String,
+    #[serde(default)]
+    pub agent_confirm_title: String,
+    #[serde(default)]
+    pub agent_confirm_body: String,
+    #[serde(default)]
+    pub agent_confirm_run: String,
+    #[serde(default)]
+    pub agent_confirm_cancel: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -749,6 +819,7 @@ impl Texts {
                 zoom_in: "整体放大".into(),
                 zoom_out: "整体缩小".into(),
                 shortcuts_heading: "快捷键".into(),
+                stop_agent: "停止 AI 代理".into(),
             },
             workspace: WorkspaceTexts {
                 heading: "工作区".into(),
@@ -1044,6 +1115,37 @@ impl Texts {
                 error_label: "请求失败:".into(),
                 not_enabled: "请先在 设置 → 通用 中启用 AI 助手并填写 API 地址与 Key。".into(),
                 clear: "清空".into(),
+                ctx_explain: "AI 解释选中".into(),
+                ctx_fix: "AI 修复".into(),
+                ctx_translate: "AI 翻译".into(),
+                ctx_explain_screen: "AI 解释屏幕".into(),
+                insert_run: "插入并执行".into(),
+                exec_confirm_title: "生产环境执行确认".into(),
+                exec_confirm_body: "即将在 PROD 主机 {} 上执行：\n{}".into(),
+                save_snippet: "存为片段".into(),
+                saved_toast: "已存入片段库".into(),
+                agent_section: "AI 终端代理".into(),
+                agent_goal_hint: "输入目标，例如：找出占用 8080 端口的进程并给出修复建议…".into(),
+                agent_start: "启动代理".into(),
+                agent_stop: "停止".into(),
+                agent_close: "关闭".into(),
+                agent_continue: "继续".into(),
+                agent_approval: "审批模式:".into(),
+                agent_max_steps: "最大步数:".into(),
+                agent_manual: "每步确认".into(),
+                agent_allowlist: "白名单自动".into(),
+                agent_fullauto: "全自动".into(),
+                agent_phase_thinking: "思考中…".into(),
+                agent_phase_waiting: "等待审批…".into(),
+                agent_phase_executing: "命令执行中…".into(),
+                agent_phase_timed_out: "执行超时，等待手动处理".into(),
+                agent_phase_need_input: "需要你的输入".into(),
+                agent_phase_done: "目标已达成".into(),
+                agent_phase_failed: "已停止".into(),
+                agent_confirm_title: "代理命令审批".into(),
+                agent_confirm_body: "AI 代理请求执行：\n{}".into(),
+                agent_confirm_run: "执行".into(),
+                agent_confirm_cancel: "拒绝".into(),
             },
             monitor: MonitorTexts {
                 title: "监控面板".into(),
