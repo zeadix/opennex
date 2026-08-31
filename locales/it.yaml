@@ -473,9 +473,9 @@ remote:
   stop: Ferma
   copy_url: Copia link
   copied: Link copiato
-  off_hint: Genera un QR code: scansionalo con WeChat per vedere e pilotare tutti i terminali dei workspace (solo LAN).
-  on_hint: Disponibile sulla LAN, scansiona con WeChat:
-  security_hint: Nota: qualsiasi dispositivo sulla stessa LAN può raggiungere questo indirizzo; il QR scade allo stop. Windows potrebbe mostrare un prompt del firewall al primo avvio.
+  off_hint: 'Genera un QR code: scansionalo con WeChat per vedere e pilotare tutti i terminali dei workspace (solo LAN).'
+  on_hint: 'Disponibile sulla LAN, scansiona con WeChat:'
+  security_hint: 'Nota: qualsiasi dispositivo sulla stessa LAN può raggiungere questo indirizzo; il QR scade allo stop. Windows potrebbe mostrare un prompt del firewall al primo avvio.'
   bind_failed: Bind della porta non riuscito
   settings_section: Controllo remoto
   port_label: 'Porta:'

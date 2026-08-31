@@ -37,25 +37,6 @@ pub struct RemoteSnapshot {
     pub focused: Option<String>,
 }
 
-/// One serialized screen frame. `lines` holds one HTML fragment per
-/// grid row (runs of equal style merged into spans); the phone page
-/// drops it straight into a preformatted container.
-#[derive(Debug, Clone, Serialize)]
-pub struct TermFrame {
-    pub seq: u64,
-    pub cols: usize,
-    pub rows: usize,
-    pub cur_x: usize,
-    pub cur_y: usize,
-    pub lines: Vec<String>,
-}
-
-impl TermFrame {
-    pub fn to_json(&self) -> String {
-        serde_json::to_string(self).unwrap_or_else(|_| "{}".into())
-    }
-}
-
 /// A command the phone sent, executed by the UI thread on the next
 /// frame (terminal writes and focus changes MUST happen there).
 pub enum RemoteCommand {
@@ -70,6 +51,12 @@ pub enum RemoteCommand {
         password: String,
         reply: mpsc::Sender<bool>,
     },
+    /// Serialize a terminal's scrollback on the UI thread; the reply
+    /// carries the ANSI stream.
+    RequestScrollback {
+        tab: String,
+        reply: mpsc::Sender<String>,
+    },
 }
 
 /// Best-effort LAN ip: UDP "connect" to a public address never sends a
@@ -83,130 +70,6 @@ pub fn lan_ip() -> Option<String> {
 /// The QR / copyable entry URL.
 pub fn remote_url(ip: &str, port: u16, token: &str) -> String {
     format!("http://{ip}:{port}/?token={token}")
-}
-
-/// Escape the four characters that would break an inline HTML fragment.
-fn html_escape(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
-        match c {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            c => out.push(c),
-        }
-    }
-    out
-}
-
-/// Serialize the VISIBLE screen of a terminal grid into one frame.
-///
-/// Style runs are merged (adjacent cells with identical fg/bg/bold
-/// collapse into a single span) to keep payloads small; spaces become
-/// &nbsp; so the browser preserves trailing whitespace.
-pub fn serialize_frame(
-    grid: &alacritty_terminal::grid::Grid<alacritty_terminal::term::cell::Cell>,
-    theme: &egui_term::TerminalTheme,
-    seq: u64,
-) -> TermFrame {
-    use alacritty_terminal::grid::Dimensions;
-    use alacritty_terminal::index::{Column, Line, Point};
-    use alacritty_terminal::term::cell::{self, Flags};
-
-    let cols = grid.columns();
-    let rows = grid.screen_lines();
-    let display_offset = grid.display_offset() as i32;
-    let viewport_start = -display_offset; // Line of the visible top row
-
-    let mut lines = Vec::with_capacity(rows);
-    for row in 0..rows {
-        let mut html = String::with_capacity(cols * 16);
-        let mut run_chars = String::new();
-        let mut run_fg = String::new();
-        let mut run_bg = String::new();
-        let mut run_bold = false;
-        let mut run_started = false;
-
-        let flush = |html: &mut String,
-                     chars: &mut String,
-                     fg: &str,
-                     bg: &str,
-                     bold: bool,
-                     started: &mut bool| {
-            if !*started {
-                return;
-            }
-            let style = if bold {
-                format!("color:{};background:{};font-weight:bold", fg, bg)
-            } else {
-                format!("color:{};background:{}", fg, bg)
-            };
-            html.push_str(&format!("<span style=\"{style}\">{chars}</span>"));
-            chars.clear();
-            *started = false;
-        };
-
-        for col in 0..cols {
-            let cell = &grid[Point::new(Line(viewport_start + row as i32), Column(col))];
-            // Wide-char spacer cells render as a space inheriting the
-            // previous run's background.
-            let ch = if cell.flags.contains(Flags::WIDE_CHAR_SPACER) {
-                ' '
-            } else {
-                cell.c
-            };
-            let ch = if ch == ' ' { '\u{a0}' } else { ch };
-            let fg = theme.get_color(cell.fg);
-            let bg = theme.get_color(cell.bg);
-            let bold = cell.flags.contains(cell::Flags::BOLD);
-            let fg_hex = format!("#{:02x}{:02x}{:02x}", fg.r(), fg.g(), fg.b());
-            let bg_hex = format!("#{:02x}{:02x}{:02x}", bg.r(), bg.g(), bg.b());
-            if run_started && (fg_hex != run_fg || bg_hex != run_bg || bold != run_bold) {
-                flush(
-                    &mut html,
-                    &mut run_chars,
-                    &run_fg,
-                    &run_bg,
-                    run_bold,
-                    &mut run_started,
-                );
-            }
-            if !run_started {
-                run_fg = fg_hex;
-                run_bg = bg_hex;
-                run_bold = bold;
-                run_started = true;
-            }
-            // Push the FULL escaped entity for structural characters
-            // (taking only the first char would truncate "&lt;" to "&").
-            run_chars.push_str(&html_escape(&ch.to_string()));
-        }
-        flush(
-            &mut html,
-            &mut run_chars,
-            &run_fg,
-            &run_bg,
-            run_bold,
-            &mut run_started,
-        );
-        lines.push(html);
-    }
-
-    // Cursor: absolute grid point -> viewport coordinates (clamped).
-    let cursor = &grid.cursor;
-    let cur_line = cursor.point.line.0 - viewport_start;
-    let cur_x = cursor.point.column.0.min(cols.saturating_sub(1));
-    let cur_y = (cur_line.max(0) as usize).min(rows.saturating_sub(1));
-
-    TermFrame {
-        seq,
-        cols,
-        rows,
-        cur_x,
-        cur_y,
-        lines,
-    }
 }
 
 /// Constant-time-ish token check for the query string (avoids the easy
@@ -252,11 +115,6 @@ fn percent_decode(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn html_escape_covers_the_structural_four() {
-        assert_eq!(html_escape("<a&b>\"c"), "&lt;a&amp;b&gt;&quot;c");
-    }
 
     #[test]
     fn token_check_is_exact_and_not_timing_obvious() {

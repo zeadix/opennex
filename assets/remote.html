@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>OpenNex Remote</title>
+<link rel="stylesheet" href="/xterm.css">
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; background: #16181d; color: #d8d8dc; font-family: sans-serif; }
@@ -13,14 +14,14 @@
   .tab { padding: 6px 12px; margin: 0 2px; border-radius: 6px; font-size: 13px; color: #9aa0aa; cursor: pointer; flex-shrink: 0; }
   .tab.active { background: #2f6fed; color: #fff; }
   .tab.locked { color: #e0a800; }
-  #term { flex: 1; position: relative; overflow: hidden; background: #0c0d10; }
-  #screen { position: absolute; left: 6px; top: 6px; font-family: "Cascadia Mono", Consolas, "Courier New", monospace; font-size: 12px; line-height: 1.25; white-space: pre; }
-  #cursor { position: absolute; width: 0.6em; height: 1.25em; background: rgba(220,225,232,0.85); }
-  @keyframes blink { 0%,49% { opacity: 1; } 50%,100% { opacity: 0; } }
-  #cursor.on { animation: blink 1s step-start infinite; }
-  #input { position: fixed; left: -9999px; opacity: 0; }
+  #term { flex: 1; position: relative; background: #0c0d10; overflow: hidden; }
+  #term .xterm { position: absolute; left: 0; top: 0; }
   .status { padding: 3px 8px; font-size: 11px; color: #9aa0aa; background: #1e2128; border-top: 1px solid #2c3038; }
   .status.err { color: #e06060; }
+  #keys { display: flex; flex-wrap: wrap; gap: 4px; padding: 5px; background: #1e2128; border-top: 1px solid #2c3038; }
+  .key { padding: 7px 11px; font-size: 13px; border-radius: 6px; background: #2c3038; color: #d8d8dc; cursor: pointer; user-select: none; -webkit-user-select: none; flex-shrink: 0; }
+  .key:active { background: #2f6fed; }
+  .key.on { background: #2f6fed; color: #fff; }
   #unlock { position: absolute; left: 0; top: 0; right: 0; bottom: 0; display: none; align-items: center; justify-content: center; background: #16181d; z-index: 5; }
   #unlock .box { text-align: center; }
   #unlock input { margin: 10px; padding: 8px; font-size: 14px; border-radius: 6px; border: 1px solid #2c3038; background: #0c0d10; color: #d8d8dc; }
@@ -31,63 +32,249 @@
 <div id="wrap">
   <div class="bar"><div class="tabs" id="wstabs"></div></div>
   <div class="bar"><div class="tabs" id="termtabs"></div></div>
-  <div id="term"><div id="screen"></div><div id="cursor"></div>
+  <div id="term">
     <div id="unlock"><div class="box">
       <div id="unlock-msg">This workspace is locked. Enter the password to unlock.</div>
       <input type="password" id="unlock-pw" autocomplete="off">
       <button id="unlock-btn">Unlock</button>
     </div></div>
   </div>
+  <div id="keys">
+    <div class="key" data-k="esc">Esc</div>
+    <div class="key" data-k="tab">Tab</div>
+    <div class="key" data-k="ctrl" id="ctrl-key">Ctrl</div>
+    <div class="key" data-k="up">↑</div>
+    <div class="key" data-k="down">↓</div>
+    <div class="key" data-k="left">←</div>
+    <div class="key" data-k="right">→</div>
+    <div class="key" data-k="pgup">PgUp</div>
+    <div class="key" data-k="pgdn">PgDn</div>
+    <div class="key" data-k="home">Home</div>
+    <div class="key" data-k="end">End</div>
+    <div class="key" data-k="ctrlc">Ctrl+C</div>
+  </div>
   <div class="status" id="status"></div>
 </div>
-<input id="input" type="text" autocomplete="off" autocapitalize="off" autocorrect="off">
+<script src="/xterm.js"></script>
 <script>
-/* OpenNex remote page — plain ES5-ish JS for WeChat X5 compatibility. */
+/* OpenNex remote page v2 - xterm.js renderer + WebSocket live sync.
+   Plain ES5-ish JS for WeChat X5 compatibility. */
 (function () {
   var TOKEN = (function () {
     var m = location.search.match(/[?&]token=([^&]+)/);
     return m ? m[1] : '';
   })();
-  var state = { ws: [], wsIndex: 0, termIndex: 0, locked: false, focused: null };
-  var lastSeq = -1;
-  var cursorOn = false;
-  var input = document.getElementById('input');
-  var screenEl = document.getElementById('screen');
-  var cursorEl = document.getElementById('cursor');
+  var state = { ws: [], wsIndex: 0, termIndex: 0, locked: false };
+  var term = new Terminal({
+    fontFamily: '"Cascadia Mono", Consolas, "Courier New", monospace',
+    fontSize: 13,
+    theme: { background: '#0c0d10', foreground: '#d8d8dc' },
+    scrollback: 2000,
+    convertEol: false
+  });
+  var termEl = document.getElementById('term');
+  term.open(termEl);
   var statusEl = document.getElementById('status');
   var unlockEl = document.getElementById('unlock');
-
-  function api(path, opts, cb) {
-    var xhr = new XMLHttpRequest();
-    xhr.open(opts && opts.method ? opts.method : 'GET', path + (path.indexOf('?') >= 0 ? '&' : '?') + 'token=' + encodeURIComponent(TOKEN), true);
-    xhr.setRequestHeader('Content-Type', 'application/json');
-    xhr.onreadystatechange = function () {
-      if (xhr.readyState === 4) {
-        cb(xhr.status, xhr.responseText);
-      }
-    };
-    xhr.send(opts && opts.body ? opts.body : null);
-  }
+  var ws = null;
+  var wsOk = false;
+  var ctrlMode = false;
+  var lastFrame = { cols: 0, rows: 0, alt: null, app_cursor: null, seq: -1 };
+  var reconnectDelay = 500;
+  var fallbackPoll = null;
 
   function setStatus(msg, isErr) {
     statusEl.textContent = msg;
     statusEl.className = 'status' + (isErr ? ' err' : '');
   }
 
-  function focusTerminal(tab) {
-    api('/api/focus', { method: 'POST', body: JSON.stringify({ tab: tab }) }, function () {});
+  function post(path, body, cb) {
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', path + '?token=' + encodeURIComponent(TOKEN), true);
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.onreadystatechange = function () {
+      if (xhr.readyState === 4 && cb) cb(xhr.status);
+    };
+    xhr.send(body ? JSON.stringify(body) : null);
+  }
+
+  function get(path, cb) {
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', path + (path.indexOf('?') >= 0 ? '&' : '?') + 'token=' + encodeURIComponent(TOKEN), true);
+    xhr.onreadystatechange = function () {
+      if (xhr.readyState === 4) cb(xhr.status, xhr.responseText);
+    };
+    xhr.send(null);
+  }
+
+  function currentTab() {
+    var cur = state.ws[state.wsIndex];
+    if (!cur || cur.locked || !cur.terminals.length) return null;
+    if (state.termIndex >= cur.terminals.length) state.termIndex = 0;
+    return cur.terminals[state.termIndex];
+  }
+
+  function sendInput(data) {
+    var tab = currentTab();
+    if (!tab) return;
+    if (wsOk && ws && ws.readyState === 1) {
+      ws.send(JSON.stringify({ t: 'input', tab: tab.id, d: data }));
+    } else {
+      post('/api/input', { tab: tab.id, data: data });
+    }
+  }
+
+  // ----- xterm input -----
+  term.onData(function (d) {
+    if (ctrlMode && d.length === 1) {
+      // Sticky Ctrl: map the next plain char to its control code.
+      var c = d.toUpperCase().charCodeAt(0);
+      if (c >= 64 && c <= 95) d = String.fromCharCode(c - 64);
+      ctrlMode = false;
+      document.getElementById('ctrl-key').className = 'key';
+    }
+    sendInput(d);
+  });
+
+  // ----- special key toolbar -----
+  function ctrlCode(ch) { return String.fromCharCode(ch.toUpperCase().charCodeAt(0) - 64); }
+  document.getElementById('keys').addEventListener('click', function (e) {
+    var k = e.target.getAttribute && e.target.getAttribute('data-k');
+    if (!k) return;
+    if (k === 'ctrl') {
+      ctrlMode = !ctrlMode;
+      e.target.className = 'key' + (ctrlMode ? ' on' : '');
+      return;
+    }
+    var map = {
+      esc: '\x1b', tab: '\t', up: '\x1b[A', down: '\x1b[B',
+      right: '\x1b[C', left: '\x1b[D',
+      pgup: '\x1b[5~', pgdn: '\x1b[6~', home: '\x1b[H', end: '\x1b[F',
+      ctrlc: '\x03'
+    };
+    if (map[k]) sendInput(map[k]);
+    term.focus();
+  });
+  // In APP_CURSOR mode xterm itself emits SS3 arrows; our toolbar keys
+  // keep CSI form which all common TUIs accept too.
+
+  // ----- frames -----
+  function applyFrame(f) {
+    if (f.seq === lastFrame.seq) return;
+    lastFrame.seq = f.seq;
+    if (f.cols !== lastFrame.cols || f.rows !== lastFrame.rows) {
+      lastFrame.cols = f.cols;
+      lastFrame.rows = f.rows;
+      term.resize(f.cols, f.rows);
+    }
+    if (f.alt !== lastFrame.alt) {
+      lastFrame.alt = f.alt;
+      term.write(f.alt ? '\x1b[?1049h' : '\x1b[?1049l');
+    }
+    if (f.app_cursor !== lastFrame.app_cursor) {
+      lastFrame.app_cursor = f.app_cursor;
+      term.write(f.app_cursor ? '\x1b[?1h' : '\x1b[?1l');
+    }
+    term.write(f.d);
+  }
+
+  // ----- websocket -----
+  function connectWs() {
+    if (fallbackPoll) return;
+    try {
+      var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      ws = new WebSocket(proto + '//' + location.host + '/ws?token=' + encodeURIComponent(TOKEN));
+    } catch (e) {
+      startFallback();
+      return;
+    }
+    ws.onopen = function () {
+      wsOk = true;
+      reconnectDelay = 500;
+      setStatus('Live');
+      ws.send(JSON.stringify({ t: 'hello' }));
+      var tab = currentTab();
+      if (tab) ws.send(JSON.stringify({ t: 'scrollback', tab: tab.id }));
+      term.focus();
+    };
+    ws.onmessage = function (ev) {
+      var m;
+      try { m = JSON.parse(ev.data); } catch (err) { return; }
+      if (m.t === 'frame') {
+        var cur = currentTab();
+        if (cur && m.tab === cur.id) applyFrame(m);
+      } else if (m.t === 'scrollback') {
+        var t0 = currentTab();
+        if (t0) {
+          term.write('\x1b[?1049l');
+          term.write(m.d);
+          lastFrame.seq = -1;
+        }
+      } else if (m.t === 'bye') {
+        setStatus('Closed by app', true);
+      }
+    };
+    ws.onclose = function () {
+      wsOk = false;
+      if (reconnectDelay >= 4000) {
+        startFallback();
+        return;
+      }
+      setStatus('Reconnecting…', true);
+      setTimeout(connectWs, reconnectDelay);
+      reconnectDelay = Math.min(reconnectDelay * 2, 4000);
+    };
+    ws.onerror = function () { /* onclose follows */ };
+  }
+
+  // ----- HTTP fallback polling -----
+  function startFallback() {
+    if (fallbackPoll) return;
+    setStatus('Fallback mode (polling)', true);
+    fallbackPoll = setInterval(function () {
+      var tab = currentTab();
+      if (!tab) return;
+      get('/api/frame?tab=' + encodeURIComponent(tab.id), function (code, body) {
+        if (code === 200 && body) {
+          try { applyFrame(JSON.parse(body)); } catch (e) {}
+        }
+      });
+    }, 150);
+  }
+
+  // ----- tabs / state -----
+  function escapeHtml(s) {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function selectTerminal(idx) {
+    state.termIndex = idx;
+    lastFrame = { cols: 0, rows: 0, alt: null, app_cursor: null, seq: -1 };
+    term.reset();
+    var cur = state.ws[state.wsIndex];
+    var tab = currentTab();
+    if (tab) {
+      if (wsOk && ws && ws.readyState === 1) {
+        ws.send(JSON.stringify({ t: 'focus', tab: tab.id }));
+        ws.send(JSON.stringify({ t: 'scrollback', tab: tab.id }));
+      } else {
+        post('/api/focus', { tab: tab.id });
+      }
+    }
+    renderTabs();
+    term.focus();
   }
 
   function renderTabs() {
-    var ws = state.ws;
-    if (!ws.length) return;
-    if (state.wsIndex >= ws.length) state.wsIndex = 0;
-    var cur = ws[state.wsIndex];
+    var wsArr = state.ws;
+    if (!wsArr.length) return;
+    if (state.wsIndex >= wsArr.length) state.wsIndex = 0;
+    var cur = wsArr[state.wsIndex];
     var wsel = document.getElementById('wstabs');
     var html = '';
-    for (var i = 0; i < ws.length; i++) {
-      html += '<div class="tab' + (i === state.wsIndex ? ' active' : '') + (ws[i].locked ? ' locked' : '') + '" data-ws="' + i + '">' +
-        escapeHtml(ws[i].name) + (ws[i].locked ? ' 🔒' : '') + '</div>';
+    for (var i = 0; i < wsArr.length; i++) {
+      html += '<div class="tab' + (i === state.wsIndex ? ' active' : '') + (wsArr[i].locked ? ' locked' : '') + '" data-ws="' + i + '">' +
+        escapeHtml(wsArr[i].name) + (wsArr[i].locked ? ' 🔒' : '') + '</div>';
     }
     wsel.innerHTML = html;
     var wsTabs = wsel.querySelectorAll('.tab');
@@ -116,102 +303,54 @@
       var tTabs = tsel.querySelectorAll('.tab');
       for (var m = 0; m < tTabs.length; m++) {
         (function (idx) {
-          tTabs[m].addEventListener('click', function () {
-            state.termIndex = idx;
-            lastSeq = -1;
-            focusTerminal(cur.terminals[idx].id);
-            refreshState();
-          });
+          tTabs[m].addEventListener('click', function () { selectTerminal(idx); });
         })(parseInt(tTabs[m].getAttribute('data-t'), 10));
       }
-      if (cur.terminals.length && cur.terminals[state.termIndex]) {
-        focusTerminal(cur.terminals[state.termIndex].id);
+      var tab = currentTab();
+      if (tab) {
+        if (wsOk && ws && ws.readyState === 1) {
+          ws.send(JSON.stringify({ t: 'focus', tab: tab.id }));
+        } else {
+          post('/api/focus', { tab: tab.id });
+        }
       }
     }
     unlockEl.style.display = state.locked ? 'flex' : 'none';
   }
 
   function refreshState() {
-    api('/api/state', null, function (code, body) {
+    get('/api/state', null, function (code, body) {
       if (code !== 200) { setStatus('Disconnected (' + code + ')', true); return; }
       var s = JSON.parse(body);
       state.ws = s.workspaces || [];
       if (!state.ws.length) { setStatus('No workspaces'); return; }
-      if (state.wsIndex >= state.ws.length) state.wsIndex = 0;
       renderTabs();
-      setStatus('Connected — ' + state.ws.length + ' workspace(s)');
-      pollFrame();
+      setStatus(wsOk ? 'Live' : (fallbackPoll ? 'Fallback mode (polling)' : 'Connecting…'));
     });
   }
-
-  function pollFrame() {
-    if (state.locked) { setTimeout(pollFrame, 800); return; }
-    var cur = state.ws[state.wsIndex];
-    if (!cur || !cur.terminals.length) { setTimeout(pollFrame, 800); return; }
-    if (state.termIndex >= cur.terminals.length) state.termIndex = 0;
-    var tab = cur.terminals[state.termIndex].id;
-    api('/api/frame?tab=' + encodeURIComponent(tab), null, function (code, body) {
-      if (code === 200 && body) {
-        var f = JSON.parse(body);
-        if (f.seq !== lastSeq) {
-          lastSeq = f.seq;
-          var html = '';
-          for (var i = 0; i < f.lines.length; i++) html += f.lines[i] + '\n';
-          screenEl.innerHTML = html;
-          var ch = 7.2; var lh = 15;
-          cursorEl.style.left = (6 + f.cur_x * ch) + 'px';
-          cursorEl.style.top = (6 + f.cur_y * lh) + 'px';
-          cursorEl.className = 'on';
-        }
-      }
-      setTimeout(pollFrame, 400);
-    });
-  }
-
-  function sendKey(text) {
-    if (state.locked) return;
-    var cur = state.ws[state.wsIndex];
-    if (!cur || !cur.terminals.length) return;
-    var tab = cur.terminals[state.termIndex].id;
-    api('/api/input', { method: 'POST', body: JSON.stringify({ tab: tab, data: text }) }, function () {});
-  }
-
-  function escapeHtml(s) {
-    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-  }
-
-  input.addEventListener('keydown', function (e) {
-    if (e.key === 'Enter') { sendKey('\r'); e.preventDefault(); }
-    else if (e.key === 'Backspace') { sendKey('\x7f'); e.preventDefault(); }
-    else if (e.key === 'Tab') { sendKey('\t'); e.preventDefault(); }
-    else if (e.key === 'ArrowUp') { sendKey('\x1b[A'); e.preventDefault(); }
-    else if (e.key === 'ArrowDown') { sendKey('\x1b[B'); e.preventDefault(); }
-    else if (e.key === 'ArrowLeft') { sendKey('\x1b[D'); e.preventDefault(); }
-    else if (e.key === 'ArrowRight') { sendKey('\x1b[C'); e.preventDefault(); }
-    else if (e.key === 'c' && (e.ctrlKey || e.metaKey)) { sendKey('\x03'); e.preventDefault(); }
-    else if (e.key === 'd' && (e.ctrlKey || e.metaKey)) { sendKey('\x04'); e.preventDefault(); }
-    else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) { sendKey(e.key); }
-  });
 
   document.getElementById('unlock-btn').addEventListener('click', function () {
     var pw = document.getElementById('unlock-pw').value;
-    api('/api/unlock', { method: 'POST', body: JSON.stringify({ panel: state.wsIndex, password: pw }) }, function (code) {
+    post('/api/unlock', { panel: state.wsIndex, password: pw }, function (code) {
       if (code === 200) {
         document.getElementById('unlock-pw').value = '';
         refreshState();
       } else {
-        document.getElementById('unlock-msg').textContent = 'Wrong password — try again.';
+        document.getElementById('unlock-msg').textContent = 'Wrong password - try again.';
       }
     });
   });
 
-  document.getElementById('term').addEventListener('click', function () { input.focus(); });
+  termEl.addEventListener('click', function () { term.focus(); });
   document.addEventListener('visibilitychange', function () {
-    if (!document.hidden) { input.focus(); }
+    if (!document.hidden) term.focus();
   });
+
+  // Boot: state first (tab bars), then live connection.
   refreshState();
+  connectWs();
   setInterval(refreshState, 2000);
-  input.focus();
+  term.focus();
 })();
 </script>
 </body>

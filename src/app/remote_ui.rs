@@ -18,7 +18,26 @@ pub(crate) struct RemoteSession {
     pub ip: String,
     pub last_refresh: Instant,
     pub frame_seq: HashMap<String, u64>,
+    /// Last serialized ANSI per tab - the change detector.
+    pub last_ansi: HashMap<String, String>,
     pub panel_visible: bool,
+}
+
+/// A WS "frame" message: the FrameMsg JSON plus the tab id.
+fn frame_json(tab: &str, frame: &crate::remote::ansi::FrameMsg) -> String {
+    let body = serde_json::to_string(frame).unwrap_or_else(|_| "{}".into());
+    // Splice the tab id in front of the closing brace.
+    let mut out = body;
+    if let Some(pos) = out.rfind('}') {
+        out.insert_str(
+            pos,
+            &format!(
+                ",\"tab\":{}",
+                serde_json::to_string(tab).unwrap_or_default()
+            ),
+        );
+    }
+    format!("{{\"t\":\"frame\",{}", &out[1..])
 }
 
 impl RemoteSession {
@@ -43,6 +62,7 @@ impl App {
             ip: lan_ip().unwrap_or_default(),
             last_refresh: Instant::now() - Duration::from_secs(1),
             frame_seq: HashMap::new(),
+            last_ansi: HashMap::new(),
             panel_visible: true,
         });
         Ok(())
@@ -68,8 +88,9 @@ impl App {
             let mut queue = session.shared.commands.lock().unwrap();
             queue.drain(..).collect()
         };
-        // 2. Throttle decision.
-        let refresh_due = session.last_refresh.elapsed() >= Duration::from_millis(200);
+        // 2. Throttle decision: ~40ms cadence while a session runs
+        // (real-time for TUI redraws; PTY output drives repaints).
+        let refresh_due = session.last_refresh.elapsed() >= Duration::from_millis(40);
         if refresh_due {
             session.last_refresh = Instant::now();
         }
@@ -93,6 +114,22 @@ impl App {
                         self.locked_panels.remove(&panel);
                     }
                     let _ = reply.send(ok);
+                }
+                RemoteCommand::RequestScrollback { tab, reply } => {
+                    let ansi = self
+                        .terminals
+                        .get_mut(&tab)
+                        .map(|td| {
+                            let content = td.instance.backend.sync();
+                            crate::remote::ansi::serialize_scrollback(
+                                &content.grid,
+                                &self.terminal_theme_cache,
+                                500,
+                                256 * 1024,
+                            )
+                        })
+                        .unwrap_or_default();
+                    let _ = reply.send(ansi);
                 }
             }
         }
@@ -140,27 +177,44 @@ impl App {
             return;
         }
 
-        // --- frames (one per live terminal) ---
+        // --- frames (one per live terminal; unchanged content keeps its
+        // seq, changed content bumps seq and broadcasts to WS writers) ---
         let theme = self.terminal_theme_cache.clone();
         let ids: Vec<String> = self.terminals.keys().cloned().collect();
-        let mut frames = HashMap::new();
-        let mut seqs: HashMap<String, u64> = self
-            .remote
-            .as_ref()
-            .map(|s| s.frame_seq.clone())
-            .unwrap_or_default();
+        let mut changed: Vec<(String, crate::remote::ansi::FrameMsg)> = Vec::new();
+        let session = self.remote.as_mut().unwrap();
+        let mut new_frames = HashMap::new();
         for id in ids {
             if let Some(td) = self.terminals.get_mut(&id) {
                 let content = td.instance.backend.sync();
-                let seq = seqs.entry(id.clone()).or_insert(0);
-                *seq = seq.wrapping_add(1);
-                let frame = crate::remote::protocol::serialize_frame(&content.grid, &theme, *seq);
-                frames.insert(id, frame);
+                let seq = session.frame_seq.entry(id.clone()).or_insert(0);
+                let frame = crate::remote::ansi::serialize_frame(
+                    &content.grid,
+                    &theme,
+                    &content.terminal_mode,
+                    *seq,
+                );
+                let mut frame = frame;
+                let prev = session.last_ansi.get(&id);
+                if prev != Some(&frame.d) {
+                    *seq = seq.wrapping_add(1);
+                    frame.seq = *seq;
+                    session.last_ansi.insert(id.clone(), frame.d.clone());
+                    changed.push((id.clone(), frame.clone()));
+                }
+                new_frames.insert(id, frame);
             }
         }
-        if let Some(session) = self.remote.as_mut() {
-            session.frame_seq = seqs;
-            *session.shared.frames.write().unwrap() = frames;
+        *session.shared.frames.write().unwrap() = new_frames;
+        // Broadcast changed frames; prune dead subscribers.
+        if !changed.is_empty() {
+            let mut subs = session.shared.subscribers.lock().unwrap();
+            subs.retain(|tx| {
+                changed.iter().all(|(id, frame)| {
+                    let payload = frame_json(id, frame);
+                    tx.send(crate::remote::ws::WsOut::Text(payload)).is_ok()
+                })
+            });
         }
     }
 

@@ -473,7 +473,7 @@ remote:
   copy_url: 링크 복사
   copied: 링크 복사됨
   off_hint: QR 코드를 생성합니다. WeChat 으로 스캔하면 모든 워크스페이스 터미널을 보고 조작할 수 있습니다(랜 전용).
-  on_hint: 랜에서 사용 가능, WeChat 으로 스캔:
+  on_hint: '랜에서 사용 가능, WeChat 으로 스캔:'
   security_hint: '주의: 같은 랜의 모든 기기가 이 주소에 접근할 수 있습니다. 중지하면 QR 이 즉시 만료됩니다. Windows 는 처음 시작 시 방화벽 확인을 표시할 수 있습니다.'
   bind_failed: 포트 바인딩 실패
   settings_section: 휴대폰 원격 제어

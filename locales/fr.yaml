@@ -474,7 +474,7 @@ remote:
   copy_url: Copier le lien
   copied: Lien copié
   off_hint: Génère un QR code — scannez-le avec WeChat pour voir et piloter tous les terminaux (réseau local uniquement).
-  on_hint: Disponible sur le réseau local, à scanner avec WeChat :
+  on_hint: 'Disponible sur le réseau local, à scanner avec WeChat :'
   security_hint: 'Note : tout appareil du même réseau local peut atteindre cette adresse ; le QR code expire à l''arrêt. Windows peut afficher une invite de pare-feu au premier démarrage.'
   bind_failed: Échec de liaison du port
   settings_section: Contrôle à distance
