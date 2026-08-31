@@ -390,6 +390,26 @@ pub struct RemoteTexts {
     pub bind_failed: String,
     pub settings_section: String,
     pub port_label: String,
+    /// Address target selector labels.
+    #[serde(default)]
+    pub addr_lan: String,
+    #[serde(default)]
+    pub addr_ipv6: String,
+    #[serde(default)]
+    pub addr_tunnel: String,
+    /// Quick tunnel controls / states.
+    #[serde(default)]
+    pub tunnel_start: String,
+    #[serde(default)]
+    pub tunnel_starting: String,
+    #[serde(default)]
+    pub tunnel_ready: String,
+    #[serde(default)]
+    pub tunnel_failed: String,
+    #[serde(default)]
+    pub tunnel_warning: String,
+    #[serde(default)]
+    pub no_addr: String,
 }
 
 /// Floating monitor panel strings.
@@ -1180,6 +1200,15 @@ impl Texts {
                 bind_failed: "端口绑定失败".into(),
                 settings_section: "手机远程控制".into(),
                 port_label: "端口:".into(),
+                addr_lan: "局域网".into(),
+                addr_ipv6: "IPv6 直连".into(),
+                addr_tunnel: "外网隧道".into(),
+                tunnel_start: "开启外网隧道".into(),
+                tunnel_starting: "正在准备外网隧道…".into(),
+                tunnel_ready: "外网隧道已就绪".into(),
+                tunnel_failed: "外网隧道失败".into(),
+                tunnel_warning: "外网地址经 Cloudflare 中转（TLS 加密）；关闭远程控制即失效。".into(),
+                no_addr: "未检测到可用地址".into(),
             },
             monitor: MonitorTexts {
                 title: "监控面板".into(),

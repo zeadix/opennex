@@ -6,6 +6,7 @@ use crate::remote::protocol::{
     lan_ip, remote_url, RemoteCommand, RemoteSnapshot, TermInfo, WsInfo,
 };
 use crate::remote::server::{RemoteServer, RemoteShared};
+use crate::remote::tunnel::{TunnelEvent, TunnelHandle};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
@@ -21,6 +22,28 @@ pub(crate) struct RemoteSession {
     /// Last serialized ANSI per tab - the change detector.
     pub last_ansi: HashMap<String, String>,
     pub panel_visible: bool,
+    /// Public IPv6 for direct cellular access (None = no global route).
+    pub ipv6: Option<String>,
+    /// Managed cloudflared quick tunnel (None = not started).
+    pub tunnel: Option<TunnelHandle>,
+    /// Handle-spawn result channel (drained by remote_tick).
+    pub tunnel_joiner: Option<std::sync::mpsc::Receiver<Result<TunnelHandle, String>>>,
+    /// Latest tunnel status surfaced to the panel.
+    pub tunnel_url: Option<String>,
+    pub tunnel_error: Option<String>,
+    pub tunnel_progress: Option<f32>,
+    pub tunnel_starting: bool,
+    /// Which address the QR shows.
+    pub qr_target: QrTarget,
+}
+
+/// Which entry URL the QR code shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum QrTarget {
+    #[default]
+    Lan,
+    Ipv6,
+    Tunnel,
 }
 
 /// A WS "frame" message: the FrameMsg JSON plus the tab id.
@@ -44,6 +67,23 @@ impl RemoteSession {
     pub fn url(&self) -> String {
         remote_url(&self.ip, self.shared.port, &self.shared.token)
     }
+
+    /// IPv6 direct URL (needs the port; bracketed literal).
+    pub fn ipv6_url(&self) -> Option<String> {
+        self.ipv6
+            .as_ref()
+            .map(|ip| remote_url(ip, self.shared.port, &self.shared.token))
+    }
+
+    /// The URL the QR should show for the current target.
+    pub fn qr_url(&self) -> Option<String> {
+        match self.qr_target {
+            QrTarget::Lan if !self.ip.is_empty() => Some(self.url()),
+            QrTarget::Lan => None,
+            QrTarget::Ipv6 => self.ipv6_url(),
+            QrTarget::Tunnel => self.tunnel_url.clone(),
+        }
+    }
 }
 
 impl App {
@@ -64,6 +104,14 @@ impl App {
             frame_seq: HashMap::new(),
             last_ansi: HashMap::new(),
             panel_visible: true,
+            ipv6: crate::remote::protocol::public_ipv6(),
+            tunnel: None,
+            tunnel_joiner: None,
+            tunnel_url: None,
+            tunnel_error: None,
+            tunnel_progress: None,
+            tunnel_starting: false,
+            qr_target: QrTarget::default(),
         });
         Ok(())
     }
@@ -73,7 +121,31 @@ impl App {
             if let Some(server) = session.server.take() {
                 server.stop();
             }
+            if let Some(mut tunnel) = session.tunnel.take() {
+                tunnel.stop();
+            }
         }
+    }
+
+    /// Start (or download + start) the cloudflared quick tunnel. The
+    /// spawn happens on a background thread; the result handle flows
+    /// back through a channel drained by remote_tick.
+    pub(crate) fn remote_tunnel_start(&mut self) {
+        let Some(session) = self.remote.as_mut() else {
+            return;
+        };
+        if session.tunnel.is_some() || session.tunnel_starting {
+            return;
+        }
+        session.tunnel_starting = true;
+        session.tunnel_error = None;
+        let data_dir = app_data_dir();
+        let port = session.shared.port;
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(TunnelHandle::start(&data_dir, port));
+        });
+        session.tunnel_joiner = Some(rx);
     }
 
     /// Per-frame tick: drain phone commands (terminal writes and focus
@@ -135,6 +207,49 @@ impl App {
         }
         if refresh_due {
             self.remote_refresh();
+        }
+        // Tunnel plumbing: adopt the spawned handle, surface its events.
+        if let Some(session) = self.remote.as_mut() {
+            if let Some(joiner) = session.tunnel_joiner.take() {
+                match joiner.try_recv() {
+                    Ok(Ok(handle)) => {
+                        session.tunnel = Some(handle);
+                        session.tunnel_starting = false;
+                    }
+                    Ok(Err(err)) => {
+                        session.tunnel_starting = false;
+                        session.tunnel_error = Some(err);
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => {
+                        session.tunnel_joiner = Some(joiner);
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        session.tunnel_starting = false;
+                    }
+                }
+            }
+            if let Some(tunnel) = session.tunnel.as_mut() {
+                while let Ok(event) = tunnel.events.try_recv() {
+                    match event {
+                        TunnelEvent::Downloading(p) => {
+                            session.tunnel_error = None;
+                            session.tunnel_progress = Some(p);
+                        }
+                        TunnelEvent::Starting => {
+                            session.tunnel_progress = None;
+                        }
+                        TunnelEvent::Ready(url) => {
+                            session.tunnel_url = Some(url);
+                            session.qr_target = QrTarget::Tunnel;
+                        }
+                        TunnelEvent::Failed(err) => {
+                            if session.tunnel_url.is_none() {
+                                session.tunnel_error = Some(err);
+                            }
+                        }
+                    }
+                }
+            }
         }
         // Keep the frame cache fresh even when nothing repaints locally.
         ctx.request_repaint_after(Duration::from_millis(250));
@@ -277,25 +392,107 @@ impl App {
                         }
                     }
                     Some(_) => {
-                        let url = self.remote.as_ref().unwrap().url();
+                        // Address target selector (LAN / IPv6 / tunnel).
+                        let ipv6 = self.remote.as_ref().and_then(|s| s.ipv6.clone());
+                        let tunnel_state = self
+                            .remote
+                            .as_ref()
+                            .map(|s| (s.tunnel_url.clone(), s.tunnel_starting, s.tunnel_progress))
+                            .unwrap_or((None, false, None));
                         ui.label(egui::RichText::new(&t.on_hint).size(11.0).color(weak));
-                        ui.label(egui::RichText::new(&url).size(11.0).color(accent));
                         ui.horizontal(|ui| {
+                            let target = self.remote.as_ref().unwrap().qr_target;
+                            let mut pick = target;
+                            if ui
+                                .selectable_label(target == QrTarget::Lan, &t.addr_lan)
+                                .clicked()
+                            {
+                                pick = QrTarget::Lan;
+                            }
+                            if let Some(ip) = ipv6.as_ref() {
+                                if ui
+                                    .selectable_label(
+                                        target == QrTarget::Ipv6,
+                                        format!("{} {}", t.addr_ipv6, &ip[..ip.len().min(12)]),
+                                    )
+                                    .clicked()
+                                {
+                                    pick = QrTarget::Ipv6;
+                                }
+                            }
+                            if tunnel_state.0.is_some()
+                                && ui
+                                    .selectable_label(target == QrTarget::Tunnel, &t.addr_tunnel)
+                                    .clicked()
+                            {
+                                pick = QrTarget::Tunnel;
+                            }
+                            if pick != target {
+                                self.remote.as_mut().unwrap().qr_target = pick;
+                            }
+                        });
+                        // Tunnel control row.
+                        ui.horizontal(|ui| {
+                            if tunnel_state.1 {
+                                let pct = tunnel_state
+                                    .2
+                                    .map(|p| format!(" ({:.0}%)", p * 100.0))
+                                    .unwrap_or_default();
+                                ui.label(
+                                    egui::RichText::new(format!("{}{pct}", t.tunnel_starting))
+                                        .size(11.0)
+                                        .color(weak),
+                                );
+                            } else if tunnel_state.0.is_some() {
+                                ui.label(
+                                    egui::RichText::new(&t.tunnel_ready)
+                                        .size(11.0)
+                                        .color(accent),
+                                );
+                            } else {
+                                if let Some(err) =
+                                    self.remote.as_ref().and_then(|s| s.tunnel_error.clone())
+                                {
+                                    ui.label(
+                                        egui::RichText::new(format!("{}: {err}", t.tunnel_failed))
+                                            .size(10.0)
+                                            .color(self.active_theme.app.danger.to_egui()),
+                                    );
+                                }
+                                if ui.button(&t.tunnel_start).clicked() {
+                                    self.remote_tunnel_start();
+                                }
+                            }
                             if ui.button(&t.copy_url).clicked() {
-                                ui.ctx().copy_text(url.clone());
-                                self.update_toast = Some((
-                                    t.copied.clone(),
-                                    Instant::now() + Duration::from_secs(4),
-                                ));
+                                if let Some(url) = self.remote.as_ref().unwrap().qr_url() {
+                                    ui.ctx().copy_text(url.clone());
+                                    self.update_toast = Some((
+                                        t.copied.clone(),
+                                        Instant::now() + Duration::from_secs(4),
+                                    ));
+                                }
                             }
                             if ui.button(&t.stop).clicked() {
                                 self.remote_stop();
                             }
                         });
-                        ui.add_space(6.0);
-                        self.remote_draw_qr(ui, &url);
+                        // QR for the selected target.
+                        if let Some(url) = self.remote.as_ref().unwrap().qr_url() {
+                            ui.label(egui::RichText::new(&url).size(11.0).color(accent));
+                            ui.add_space(6.0);
+                            self.remote_draw_qr(ui, &url);
+                        } else if self.remote.as_ref().is_some_and(|s| s.ip.is_empty()) {
+                            ui.label(egui::RichText::new(&t.no_addr).size(11.0).color(weak));
+                        }
                         ui.add_space(4.0);
                         ui.label(egui::RichText::new(&t.security_hint).size(10.0).color(weak));
+                        if tunnel_state.0.is_some() {
+                            ui.label(
+                                egui::RichText::new(&t.tunnel_warning)
+                                    .size(10.0)
+                                    .color(weak),
+                            );
+                        }
                     }
                 }
             });

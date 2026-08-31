@@ -67,6 +67,29 @@ pub fn lan_ip() -> Option<String> {
     sock.local_addr().ok().map(|a| a.ip().to_string())
 }
 
+/// Is this a GLOBAL (publicly routable) IPv6 address? Excludes loopback,
+/// unspecified, link-local (fe80::/10) and ULA (fc00::/7) ranges.
+pub fn is_global_ipv6(ip: &std::net::Ipv6Addr) -> bool {
+    let first = ip.segments()[0];
+    !ip.is_loopback()
+        && !ip.is_unspecified()
+        && (first & 0xffc0) != 0xfe80 // link-local
+        && (first & 0xfe00) != 0xfc00 // ULA
+}
+
+/// Best-effort public IPv6 for direct phone access over cellular: the
+/// same UDP trick against a public IPv6 resolver. None whenever the
+/// machine has no global IPv6 route (very common on LANs).
+pub fn public_ipv6() -> Option<String> {
+    let sock = std::net::UdpSocket::bind("[::]:0").ok()?;
+    sock.connect("[2001:4860:4860::8888]:53").ok()?;
+    let addr = sock.local_addr().ok()?;
+    match addr.ip() {
+        std::net::IpAddr::V6(v6) if is_global_ipv6(&v6) => Some(v6.to_string()),
+        _ => None,
+    }
+}
+
 /// The QR / copyable entry URL.
 pub fn remote_url(ip: &str, port: u16, token: &str) -> String {
     format!("http://{ip}:{port}/?token={token}")
@@ -130,6 +153,19 @@ mod tests {
         assert_eq!(q[0], ("token".to_string(), "a b".to_string()));
         assert_eq!(q[1], ("port".to_string(), "47822".to_string()));
         assert!(parse_query("noequals").is_empty());
+    }
+
+    #[test]
+    fn global_ipv6_filter_rejects_private_ranges() {
+        use std::net::Ipv6Addr;
+        assert!(is_global_ipv6(&Ipv6Addr::new(
+            0x2408, 0x8888, 0, 0, 0, 0, 0, 1
+        )));
+        assert!(!is_global_ipv6(&Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1)));
+        assert!(!is_global_ipv6(&Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1)));
+        assert!(!is_global_ipv6(&Ipv6Addr::new(0xfc42, 0, 0, 0, 0, 0, 0, 1)));
+        assert!(!is_global_ipv6(&Ipv6Addr::LOCALHOST));
+        assert!(!is_global_ipv6(&Ipv6Addr::UNSPECIFIED));
     }
 
     #[test]

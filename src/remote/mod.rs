@@ -4,6 +4,7 @@
 pub mod ansi;
 pub mod protocol;
 pub mod server;
+pub mod tunnel;
 pub mod ws;
 
 /// The phone web page, embedded at compile time.
