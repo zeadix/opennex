@@ -16,6 +16,7 @@ view_menu:
   workspace_toggle: Arbeitsbereich
   ai_assistant: KI-Assistent
   monitor: Monitor
+  remote: Fernsteuerung
 settings:
   title: Einstellungen
   tabs:
@@ -466,3 +467,15 @@ monitor:
   cpu: CPU
   memory: RAM
   empty_hint: Noch keine Messwerte – warte auf den nächsten Takt…
+remote:
+  panel_title: Handy-Fernsteuerung
+  start: Fernsteuerung starten
+  stop: Stopp
+  copy_url: Link kopieren
+  copied: Link kopiert
+  off_hint: Erzeugt einen QR-Code — mit WeChat scannen, um alle Workspace-Terminals zu sehen und zu bedienen (nur LAN).
+  on_hint: Im LAN verfügbar, mit WeChat scannen:
+  security_hint: Hinweis: Jedes Gerät im selben LAN kann diese Adresse erreichen; der QR-Code verfällt beim Stoppen. Windows zeigt beim ersten Start evtl. eine Firewall-Abfrage.
+  bind_failed: Port-Bindung fehlgeschlagen
+  settings_section: Handy-Fernsteuerung
+  port_label: 'Port:'

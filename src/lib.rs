@@ -6,6 +6,7 @@ pub mod hosts;
 pub mod i18n;
 pub mod persist;
 pub mod proc_stats;
+pub mod remote;
 pub mod shells;
 pub mod terminal;
 pub mod theme;

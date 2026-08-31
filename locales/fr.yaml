@@ -16,6 +16,7 @@ view_menu:
   workspace_toggle: Espace de travail
   ai_assistant: Assistant IA
   monitor: Moniteur
+  remote: Contrôle à distance
 settings:
   title: Paramètres
   tabs:
@@ -466,3 +467,15 @@ monitor:
   cpu: CPU
   memory: MÉM
   empty_hint: Aucun échantillon pour l'instant — attente du prochain cycle…
+remote:
+  panel_title: Contrôle à distance par téléphone
+  start: Démarrer le contrôle à distance
+  stop: Arrêter
+  copy_url: Copier le lien
+  copied: Lien copié
+  off_hint: Génère un QR code — scannez-le avec WeChat pour voir et piloter tous les terminaux (réseau local uniquement).
+  on_hint: Disponible sur le réseau local, à scanner avec WeChat :
+  security_hint: 'Note : tout appareil du même réseau local peut atteindre cette adresse ; le QR code expire à l''arrêt. Windows peut afficher une invite de pare-feu au premier démarrage.'
+  bind_failed: Échec de liaison du port
+  settings_section: Contrôle à distance
+  port_label: 'Port :'

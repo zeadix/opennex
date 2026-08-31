@@ -16,6 +16,7 @@ view_menu:
   workspace_toggle: Workspace
   ai_assistant: AI Assistant
   monitor: Monitor
+  remote: Remote Control
 settings:
   title: Settings
   tabs:
@@ -466,3 +467,15 @@ monitor:
   cpu: CPU
   memory: MEM
   empty_hint: No samples yet, waiting for the next tick…
+remote:
+  panel_title: Phone Remote Control
+  start: Start remote control
+  stop: Stop
+  copy_url: Copy link
+  copied: Link copied
+  off_hint: Generates a QR code — scan it with WeChat to view and operate every workspace terminal (LAN only).
+  on_hint: Available on your LAN, scan with WeChat:
+  security_hint: Note: any device on the same LAN can reach this address; the QR expires as soon as you stop. Windows may show a firewall prompt on first start.
+  bind_failed: Port bind failed
+  settings_section: Phone Remote Control
+  port_label: 'Port:'

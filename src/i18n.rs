@@ -23,6 +23,7 @@ pub struct Texts {
     pub ssh: SshTexts,
     pub ai: AiTexts,
     pub monitor: MonitorTexts,
+    pub remote: RemoteTexts,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -53,6 +54,9 @@ pub struct ViewMenuTexts {
     /// 视图 menu toggle for the floating monitor panel.
     #[serde(default)]
     pub monitor: String,
+    /// 视图 menu toggle for the remote phone control panel.
+    #[serde(default)]
+    pub remote: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -370,6 +374,22 @@ pub struct TerminalTexts {
     /// Floating scrollback search bar hint text.
     #[serde(default)]
     pub term_search_hint: String,
+}
+
+/// Remote phone control (QR + embedded server) strings.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct RemoteTexts {
+    pub panel_title: String,
+    pub start: String,
+    pub stop: String,
+    pub copy_url: String,
+    pub copied: String,
+    pub off_hint: String,
+    pub on_hint: String,
+    pub security_hint: String,
+    pub bind_failed: String,
+    pub settings_section: String,
+    pub port_label: String,
 }
 
 /// Floating monitor panel strings.
@@ -699,6 +719,7 @@ impl Texts {
                 workspace_toggle: "工作区".into(),
                 ai_assistant: "AI 助手".into(),
                 monitor: "监控面板".into(),
+                remote: "远程控制".into(),
             },
             settings: SettingsTexts {
                 title: "设置".into(),
@@ -1146,6 +1167,19 @@ impl Texts {
                 agent_confirm_body: "AI 代理请求执行：\n{}".into(),
                 agent_confirm_run: "执行".into(),
                 agent_confirm_cancel: "拒绝".into(),
+            },
+            remote: RemoteTexts {
+                panel_title: "手机远程控制".into(),
+                start: "启动远程控制".into(),
+                stop: "停止".into(),
+                copy_url: "复制链接".into(),
+                copied: "已复制链接".into(),
+                off_hint: "开启后生成二维码，手机微信扫码即可查看并操作全部工作区终端（局域网内有效）。".into(),
+                on_hint: "局域网内可用，微信扫码访问：".into(),
+                security_hint: "注意：同一局域网内的设备均可访问此地址；关闭后二维码立即失效。Windows 首次开启可能弹出防火墙提示。".into(),
+                bind_failed: "端口绑定失败".into(),
+                settings_section: "手机远程控制".into(),
+                port_label: "端口:".into(),
             },
             monitor: MonitorTexts {
                 title: "监控面板".into(),

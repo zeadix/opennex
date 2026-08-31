@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>OpenNex Remote</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: #16181d; color: #d8d8dc; font-family: sans-serif; }
+  #wrap { display: flex; flex-direction: column; height: 100%; }
+  .bar { background: #1e2128; border-bottom: 1px solid #2c3038; overflow-x: auto; white-space: nowrap; }
+  .bar .tabs { display: flex; padding: 4px; }
+  .tab { padding: 6px 12px; margin: 0 2px; border-radius: 6px; font-size: 13px; color: #9aa0aa; cursor: pointer; flex-shrink: 0; }
+  .tab.active { background: #2f6fed; color: #fff; }
+  .tab.locked { color: #e0a800; }
+  #term { flex: 1; position: relative; overflow: hidden; background: #0c0d10; }
+  #screen { position: absolute; left: 6px; top: 6px; font-family: "Cascadia Mono", Consolas, "Courier New", monospace; font-size: 12px; line-height: 1.25; white-space: pre; }
+  #cursor { position: absolute; width: 0.6em; height: 1.25em; background: rgba(220,225,232,0.85); }
+  @keyframes blink { 0%,49% { opacity: 1; } 50%,100% { opacity: 0; } }
+  #cursor.on { animation: blink 1s step-start infinite; }
+  #input { position: fixed; left: -9999px; opacity: 0; }
+  .status { padding: 3px 8px; font-size: 11px; color: #9aa0aa; background: #1e2128; border-top: 1px solid #2c3038; }
+  .status.err { color: #e06060; }
+  #unlock { position: absolute; left: 0; top: 0; right: 0; bottom: 0; display: none; align-items: center; justify-content: center; background: #16181d; z-index: 5; }
+  #unlock .box { text-align: center; }
+  #unlock input { margin: 10px; padding: 8px; font-size: 14px; border-radius: 6px; border: 1px solid #2c3038; background: #0c0d10; color: #d8d8dc; }
+  #unlock button { padding: 8px 20px; font-size: 14px; border: none; border-radius: 6px; background: #2f6fed; color: #fff; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div class="bar"><div class="tabs" id="wstabs"></div></div>
+  <div class="bar"><div class="tabs" id="termtabs"></div></div>
+  <div id="term"><div id="screen"></div><div id="cursor"></div>
+    <div id="unlock"><div class="box">
+      <div id="unlock-msg">This workspace is locked. Enter the password to unlock.</div>
+      <input type="password" id="unlock-pw" autocomplete="off">
+      <button id="unlock-btn">Unlock</button>
+    </div></div>
+  </div>
+  <div class="status" id="status"></div>
+</div>
+<input id="input" type="text" autocomplete="off" autocapitalize="off" autocorrect="off">
+<script>
+/* OpenNex remote page — plain ES5-ish JS for WeChat X5 compatibility. */
+(function () {
+  var TOKEN = (function () {
+    var m = location.search.match(/[?&]token=([^&]+)/);
+    return m ? m[1] : '';
+  })();
+  var state = { ws: [], wsIndex: 0, termIndex: 0, locked: false, focused: null };
+  var lastSeq = -1;
+  var cursorOn = false;
+  var input = document.getElementById('input');
+  var screenEl = document.getElementById('screen');
+  var cursorEl = document.getElementById('cursor');
+  var statusEl = document.getElementById('status');
+  var unlockEl = document.getElementById('unlock');
+
+  function api(path, opts, cb) {
+    var xhr = new XMLHttpRequest();
+    xhr.open(opts && opts.method ? opts.method : 'GET', path + (path.indexOf('?') >= 0 ? '&' : '?') + 'token=' + encodeURIComponent(TOKEN), true);
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.onreadystatechange = function () {
+      if (xhr.readyState === 4) {
+        cb(xhr.status, xhr.responseText);
+      }
+    };
+    xhr.send(opts && opts.body ? opts.body : null);
+  }
+
+  function setStatus(msg, isErr) {
+    statusEl.textContent = msg;
+    statusEl.className = 'status' + (isErr ? ' err' : '');
+  }
+
+  function focusTerminal(tab) {
+    api('/api/focus', { method: 'POST', body: JSON.stringify({ tab: tab }) }, function () {});
+  }
+
+  function renderTabs() {
+    var ws = state.ws;
+    if (!ws.length) return;
+    if (state.wsIndex >= ws.length) state.wsIndex = 0;
+    var cur = ws[state.wsIndex];
+    var wsel = document.getElementById('wstabs');
+    var html = '';
+    for (var i = 0; i < ws.length; i++) {
+      html += '<div class="tab' + (i === state.wsIndex ? ' active' : '') + (ws[i].locked ? ' locked' : '') + '" data-ws="' + i + '">' +
+        escapeHtml(ws[i].name) + (ws[i].locked ? ' 🔒' : '') + '</div>';
+    }
+    wsel.innerHTML = html;
+    var wsTabs = wsel.querySelectorAll('.tab');
+    for (var j = 0; j < wsTabs.length; j++) {
+      (function (idx) {
+        wsTabs[j].addEventListener('click', function () {
+          state.wsIndex = idx;
+          state.termIndex = 0;
+          refreshState();
+        });
+      })(parseInt(wsTabs[j].getAttribute('data-ws'), 10));
+    }
+    var tsel = document.getElementById('termtabs');
+    if (cur.locked) {
+      tsel.innerHTML = '';
+      state.locked = true;
+    } else {
+      state.locked = false;
+      if (state.termIndex >= cur.terminals.length) state.termIndex = 0;
+      var thtml = '';
+      for (var k = 0; k < cur.terminals.length; k++) {
+        thtml += '<div class="tab' + (k === state.termIndex ? ' active' : '') + '" data-t="' + k + '">' +
+          escapeHtml(cur.terminals[k].name) + '</div>';
+      }
+      tsel.innerHTML = thtml;
+      var tTabs = tsel.querySelectorAll('.tab');
+      for (var m = 0; m < tTabs.length; m++) {
+        (function (idx) {
+          tTabs[m].addEventListener('click', function () {
+            state.termIndex = idx;
+            lastSeq = -1;
+            focusTerminal(cur.terminals[idx].id);
+            refreshState();
+          });
+        })(parseInt(tTabs[m].getAttribute('data-t'), 10));
+      }
+      if (cur.terminals.length && cur.terminals[state.termIndex]) {
+        focusTerminal(cur.terminals[state.termIndex].id);
+      }
+    }
+    unlockEl.style.display = state.locked ? 'flex' : 'none';
+  }
+
+  function refreshState() {
+    api('/api/state', null, function (code, body) {
+      if (code !== 200) { setStatus('Disconnected (' + code + ')', true); return; }
+      var s = JSON.parse(body);
+      state.ws = s.workspaces || [];
+      if (!state.ws.length) { setStatus('No workspaces'); return; }
+      if (state.wsIndex >= state.ws.length) state.wsIndex = 0;
+      renderTabs();
+      setStatus('Connected — ' + state.ws.length + ' workspace(s)');
+      pollFrame();
+    });
+  }
+
+  function pollFrame() {
+    if (state.locked) { setTimeout(pollFrame, 800); return; }
+    var cur = state.ws[state.wsIndex];
+    if (!cur || !cur.terminals.length) { setTimeout(pollFrame, 800); return; }
+    if (state.termIndex >= cur.terminals.length) state.termIndex = 0;
+    var tab = cur.terminals[state.termIndex].id;
+    api('/api/frame?tab=' + encodeURIComponent(tab), null, function (code, body) {
+      if (code === 200 && body) {
+        var f = JSON.parse(body);
+        if (f.seq !== lastSeq) {
+          lastSeq = f.seq;
+          var html = '';
+          for (var i = 0; i < f.lines.length; i++) html += f.lines[i] + '\n';
+          screenEl.innerHTML = html;
+          var ch = 7.2; var lh = 15;
+          cursorEl.style.left = (6 + f.cur_x * ch) + 'px';
+          cursorEl.style.top = (6 + f.cur_y * lh) + 'px';
+          cursorEl.className = 'on';
+        }
+      }
+      setTimeout(pollFrame, 400);
+    });
+  }
+
+  function sendKey(text) {
+    if (state.locked) return;
+    var cur = state.ws[state.wsIndex];
+    if (!cur || !cur.terminals.length) return;
+    var tab = cur.terminals[state.termIndex].id;
+    api('/api/input', { method: 'POST', body: JSON.stringify({ tab: tab, data: text }) }, function () {});
+  }
+
+  function escapeHtml(s) {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  input.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { sendKey('\r'); e.preventDefault(); }
+    else if (e.key === 'Backspace') { sendKey('\x7f'); e.preventDefault(); }
+    else if (e.key === 'Tab') { sendKey('\t'); e.preventDefault(); }
+    else if (e.key === 'ArrowUp') { sendKey('\x1b[A'); e.preventDefault(); }
+    else if (e.key === 'ArrowDown') { sendKey('\x1b[B'); e.preventDefault(); }
+    else if (e.key === 'ArrowLeft') { sendKey('\x1b[D'); e.preventDefault(); }
+    else if (e.key === 'ArrowRight') { sendKey('\x1b[C'); e.preventDefault(); }
+    else if (e.key === 'c' && (e.ctrlKey || e.metaKey)) { sendKey('\x03'); e.preventDefault(); }
+    else if (e.key === 'd' && (e.ctrlKey || e.metaKey)) { sendKey('\x04'); e.preventDefault(); }
+    else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) { sendKey(e.key); }
+  });
+
+  document.getElementById('unlock-btn').addEventListener('click', function () {
+    var pw = document.getElementById('unlock-pw').value;
+    api('/api/unlock', { method: 'POST', body: JSON.stringify({ panel: state.wsIndex, password: pw }) }, function (code) {
+      if (code === 200) {
+        document.getElementById('unlock-pw').value = '';
+        refreshState();
+      } else {
+        document.getElementById('unlock-msg').textContent = 'Wrong password — try again.';
+      }
+    });
+  });
+
+  document.getElementById('term').addEventListener('click', function () { input.focus(); });
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) { input.focus(); }
+  });
+  refreshState();
+  setInterval(refreshState, 2000);
+  input.focus();
+})();
+</script>
+</body>
+</html>

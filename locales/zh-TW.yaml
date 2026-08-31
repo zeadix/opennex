@@ -16,6 +16,7 @@ view_menu:
   workspace_toggle: 工作區
   ai_assistant: AI 助手
   monitor: 監控面板
+  remote: 遠端控制
 settings:
   title: 設定
   tabs:
@@ -465,3 +466,15 @@ monitor:
   cpu: CPU
   memory: 記憶體
   empty_hint: 尚無取樣資料，等待下一個取樣週期…
+remote:
+  panel_title: 手機遠端控制
+  start: 啟動遠端控制
+  stop: 停止
+  copy_url: 複製連結
+  copied: 已複製連結
+  off_hint: 開啟後產生 QR Code，手機微信掃碼即可檢視並操作全部工作區終端機（區網內有效）。
+  on_hint: 區網內可用，微信掃碼存取：
+  security_hint: 注意：同一區網內的裝置均可存取此位址；關閉後 QR Code 立即失效。Windows 首次開啟可能彈出防火牆提示。
+  bind_failed: 連接埠綁定失敗
+  settings_section: 手機遠端控制
+  port_label: '連接埠:'

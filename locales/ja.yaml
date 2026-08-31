@@ -16,6 +16,7 @@ view_menu:
   workspace_toggle: ワークスペース
   ai_assistant: AI アシスタント
   monitor: モニター
+  remote: リモート操作
 settings:
   title: 設定
   tabs:
@@ -465,3 +466,15 @@ monitor:
   cpu: CPU
   memory: メモリ
   empty_hint: まだサンプルがありません。次の周期を待っています…
+remote:
+  panel_title: スマホリモート操作
+  start: リモート操作を開始
+  stop: 停止
+  copy_url: リンクをコピー
+  copied: リンクをコピーしました
+  off_hint: QR コードを生成し、WeChat でスキャンすると全ワークスペースの端末を表示・操作できます（LAN 内のみ）。
+  on_hint: LAN 内で利用可能、WeChat でスキャン：
+  security_hint: 注意：同じ LAN 内の端末はこのアドレスにアクセスできます。停止すると QR コードは無効になります。Windows は初回にファイアウォールの確認を表示する場合があります。
+  bind_failed: ポートのバインドに失敗
+  settings_section: スマホリモート操作
+  port_label: 'ポート:'

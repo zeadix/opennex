@@ -16,6 +16,7 @@ view_menu:
   workspace_toggle: 工作区
   ai_assistant: AI 助手
   monitor: 监控面板
+  remote: 远程控制
 settings:
   title: 设置
   tabs:
@@ -465,3 +466,15 @@ monitor:
   cpu: CPU
   memory: 内存
   empty_hint: 暂无采样数据，等待下一个采样周期…
+remote:
+  panel_title: 手机远程控制
+  start: 启动远程控制
+  stop: 停止
+  copy_url: 复制链接
+  copied: 已复制链接
+  off_hint: 开启后生成二维码，手机微信扫码即可查看并操作全部工作区终端（局域网内有效）。
+  on_hint: 局域网内可用，微信扫码访问：
+  security_hint: 注意：同一局域网内的设备均可访问此地址；关闭后二维码立即失效。Windows 首次开启可能弹出防火墙提示。
+  bind_failed: 端口绑定失败
+  settings_section: 手机远程控制
+  port_label: '端口:'

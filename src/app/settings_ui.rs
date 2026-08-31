@@ -233,6 +233,18 @@ impl App {
             self.settings_edit.agent_max_steps = max_steps;
         }
 
+        // Remote phone control group.
+        let tr = self.texts.remote.clone();
+        self.settings_group(ui, &tr.settings_section);
+        let mut port = self.settings_edit.remote_port;
+        self.settings_row(ui, &tr.port_label, |ui| {
+            ui.add_sized(
+                [180.0, 20.0],
+                egui::DragValue::new(&mut port).range(1024..=65535),
+            );
+        });
+        self.settings_edit.remote_port = port;
+
         self.settings_group(ui, &b.data_section);
         let mut max_h = self.settings_edit.max_history;
         let mut sb = self.settings_edit.scrollback;

@@ -13,6 +13,7 @@ mod ai_ui;
 mod dialogs;
 mod history_menu;
 mod monitor;
+mod remote_ui;
 mod search;
 mod settings_ui;
 mod ssh_ui;
@@ -22,6 +23,7 @@ use self::ai_ui::AiCtxAction;
 use self::dialogs::{open_snippet_fill_fields, SnippetFillState};
 use self::history_menu::{history_menu_shortcut_released, toggle_history_menu, AltKeyState};
 use self::monitor::{proc_sample_id, spawn_proc_sampler, ProcSampleJob, ProcSampleResult};
+use self::remote_ui::RemoteSession;
 use self::search::TerminalSearch;
 use self::settings_ui::{read_settings_from, save_settings, settings_path, SettingsWindowState};
 use self::ssh_ui::SshHostDialog;
@@ -90,6 +92,9 @@ struct AppSettings {
     /// Hard step cap for one agent run.
     #[serde(default = "default_agent_max_steps")]
     agent_max_steps: usize,
+    /// Port the embedded remote-control server binds (0.0.0.0).
+    #[serde(default = "default_remote_port")]
+    remote_port: u16,
 }
 
 fn default_agent_approval_mode() -> String {
@@ -98,6 +103,10 @@ fn default_agent_approval_mode() -> String {
 
 fn default_agent_max_steps() -> usize {
     10
+}
+
+fn default_remote_port() -> u16 {
+    47822
 }
 
 fn default_ai_base_url() -> String {
@@ -1217,6 +1226,7 @@ impl Default for AppSettings {
             ai_model: default_ai_model(),
             agent_approval_mode: default_agent_approval_mode(),
             agent_max_steps: default_agent_max_steps(),
+            remote_port: default_remote_port(),
             auto_match_command: true,
             default_shell: default_shell_pref(),
             smooth_rendering: true,
@@ -1646,6 +1656,11 @@ pub struct App {
     ai_ctx_intent: Option<AiCtxAction>,
     /// The running terminal agent (None when idle).
     agent: Option<AgentRun>,
+    /// The remote phone-control session (None when off).
+    remote: Option<RemoteSession>,
+    /// "Open the remote panel" intent (view-menu toggle; lives even
+    /// while no session runs).
+    show_remote_panel: bool,
     /// Goal text of the agent section (persists across the panel's
     /// open/close while no agent runs).
     agent_goal: String,
@@ -2112,6 +2127,8 @@ impl App {
             agent: None,
             agent_goal: String::new(),
             agent_confirm_just_opened: false,
+            remote: None,
+            show_remote_panel: false,
             snippet_fill: None,
             snippet_fill_just_opened: false,
             startup_cmd_dialog: None,
@@ -4024,6 +4041,8 @@ impl eframe::App for App {
         }
         // Agent state machine tick (thinking drain / completion wait).
         self.agent_tick(ctx);
+        // Remote phone control: drain commands + refresh shared frames.
+        self.remote_tick(ctx);
 
         self.cwd_poll_frame = self.cwd_poll_frame.wrapping_add(1);
         if self.cwd_poll_frame >= 15 {
@@ -5001,6 +5020,22 @@ impl eframe::App for App {
                             self.show_monitor = !self.show_monitor;
                             ui.close_menu();
                         }
+                        let visible = self
+                            .remote
+                            .as_ref()
+                            .map(|s| s.panel_visible)
+                            .unwrap_or(self.show_remote_panel);
+                        if ui
+                            .selectable_label(visible, &self.texts.view_menu.remote)
+                            .clicked()
+                        {
+                            if let Some(session) = self.remote.as_mut() {
+                                session.panel_visible = !session.panel_visible;
+                            } else {
+                                self.show_remote_panel = !self.show_remote_panel;
+                            }
+                            ui.close_menu();
+                        }
                     });
                     let label = self.texts.menu.theme.clone();
                     dropdown(ui, &label, "menu_theme", &mut |ui| {
@@ -5921,6 +5956,7 @@ impl eframe::App for App {
         self.render_ssh_delete_confirm(ctx);
         self.render_ai_panel(ctx);
         self.render_ai_exec_confirm(ctx);
+        self.render_remote_panel(ctx);
         self.render_agent_confirm(ctx);
         self.render_monitor_panel(ctx);
         self.render_search_bar(ctx);
