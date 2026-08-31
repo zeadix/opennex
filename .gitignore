@@ -12,3 +12,6 @@ Cargo.toml.orig
 AGENTS.md
 project.md
 .worktrees/
+
+# ZCode tool workspace
+.zcode/
