@@ -1251,6 +1251,26 @@ fn embedded_locale(code: &str) -> Option<&'static str> {
     }
 }
 
+/// Walk a serialized Texts JSON value and collect every leaf path
+/// ("settings.general.max_history" style) - the structural counterpart
+/// of `leaf_paths` for the Rust side.
+#[cfg(test)]
+fn collect_texts_fields(value: serde_json::Value, prefix: &str, out: &mut Vec<String>) {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (k, v) in map {
+                let path = if prefix.is_empty() {
+                    k.clone()
+                } else {
+                    format!("{prefix}.{k}")
+                };
+                collect_texts_fields(v, &path, out);
+            }
+        }
+        _ => out.push(prefix.to_string()),
+    }
+}
+
 fn known_locale_codes() -> Vec<&'static str> {
     vec!["zh", "en", "zh-TW", "de", "fr", "ja", "it", "ko", "hi"]
 }
@@ -1388,6 +1408,33 @@ mod tests {
                 "locale {code} drift — missing: {missing:?} extra: {extra:?}"
             );
         }
+    }
+
+    /// The yaml-vs-yaml key test cannot catch keys that are missing from
+    /// EVERY locale (they silently deserialize to empty strings via
+    /// serde defaults - the v2.5 tunnel labels shipped blank this way).
+    /// This guard compares the ENGLISH yaml against the Rust struct
+    /// itself: every Texts leaf field must exist in en.yaml.
+    #[test]
+    fn english_yaml_covers_every_texts_field() {
+        let expected = {
+            let texts = Texts::zh_default();
+            let mut fields = Vec::new();
+            collect_texts_fields(serde_json::to_value(&texts).unwrap(), "", &mut fields);
+            fields.sort();
+            fields
+        };
+        assert!(expected.len() > 400, "field extraction broke");
+        let doc: serde_yaml::Value = serde_yaml::from_str(embedded_locale("en").unwrap()).unwrap();
+        let mut actual = Vec::new();
+        leaf_paths(&doc, "", &mut actual);
+        actual.sort();
+        let missing: Vec<&String> = expected.iter().filter(|k| !actual.contains(k)).collect();
+        assert!(
+            missing.is_empty(),
+            "en.yaml is missing {} Texts field(s): {missing:?}",
+            missing.len()
+        );
     }
 
     #[test]

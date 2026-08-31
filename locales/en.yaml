@@ -59,6 +59,7 @@ settings:
     font_family: 'Font:'
     bg_color: 'Background:'
     fg_color: 'Foreground:'
+    terminal_theme: 'Terminal color scheme:'
     command_menu_section: Command Menu
     menu_bg_color: 'Background:'
     menu_fg_color: 'Text Color:'
@@ -479,3 +480,13 @@ remote:
   bind_failed: Port bind failed
   settings_section: Phone Remote Control
   port_label: 'Port:'
+  addr_lan: LAN
+  addr_ipv6: IPv6 direct
+  addr_tunnel: WAN tunnel
+  tunnel_start: Start WAN tunnel
+  tunnel_starting: Preparing the WAN tunnel…
+  tunnel_ready: WAN tunnel ready
+  tunnel_failed: WAN tunnel failed
+  tunnel_warning: 'The WAN address transits Cloudflare (TLS encrypted); it dies as soon as remote control stops.'
+  no_addr: No usable address detected
+

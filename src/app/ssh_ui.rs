@@ -145,12 +145,15 @@ impl App {
         }
 
         // Search only earns its space once there is something to search.
-        ui.add(
+        let filter_resp = ui.add(
             egui::TextEdit::singleline(&mut self.ssh_host_filter)
                 .hint_text(&self.texts.ssh.search_hint)
                 .desired_width(ui.available_width())
                 .font(egui::FontId::proportional(12.0)),
         );
+        // While the search box owns the keyboard, the terminal view must
+        // not steal focus back every frame (keystrokes fell into the PTY).
+        self.sidebar_input_focused = filter_resp.has_focus();
 
         let filter = self.ssh_host_filter.trim().to_lowercase();
         let hosts = self.ssh_hosts.clone();

@@ -36,6 +36,23 @@ impl FrameMsg {
     }
 }
 
+/// A WS "frame" message: the FrameMsg JSON plus the tab id (shared by
+/// the UI-side broadcast and the server-side immediate push).
+pub fn frame_json(tab: &str, frame: &FrameMsg) -> String {
+    let body = serde_json::to_string(frame).unwrap_or_else(|_| "{}".into());
+    let mut out = body;
+    if let Some(pos) = out.rfind('}') {
+        out.insert_str(
+            pos,
+            &format!(
+                ",\"tab\":{}",
+                serde_json::to_string(tab).unwrap_or_default()
+            ),
+        );
+    }
+    format!("{{\"t\":\"frame\",{}", &out[1..])
+}
+
 /// Style attributes of one cell, decoupled from alacritty types so the
 /// SGR emitter is unit-testable without a grid.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

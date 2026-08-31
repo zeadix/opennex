@@ -35,6 +35,14 @@ pub(crate) struct RemoteSession {
     pub tunnel_starting: bool,
     /// Which address the QR shows.
     pub qr_target: QrTarget,
+    /// The tab the phone is currently watching (drives on-demand frame
+    /// serialization; None = nobody focused yet).
+    pub remote_focus_tab: Option<String>,
+    /// QR cache: (url, dark-module matrix) - regenerating the QR per
+    /// frame cost ~1.7k painter shapes at 60fps for a static image.
+    pub qr_cache: Option<(String, Vec<bool>)>,
+    /// Module count per side of the cached QR.
+    pub qr_width: usize,
 }
 
 /// Which entry URL the QR code shows.
@@ -46,21 +54,31 @@ pub(crate) enum QrTarget {
     Tunnel,
 }
 
-/// A WS "frame" message: the FrameMsg JSON plus the tab id.
-fn frame_json(tab: &str, frame: &crate::remote::ansi::FrameMsg) -> String {
-    let body = serde_json::to_string(frame).unwrap_or_else(|_| "{}".into());
-    // Splice the tab id in front of the closing brace.
-    let mut out = body;
-    if let Some(pos) = out.rfind('}') {
-        out.insert_str(
-            pos,
-            &format!(
-                ",\"tab\":{}",
-                serde_json::to_string(tab).unwrap_or_default()
-            ),
-        );
+/// Paint the QR module matrix with quiet zone.
+fn draw_qr_modules(ui: &mut egui::Ui, modules: &[bool], width: usize) {
+    if width == 0 || modules.len() != width * width {
+        return;
     }
-    format!("{{\"t\":\"frame\",{}", &out[1..])
+    let quiet = 2.0;
+    let total = width as f32 + quiet * 2.0;
+    let size = 220.0;
+    let cell = size / total;
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
+    let origin = rect.min + egui::vec2(quiet * cell, quiet * cell);
+    let dark = ui.visuals().strong_text_color();
+    let light = ui.visuals().extreme_bg_color;
+    ui.painter().rect_filled(rect, 4.0, light);
+    for row in 0..width {
+        for col in 0..width {
+            if modules[row * width + col] {
+                let cell_rect = egui::Rect::from_min_size(
+                    egui::pos2(origin.x + col as f32 * cell, origin.y + row as f32 * cell),
+                    egui::vec2(cell, cell),
+                );
+                ui.painter().rect_filled(cell_rect, 0.0, dark);
+            }
+        }
+    }
 }
 
 impl RemoteSession {
@@ -112,6 +130,9 @@ impl App {
             tunnel_progress: None,
             tunnel_starting: false,
             qr_target: QrTarget::default(),
+            remote_focus_tab: None,
+            qr_cache: None,
+            qr_width: 0,
         });
         Ok(())
     }
@@ -160,16 +181,27 @@ impl App {
             let mut queue = session.shared.commands.lock().unwrap();
             queue.drain(..).collect()
         };
-        // 2. Throttle decision: ~40ms cadence while a session runs
-        // (real-time for TUI redraws; PTY output drives repaints).
-        let refresh_due = session.last_refresh.elapsed() >= Duration::from_millis(40);
+        // 2. Throttle decision: ~40ms only while a phone is actually
+        // subscribed (real-time for TUI redraws); with nobody watching,
+        // 500ms snapshot refresh keeps the server responsive without
+        // burning CPU on serialization nobody reads.
+        let has_subs = !session.shared.subscribers.lock().unwrap().is_empty();
+        let cadence = if has_subs { 40 } else { 500 };
+        let refresh_due = session.last_refresh.elapsed() >= Duration::from_millis(cadence);
         if refresh_due {
             session.last_refresh = Instant::now();
         }
         // 3. Execute commands and refresh (no `session` borrow live).
         for command in commands {
             match command {
-                RemoteCommand::Focus { tab } => self.remote_focus(&tab),
+                RemoteCommand::Focus { tab } => {
+                    // Track which tab the phone watches (drives on-demand
+                    // serialization) before focusing it.
+                    if let Some(session) = self.remote.as_mut() {
+                        session.remote_focus_tab = Some(tab.clone());
+                    }
+                    self.remote_focus(&tab);
+                }
                 RemoteCommand::Write { tab, data } => {
                     if let Some(td) = self.terminals.get_mut(&tab) {
                         td.instance.write(data.as_bytes());
@@ -228,24 +260,36 @@ impl App {
                     }
                 }
             }
+            // Drain events with the tunnel borrow live, act afterwards.
+            let mut drained: Vec<TunnelEvent> = Vec::new();
             if let Some(tunnel) = session.tunnel.as_mut() {
                 while let Ok(event) = tunnel.events.try_recv() {
-                    match event {
-                        TunnelEvent::Downloading(p) => {
-                            session.tunnel_error = None;
-                            session.tunnel_progress = Some(p);
-                        }
-                        TunnelEvent::Starting => {
-                            session.tunnel_progress = None;
-                        }
-                        TunnelEvent::Ready(url) => {
-                            session.tunnel_url = Some(url);
-                            session.qr_target = QrTarget::Tunnel;
-                        }
-                        TunnelEvent::Failed(err) => {
-                            if session.tunnel_url.is_none() {
-                                session.tunnel_error = Some(err);
+                    drained.push(event);
+                }
+            }
+            for event in drained {
+                match event {
+                    TunnelEvent::Downloading(p) => {
+                        session.tunnel_error = None;
+                        session.tunnel_progress = Some(p);
+                    }
+                    TunnelEvent::Starting => {
+                        session.tunnel_progress = None;
+                    }
+                    TunnelEvent::Ready(url) => {
+                        session.tunnel_url = Some(url);
+                        session.qr_target = QrTarget::Tunnel;
+                    }
+                    TunnelEvent::Failed(err) => {
+                        if session.tunnel_url.is_none() {
+                            session.tunnel_error = Some(err);
+                            // Drop the dead handle so Start can be
+                            // pressed again (the guard in
+                            // remote_tunnel_start rejects Some).
+                            if let Some(mut tunnel) = session.tunnel.take() {
+                                tunnel.stop();
                             }
+                            session.tunnel_starting = false;
                         }
                     }
                 }
@@ -292,24 +336,26 @@ impl App {
             return;
         }
 
-        // --- frames (one per live terminal; unchanged content keeps its
-        // seq, changed content bumps seq and broadcasts to WS writers) ---
+        // --- frames (on-demand: only the tab the phone watches gets
+        // serialized; other tabs keep their last frame in the map.
+        // Unchanged content keeps its seq - zero push when idle.) ---
         let theme = self.terminal_theme_cache.clone();
-        let ids: Vec<String> = self.terminals.keys().cloned().collect();
         let mut changed: Vec<(String, crate::remote::ansi::FrameMsg)> = Vec::new();
         let session = self.remote.as_mut().unwrap();
-        let mut new_frames = HashMap::new();
-        for id in ids {
+        let watch = session
+            .remote_focus_tab
+            .clone()
+            .or_else(|| self.focused_terminal.clone());
+        if let Some(id) = watch {
             if let Some(td) = self.terminals.get_mut(&id) {
                 let content = td.instance.backend.sync();
                 let seq = session.frame_seq.entry(id.clone()).or_insert(0);
-                let frame = crate::remote::ansi::serialize_frame(
+                let mut frame = crate::remote::ansi::serialize_frame(
                     &content.grid,
                     &theme,
                     &content.terminal_mode,
                     *seq,
                 );
-                let mut frame = frame;
                 let prev = session.last_ansi.get(&id);
                 if prev != Some(&frame.d) {
                     *seq = seq.wrapping_add(1);
@@ -317,17 +363,20 @@ impl App {
                     session.last_ansi.insert(id.clone(), frame.d.clone());
                     changed.push((id.clone(), frame.clone()));
                 }
-                new_frames.insert(id, frame);
+                session.shared.frames.write().unwrap().insert(id, frame);
             }
         }
-        *session.shared.frames.write().unwrap() = new_frames;
         // Broadcast changed frames; prune dead subscribers.
         if !changed.is_empty() {
             let mut subs = session.shared.subscribers.lock().unwrap();
+            let payloads: Vec<(String, String)> = changed
+                .iter()
+                .map(|(id, frame)| (id.clone(), crate::remote::ansi::frame_json(id, frame)))
+                .collect();
             subs.retain(|tx| {
-                changed.iter().all(|(id, frame)| {
-                    let payload = frame_json(id, frame);
-                    tx.send(crate::remote::ws::WsOut::Text(payload)).is_ok()
+                payloads.iter().all(|(_, payload)| {
+                    tx.send(crate::remote::ws::WsOut::Text(payload.clone()))
+                        .is_ok()
                 })
             });
         }
@@ -506,35 +555,37 @@ impl App {
         }
     }
 
-    /// Draw the QR matrix with plain rects (no image dependency).
+    /// Draw the QR matrix with plain rects (no image dependency). The
+    /// matrix is cached per URL so a static QR costs nothing after the
+    /// first frame.
     fn remote_draw_qr(&mut self, ui: &mut egui::Ui, url: &str) {
-        let Ok(code) = qrcode::QrCode::new(url.as_bytes()) else {
-            ui.label("QR error");
+        let cache_hit = self
+            .remote
+            .as_ref()
+            .and_then(|s| s.qr_cache.as_ref())
+            .is_some_and(|(cached_url, _)| cached_url == url);
+        if !cache_hit {
+            let Ok(code) = qrcode::QrCode::new(url.as_bytes()) else {
+                ui.label("QR error");
+                return;
+            };
+            let width = code.width();
+            let modules: Vec<bool> = code
+                .to_colors()
+                .into_iter()
+                .map(|c| matches!(c, qrcode::Color::Dark))
+                .collect();
+            if let Some(session) = self.remote.as_mut() {
+                session.qr_cache = Some((url.to_string(), modules));
+                session.qr_width = width;
+            }
+        }
+        let Some(session) = self.remote.as_ref() else {
             return;
         };
-        let modules = code.width() as f32;
-        let quiet = 2.0;
-        let total = modules + quiet * 2.0;
-        let size = 220.0;
-        let cell = size / total;
-        let (rect, _) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
-        let origin = rect.min + egui::vec2(quiet * cell, quiet * cell);
-        let dark = ui.visuals().strong_text_color();
-        let light = ui.visuals().extreme_bg_color;
-        ui.painter().rect_filled(rect, 4.0, light);
-        // qrcode 0.14: module matrix via to_colors (row-major).
-        let colors: Vec<qrcode::Color> = code.to_colors();
-        for (i, color) in colors.iter().enumerate() {
-            let (row, col) = (i / code.width(), i % code.width());
-            let fill = match color {
-                qrcode::Color::Dark => dark,
-                qrcode::Color::Light => light,
-            };
-            let cell_rect = egui::Rect::from_min_size(
-                egui::pos2(origin.x + col as f32 * cell, origin.y + row as f32 * cell),
-                egui::vec2(cell, cell),
-            );
-            ui.painter().rect_filled(cell_rect, 0.0, fill);
-        }
+        let Some((_, modules)) = session.qr_cache.as_ref() else {
+            return;
+        };
+        draw_qr_modules(ui, modules, session.qr_width);
     }
 }

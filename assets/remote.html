@@ -2,7 +2,7 @@
 <html lang="zh">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>OpenNex Remote</title>
 <link rel="stylesheet" href="/xterm.css">
 <style>
@@ -159,12 +159,27 @@
   // keep CSI form which all common TUIs accept too.
 
   // ----- frames -----
+  // Fit the terminal width to the viewport: pick the largest font size
+  // whose cols still fit, so 80-column screens are not cropped on
+  // phones (clamped to a readable minimum; users can pinch-zoom beyond).
+  var fittedCols = -1;
+  function fitFont(cols) {
+    if (cols === fittedCols || !cols) return;
+    fittedCols = cols;
+    var avail = window.innerWidth - 12;
+    // xterm character width ~ 0.6 * font size for common monospace.
+    var size = Math.floor(avail / (cols * 0.6));
+    size = Math.max(8, Math.min(size, 16));
+    term.options.fontSize = size;
+  }
+
   function applyFrame(f) {
     if (f.seq === lastFrame.seq) return;
     lastFrame.seq = f.seq;
     if (f.cols !== lastFrame.cols || f.rows !== lastFrame.rows) {
       lastFrame.cols = f.cols;
       lastFrame.rows = f.rows;
+      fitFont(f.cols);
       term.resize(f.cols, f.rows);
     }
     if (f.alt !== lastFrame.alt) {
@@ -179,8 +194,9 @@
   }
 
   // ----- websocket -----
-  function connectWs() {
-    if (fallbackPoll) return;
+  function connectWs(isRetry) {
+    if (fallbackPoll && !isRetry) return;
+    if (ws && ws.readyState === 1) return;
     try {
       var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
       ws = new WebSocket(proto + '//' + location.host + '/ws?token=' + encodeURIComponent(TOKEN));
@@ -191,10 +207,22 @@
     ws.onopen = function () {
       wsOk = true;
       reconnectDelay = 500;
+      // Stop the fallback poller if it was running.
+      if (fallbackPoll) { clearInterval(fallbackPoll); fallbackPoll = null; }
       setStatus('Live');
+      // Fresh connection: reset so the scrollback seed cannot append on
+      // top of a half-drawn buffer (reconnect used to duplicate history).
+      term.reset();
+      lastFrame = { cols: 0, rows: 0, alt: null, app_cursor: null, seq: -1 };
+      ctrlMode = false;
+      var ctrlKey = document.getElementById('ctrl-key');
+      if (ctrlKey) ctrlKey.className = 'key';
       ws.send(JSON.stringify({ t: 'hello' }));
       var tab = currentTab();
-      if (tab) ws.send(JSON.stringify({ t: 'scrollback', tab: tab.id }));
+      if (tab) {
+        ws.send(JSON.stringify({ t: 'focus', tab: tab.id }));
+        ws.send(JSON.stringify({ t: 'scrollback', tab: tab.id }));
+      }
       term.focus();
     };
     ws.onmessage = function (ev) {
@@ -205,9 +233,15 @@
         if (cur && m.tab === cur.id) applyFrame(m);
       } else if (m.t === 'scrollback') {
         var t0 = currentTab();
-        if (t0) {
+        // Match the answer to the CURRENT tab: a late answer for a tab
+        // we already switched away from must not paint over the new one.
+        if (t0 && m.tab === t0.id) {
           term.write('\x1b[?1049l');
           term.write(m.d);
+          // The server follows with the current frame; make sure the
+          // alt-screen tracker agrees with the primary buffer we just
+          // wrote (otherwise a TUI frame would land in the wrong buffer).
+          lastFrame.alt = false;
           lastFrame.seq = -1;
         }
       } else if (m.t === 'bye') {
@@ -240,26 +274,48 @@
         }
       });
     }, 150);
+    // The fallback is a detour, not a destination: keep retrying the
+    // socket (onopen stops the poller when it comes back).
+    wsRetry = setInterval(function () {
+      connectWs(true);
+    }, 30000);
   }
+  var wsRetry = null;
 
   // ----- tabs / state -----
   function escapeHtml(s) {
     return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
+  function requestScrollback(tabId) {
+    if (wsOk && ws && ws.readyState === 1) {
+      ws.send(JSON.stringify({ t: 'scrollback', tab: tabId }));
+    } else {
+      get('/api/scrollback?tab=' + encodeURIComponent(tabId), function (code, body) {
+        if (code === 200 && body) {
+          try { term.write(JSON.parse(body)); } catch (e) {}
+        }
+      });
+    }
+  }
+
   function selectTerminal(idx) {
     state.termIndex = idx;
+    // Full reset: buffered content, alt-screen and sticky Ctrl from the
+    // previous terminal must not leak into the new one.
     lastFrame = { cols: 0, rows: 0, alt: null, app_cursor: null, seq: -1 };
     term.reset();
-    var cur = state.ws[state.wsIndex];
+    ctrlMode = false;
+    var ctrlKey = document.getElementById('ctrl-key');
+    if (ctrlKey) ctrlKey.className = 'key';
     var tab = currentTab();
     if (tab) {
       if (wsOk && ws && ws.readyState === 1) {
         ws.send(JSON.stringify({ t: 'focus', tab: tab.id }));
-        ws.send(JSON.stringify({ t: 'scrollback', tab: tab.id }));
       } else {
         post('/api/focus', { tab: tab.id });
       }
+      requestScrollback(tab.id);
     }
     renderTabs();
     term.focus();
@@ -283,7 +339,7 @@
         wsTabs[j].addEventListener('click', function () {
           state.wsIndex = idx;
           state.termIndex = 0;
-          refreshState();
+          selectTerminal(0);
         });
       })(parseInt(wsTabs[j].getAttribute('data-ws'), 10));
     }
@@ -306,14 +362,10 @@
           tTabs[m].addEventListener('click', function () { selectTerminal(idx); });
         })(parseInt(tTabs[m].getAttribute('data-t'), 10));
       }
-      var tab = currentTab();
-      if (tab) {
-        if (wsOk && ws && ws.readyState === 1) {
-          ws.send(JSON.stringify({ t: 'focus', tab: tab.id }));
-        } else {
-          post('/api/focus', { tab: tab.id });
-        }
-      }
+      // NOTE: no focus message here. renderTabs also runs on the 2s
+      // periodic state refresh - re-focusing would fight the desktop
+      // user for focus every 2 seconds. Focus is sent ONLY from
+      // selectTerminal (user-driven).
     }
     unlockEl.style.display = state.locked ? 'flex' : 'none';
   }

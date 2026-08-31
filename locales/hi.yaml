@@ -59,6 +59,7 @@ settings:
     font_family: 'फ़ॉन्ट:'
     bg_color: 'पृष्ठभूमि:'
     fg_color: 'अग्रभूमि:'
+    terminal_theme: 'टर्मिनल रंग योजना:'
     command_menu_section: कमांड मेनू
     menu_bg_color: 'पृष्ठभूमि:'
     menu_fg_color: 'पाठ रंग:'
@@ -479,3 +480,13 @@ remote:
   bind_failed: पोर्ट बाइंड विफल
   settings_section: फ़ोन रिमोट कंट्रोल
   port_label: 'पोर्ट:'
+  addr_lan: LAN
+  addr_ipv6: IPv6 सीधा
+  addr_tunnel: WAN टनल
+  tunnel_start: WAN टनल शुरू करें
+  tunnel_starting: WAN टनल तैयार हो रहा है…
+  tunnel_ready: WAN टनल तैयार
+  tunnel_failed: WAN टनल विफल
+  tunnel_warning: 'WAN पता Cloudflare से गुजरता है (TLS एन्क्रिप्टेड); रिमोट कंट्रोल बंद करते ही समाप्त।'
+  no_addr: कोई उपयोगी पता नहीं मिला
+

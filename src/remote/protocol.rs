@@ -90,9 +90,14 @@ pub fn public_ipv6() -> Option<String> {
     }
 }
 
-/// The QR / copyable entry URL.
+/// The QR / copyable entry URL. IPv6 literals need bracketing or the
+/// port separator becomes ambiguous (`http://2408::1:47822/`).
 pub fn remote_url(ip: &str, port: u16, token: &str) -> String {
-    format!("http://{ip}:{port}/?token={token}")
+    if ip.contains(':') && !ip.starts_with('[') {
+        format!("http://[{ip}]:{port}/?token={token}")
+    } else {
+        format!("http://{ip}:{port}/?token={token}")
+    }
 }
 
 /// Constant-time-ish token check for the query string (avoids the easy
@@ -173,6 +178,11 @@ mod tests {
         assert_eq!(
             remote_url("192.168.1.5", 47822, "tok"),
             "http://192.168.1.5:47822/?token=tok"
+        );
+        // IPv6 literals get bracketed (unbracketed is an invalid URL).
+        assert_eq!(
+            remote_url("2408:8888::1", 47822, "tok"),
+            "http://[2408:8888::1]:47822/?token=tok"
         );
     }
 

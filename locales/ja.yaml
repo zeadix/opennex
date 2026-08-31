@@ -59,6 +59,7 @@ settings:
     font_family: 'フォント:'
     bg_color: '背景色:'
     fg_color: '前景色:'
+    terminal_theme: '端末カラースキーム:'
     command_menu_section: コマンドメニュー
     menu_bg_color: '背景色:'
     menu_fg_color: '文字色:'
@@ -478,3 +479,13 @@ remote:
   bind_failed: ポートのバインドに失敗
   settings_section: スマホリモート操作
   port_label: 'ポート:'
+  addr_lan: LAN
+  addr_ipv6: IPv6 直接
+  addr_tunnel: 外部トンネル
+  tunnel_start: 外部トンネルを開始
+  tunnel_starting: 外部トンネルを準備中…
+  tunnel_ready: 外部トンネル準備完了
+  tunnel_failed: 外部トンネル失敗
+  tunnel_warning: 外部アドレスは Cloudflare 経由（TLS 暗号化）。リモート操作を停止すると無効になります。
+  no_addr: 利用可能なアドレスが見つかりません
+

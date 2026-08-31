@@ -59,6 +59,7 @@ settings:
     font_family: '字体:'
     bg_color: '背景色:'
     fg_color: '前景色:'
+    terminal_theme: '终端配色方案:'
     command_menu_section: 指令菜单
     menu_bg_color: '背景色:'
     menu_fg_color: '文字色:'
@@ -478,3 +479,13 @@ remote:
   bind_failed: 端口绑定失败
   settings_section: 手机远程控制
   port_label: '端口:'
+  addr_lan: 局域网
+  addr_ipv6: IPv6 直连
+  addr_tunnel: 外网隧道
+  tunnel_start: 开启外网隧道
+  tunnel_starting: 正在准备外网隧道…
+  tunnel_ready: 外网隧道已就绪
+  tunnel_failed: 外网隧道失败
+  tunnel_warning: 外网地址经 Cloudflare 中转（TLS 加密）；关闭远程控制即失效。
+  no_addr: 未检测到可用地址
+

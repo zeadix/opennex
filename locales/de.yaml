@@ -59,6 +59,7 @@ settings:
     font_family: 'Schriftart:'
     bg_color: 'Hintergrund:'
     fg_color: 'Vordergrund:'
+    terminal_theme: 'Terminal-Farbschema:'
     command_menu_section: Befehlsmenü
     menu_bg_color: 'Hintergrund:'
     menu_fg_color: 'Textfarbe:'
@@ -479,3 +480,13 @@ remote:
   bind_failed: Port-Bindung fehlgeschlagen
   settings_section: Handy-Fernsteuerung
   port_label: 'Port:'
+  addr_lan: LAN
+  addr_ipv6: IPv6 direkt
+  addr_tunnel: WAN-Tunnel
+  tunnel_start: WAN-Tunnel starten
+  tunnel_starting: WAN-Tunnel wird vorbereitet…
+  tunnel_ready: WAN-Tunnel bereit
+  tunnel_failed: WAN-Tunnel fehlgeschlagen
+  tunnel_warning: 'Die WAN-Adresse läuft über Cloudflare (TLS-verschlüsselt); sie endet mit dem Stoppen der Fernsteuerung.'
+  no_addr: Keine nutzbare Adresse gefunden
+

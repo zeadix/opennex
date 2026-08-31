@@ -59,6 +59,7 @@ settings:
     font_family: 'Police :'
     bg_color: 'Arrière-plan :'
     fg_color: 'Premier plan :'
+    terminal_theme: 'Schéma de couleurs du terminal :'
     command_menu_section: Menu de commandes
     menu_bg_color: 'Arrière-plan :'
     menu_fg_color: 'Couleur du texte :'
@@ -479,3 +480,13 @@ remote:
   bind_failed: Échec de liaison du port
   settings_section: Contrôle à distance
   port_label: 'Port :'
+  addr_lan: LAN
+  addr_ipv6: IPv6 direct
+  addr_tunnel: Tunnel WAN
+  tunnel_start: Démarrer le tunnel WAN
+  tunnel_starting: Préparation du tunnel WAN…
+  tunnel_ready: Tunnel WAN prêt
+  tunnel_failed: Échec du tunnel WAN
+  tunnel_warning: "L'adresse WAN transite par Cloudflare (chiffré TLS) ; elle expire dès l'arrêt du contrôle à distance."
+  no_addr: Aucune adresse utilisable détectée
+

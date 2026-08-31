@@ -281,6 +281,11 @@ Respond with ONLY the JSON object as instructed."
                         GateDecision::Confirm => {
                             agent.pending_confirm = Some(command);
                             agent.phase = AgentPhase::WaitingConfirm;
+                            // Rising edge: the shared dialog keyboard cursor
+                            // must start on the SAFE side, or a cursor left on
+                            // "run" by a previous dialog would let a stray
+                            // Enter execute the model's command directly.
+                            self.agent_confirm_just_opened = true;
                         }
                         GateDecision::Deny => {
                             // Tell the model the command was refused.
@@ -354,6 +359,12 @@ Try a read-only alternative."
             return false;
         };
         let Some(td) = self.terminals.get_mut(&tab) else {
+            // Target terminal vanished (closed / scene reloaded): stop
+            // instead of spinning - the timeout logic below never runs
+            // when the tab is missing, which used to deadlock the
+            // Executing phase.
+            agent.wait = None;
+            agent.phase = AgentPhase::Failed("target terminal closed".into());
             return false;
         };
         let signal = crate::app::agent::wait_signal(

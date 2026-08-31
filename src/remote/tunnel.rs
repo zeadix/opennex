@@ -210,6 +210,16 @@ impl TunnelHandle {
     }
 }
 
+impl Drop for TunnelHandle {
+    fn drop(&mut self) {
+        // Belt-and-suspenders: a dropped handle must never leak a
+        // running cloudflared (session teardown paths that forget
+        // stop()).
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

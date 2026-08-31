@@ -1661,6 +1661,9 @@ pub struct App {
     /// "Open the remote panel" intent (view-menu toggle; lives even
     /// while no session runs).
     show_remote_panel: bool,
+    /// The sidebar SSH host search box holds keyboard focus - the
+    /// terminal must not reclaim it every frame.
+    sidebar_input_focused: bool,
     /// Goal text of the agent section (persists across the panel's
     /// open/close while no agent runs).
     agent_goal: String,
@@ -2129,6 +2132,7 @@ impl App {
             agent_confirm_just_opened: false,
             remote: None,
             show_remote_panel: false,
+            sidebar_input_focused: false,
             snippet_fill: None,
             snippet_fill_just_opened: false,
             startup_cmd_dialog: None,
@@ -2461,6 +2465,24 @@ impl App {
                 if self.terminal_search.as_ref().is_some_and(|s| s.tab == tab) {
                     self.terminal_search = None;
                 }
+                // An agent driving the closed terminal must stop, or it
+                // spins forever against a vanished tab (and keeps
+                // burning model calls).
+                if self.agent.as_ref().is_some_and(|a| a.tab == tab) {
+                    if let Some(agent) = self.agent.as_mut() {
+                        agent.request_stop = true;
+                    }
+                }
+                // Remote caches for the closed tab (frame seq / last
+                // serialized ANSI) would otherwise leak until the
+                // remote session stops.
+                if let Some(session) = self.remote.as_mut() {
+                    session.frame_seq.remove(&tab);
+                    session.last_ansi.remove(&tab);
+                    if session.remote_focus_tab.as_deref() == Some(tab.as_str()) {
+                        session.remote_focus_tab = None;
+                    }
+                }
                 if self.focused_terminal.as_ref() == Some(&tab) {
                     self.focused_terminal = None;
                 }
@@ -2490,6 +2512,16 @@ impl App {
                     self.terminals.clear();
                     self.panels.clear();
                     self.dock_states.clear();
+                    // The agent and broadcast groups pointed at the OLD
+                    // terminals; restored tabs would otherwise inherit
+                    // stale memberships.
+                    self.agent = None;
+                    self.broadcast_group.clear();
+                    if let Some(session) = self.remote.as_mut() {
+                        session.frame_seq.clear();
+                        session.last_ansi.clear();
+                        session.remote_focus_tab = None;
+                    }
                     for panel in &scene.panels {
                         let idx = self.panels.len();
                         for (_id, tstate) in &panel.terminals {
@@ -7140,6 +7172,8 @@ impl eframe::App for App {
                                 startup_cmd_just_opened: &mut self.startup_cmd_just_opened,
                                 search: &self.terminal_search,
                                 ai_ctx_intent: &mut self.ai_ctx_intent,
+                                ai_settings_enabled: self.settings.ai_enabled,
+                                sidebar_input_focused: self.sidebar_input_focused,
                                 agent_tab: self
                                     .agent
                                     .as_ref()
@@ -8012,6 +8046,12 @@ struct TerminalTabViewer<'a> {
     search: &'a Option<TerminalSearch>,
     /// Right-click AI intent slot (written by the tab, consumed by App).
     ai_ctx_intent: &'a mut Option<AiCtxAction>,
+    /// Whether the AI settings allow requests (hides the menu entry).
+    ai_settings_enabled: bool,
+    /// The sidebar SSH host search box holds keyboard focus: the
+    /// terminal must not reclaim it every frame (typing used to fall
+    /// through into the PTY).
+    sidebar_input_focused: bool,
     /// The tab the terminal agent is attached to (title icon + broadcast
     /// pause while the agent drives it).
     agent_tab: Option<String>,
@@ -8277,7 +8317,8 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                 // protection as the settings popups: without it the
                 // terminal re-claims keyboard focus every frame and the
                 // dialog's text field can never hold focus.
-                let terminal_may_focus = is_focused && !self.modal_open;
+                let terminal_may_focus =
+                    is_focused && !self.modal_open && !self.sidebar_input_focused;
                 tv = tv.set_focus(terminal_may_focus);
                 // Override keys handled by app-level history UI
                 tv = tv.add_bindings(vec![
@@ -8558,22 +8599,24 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
             let ai_menu = self.texts.ai.clone();
             let mut ai_intent: Option<AiCtxAction> = None;
             terminal_response.clone().context_menu(|ui| {
-                if ui.button(&ai_menu.ctx_explain).clicked() {
-                    ai_intent = Some(AiCtxAction::ExplainSelection);
-                    ui.close_menu();
-                }
-                if ui.button(&ai_menu.ctx_fix).clicked() {
-                    ai_intent = Some(AiCtxAction::FixSelection);
-                    ui.close_menu();
-                }
-                if ui.button(&ai_menu.ctx_translate).clicked() {
-                    ai_intent = Some(AiCtxAction::TranslateSelection);
-                    ui.close_menu();
-                }
-                ui.separator();
-                if ui.button(&ai_menu.ctx_explain_screen).clicked() {
-                    ai_intent = Some(AiCtxAction::ExplainScreen);
-                    ui.close_menu();
+                if self.ai_settings_enabled {
+                    if ui.button(&ai_menu.ctx_explain).clicked() {
+                        ai_intent = Some(AiCtxAction::ExplainSelection);
+                        ui.close_menu();
+                    }
+                    if ui.button(&ai_menu.ctx_fix).clicked() {
+                        ai_intent = Some(AiCtxAction::FixSelection);
+                        ui.close_menu();
+                    }
+                    if ui.button(&ai_menu.ctx_translate).clicked() {
+                        ai_intent = Some(AiCtxAction::TranslateSelection);
+                        ui.close_menu();
+                    }
+                    ui.separator();
+                    if ui.button(&ai_menu.ctx_explain_screen).clicked() {
+                        ai_intent = Some(AiCtxAction::ExplainScreen);
+                        ui.close_menu();
+                    }
                 }
             });
             if let Some(action) = ai_intent {

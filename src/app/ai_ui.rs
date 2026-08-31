@@ -61,6 +61,10 @@ impl App {
                 let weak = self.active_theme.app.weak_text.to_egui();
                 if !self.settings.ai_enabled {
                     ui.label(&t.not_enabled);
+                    // The agent section stays reachable with AI disabled:
+                    // a RUNNING agent (or its stop button) must not
+                    // vanish mid-flight just because the toggle flipped.
+                    self.render_agent_section(ui);
                     return;
                 }
                 // Transcript (multi-turn).
@@ -239,7 +243,7 @@ preserve technical terms, identifiers and formatting."
     /// and is drained on later frames. The user turn is pushed BEFORE the
     /// spawn so a failed request still shows what was asked.
     pub(crate) fn ai_send(&mut self, ctx: &egui::Context, system: String, user: String) {
-        if self.ai_busy {
+        if self.ai_busy || !self.settings.ai_enabled {
             return;
         }
         let user = user.trim().to_string();

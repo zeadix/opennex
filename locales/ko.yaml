@@ -59,6 +59,7 @@ settings:
     font_family: '글꼴:'
     bg_color: '배경색:'
     fg_color: '전경색:'
+    terminal_theme: '터미널 색 구성표:'
     command_menu_section: 명령 메뉴
     menu_bg_color: '배경색:'
     menu_fg_color: '글자색:'
@@ -478,3 +479,13 @@ remote:
   bind_failed: 포트 바인딩 실패
   settings_section: 휴대폰 원격 제어
   port_label: '포트:'
+  addr_lan: 랜
+  addr_ipv6: IPv6 직접
+  addr_tunnel: 외부 터널
+  tunnel_start: 외부 터널 시작
+  tunnel_starting: 외부 터널 준비 중…
+  tunnel_ready: 외부 터널 준비됨
+  tunnel_failed: 외부 터널 실패
+  tunnel_warning: '외부 주소는 Cloudflare 를 경유합니다(TLS 암호화). 원격 제어를 중지하면 즉시 만료됩니다.'
+  no_addr: 사용 가능한 주소가 없습니다
+
