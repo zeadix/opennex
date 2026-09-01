@@ -57,6 +57,20 @@ pub enum RemoteCommand {
         tab: String,
         reply: mpsc::Sender<String>,
     },
+    /// Scroll the phone's terminal view back to the live prompt (the
+    /// desktop user may have scrolled the shared viewport into history).
+    ScrollBottom { tab: String },
+    /// Forward a mouse event to a TUI application (button press/release,
+    /// motion or wheel) in grid coordinates.
+    Mouse {
+        tab: String,
+        /// egui_term mouse button code (0/1/2 buttons, 32-35 motion,
+        /// 64/65 wheel).
+        btn: u8,
+        col: u16,
+        row: u16,
+        pressed: bool,
+    },
 }
 
 /// Best-effort LAN ip: UDP "connect" to a public address never sends a

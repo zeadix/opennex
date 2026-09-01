@@ -27,6 +27,9 @@ pub struct FrameMsg {
     pub alt: bool,
     /// DECCKM application cursor mode: xterm then emits SS3 arrow keys.
     pub app_cursor: bool,
+    /// A TUI application enabled mouse reporting: the phone page then
+    /// forwards touches as mouse events.
+    pub mouse_mode: bool,
     pub d: String,
 }
 
@@ -200,6 +203,7 @@ pub fn serialize_frame(
         cy: cy.saturating_sub(1),
         alt: terminal_mode.contains(TermMode::ALT_SCREEN),
         app_cursor: terminal_mode.contains(TermMode::APP_CURSOR),
+        mouse_mode: terminal_mode.contains(TermMode::MOUSE_MODE),
         d: data,
     }
 }

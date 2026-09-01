@@ -219,6 +219,53 @@ impl App {
                     }
                     let _ = reply.send(ok);
                 }
+                RemoteCommand::ScrollBottom { tab } => {
+                    // Large negative delta scrolls the shared viewport to
+                    // the live prompt (desktop and phone see the same
+                    // grid - the phone's ⤓ must move BOTH back).
+                    if let Some(td) = self.terminals.get_mut(&tab) {
+                        td.instance
+                            .backend
+                            .process_command(egui_term::BackendCommand::Scroll(-1_000_000));
+                        td.instance.backend.set_dirty();
+                    }
+                }
+                RemoteCommand::Mouse {
+                    tab,
+                    btn,
+                    col,
+                    row,
+                    pressed,
+                } => {
+                    // Forward a phone touch to the TUI application as a
+                    // real mouse event (grid coordinates).
+                    if let Some(td) = self.terminals.get_mut(&tab) {
+                        let button = match btn {
+                            0 => crate::remote::remote_mouse_button(0),
+                            1 => crate::remote::remote_mouse_button(1),
+                            2 => crate::remote::remote_mouse_button(2),
+                            32 => crate::remote::remote_mouse_button(32),
+                            33 => crate::remote::remote_mouse_button(33),
+                            34 => crate::remote::remote_mouse_button(34),
+                            35 => crate::remote::remote_mouse_button(35),
+                            64 => crate::remote::remote_mouse_button(64),
+                            65 => crate::remote::remote_mouse_button(65),
+                            _ => crate::remote::remote_mouse_button(99),
+                        };
+                        let point = alacritty_terminal::index::Point::new(
+                            alacritty_terminal::index::Line(row as i32),
+                            alacritty_terminal::index::Column(col as usize),
+                        );
+                        td.instance.backend.process_command(
+                            egui_term::BackendCommand::MouseReport(
+                                button,
+                                egui::Modifiers::NONE,
+                                point,
+                                pressed,
+                            ),
+                        );
+                    }
+                }
                 RemoteCommand::RequestScrollback { tab, reply } => {
                     let ansi = self
                         .terminals

@@ -2,7 +2,7 @@
 <html lang="zh">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content">
 <title>OpenNex Remote</title>
 <link rel="stylesheet" href="/xterm.css">
 <style>
@@ -22,6 +22,20 @@
   .key { padding: 7px 11px; font-size: 13px; border-radius: 6px; background: #2c3038; color: #d8d8dc; cursor: pointer; user-select: none; -webkit-user-select: none; flex-shrink: 0; }
   .key:active { background: #2f6fed; }
   .key.on { background: #2f6fed; color: #fff; }
+  .key.tool { background: #1e2128; color: #9aa0aa; font-size: 12px; }
+  #keys.collapsed .key { display: none; }
+  #keys.collapsed .key.tool { display: block; }
+  #keys.collapsed { padding: 3px 5px; }
+  #cmdbar { display: none; padding: 5px; background: #1e2128; border-top: 1px solid #2c3038; }
+  #cmdbar.show { display: flex; gap: 5px; }
+  #cmdbar input { flex: 1; padding: 8px; font-size: 14px; border-radius: 6px; border: 1px solid #2c3038; background: #0c0d10; color: #d8d8dc; font-family: monospace; }
+  #cmdbar button { padding: 8px 14px; font-size: 14px; border: none; border-radius: 6px; background: #2f6fed; color: #fff; }
+  #copybox { display: none; position: absolute; left: 0; top: 0; right: 0; bottom: 0; z-index: 6; background: #16181d; flex-direction: column; }
+  #copybox.show { display: flex; }
+  #copybox textarea { flex: 1; margin: 8px; padding: 8px; font-family: monospace; font-size: 13px; background: #0c0d10; color: #d8d8dc; border: 1px solid #2c3038; border-radius: 6px; }
+  #copybox .row { display: flex; gap: 6px; padding: 0 8px 8px; }
+  #copybox button { flex: 1; padding: 10px; font-size: 14px; border: none; border-radius: 6px; background: #2f6fed; color: #fff; }
+  #copybox button.ghost { background: #2c3038; }
   #unlock { position: absolute; left: 0; top: 0; right: 0; bottom: 0; display: none; align-items: center; justify-content: center; background: #16181d; z-index: 5; }
   #unlock .box { text-align: center; }
   #unlock input { margin: 10px; padding: 8px; font-size: 14px; border-radius: 6px; border: 1px solid #2c3038; background: #0c0d10; color: #d8d8dc; }
@@ -39,6 +53,10 @@
       <button id="unlock-btn">Unlock</button>
     </div></div>
   </div>
+  <div id="cmdbar">
+    <input id="cmd-input" type="text" autocomplete="off" autocapitalize="off" spellcheck="false">
+    <button id="cmd-send">Run</button>
+  </div>
   <div id="keys">
     <div class="key" data-k="esc">Esc</div>
     <div class="key" data-k="tab">Tab</div>
@@ -52,8 +70,22 @@
     <div class="key" data-k="home">Home</div>
     <div class="key" data-k="end">End</div>
     <div class="key" data-k="ctrlc">Ctrl+C</div>
+    <div class="key" data-k="ctrld">Ctrl+D</div>
+    <div class="key" data-k="ctrll">Ctrl+L</div>
+    <div class="key" data-k="paste">Paste</div>
+    <div class="key" data-k="copy">Copy</div>
+    <div class="key" data-k="bottom">⤓</div>
+    <div class="key tool" data-k="cmdbar">Aa</div>
+    <div class="key tool" data-k="collapse">▾</div>
   </div>
-  <div class="status" id="status"></div>
+  <div class="status" id="status"><span id="status-text"></span> <span class="key" id="follow-btn" style="padding:2px 8px;font-size:10px;float:right;">Follow</span></div>
+  <div id="copybox">
+    <textarea id="copy-text" readonly></textarea>
+    <div class="row">
+      <button id="copy-done" class="ghost">Close</button>
+      <button id="copy-select">Select all</button>
+    </div>
+  </div>
 </div>
 <script src="/xterm.js"></script>
 <script>
@@ -84,9 +116,16 @@
   var fallbackPoll = null;
 
   function setStatus(msg, isErr) {
-    statusEl.textContent = msg;
+    var textEl = document.getElementById('status-text');
+    if (textEl) textEl.textContent = msg;
     statusEl.className = 'status' + (isErr ? ' err' : '');
   }
+  document.getElementById('follow-btn').addEventListener('click', function () {
+    followDesktop = !followDesktop;
+    this.className = followDesktop ? 'key on' : 'key';
+    this.textContent = T.follow + (followDesktop ? ' ✓' : '');
+    updateStatus();
+  });
 
   function post(path, body, cb) {
     var xhr = new XMLHttpRequest();
@@ -137,26 +176,221 @@
   });
 
   // ----- special key toolbar -----
-  function ctrlCode(ch) { return String.fromCharCode(ch.toUpperCase().charCodeAt(0) - 64); }
-  document.getElementById('keys').addEventListener('click', function (e) {
-    var k = e.target.getAttribute && e.target.getAttribute('data-k');
-    if (!k) return;
-    if (k === 'ctrl') {
-      ctrlMode = !ctrlMode;
-      e.target.className = 'key' + (ctrlMode ? ' on' : '');
-      return;
-    }
+  var REPEAT_KEYS = { up: 1, down: 1, left: 1, right: 1, pgup: 1, pgdn: 1 };
+  function keySeq(k) {
     var map = {
       esc: '\x1b', tab: '\t', up: '\x1b[A', down: '\x1b[B',
       right: '\x1b[C', left: '\x1b[D',
       pgup: '\x1b[5~', pgdn: '\x1b[6~', home: '\x1b[H', end: '\x1b[F',
-      ctrlc: '\x03'
+      ctrlc: '\x03', ctrld: '\x04', ctrll: '\x0c'
     };
-    if (map[k]) sendInput(map[k]);
+    return map[k] || null;
+  }
+  function pasteIntoTerminal() {
+    if (navigator.clipboard && navigator.clipboard.readText) {
+      navigator.clipboard.readText().then(function (text) {
+        if (text) sendInput(text);
+      }, function () { showCopyBox(''); });
+    } else {
+      showCopyBox('');
+    }
+  }
+  function showCopyBox(text) {
+    var box = document.getElementById('copybox');
+    document.getElementById('copy-text').value = text;
+    box.className = 'show';
+    document.getElementById('copy-text').focus();
+  }
+  function copyTerminalOutput() {
+    term.selectAll();
+    var text = term.getSelection();
+    term.clearSelection();
+    term.scrollToBottom();
+    if (!text) return;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () {
+        setStatus(T.copied);
+      }, function () { showCopyBox(text); });
+    } else {
+      showCopyBox(text);
+    }
+  }
+  function scrollBottom() {
+    if (wsOk && ws && ws.readyState === 1) {
+      ws.send(JSON.stringify({ t: 'scroll_bottom' }));
+    } else {
+      get('/api/scroll_bottom', function () {});
+    }
+    term.scrollToBottom();
+  }
+  function toolbarAction(k, el) {
+    if (k === 'ctrl') {
+      ctrlMode = !ctrlMode;
+      el.className = 'key' + (ctrlMode ? ' on' : '');
+      return;
+    }
+    if (k === 'paste') { pasteIntoTerminal(); return; }
+    if (k === 'copy') { copyTerminalOutput(); return; }
+    if (k === 'bottom') { scrollBottom(); return; }
+    if (k === 'collapse') {
+      var keys = document.getElementById('keys');
+      keys.className = keys.className === 'collapsed' ? '' : 'collapsed';
+      el.textContent = keys.className === 'collapsed' ? '▴' : '▾';
+      return;
+    }
+    if (k === 'cmdbar') {
+      var bar = document.getElementById('cmdbar');
+      var on = bar.className === 'show';
+      bar.className = on ? '' : 'show';
+      el.className = 'key tool' + (on ? '' : ' on');
+      if (!on) document.getElementById('cmd-input').focus();
+      else term.focus();
+      return;
+    }
+    var seq = keySeq(k);
+    if (seq) sendInput(seq);
     term.focus();
+  }
+  document.getElementById('keys').addEventListener('click', function (e) {
+    var k = e.target.getAttribute && e.target.getAttribute('data-k');
+    if (!k) return;
+    toolbarAction(k, e.target);
+  });
+  // Long-press auto-repeat for arrows/PgUp/PgDn (vim/less navigation).
+  document.getElementById('keys').addEventListener('pointerdown', function (e) {
+    var k = e.target.getAttribute && e.target.getAttribute('data-k');
+    if (!k || !REPEAT_KEYS[k]) return;
+    var seq = keySeq(k);
+    if (!seq) return;
+    var timer = null;
+    var started = false;
+    var start = function () {
+      started = true;
+      timer = setInterval(function () { sendInput(seq); }, 80);
+    };
+    var delay = setTimeout(start, 400);
+    var stop = function () {
+      clearTimeout(delay);
+      if (timer) clearInterval(timer);
+      if (!started) sendInput(seq);
+      document.removeEventListener('pointerup', stop);
+      document.removeEventListener('pointercancel', stop);
+    };
+    document.addEventListener('pointerup', stop);
+    document.addEventListener('pointercancel', stop);
+  });
+
+  // ----- command bar (line mode) -----
+  document.getElementById('cmd-send').addEventListener('click', function () {
+    var input = document.getElementById('cmd-input');
+    var line = input.value;
+    if (!line) return;
+    sendInput(line + '\r');
+    input.value = '';
+    term.focus();
+  });
+  document.getElementById('cmd-input').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); document.getElementById('cmd-send').click(); }
+  });
+
+  // ----- copy box -----
+  document.getElementById('copy-done').addEventListener('click', function () {
+    document.getElementById('copybox').className = '';
+    term.focus();
+  });
+  document.getElementById('copy-select').addEventListener('click', function () {
+    var ta = document.getElementById('copy-text');
+    ta.focus();
+    ta.select();
+  });
+
+  // ----- soft-keyboard occlusion -----
+  // Compress the app to the VISIBLE viewport so the toolbar stays above
+  // the keyboard (the moment you need Ctrl+C the most).
+  function applyVisualViewport() {
+    var vv = window.visualViewport;
+    var h = vv ? vv.height : window.innerHeight;
+    document.getElementById('wrap').style.height = h + 'px';
+  }
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', applyVisualViewport);
+  }
+  window.addEventListener('resize', applyVisualViewport);
+  applyVisualViewport();
+
+  // ----- orientation / rotation refit -----
+  window.addEventListener('orientationchange', function () {
+    fittedCols = -1;
+    var f = lastFrame;
+    if (f.cols) fitFont(f.cols);
   });
   // In APP_CURSOR mode xterm itself emits SS3 arrows; our toolbar keys
   // keep CSI form which all common TUIs accept too.
+
+  // ----- mouse forwarding (TUI applications) -----
+  // Only active when the app enabled mouse reporting (mouse_mode rides
+  // along in frames); otherwise touches stay as local scrolling.
+  var mouseMode = false;
+  var mouseCell = { w: 8, h: 16 };
+  function measureCells() {
+    var rows = document.querySelectorAll('#term .xterm-rows');
+    if (rows.length) {
+      var r = rows[0].getBoundingClientRect();
+      if (r.height > 4) mouseCell.h = r.height / (term.rows || 24);
+      mouseCell.w = r.width / (term.cols || 80);
+    }
+  }
+  function sendMouse(btn, col, row, pressed) {
+    var tab = currentTab();
+    if (!tab) return;
+    if (wsOk && ws && ws.readyState === 1) {
+      ws.send(JSON.stringify({ t: 'mouse', tab: tab.id, btn: btn, col: col, row: row, pressed: pressed }));
+    }
+  }
+  var touchStart = null;
+  termEl.addEventListener('touchstart', function (e) {
+    if (!mouseMode) return;
+    measureCells();
+    var t = e.touches[0];
+    var rect = termEl.getBoundingClientRect();
+    var x = t.clientX - rect.left;
+    var y = t.clientY - rect.top;
+    touchStart = { x: x, y: y, sent: false };
+    var col = Math.max(0, Math.floor(x / mouseCell.w));
+    var row = Math.max(0, Math.floor(y / mouseCell.h));
+    touchStart.col = col;
+    touchStart.row = row;
+    sendMouse(0, col, row, true);
+  }, { passive: true });
+  termEl.addEventListener('touchmove', function (e) {
+    if (!mouseMode || !touchStart) return;
+    var t = e.touches[0];
+    var rect = termEl.getBoundingClientRect();
+    var col = Math.max(0, Math.floor((t.clientX - rect.left) / mouseCell.w));
+    var row = Math.max(0, Math.floor((t.clientY - rect.top) / mouseCell.h));
+    if (col !== touchStart.col || row !== touchStart.row) {
+      sendMouse(32, col, row, true);
+      touchStart.col = col;
+      touchStart.row = row;
+      touchStart.sent = true;
+    }
+  }, { passive: true });
+  termEl.addEventListener('touchend', function (e) {
+    if (!mouseMode || !touchStart) return;
+    sendMouse(0, touchStart.col, touchStart.row, false);
+    touchStart = null;
+  }, { passive: true });
+  // Wheel emulation: two-finger vertical swipe in mouse mode.
+  termEl.addEventListener('touchmove', function (e) {
+    if (!mouseMode || e.touches.length < 2 || !touchStart) return;
+    var t = e.touches[0];
+    var dy = t.clientY - touchStart.y;
+    if (Math.abs(dy) > 40) {
+      var btn = dy < 0 ? 64 : 65;
+      sendMouse(btn, touchStart.col || 0, touchStart.row || 0, true);
+      touchStart.y = t.clientY;
+    }
+  }, { passive: true });
 
   // ----- frames -----
   // Fit the terminal width to the viewport: pick the largest font size
@@ -190,7 +424,9 @@
       lastFrame.app_cursor = f.app_cursor;
       term.write(f.app_cursor ? '\x1b[?1h' : '\x1b[?1l');
     }
+    mouseMode = !!f.mouse_mode;
     term.write(f.d);
+    updateStatus();
   }
 
   // ----- websocket -----
@@ -370,15 +606,69 @@
     unlockEl.style.display = state.locked ? 'flex' : 'none';
   }
 
+  var followDesktop = false;
+  var lastDesktopFocus = null;
+  var lastRtt = null;
+  var L = (navigator.language || 'en').toLowerCase().indexOf('zh') === 0;
+  var T = {
+    live: L ? '实时' : 'Live',
+    fallback: L ? '轮询模式' : 'Fallback (polling)',
+    connecting: L ? '连接中…' : 'Connecting…',
+    disconnected: L ? '已断开' : 'Disconnected',
+    noWs: L ? '无工作区' : 'No workspaces',
+    copied: L ? '已复制' : 'Copied',
+    run: L ? '运行' : 'Run',
+    follow: L ? '跟随' : 'Follow',
+    mouse: L ? '鼠标' : 'Mouse',
+    desktop: L ? '桌面' : 'Desktop'
+  };
+  document.getElementById('cmd-send').textContent = T.run;
+
   function refreshState() {
+    var t0 = Date.now();
     get('/api/state', null, function (code, body) {
-      if (code !== 200) { setStatus('Disconnected (' + code + ')', true); return; }
+      if (code !== 200) { setStatus(T.disconnected + ' (' + code + ')', true); return; }
+      lastRtt = Date.now() - t0;
       var s = JSON.parse(body);
       state.ws = s.workspaces || [];
-      if (!state.ws.length) { setStatus('No workspaces'); return; }
+      if (!state.ws.length) { setStatus(T.noWs); return; }
+      // Optional follow-the-desktop focus (off by default: the phone is
+      // usually the viewer and must not chase the desktop's typing).
+      if (followDesktop && s.focused && s.focused !== lastDesktopFocus) {
+        for (var wi = 0; wi < state.ws.length; wi++) {
+          var terms = state.ws[wi].terminals || [];
+          for (var ti = 0; ti < terms.length; ti++) {
+            if (terms[ti].id === s.focused) {
+              state.wsIndex = wi;
+              selectTerminal(ti);
+              break;
+            }
+          }
+        }
+      }
+      lastDesktopFocus = s.focused || null;
       renderTabs();
-      setStatus(wsOk ? 'Live' : (fallbackPoll ? 'Fallback mode (polling)' : 'Connecting…'));
+      updateStatus();
     });
+  }
+  function updateStatus() {
+    var parts = [];
+    parts.push(wsOk ? T.live : (fallbackPoll ? T.fallback : T.connecting));
+    if (lastRtt !== null) parts.push(lastRtt + 'ms');
+    if (lastFrame.cols) parts.push(lastFrame.cols + '×' + lastFrame.rows);
+    if (mouseMode) parts.push(T.mouse);
+    if (followDesktop && lastDesktopFocus) {
+      var cur = state.ws[state.wsIndex];
+      if (cur) {
+        for (var i = 0; i < (cur.terminals || []).length; i++) {
+          if (cur.terminals[i].id === lastDesktopFocus) {
+            parts.push(T.desktop + ': ' + cur.terminals[i].name);
+            break;
+          }
+        }
+      }
+    }
+    setStatus(parts.join(' · '));
   }
 
   document.getElementById('unlock-btn').addEventListener('click', function () {

@@ -198,9 +198,26 @@ pub enum WsOut {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ClientMsg {
     Hello,
-    Focus { tab: String },
-    Input { tab: String, data: String },
-    Scrollback { tab: String },
+    Focus {
+        tab: String,
+    },
+    Input {
+        tab: String,
+        data: String,
+    },
+    Scrollback {
+        tab: String,
+    },
+    ScrollBottom {
+        tab: String,
+    },
+    Mouse {
+        tab: String,
+        btn: u8,
+        col: u16,
+        row: u16,
+        pressed: bool,
+    },
 }
 
 /// Parse a client text-frame payload into a ClientMsg. Unknown shapes
@@ -219,6 +236,16 @@ pub fn parse_client_msg(payload: &[u8]) -> Option<ClientMsg> {
         }),
         "scrollback" => Some(ClientMsg::Scrollback {
             tab: v.get("tab")?.as_str()?.to_string(),
+        }),
+        "scroll_bottom" => Some(ClientMsg::ScrollBottom {
+            tab: v.get("tab")?.as_str()?.to_string(),
+        }),
+        "mouse" => Some(ClientMsg::Mouse {
+            tab: v.get("tab")?.as_str()?.to_string(),
+            btn: v.get("btn")?.as_u64()? as u8,
+            col: v.get("col")?.as_u64()? as u16,
+            row: v.get("row")?.as_u64()? as u16,
+            pressed: v.get("pressed")?.as_bool()?,
         }),
         _ => None,
     }
@@ -268,6 +295,38 @@ Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n";
                 tab: "terminal-1".into()
             })
         );
+        assert_eq!(
+            parse_client_msg(br#"{"t":"scroll_bottom","tab":"terminal-1"}"#),
+            Some(ClientMsg::ScrollBottom {
+                tab: "terminal-1".into()
+            })
+        );
+        assert_eq!(
+            parse_client_msg(
+                br#"{"t":"mouse","tab":"t-1","btn":0,"col":12,"row":3,"pressed":true}"#
+            ),
+            Some(ClientMsg::Mouse {
+                tab: "t-1".into(),
+                btn: 0,
+                col: 12,
+                row: 3,
+                pressed: true
+            })
+        );
+        assert_eq!(
+            parse_client_msg(
+                br#"{"t":"mouse","tab":"t-1","btn":64,"col":0,"row":0,"pressed":true}"#
+            ),
+            Some(ClientMsg::Mouse {
+                tab: "t-1".into(),
+                btn: 64,
+                col: 0,
+                row: 0,
+                pressed: true
+            })
+        );
+        // Missing required mouse fields -> None (connection continues).
+        assert!(parse_client_msg(br#"{"t":"mouse","tab":"t-1"}"#).is_none());
         assert!(parse_client_msg(br#"{"t":"nope"}"#).is_none());
         assert!(parse_client_msg(b"not json").is_none());
     }

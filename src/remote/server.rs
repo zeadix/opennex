@@ -282,6 +282,19 @@ fn handle_connection(mut stream: TcpStream, shared: &RemoteShared) -> std::io::R
                 Err(_) => write_response(&mut stream, 404, "text/plain", "no scrollback"),
             }
         }
+        ("GET", "/api/scroll_bottom") => {
+            let tab = query_pairs
+                .iter()
+                .find(|(k, _)| k == "tab")
+                .map(|(_, v)| v.clone())
+                .unwrap_or_default();
+            shared
+                .commands
+                .lock()
+                .unwrap()
+                .push_back(RemoteCommand::ScrollBottom { tab });
+            write_response(&mut stream, 200, "application/json", "{\"ok\":true}")
+        }
         ("POST", "/api/focus") => {
             let body_text = String::from_utf8_lossy(&body);
             let parsed: Result<serde_json::Value, _> = serde_json::from_str(&body_text);
@@ -459,6 +472,32 @@ Sec-WebSocket-Accept: {accept}\r\n\r\n"
                                     .lock()
                                     .unwrap()
                                     .push_back(RemoteCommand::Write { tab, data });
+                            }
+                            ClientMsg::ScrollBottom { tab } => {
+                                shared
+                                    .commands
+                                    .lock()
+                                    .unwrap()
+                                    .push_back(RemoteCommand::ScrollBottom { tab });
+                            }
+                            ClientMsg::Mouse {
+                                tab,
+                                btn,
+                                col,
+                                row,
+                                pressed,
+                            } => {
+                                shared
+                                    .commands
+                                    .lock()
+                                    .unwrap()
+                                    .push_back(RemoteCommand::Mouse {
+                                        tab,
+                                        btn,
+                                        col,
+                                        row,
+                                        pressed,
+                                    });
                             }
                             ClientMsg::Scrollback { tab } => {
                                 // Serialize on the UI thread, deliver through
