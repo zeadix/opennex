@@ -488,4 +488,15 @@ remote:
   tunnel_failed: 외부 터널 실패
   tunnel_warning: '외부 주소는 Cloudflare 를 경유합니다(TLS 암호화). 원격 제어를 중지하면 즉시 만료됩니다.'
   no_addr: 사용 가능한 주소가 없습니다
+  relay_section: 릴레이 채널(frp)
+  relay_add: 릴레이 채널 추가
+  relay_name: 이름
+  relay_server: 서버 주소
+  relay_port: 서버 포트
+  relay_forward: 공개 포트
+  relay_token: 토큰
+  relay_enabled: 사용
+  relay_delete: 삭제
+  relay_retry: 다시 시도
+  relay_hint: 위 채널을 선택하면 자동으로 연결됩니다. 처음 사용 시 frpc(약 10MB)가 자동 다운로드되며, <데이터 디렉터리>/tunnel/frpc에 직접 배치할 수도 있습니다.
 

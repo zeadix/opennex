@@ -489,4 +489,15 @@ remote:
   tunnel_failed: WAN टनल विफल
   tunnel_warning: 'WAN पता Cloudflare से गुजरता है (TLS एन्क्रिप्टेड); रिमोट कंट्रोल बंद करते ही समाप्त।'
   no_addr: कोई उपयोगी पता नहीं मिला
+  relay_section: रिले चैनल (frp)
+  relay_add: रिले चैनल जोड़ें
+  relay_name: नाम
+  relay_server: सर्वर पता
+  relay_port: सर्वर पोर्ट
+  relay_forward: सार्वजनिक पोर्ट
+  relay_token: टोकन
+  relay_enabled: सक्षम
+  relay_delete: हटाएँ
+  relay_retry: पुनः प्रयास
+  relay_hint: स्वतः कनेक्ट होने के लिए ऊपर कोई चैनल चुनें। पहली बार उपयोग पर frpc (~10 MB) डाउनलोड होता है; इसे <data dir>/tunnel/frpc पर मैन्युअल रूप से भी रखा जा सकता है।
 

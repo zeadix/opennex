@@ -2,6 +2,7 @@
 //! command queue plumbing.
 
 pub mod ansi;
+pub mod frp;
 pub mod protocol;
 pub mod server;
 pub mod tunnel;

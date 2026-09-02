@@ -488,4 +488,15 @@ remote:
   tunnel_failed: 外網隧道失敗
   tunnel_warning: 外網位址經 Cloudflare 中轉（TLS 加密）；關閉遠端控制即失效。
   no_addr: 未偵測到可用位址
+  relay_section: 中轉通道（frp）
+  relay_add: 新增中轉通道
+  relay_name: 名稱
+  relay_server: 伺服器位址
+  relay_port: 服務連接埠
+  relay_forward: 公網連接埠
+  relay_token: 權杖
+  relay_enabled: 啟用
+  relay_delete: 刪除
+  relay_retry: 重試
+  relay_hint: 選取上方通道即自動連線；首次使用將自動下載 frpc（約 10MB），也可手動放置到資料目錄 tunnel/frpc。
 

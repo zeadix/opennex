@@ -245,6 +245,78 @@ impl App {
         });
         self.settings_edit.remote_port = port;
 
+        // Relay channels (WAN phone access through user-hosted frp
+        // relays, e.g. an Aliyun ECS). Edits apply instantly: the sync
+        // in remote_tick restarts the channel when its config changes.
+        self.settings_group(ui, &tr.relay_section);
+        let mut tunnels = self.settings_edit.remote_tunnels.clone();
+        let mut delete_idx: Option<usize> = None;
+        for (i, p) in tunnels.iter_mut().enumerate() {
+            let mut name = p.name.clone();
+            self.settings_row(ui, &format!("#{} {}", i + 1, tr.relay_name), |ui| {
+                ui.add_sized([180.0, 20.0], egui::TextEdit::singleline(&mut name));
+                if ui.button(&tr.relay_delete).clicked() {
+                    delete_idx = Some(i);
+                }
+            });
+            p.name = name;
+            let mut server = p.server.clone();
+            self.settings_row(ui, &tr.relay_server, |ui| {
+                ui.add_sized([180.0, 20.0], egui::TextEdit::singleline(&mut server));
+            });
+            p.server = server;
+            let mut rport = p.port;
+            self.settings_row(ui, &tr.relay_port, |ui| {
+                ui.add_sized(
+                    [180.0, 20.0],
+                    egui::DragValue::new(&mut rport).range(1..=65535),
+                );
+            });
+            p.port = rport;
+            let mut forward = p.forward_port;
+            self.settings_row(ui, &tr.relay_forward, |ui| {
+                ui.add_sized(
+                    [180.0, 20.0],
+                    egui::DragValue::new(&mut forward).range(1024..=65535),
+                );
+            });
+            p.forward_port = forward;
+            let mut token = p.token.clone();
+            self.settings_row(ui, &tr.relay_token, |ui| {
+                ui.add_sized([180.0, 20.0], egui::TextEdit::singleline(&mut token));
+            });
+            p.token = token;
+            let mut enabled = p.enabled;
+            self.settings_row(ui, &tr.relay_enabled, |ui| {
+                ui.checkbox(&mut enabled, "");
+            });
+            p.enabled = enabled;
+        }
+        if let Some(i) = delete_idx {
+            tunnels.remove(i);
+        }
+        self.settings_edit.remote_tunnels = tunnels;
+        let mut add = false;
+        self.settings_action_row(ui, |ui| {
+            if ui.button(&tr.relay_add).clicked() {
+                add = true;
+            }
+        });
+        if add {
+            self.settings_edit.remote_tunnels.push(TunnelProfile {
+                name: format!(
+                    "{} {}",
+                    tr.relay_name,
+                    self.settings_edit.remote_tunnels.len() + 1
+                ),
+                server: String::new(),
+                port: 7000,
+                token: String::new(),
+                forward_port: 47823,
+                enabled: false,
+            });
+        }
+
         self.settings_group(ui, &b.data_section);
         let mut max_h = self.settings_edit.max_history;
         let mut sb = self.settings_edit.scrollback;

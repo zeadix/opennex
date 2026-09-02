@@ -489,4 +489,15 @@ remote:
   tunnel_failed: WAN tunnel failed
   tunnel_warning: 'The WAN address transits Cloudflare (TLS encrypted); it dies as soon as remote control stops.'
   no_addr: No usable address detected
+  relay_section: Relay channels (frp)
+  relay_add: Add relay channel
+  relay_name: Name
+  relay_server: Server address
+  relay_port: Server port
+  relay_forward: Public port
+  relay_token: Token
+  relay_enabled: Enabled
+  relay_delete: Delete
+  relay_retry: Retry
+  relay_hint: Select a channel above to connect automatically. frpc (~10 MB) downloads on first use; you can also place it manually at <data dir>/tunnel/frpc.
 

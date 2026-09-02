@@ -410,6 +410,29 @@ pub struct RemoteTexts {
     pub tunnel_warning: String,
     #[serde(default)]
     pub no_addr: String,
+    /// Relay-channel editor (frp profiles in settings) + panel hints.
+    #[serde(default)]
+    pub relay_section: String,
+    #[serde(default)]
+    pub relay_add: String,
+    #[serde(default)]
+    pub relay_name: String,
+    #[serde(default)]
+    pub relay_server: String,
+    #[serde(default)]
+    pub relay_port: String,
+    #[serde(default)]
+    pub relay_forward: String,
+    #[serde(default)]
+    pub relay_token: String,
+    #[serde(default)]
+    pub relay_enabled: String,
+    #[serde(default)]
+    pub relay_delete: String,
+    #[serde(default)]
+    pub relay_retry: String,
+    #[serde(default)]
+    pub relay_hint: String,
 }
 
 /// Floating monitor panel strings.
@@ -1209,6 +1232,17 @@ impl Texts {
                 tunnel_failed: "外网隧道失败".into(),
                 tunnel_warning: "外网地址经 Cloudflare 中转（TLS 加密）；关闭远程控制即失效。".into(),
                 no_addr: "未检测到可用地址".into(),
+                relay_section: "中转通道（frp）".into(),
+                relay_add: "添加中转通道".into(),
+                relay_name: "名称".into(),
+                relay_server: "服务器地址".into(),
+                relay_port: "服务端口".into(),
+                relay_forward: "公网端口".into(),
+                relay_token: "令牌".into(),
+                relay_enabled: "启用".into(),
+                relay_delete: "删除".into(),
+                relay_retry: "重试".into(),
+                relay_hint: "选中上方通道即自动连接；首次使用将自动下载 frpc（约 10MB），也可手动放置到数据目录 tunnel/frpc。".into(),
             },
             monitor: MonitorTexts {
                 title: "监控面板".into(),

@@ -488,4 +488,15 @@ remote:
   tunnel_failed: 外部トンネル失敗
   tunnel_warning: 外部アドレスは Cloudflare 経由（TLS 暗号化）。リモート操作を停止すると無効になります。
   no_addr: 利用可能なアドレスが見つかりません
+  relay_section: 中継チャネル（frp）
+  relay_add: 中継チャネルを追加
+  relay_name: 名前
+  relay_server: サーバーアドレス
+  relay_port: サーバーポート
+  relay_forward: 公開ポート
+  relay_token: トークン
+  relay_enabled: 有効
+  relay_delete: 削除
+  relay_retry: 再試行
+  relay_hint: 上のチャネルを選択すると自動接続します。初回使用時に frpc（約10MB）を自動ダウンロードします。手動で <データディレクトリ>/tunnel/frpc に配置することも可能です。
 

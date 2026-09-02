@@ -36,6 +36,32 @@ const MAX_FONT_SIZE: f32 = 32.0;
 const FONT_SIZE_STEP: f32 = 1.0;
 const WORKSPACE_SIDEBAR_DEFAULT_WIDTH: f32 = 192.0;
 
+/// One user-configured relay channel for the phone remote control
+/// (e.g. an frps instance on a cloud VM). Editing the list in settings
+/// takes effect immediately: running channels whose entry changed are
+/// restarted, newly enabled ones are spawned, removed ones are killed.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct TunnelProfile {
+    /// Display name shown in the remote panel's address selector.
+    pub name: String,
+    /// Relay server address (IP or hostname).
+    pub server: String,
+    /// Relay control port (frps bind_port, default 7000).
+    #[serde(default = "default_relay_port")]
+    pub port: u16,
+    /// Relay auth token (must match frps auth.token).
+    #[serde(default)]
+    pub token: String,
+    /// Public port on the relay that forwards to the local remote server.
+    pub forward_port: u16,
+    #[serde(default)]
+    pub enabled: bool,
+}
+
+fn default_relay_port() -> u16 {
+    7000
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct AppSettings {
     #[serde(default = "default_max_history")]
@@ -95,6 +121,9 @@ struct AppSettings {
     /// Port the embedded remote-control server binds (0.0.0.0).
     #[serde(default = "default_remote_port")]
     remote_port: u16,
+    /// Relay channels for WAN phone access (frp servers etc.).
+    #[serde(default)]
+    remote_tunnels: Vec<TunnelProfile>,
 }
 
 fn default_agent_approval_mode() -> String {
@@ -1231,6 +1260,7 @@ impl Default for AppSettings {
             default_shell: default_shell_pref(),
             smooth_rendering: true,
             smooth_level: default_smooth_level(),
+            remote_tunnels: Vec::new(),
         }
     }
 }

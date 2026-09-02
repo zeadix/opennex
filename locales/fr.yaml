@@ -489,4 +489,15 @@ remote:
   tunnel_failed: Échec du tunnel WAN
   tunnel_warning: "L'adresse WAN transite par Cloudflare (chiffré TLS) ; elle expire dès l'arrêt du contrôle à distance."
   no_addr: Aucune adresse utilisable détectée
+  relay_section: Canaux relais (frp)
+  relay_add: Ajouter un canal relais
+  relay_name: Nom
+  relay_server: Adresse du serveur
+  relay_port: Port du serveur
+  relay_forward: Port public
+  relay_token: Jeton
+  relay_enabled: Activé
+  relay_delete: Supprimer
+  relay_retry: Réessayer
+  relay_hint: Sélectionnez un canal ci-dessus pour vous connecter automatiquement. frpc (~10 Mo) est téléchargé au premier usage ; placez-le aussi manuellement dans <répertoire de données>/tunnel/frpc.
 

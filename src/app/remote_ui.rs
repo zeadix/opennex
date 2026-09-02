@@ -2,6 +2,7 @@
 //! execution, server lifecycle) and the desktop panel with the QR code.
 
 use super::*;
+use crate::remote::frp::FrpHandle;
 use crate::remote::protocol::{
     lan_ip, remote_url, RemoteCommand, RemoteSnapshot, TermInfo, WsInfo,
 };
@@ -33,6 +34,24 @@ pub(crate) struct RemoteSession {
     pub tunnel_error: Option<String>,
     pub tunnel_progress: Option<f32>,
     pub tunnel_starting: bool,
+    /// Managed frpc relay channel (None = not running).
+    pub frp: Option<FrpHandle>,
+    /// Index of the profile the running frpc serves (None = none).
+    pub frp_index: Option<usize>,
+    /// Config snapshot the running frpc was started with - the change
+    /// detector for the instant-apply sync.
+    pub frp_profile: Option<crate::app::TunnelProfile>,
+    /// Spawn-result channel for frpc (drained by remote_tick).
+    pub frp_joiner: Option<std::sync::mpsc::Receiver<Result<FrpHandle, String>>>,
+    /// Latest frp status surfaced to the panel.
+    pub frp_url: Option<String>,
+    pub frp_error: Option<String>,
+    pub frp_progress: Option<f32>,
+    pub frp_starting: bool,
+    /// Config snapshot of the last FAILED spawn attempt - blocks an
+    /// infinite auto-restart loop until the user edits the profile or
+    /// switches targets.
+    pub frp_failed_profile: Option<crate::app::TunnelProfile>,
     /// Which address the QR shows.
     pub qr_target: QrTarget,
     /// The tab the phone is currently watching (drives on-demand frame
@@ -52,6 +71,8 @@ pub(crate) enum QrTarget {
     Lan,
     Ipv6,
     Tunnel,
+    /// A user-configured relay channel (index into settings.remote_tunnels).
+    Frp(usize),
 }
 
 /// Paint the QR module matrix with quiet zone.
@@ -100,6 +121,8 @@ impl RemoteSession {
             QrTarget::Lan => None,
             QrTarget::Ipv6 => self.ipv6_url(),
             QrTarget::Tunnel => self.tunnel_url.clone(),
+            // Frp targets resolve through App (needs settings access).
+            QrTarget::Frp(_) => None,
         }
     }
 }
@@ -129,6 +152,15 @@ impl App {
             tunnel_error: None,
             tunnel_progress: None,
             tunnel_starting: false,
+            frp: None,
+            frp_index: None,
+            frp_profile: None,
+            frp_joiner: None,
+            frp_url: None,
+            frp_error: None,
+            frp_progress: None,
+            frp_starting: false,
+            frp_failed_profile: None,
             qr_target: QrTarget::default(),
             remote_focus_tab: None,
             qr_cache: None,
@@ -145,7 +177,114 @@ impl App {
             if let Some(mut tunnel) = session.tunnel.take() {
                 tunnel.stop();
             }
+            if let Some(mut frp) = session.frp.take() {
+                frp.stop();
+            }
         }
+    }
+
+    /// The URL the QR should show, including relay-channel targets
+    /// resolved from settings.
+    pub(crate) fn remote_qr_url(&self) -> Option<String> {
+        let session = self.remote.as_ref()?;
+        match session.qr_target {
+            QrTarget::Frp(i) => self
+                .settings
+                .remote_tunnels
+                .get(i)
+                .map(crate::remote::frp::relay_url),
+            _ => session.qr_url(),
+        }
+    }
+
+    /// Tear the frp channel down completely (process + all state).
+    fn remote_frp_reset(session: &mut RemoteSession) {
+        if let Some(mut frp) = session.frp.take() {
+            frp.stop();
+        }
+        session.frp_joiner = None;
+        session.frp_index = None;
+        session.frp_profile = None;
+        session.frp_url = None;
+        session.frp_error = None;
+        session.frp_progress = None;
+        session.frp_starting = false;
+        session.frp_failed_profile = None;
+    }
+
+    /// Keep the single active frp relay channel in sync with the
+    /// panel's selected target and the settings config (instant apply).
+    ///
+    /// Desired state = the profile the address selector points at.
+    /// When the desired profile differs from what is running (config
+    /// edited, target switched), the old frpc is stopped and a new one
+    /// spawned within the same frame - no restart needed. A config
+    /// that just FAILED blocks auto-respawn until edited or reselected.
+    pub(crate) fn remote_sync_frp(&mut self) {
+        // Compute the desired channel without holding the session borrow.
+        let desired = {
+            let Some(session) = self.remote.as_ref() else {
+                return;
+            };
+            match session.qr_target {
+                QrTarget::Frp(i) => self
+                    .settings
+                    .remote_tunnels
+                    .get(i)
+                    .filter(|p| p.enabled && !p.server.trim().is_empty() && p.forward_port != 0)
+                    .map(|p| (i, p.clone())),
+                _ => None,
+            }
+        };
+        let Some((want_index, want_profile)) = desired else {
+            if let Some(session) = self.remote.as_mut() {
+                if session.frp.is_some() || session.frp_joiner.is_some() {
+                    Self::remote_frp_reset(session);
+                }
+            }
+            return;
+        };
+        let session = self.remote.as_mut().unwrap();
+        // Spawn still in flight: adoption will land with this config.
+        if session.frp_joiner.is_some() {
+            return;
+        }
+        // Already running the exact desired config.
+        if session.frp.is_some()
+            && session.frp_index == Some(want_index)
+            && session.frp_profile.as_ref() == Some(&want_profile)
+        {
+            return;
+        }
+        // Same config just failed: wait for an edit (or reselect) so a
+        // broken relay address cannot spin spawn/kill cycles forever.
+        if session.frp.is_none() && session.frp_failed_profile.as_ref() == Some(&want_profile) {
+            return;
+        }
+        // Switching channel or config changed: replace the process.
+        if let Some(mut frp) = session.frp.take() {
+            frp.stop();
+        }
+        session.frp_joiner = None;
+        session.frp_starting = true;
+        session.frp_error = None;
+        session.frp_url = None;
+        session.frp_progress = None;
+        session.frp_failed_profile = None;
+        session.frp_index = Some(want_index);
+        session.frp_profile = Some(want_profile.clone());
+        let data_dir = app_data_dir();
+        let local_port = session.shared.port;
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(FrpHandle::start(
+                &data_dir,
+                &want_profile,
+                want_index,
+                local_port,
+            ));
+        });
+        session.frp_joiner = Some(rx);
     }
 
     /// Start (or download + start) the cloudflared quick tunnel. The
@@ -287,6 +426,9 @@ impl App {
         if refresh_due {
             self.remote_refresh();
         }
+        // Relay channel sync (instant apply): selection / config changes
+        // start, replace or stop the frpc process within this frame.
+        self.remote_sync_frp();
         // Tunnel plumbing: adopt the spawned handle, surface its events.
         if let Some(session) = self.remote.as_mut() {
             if let Some(joiner) = session.tunnel_joiner.take() {
@@ -337,6 +479,63 @@ impl App {
                                 tunnel.stop();
                             }
                             session.tunnel_starting = false;
+                        }
+                    }
+                }
+            }
+            // frp plumbing: adopt the spawn result, surface its events.
+            if let Some(joiner) = session.frp_joiner.take() {
+                match joiner.try_recv() {
+                    Ok(Ok(handle)) => {
+                        session.frp = Some(handle);
+                        session.frp_starting = false;
+                        session.frp_failed_profile = None;
+                    }
+                    Ok(Err(err)) => {
+                        session.frp_starting = false;
+                        session.frp_error = Some(err);
+                        session.frp_failed_profile = session.frp_profile.take();
+                        session.frp_index = None;
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => {
+                        session.frp_joiner = Some(joiner);
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        session.frp_starting = false;
+                    }
+                }
+            }
+            let mut frp_events: Vec<TunnelEvent> = Vec::new();
+            if let Some(frp) = session.frp.as_mut() {
+                while let Ok(event) = frp.events.try_recv() {
+                    frp_events.push(event);
+                }
+            }
+            for event in frp_events {
+                match event {
+                    TunnelEvent::Downloading(p) => {
+                        session.frp_error = None;
+                        session.frp_progress = Some(p);
+                    }
+                    TunnelEvent::Starting => {
+                        session.frp_progress = None;
+                    }
+                    TunnelEvent::Ready(url) => {
+                        session.frp_url = Some(url);
+                        session.frp_error = None;
+                    }
+                    TunnelEvent::Failed(err) => {
+                        // A late watchdog after a success is noise; only
+                        // real failures (before any URL) tear the
+                        // channel down so the user can fix the config.
+                        if session.frp_url.is_none() {
+                            session.frp_error = Some(err);
+                            if let Some(mut frp) = session.frp.take() {
+                                frp.stop();
+                            }
+                            session.frp_failed_profile = session.frp_profile.take();
+                            session.frp_index = None;
+                            session.frp_starting = false;
                         }
                     }
                 }
@@ -488,13 +687,35 @@ impl App {
                         }
                     }
                     Some(_) => {
-                        // Address target selector (LAN / IPv6 / tunnel).
+                        // Address target selector (LAN / IPv6 / tunnel /
+                        // relay channels). Selecting a relay channel
+                        // auto-starts it within a frame (instant apply).
                         let ipv6 = self.remote.as_ref().and_then(|s| s.ipv6.clone());
                         let tunnel_state = self
                             .remote
                             .as_ref()
                             .map(|s| (s.tunnel_url.clone(), s.tunnel_starting, s.tunnel_progress))
                             .unwrap_or((None, false, None));
+                        let frp_state = self
+                            .remote
+                            .as_ref()
+                            .map(|s| {
+                                (
+                                    s.frp_url.clone(),
+                                    s.frp_starting,
+                                    s.frp_progress,
+                                    s.frp_error.clone(),
+                                )
+                            })
+                            .unwrap_or((None, false, None, None));
+                        let relay_channels: Vec<(usize, String)> = self
+                            .settings
+                            .remote_tunnels
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, p)| p.enabled)
+                            .map(|(i, p)| (i, p.name.clone()))
+                            .collect();
                         ui.label(egui::RichText::new(&t.on_hint).size(11.0).color(weak));
                         ui.horizontal(|ui| {
                             let target = self.remote.as_ref().unwrap().qr_target;
@@ -523,10 +744,56 @@ impl App {
                             {
                                 pick = QrTarget::Tunnel;
                             }
+                            for (i, name) in &relay_channels {
+                                if ui
+                                    .selectable_label(target == QrTarget::Frp(*i), name.clone())
+                                    .clicked()
+                                {
+                                    pick = QrTarget::Frp(*i);
+                                }
+                            }
                             if pick != target {
                                 self.remote.as_mut().unwrap().qr_target = pick;
                             }
                         });
+                        // Relay-channel status row (only while a relay
+                        // target is selected; the channel lifecycle is
+                        // driven by remote_sync_frp, not by buttons).
+                        if matches!(self.remote.as_ref().unwrap().qr_target, QrTarget::Frp(_)) {
+                            ui.horizontal(|ui| {
+                                if frp_state.1 {
+                                    let pct = frp_state
+                                        .2
+                                        .map(|p| format!(" ({:.0}%)", p * 100.0))
+                                        .unwrap_or_default();
+                                    ui.label(
+                                        egui::RichText::new(format!("{}{pct}", t.tunnel_starting))
+                                            .size(11.0)
+                                            .color(weak),
+                                    );
+                                } else if frp_state.0.is_some() {
+                                    ui.label(
+                                        egui::RichText::new(&t.tunnel_ready)
+                                            .size(11.0)
+                                            .color(accent),
+                                    );
+                                } else if let Some(err) = frp_state.3.as_ref() {
+                                    ui.label(
+                                        egui::RichText::new(format!("{}: {err}", t.tunnel_failed))
+                                            .size(10.0)
+                                            .color(self.active_theme.app.danger.to_egui()),
+                                    );
+                                    if ui.button(&t.relay_retry).clicked() {
+                                        // Forget the failure so the sync
+                                        // respawns the channel.
+                                        if let Some(session) = self.remote.as_mut() {
+                                            session.frp_failed_profile = None;
+                                        }
+                                    }
+                                }
+                            });
+                            ui.label(egui::RichText::new(&t.relay_hint).size(10.0).color(weak));
+                        }
                         // Tunnel control row.
                         ui.horizontal(|ui| {
                             if tunnel_state.1 {
@@ -560,7 +827,7 @@ impl App {
                                 }
                             }
                             if ui.button(&t.copy_url).clicked() {
-                                if let Some(url) = self.remote.as_ref().unwrap().qr_url() {
+                                if let Some(url) = self.remote_qr_url() {
                                     ui.ctx().copy_text(url.clone());
                                     self.update_toast = Some((
                                         t.copied.clone(),
@@ -573,7 +840,7 @@ impl App {
                             }
                         });
                         // QR for the selected target.
-                        if let Some(url) = self.remote.as_ref().unwrap().qr_url() {
+                        if let Some(url) = self.remote_qr_url() {
                             ui.label(egui::RichText::new(&url).size(11.0).color(accent));
                             ui.add_space(6.0);
                             self.remote_draw_qr(ui, &url);
