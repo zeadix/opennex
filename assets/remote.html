@@ -626,7 +626,7 @@
 
   function refreshState() {
     var t0 = Date.now();
-    get('/api/state', null, function (code, body) {
+    get('/api/state', function (code, body) {
       if (code !== 200) { setStatus(T.disconnected + ' (' + code + ')', true); return; }
       lastRtt = Date.now() - t0;
       var s = JSON.parse(body);
