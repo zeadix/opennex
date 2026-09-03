@@ -1,7 +1,7 @@
-use alacritty_terminal::index::Point as TerminalGridPoint;
+use alacritty_terminal::index::{Column, Point as TerminalGridPoint};
 use alacritty_terminal::term::cell;
-use alacritty_terminal::term::point_to_viewport;
 use alacritty_terminal::term::TermMode;
+use alacritty_terminal::term::{point_to_viewport, viewport_to_point};
 use alacritty_terminal::vte::ansi::{Color, NamedColor};
 use egui::epaint::RectShape;
 use egui::Color32;
@@ -573,104 +573,120 @@ impl<'a> TerminalView<'a> {
             global_bg,
         ))];
 
-        // Grid points use absolute line coords; convert to viewport rows via
-        // alacritty's point_to_viewport (same as Alacritty's own renderer).
-        // Using `line + display_offset` alone is wrong for some reflow cases and
-        // draws the same logical content stacked → looks like "copy on wrap".
-        for indexed in content.grid.display_iter() {
-            let Some(vp) = point_to_viewport(display_offset, indexed.point)
-            else {
-                continue;
-            };
+        // Viewport-cell iteration: for every VISIBLE (row, col) resolve
+        // the grid cell via viewport_to_point and paint it at exactly
+        // that viewport position. Unlike walking display_iter() (absolute
+        // line coords) and projecting each cell, this structurally
+        // CANNOT stack the same logical row twice or skip rows after a
+        // reflow: one viewport cell = one draw, coordinates are unique
+        // by construction.
+        use alacritty_terminal::grid::Dimensions;
+        let columns = content.grid.columns();
+        let screen_lines = content.grid.screen_lines();
+        for row in 0..screen_lines {
+            for col in 0..columns {
+                let point = viewport_to_point(
+                    display_offset,
+                    TerminalGridPoint::new(row, Column(col)),
+                );
+                let indexed = &content.grid[point];
 
-            let flags = indexed.cell.flags;
-            if flags.contains(cell::Flags::WIDE_CHAR_SPACER) {
-                continue;
-            }
-
-            let is_app_cursor_mode =
-                content.terminal_mode.contains(TermMode::APP_CURSOR);
-            let is_wide_char = flags.contains(cell::Flags::WIDE_CHAR);
-            let is_inverse = flags.contains(cell::Flags::INVERSE);
-            let is_dim =
-                flags.intersects(cell::Flags::DIM | cell::Flags::DIM_BOLD);
-            let is_selected = content
-                .selectable_range
-                .is_some_and(|r| r.contains(indexed.point));
-            let is_hovered_hyperlink =
-                content.hovered_hyperlink.as_ref().is_some_and(|r| {
-                    r.contains(&indexed.point)
-                        && r.contains(&state.current_mouse_position_on_grid)
-                });
-
-            let x = layout_min.x + (cell_width * vp.column.0 as f32);
-            let y = layout_min.y + (cell_height * vp.line as f32);
-
-            let mut fg = self.theme.get_color(indexed.fg);
-            let bg = self.theme.get_color(indexed.bg);
-            let draw_w = if is_wide_char {
-                cell_width * 2.0
-            } else {
-                cell_width
-            };
-
-            if is_dim {
-                fg = fg.linear_multiply(0.7);
-            }
-
-            let (fg, bg) = resolved_cell_colors(
-                &self.theme,
-                fg,
-                bg,
-                is_inverse,
-                is_selected,
-            );
-
-            if global_bg != bg {
-                shapes.push(Shape::Rect(RectShape::filled(
-                    Rect::from_min_size(
-                        Pos2::new(x, y),
-                        Vec2::new(draw_w + 1.0, cell_height + 1.0),
-                    ),
-                    CornerRadius::ZERO,
-                    bg,
-                )));
-            }
-
-            if is_hovered_hyperlink {
-                let underline_height = y + cell_height;
-                shapes.push(Shape::LineSegment {
-                    points: [
-                        Pos2::new(x, underline_height),
-                        Pos2::new(x + draw_w, underline_height),
-                    ],
-                    stroke: Stroke::new(
-                        cell_height * 0.15,
-                        self.theme.link_color(),
-                    ),
-                });
-            }
-
-            if indexed.c != ' ' && indexed.c != '\t' {
-                let mut fg = fg;
-                let mut bg = bg;
-                if content.grid.cursor.point == indexed.point
-                    && is_app_cursor_mode
-                {
-                    std::mem::swap(&mut fg, &mut bg);
+                let flags = indexed.flags;
+                if flags.contains(cell::Flags::WIDE_CHAR_SPACER) {
+                    continue;
                 }
 
-                shapes.push(Shape::text(
-                    &painter.fonts(|c| c.clone()),
-                    Pos2 {
-                        x: x + (draw_w / 2.0),
-                        y,
-                    },
-                    Align2::CENTER_TOP,
-                    indexed.c,
-                    self.font.font_type(),
+                let is_app_cursor_mode =
+                    content.terminal_mode.contains(TermMode::APP_CURSOR);
+                let is_wide_char = flags.contains(cell::Flags::WIDE_CHAR);
+                let is_inverse = flags.contains(cell::Flags::INVERSE);
+                let is_dim =
+                    flags.intersects(cell::Flags::DIM | cell::Flags::DIM_BOLD);
+                let is_selected = content
+                    .selectable_range
+                    .as_ref()
+                    .is_some_and(|r| r.contains(point));
+                let is_hovered_hyperlink =
+                    content.hovered_hyperlink.as_ref().is_some_and(|r| {
+                        r.contains(&point)
+                            && r.contains(&state.current_mouse_position_on_grid)
+                    });
+
+                let x = layout_min.x + (cell_width * col as f32);
+                let y = layout_min.y + (cell_height * row as f32);
+
+                let mut fg = self.theme.get_color(indexed.fg);
+                let bg = self.theme.get_color(indexed.bg);
+                let draw_w = if is_wide_char {
+                    // A wide char at the LAST column would draw past the
+                    // viewport; the painter's clip rect crops it — count
+                    // only the visible cell.
+                    if col + 1 < columns {
+                        cell_width * 2.0
+                    } else {
+                        cell_width
+                    }
+                } else {
+                    cell_width
+                };
+
+                if is_dim {
+                    fg = fg.linear_multiply(0.7);
+                }
+
+                let (fg, bg) = resolved_cell_colors(
+                    &self.theme,
                     fg,
-                ));
+                    bg,
+                    is_inverse,
+                    is_selected,
+                );
+
+                if global_bg != bg {
+                    shapes.push(Shape::Rect(RectShape::filled(
+                        Rect::from_min_size(
+                            Pos2::new(x, y),
+                            Vec2::new(draw_w + 1.0, cell_height + 1.0),
+                        ),
+                        CornerRadius::ZERO,
+                        bg,
+                    )));
+                }
+
+                if is_hovered_hyperlink {
+                    let underline_height = y + cell_height;
+                    shapes.push(Shape::LineSegment {
+                        points: [
+                            Pos2::new(x, underline_height),
+                            Pos2::new(x + draw_w, underline_height),
+                        ],
+                        stroke: Stroke::new(
+                            cell_height * 0.15,
+                            self.theme.link_color(),
+                        ),
+                    });
+                }
+
+                if indexed.c != ' ' && indexed.c != '\t' {
+                    let mut fg = fg;
+                    let mut bg = bg;
+                    if content.grid.cursor.point == point && is_app_cursor_mode
+                    {
+                        std::mem::swap(&mut fg, &mut bg);
+                    }
+
+                    shapes.push(Shape::text(
+                        &painter.fonts(|c| c.clone()),
+                        Pos2 {
+                            x: x + (draw_w / 2.0),
+                            y,
+                        },
+                        Align2::CENTER_TOP,
+                        indexed.c,
+                        self.font.font_type(),
+                        fg,
+                    ));
+                }
             }
         }
 

@@ -83,7 +83,7 @@ pub enum LinkAction {
     Open,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TerminalSize {
     pub cell_width: u16,
     pub cell_height: u16,
@@ -582,6 +582,20 @@ impl TerminalBackend {
             num_cols: cols,
         };
 
+        // Cell metrics can change WITHOUT the grid changing (sub-pixel
+        // font measure drift, zoom factor). `self.size` is already the
+        // new value here — the render snapshot MUST follow it on the
+        // next sync, or the renderer keeps placing glyphs with the OLD
+        // cell_width/cell_height over a grid laid out for the new one
+        // (misaligned columns that read as duplicated/overlapping text).
+        if !grid_changed
+            && (cell_width != self.last_content.terminal_size.cell_width
+                || cell_height != self.last_content.terminal_size.cell_height
+                || layout_size != self.last_content.terminal_size.layout_size)
+        {
+            self.dirty.store(true, Ordering::Relaxed);
+        }
+
         if grid_changed {
             self.dirty.store(true, Ordering::Relaxed);
             // Stamp the SIGWINCH moment: the child's redraw burst right
@@ -805,6 +819,157 @@ mod tests {
             content.grid.display_iter().map(|cell| cell.c).collect();
 
         assert!(output.contains("startup"));
+    }
+
+    // ---- Resize reflow integrity (the Linux narrow-pane bug) ----------
+    //
+    // Character-count invariance: shrinking a line of N known characters
+    // must NEVER duplicate or drop one, at every width, in both
+    // directions. Duplicated glyphs after narrowing used to be the
+    // renderer's fault (stale cell metrics / stacked reflow rows); the
+    // grid-level assertions below pin the emulator side, the app-level
+    // renderer now draws one viewport cell at most once.
+
+    #[cfg(unix)]
+    mod resize_reflow_tests {
+        use super::*;
+        use crate::backend::TerminalBackend;
+        use crate::BackendSettings;
+        use std::path::PathBuf;
+
+        fn start(cmd: &str, id: u64) -> TerminalBackend {
+            TerminalBackend::new(
+                id,
+                egui::Context::default(),
+                BackendSettings {
+                    shell: "/bin/sh".into(),
+                    args: vec!["-c".into(), format!("{cmd}; sleep 4").into()],
+                    working_directory: Some(PathBuf::from("/tmp")),
+                    env: vec![],
+                    scrollback: 500,
+                },
+            )
+            .expect("backend")
+        }
+
+        /// Pump syncs until the visible text stops changing (~300ms
+        /// quiet) so SIGWINCH redraws / reflow have fully landed.
+        fn settle(backend: &mut TerminalBackend, deadline_ms: u64) {
+            let start = std::time::Instant::now();
+            let mut last = screen_text(backend);
+            let mut stable_for = 0u64;
+            while start.elapsed().as_millis() < deadline_ms as u128 {
+                thread::sleep(Duration::from_millis(50));
+                backend.set_dirty();
+                let _ = backend.sync();
+                let now = screen_text(backend);
+                if now == last {
+                    stable_for += 50;
+                    if stable_for >= 300 {
+                        return;
+                    }
+                } else {
+                    last = now;
+                    stable_for = 0;
+                }
+            }
+        }
+
+        fn screen_text(backend: &mut TerminalBackend) -> String {
+            use alacritty_terminal::grid::Dimensions;
+            backend.set_dirty();
+            let content = backend.sync();
+            let grid = &content.grid;
+            let mut text = String::new();
+            for row in 0..grid.screen_lines() {
+                for col in 0..grid.columns() {
+                    use alacritty_terminal::index::Point;
+                    text.push(
+                        grid[Point::new(Line(row as i32), Column(col))].c,
+                    );
+                }
+                text.push('\n');
+            }
+            text
+        }
+
+        fn resize(backend: &mut TerminalBackend, cols: u16, rows: u16) {
+            backend.process_command(BackendCommand::Resize(
+                crate::Size::from(egui::vec2(
+                    cols as f32 * 10.0,
+                    rows as f32 * 20.0,
+                )),
+                crate::Size::from(egui::vec2(10.0, 20.0)),
+            ));
+        }
+
+        /// Print `text`, then sweep widths and require the exact count
+        /// of `probe` chars on screen at every step — reflow must
+        /// neither duplicate (the "copy characters" bug) nor drop.
+        fn assert_probe_count_stable(
+            backend: &mut TerminalBackend,
+            probe: char,
+            want: usize,
+        ) {
+            let count = |s: &str| s.chars().filter(|c| *c == probe).count();
+            let widths: &[u16] = &[40, 20, 40, 60, 30, 80, 25, 40];
+            for &w in widths {
+                resize(backend, w, 24);
+                settle(backend, 4_000);
+                let got = count(&screen_text(backend));
+                assert_eq!(
+                    got, want,
+                    "width {w}: '{probe}' count drifted (want {want}) — reflow duplicated or dropped characters"
+                );
+            }
+        }
+
+        #[test]
+        fn shrink_reflow_neither_duplicates_nor_drops_ascii() {
+            // 60 'X' on one line, parked at the screen BOTTOM (26 filler
+            // lines first): line-count changes push top content into
+            // history, but the cursor's row always stays visible. At 40
+            // cols → 40+20, at 20 → 20+20+20; the sweep must keep
+            // exactly 60 visible.
+            let mut backend = start("seq 1 26; printf 'XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX'", 301);
+            thread::sleep(Duration::from_millis(200));
+            settle(&mut backend, 4_000);
+            resize(&mut backend, 40, 24);
+            settle(&mut backend, 4_000);
+            assert_probe_count_stable(&mut backend, 'X', 60);
+        }
+
+        #[test]
+        fn shrink_reflow_neither_duplicates_nor_drops_cjk() {
+            // 12 CJK chars (24 cells at 2 cells/char) at the screen
+            // bottom: widths crossing the 2-cell boundary must keep
+            // exactly 12 glyphs and never split a wide char into
+            // spacers that render twice.
+            let mut backend =
+                start("seq 1 26; printf '中文测试中文测试中文测试'", 302);
+            thread::sleep(Duration::from_millis(200));
+            settle(&mut backend, 4_000);
+            resize(&mut backend, 40, 24);
+            settle(&mut backend, 4_000);
+            assert_probe_count_stable(&mut backend, '中', 3);
+            assert_probe_count_stable(&mut backend, '文', 3);
+            assert_probe_count_stable(&mut backend, '测', 3);
+            assert_probe_count_stable(&mut backend, '试', 3);
+        }
+
+        #[test]
+        fn mixed_wide_narrow_lines_survive_the_sweep() {
+            // Alternating CJK + ASCII at the screen bottom: the classic
+            // case where a wide char wraps at the boundary.
+            let mut backend =
+                start("seq 1 26; printf 'a中b文c测d试e中f文g测h试'", 303);
+            thread::sleep(Duration::from_millis(200));
+            settle(&mut backend, 4_000);
+            resize(&mut backend, 40, 24);
+            settle(&mut backend, 4_000);
+            assert_probe_count_stable(&mut backend, '中', 2);
+            assert_probe_count_stable(&mut backend, 'a', 1);
+        }
     }
 
     #[test]
