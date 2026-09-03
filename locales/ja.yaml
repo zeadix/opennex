@@ -26,6 +26,8 @@ settings:
     lock: ロック
   nav:
     general: 一般
+    ai_assistant: AI アシスタント
+    remote: リモート操作
     themes: テーマ
     shortcuts: ショートカット
     lock: ロック
@@ -363,6 +365,7 @@ theme_editor:
   text_label: '通常テキスト:'
   ui_appearance: UI 外観
   ui_font_label_short: 'UI フォント:'
+  font_cjk_hint: このフォントには CJK の字形がありません。UI の中国語テキストは内蔵の Noto Sans CJK で描画され続けます（英数字のみ変化）。
   ui_font_size_label: 'UI フォントサイズ:'
   unsaved: ● 未保存
   warning_label: '警告:'

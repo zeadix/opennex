@@ -647,8 +647,7 @@ impl<'a> TerminalView<'a> {
                     stroke: Stroke::new(
                         cell_height * 0.15,
                         self.theme.link_color(),
-                    )
-                    .into(),
+                    ),
                 });
             }
 

@@ -82,6 +82,10 @@ pub struct SettingsTabsTexts {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SettingsNavTexts {
     pub general: String,
+    #[serde(default)]
+    pub ai_assistant: String,
+    #[serde(default)]
+    pub remote: String,
     pub themes: String,
     pub shortcuts: String,
     pub lock: String,
@@ -682,6 +686,7 @@ pub struct ThemeEditorTexts {
     pub text_label: String,
     pub ui_appearance: String,
     pub ui_font_label_short: String,
+    pub font_cjk_hint: String,
     pub ui_font_size_label: String,
     pub unsaved: String,
     pub warning_label: String,
@@ -774,6 +779,8 @@ impl Texts {
                 },
                 nav: SettingsNavTexts {
                     general: "通用".into(),
+                    ai_assistant: "AI 助手".into(),
+                    remote: "远程控制".into(),
                     themes: "主题".into(),
                     shortcuts: "快捷键".into(),
                     lock: "锁定".into(),
@@ -1116,6 +1123,7 @@ impl Texts {
                 ui_appearance: "UI 外观".into(),
                 ui_font_label_short: "UI 字体:".into(),
                 ui_font_size_label: "UI 字号:".into(),
+                font_cjk_hint: "该字体不含中文字形，界面中文将继续使用内置 Noto Sans CJK 渲染（仅英文/数字外观变化）。".into(),
                 unsaved: "● 未保存".into(),
                 warning_label: "警告:".into(),
                 weak_text_label: "弱化文字:".into(),

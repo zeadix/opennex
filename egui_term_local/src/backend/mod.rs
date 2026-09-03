@@ -152,6 +152,24 @@ pub struct TerminalBackend {
     /// Cumulative bytes written TO the pty (keyboard input, pastes, mouse
     /// reports). Exposed so the app can compute per-terminal uplink rates.
     pub tx_bytes: std::sync::Arc<AtomicU64>,
+    /// UNIX-time ms of the last PTY OUTPUT event (any bytes from the
+    /// child: shell echo, TUI redraws, streaming logs). Written by the
+    /// event subscription thread next to `dirty`, read lock-free by the
+    /// app for idle/activity indicators - unlike `dirty` this is never
+    /// consumed, so observing it cannot disturb the render pipeline.
+    last_output_ms: Arc<AtomicU64>,
+    /// UNIX-time ms of the last grid resize (SIGWINCH source). Wakeups
+    /// inside the grace window after this are reflow redraw noise, not
+    /// activity (see [`RESIZE_GRACE_MS`]).
+    last_resize_ms: Arc<AtomicU64>,
+}
+
+/// Current UNIX time in whole milliseconds (0 fallback on clock error).
+pub fn unix_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 impl TerminalBackend {
@@ -207,6 +225,10 @@ impl TerminalBackend {
         let _pty_event_loop_thread = pty_event_loop.spawn();
         let dirty = Arc::new(AtomicBool::new(true));
         let dirty_thread = dirty.clone();
+        let last_output = Arc::new(AtomicU64::new(unix_ms()));
+        let last_output_thread = last_output.clone();
+        let last_resize = Arc::new(AtomicU64::new(0));
+        let last_resize_thread = last_resize.clone();
         let child_exited = Arc::new(AtomicBool::new(false));
         let exited_thread = child_exited.clone();
         let _pty_event_subscription = std::thread::Builder::new()
@@ -215,6 +237,8 @@ impl TerminalBackend {
                 receive_events(
                     event_receiver,
                     dirty_thread,
+                    last_output_thread,
+                    last_resize_thread,
                     exited_thread,
                     app_context,
                 )
@@ -231,6 +255,8 @@ impl TerminalBackend {
             dirty,
             child_exited,
             tx_bytes: std::sync::Arc::new(AtomicU64::new(0)),
+            last_output_ms: last_output,
+            last_resize_ms: last_resize,
         })
     }
 
@@ -328,6 +354,11 @@ impl TerminalBackend {
 
     pub fn child_pid(&self) -> u32 {
         self.child_pid
+    }
+
+    /// UNIX-time ms of the last PTY output event (see the field docs).
+    pub fn last_output_ms(&self) -> u64 {
+        self.last_output_ms.load(Ordering::Relaxed)
     }
 
     fn process_link_action(
@@ -429,8 +460,7 @@ impl TerminalBackend {
             c
         );
 
-        self.tx_bytes
-            .fetch_add(msg.as_bytes().len() as u64, Ordering::Relaxed);
+        self.tx_bytes.fetch_add(msg.len() as u64, Ordering::Relaxed);
         self.notifier.notify(msg.as_bytes().to_vec());
     }
 
@@ -554,6 +584,10 @@ impl TerminalBackend {
 
         if grid_changed {
             self.dirty.store(true, Ordering::Relaxed);
+            // Stamp the SIGWINCH moment: the child's redraw burst right
+            // after this must not count as terminal activity (workspace
+            // switch / split drag / font change all land here).
+            self.last_resize_ms.store(unix_ms(), Ordering::Relaxed);
             // Notify PTY first, then reflow the emulator grid once.
             self.notifier.on_resize(self.size.into());
             terminal.resize(TermSize::new(
@@ -781,9 +815,112 @@ mod tests {
         receive_events(
             receiver,
             Arc::new(AtomicBool::new(false)),
+            Arc::new(AtomicU64::new(0)),
+            Arc::new(AtomicU64::new(0)),
             Arc::new(AtomicBool::new(false)),
             egui::Context::default(),
         );
+    }
+
+    /// Wakeups right after a grid resize are reflow redraw noise: they
+    /// must NOT advance the activity timestamp. Cosmetic events
+    /// (DECSCUSR blinking change, title, bell) never do, either.
+    #[test]
+    fn activity_timestamp_ignores_resize_burst_and_cosmetic_events() {
+        let (sender, receiver) = mpsc::channel();
+        let dirty = Arc::new(AtomicBool::new(false));
+        let last_output = Arc::new(AtomicU64::new(0));
+        let last_resize = Arc::new(AtomicU64::new(0));
+        let exited = Arc::new(AtomicBool::new(false));
+        let ctx = egui::Context::default();
+        let worker = {
+            let dirty = dirty.clone();
+            let last_output = last_output.clone();
+            let last_resize = last_resize.clone();
+            let exited = exited.clone();
+            std::thread::spawn(move || {
+                receive_events(
+                    receiver,
+                    dirty,
+                    last_output,
+                    last_resize,
+                    exited,
+                    ctx,
+                );
+            })
+        };
+
+        // Pre-condition: nothing has stamped activity yet.
+        assert_eq!(last_output.load(Ordering::Relaxed), 0);
+
+        // Simulate "we resized just now": the redraw burst that follows
+        // is inside the grace window and must be ignored.
+        last_resize.store(unix_ms(), Ordering::Relaxed);
+        let _ = sender.send(Event::Wakeup);
+        let _ = sender.send(Event::MouseCursorDirty);
+        let _ = sender.send(Event::CursorBlinkingChange);
+        let _ = sender.send(Event::Title("x".into()));
+        for _ in 0..50 {
+            if dirty.load(Ordering::Relaxed) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert_eq!(
+            last_output.load(Ordering::Relaxed),
+            0,
+            "redraw burst inside the resize grace window counted as activity"
+        );
+
+        // Outside the grace window a Wakeup IS new content.
+        last_resize.store(
+            unix_ms().saturating_sub(super::RESIZE_GRACE_MS + 1),
+            Ordering::Relaxed,
+        );
+        let _ = sender.send(Event::Wakeup);
+        for _ in 0..50 {
+            if last_output.load(Ordering::Relaxed) != 0 {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(
+            last_output.load(Ordering::Relaxed) != 0,
+            "real output outside the grace window was ignored"
+        );
+
+        // Cosmetic events still never stamp activity.
+        let before = last_output.load(Ordering::Relaxed);
+        let _ = sender.send(Event::CursorBlinkingChange);
+        let _ = sender.send(Event::Title("y".into()));
+        for _ in 0..50 {
+            if dirty.load(Ordering::Relaxed) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        assert_eq!(
+            last_output.load(Ordering::Relaxed),
+            before,
+            "cosmetic event stamped activity"
+        );
+
+        drop(sender);
+        let _ = worker.join();
+    }
+
+    #[test]
+    fn wakeup_grace_window_classification() {
+        // No resize ever recorded: everything counts.
+        assert!(wakeup_is_real_output(1_000, 0));
+        // Inside the grace window: redraw noise.
+        assert!(!wakeup_is_real_output(1_000, 900));
+        // Boundary: the window has fully elapsed.
+        assert!(wakeup_is_real_output(1_000 + RESIZE_GRACE_MS, 1_000));
+        // Clock skew (resize stamped in the "future"): treat as inside
+        // the window, saturating subtraction must not panic.
+        assert!(!wakeup_is_real_output(1_000, 2_000));
     }
 }
 
@@ -816,14 +953,43 @@ impl Drop for TerminalBackend {
     }
 }
 
+/// Wakeups landing inside this window after a grid resize are reflow
+/// redraw noise (SIGWINCH → bash prompt repaint / full-screen TUI
+/// redraw), NOT new information: they must not count as terminal
+/// activity. This is what keeps the workspace sidebar's idle dot green
+/// when switching to a workspace whose PTY still had a stale size.
+pub(crate) const RESIZE_GRACE_MS: u64 = 500;
+
+/// Should this Wakeup advance the activity timestamp? Only reflow
+/// redraws inside the resize grace window are filtered out.
+pub(crate) fn wakeup_is_real_output(now_ms: u64, last_resize_ms: u64) -> bool {
+    last_resize_ms == 0
+        || now_ms.saturating_sub(last_resize_ms) >= RESIZE_GRACE_MS
+}
+
 fn receive_events(
     event_receiver: mpsc::Receiver<Event>,
     dirty: Arc<AtomicBool>,
+    last_output_ms: Arc<AtomicU64>,
+    last_resize_ms: Arc<AtomicU64>,
     child_exited: Arc<AtomicBool>,
     app_context: egui::Context,
 ) {
     while let Ok(event) = event_receiver.recv() {
         dirty.store(true, Ordering::Relaxed);
+        // Only genuine NEW terminal content counts as activity. The
+        // other events ride along with real output (MouseCursorDirty)
+        // or are cosmetic (CursorBlinkingChange from DECSCUSR, Title,
+        // Bell, PtyWrite echoes...) — treating them as output made the
+        // cursor blink and resize redraws reset the idle timer.
+        if matches!(event, Event::Wakeup)
+            && wakeup_is_real_output(
+                unix_ms(),
+                last_resize_ms.load(Ordering::Relaxed),
+            )
+        {
+            last_output_ms.store(unix_ms(), Ordering::Relaxed);
+        }
         app_context.request_repaint();
         if matches!(event, Event::Exit) {
             child_exited.store(true, Ordering::Relaxed);

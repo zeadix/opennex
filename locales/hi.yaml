@@ -26,6 +26,8 @@ settings:
     lock: लॉक
   nav:
     general: सामान्य
+    ai_assistant: AI सहायक
+    remote: रिमोट नियंत्रण
     themes: थीम
     shortcuts: शॉर्टकट
     lock: लॉक
@@ -364,6 +366,7 @@ theme_editor:
   text_label: 'सामान्य टेक्स्ट:'
   ui_appearance: UI रूप
   ui_font_label_short: 'UI फ़ॉन्ट:'
+  font_cjk_hint: इस फ़ॉन्ट में CJK ग्लिफ़ नहीं हैं। UI का चीनी टेक्स्ट अंतर्निहित Noto Sans CJK से ही रेंडर होता रहेगा (केवल लैटिन/अंक बदलेंगे)।
   ui_font_size_label: 'UI फ़ॉन्ट आकार:'
   unsaved: ● असहेजित
   warning_label: 'चेतावनी:'

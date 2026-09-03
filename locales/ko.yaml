@@ -26,6 +26,8 @@ settings:
     lock: 잠금
   nav:
     general: 일반
+    ai_assistant: AI 어시스턴트
+    remote: 원격 제어
     themes: 테마
     shortcuts: 단축키
     lock: 잠금
@@ -363,6 +365,7 @@ theme_editor:
   text_label: '일반 텍스트:'
   ui_appearance: UI 모양
   ui_font_label_short: 'UI 글꼴:'
+  font_cjk_hint: 이 글꼴에는 CJK 글리프가 없습니다. UI의 중국어 텍스트는 내장 Noto Sans CJK로 계속 렌더링됩니다(라틴 문자/숫자만 변경).
   ui_font_size_label: 'UI 글꼴 크기:'
   unsaved: ● 저장 안 됨
   warning_label: '경고:'

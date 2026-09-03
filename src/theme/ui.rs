@@ -214,6 +214,10 @@ pub struct ThemeEditorLabels {
     pub discard: String,
     pub ui_font_label_short: String,
     pub ui_font_size_label: String,
+    /// Shown when the selected UI font has no CJK glyphs (the UI's
+    /// Chinese text then keeps falling back to the bundled Noto Sans
+    /// CJK, so the font choice looks like a no-op).
+    pub font_cjk_hint: String,
     pub terminal_font_label_short: String,
     pub terminal_font_size_label: String,
     pub cell_spacing_label: String,
@@ -231,12 +235,21 @@ pub fn show_theme_editor_body(
     subtab: ThemeEditorSubtab,
     dialog: &mut ThemeDialogState,
     labels: &ThemeEditorLabels,
+    cjk_fonts: &std::collections::HashSet<String>,
 ) -> Vec<ThemeAction> {
     let mut actions = Vec::new();
     let _ = (available, has_unsaved, dialog);
     match subtab {
         ThemeEditorSubtab::UiAppearance => {
-            show_ui_appearance_editor(ui, draft, available_fonts, is_builtin, &mut actions, labels);
+            show_ui_appearance_editor(
+                ui,
+                draft,
+                available_fonts,
+                is_builtin,
+                &mut actions,
+                labels,
+                cjk_fonts,
+            );
         }
         ThemeEditorSubtab::Terminal => {
             show_terminal_section_editor(
@@ -262,6 +275,7 @@ fn show_ui_appearance_editor(
     _is_builtin: bool,
     actions: &mut Vec<ThemeAction>,
     labels: &ThemeEditorLabels,
+    cjk_fonts: &std::collections::HashSet<String>,
 ) {
     ui.strong(egui::RichText::new(&labels.system_ui).size(12.0));
     ui.add_space(4.0);
@@ -296,7 +310,18 @@ fn show_ui_appearance_editor(
                                 ui.selectable_label(current == name, name).clicked()
                             };
                         let font_entry = |ui: &mut egui::Ui, font: &str, current: &str| -> bool {
-                            let rich = egui::RichText::new(font)
+                            // CJK-capable fonts carry a badge: picking a
+                            // font WITHOUT CJK glyphs keeps every Chinese
+                            // label on the bundled Noto Sans CJK fallback
+                            // (only Latin text changes), which users
+                            // otherwise read as "the setting does
+                            // nothing".
+                            let text = if cjk_fonts.contains(font) {
+                                format!("{font} · CJK")
+                            } else {
+                                font.to_string()
+                            };
+                            let rich = egui::RichText::new(text)
                                 .family(egui::FontFamily::Name(std::sync::Arc::from(font)));
                             ui.selectable_label(current == font, rich).clicked()
                         };
@@ -318,6 +343,15 @@ fn show_ui_appearance_editor(
                         }
                     });
             });
+        // Current font has no CJK glyphs: explain why most of the UI
+        // (Chinese labels) keeps rendering with the bundled fallback.
+        let picks_cjk = current.is_empty()
+            || current == "system-ui"
+            || current == "monospace"
+            || cjk_fonts.contains(&current);
+        if !picks_cjk {
+            ui.label(egui::RichText::new(&labels.font_cjk_hint).size(10.0).weak());
+        }
         ui.add(
             egui::DragValue::new(&mut draft.app.ui_font_size)
                 .range(8.0..=32.0)

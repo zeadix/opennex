@@ -636,6 +636,29 @@ fn terminal_should_have_focus(
     terminal_is_active && !workspace_is_renaming && !terminal_is_renaming
 }
 
+/// A workspace whose focused terminal went ≥30s without PTY output or
+/// user input counts as IDLE (green dot); anything inside the window
+/// is ACTIVE (red dot). No focused terminal → UNKNOWN (neutral dot).
+pub(crate) const WORKSPACE_IDLE_MS: u64 = 30_000;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WorkspaceActivity {
+    /// Output/input inside the idle window.
+    Active,
+    /// Silent for the whole window.
+    Idle,
+    /// No terminal / no focused leaf to watch.
+    Unknown,
+}
+
+fn workspace_activity_state(activity_ms: Option<u64>, now_ms: u64) -> WorkspaceActivity {
+    match activity_ms {
+        Some(ms) if now_ms.saturating_sub(ms) < WORKSPACE_IDLE_MS => WorkspaceActivity::Active,
+        Some(_) => WorkspaceActivity::Idle,
+        None => WorkspaceActivity::Unknown,
+    }
+}
+
 fn terminal_focus_lock_allowed(workspace_is_renaming: bool, terminal_is_renaming: bool) -> bool {
     !workspace_is_renaming && !terminal_is_renaming
 }
@@ -690,6 +713,48 @@ fn check_shortcut(
         }
     }
     false
+}
+
+/// Like [`check_shortcut`] but immune to key AUTO-REPEAT: holding the
+/// combo fires exactly once per physical press. Holding the
+/// workspace-switch keys used to switch workspaces every repeat frame
+/// (~30/s), thrashing multi-terminal repaints (visible freeze) and
+/// leaving egui's keyboard focus stranded on a widget from an
+/// already-hidden workspace — after which every Text event was routed
+/// to that ghost widget and typing died app-wide.
+fn check_shortcut_no_repeat(
+    ctx: &egui::Context,
+    binds: &HashMap<String, ShortcutBinding>,
+    name: &str,
+) -> bool {
+    let Some(b) = binds.get(name) else {
+        return false;
+    };
+    let Some(key) = binding_to_key(b) else {
+        return false;
+    };
+    let mods = binding_to_modifiers(b);
+    let mut matched = false;
+    ctx.input_mut(|input| {
+        // Matching events are ALWAYS removed: non-repeat hits count as
+        // the trigger, repeats are dropped on the floor (a leftover
+        // repeat would otherwise leak into the focused terminal as a
+        // bare arrow-key escape sequence).
+        input.events.retain(|event| match event {
+            egui::Event::Key {
+                key: event_key,
+                modifiers: event_mods,
+                pressed: true,
+                repeat,
+                ..
+            } if *event_key == key && *event_mods == mods => {
+                matched |= !repeat;
+                false
+            }
+            _ => true,
+        });
+    });
+    matched
 }
 
 fn consume_exact_shortcut(
@@ -793,6 +858,14 @@ struct DialogKeysOutcome {
 ///   history clear confirm, favorites clear confirm,
 ///   favorite folder dialogs (name/command/delete).
 fn any_modal_open(app: &App) -> bool {
+    any_modal_open_excluding_ai(app) || app.show_ai_panel
+}
+
+/// Every modal EXCEPT the AI assistant panel. The AI panel is a modal
+/// for keyboard isolation, but it must still be closable with Esc —
+/// the Esc handler needs to know whether some OTHER modal (settings,
+/// theme editor, …) owns the keyboard first.
+fn any_modal_open_excluding_ai(app: &App) -> bool {
     app.show_settings
         || app.show_about
         || app.theme_editor_open
@@ -812,7 +885,6 @@ fn any_modal_open(app: &App) -> bool {
         || app.fav_delete_confirm.is_some()
         || app.ssh_dialog.is_some()
         || app.ssh_delete_confirm.is_some()
-        || app.show_ai_panel
         || app.snippet_fill.is_some()
         || app.startup_cmd_dialog.is_some()
         || app.terminal_search.is_some()
@@ -1269,8 +1341,123 @@ impl Default for AppSettings {
 /// the system font directories carry a .ttf/.otf/.ttc extension but are
 /// not valid font resources (e.g. Windows mstmc.ttf bitmap fonts);
 /// egui/epaint panics when parsing those at first use, crashing startup.
+/// Whether the font file provides glyphs for common CJK codepoints
+/// (中/文/界). TTC collections are probed at index 0 — enough to
+/// classify the FILE. Drives the theme editor's "CJK" badge and the
+/// fallback hint: a font without CJK glyphs keeps every Chinese label
+/// on the bundled Noto Sans CJK, so only Latin text visibly changes.
+fn font_file_has_cjk(data: &[u8]) -> bool {
+    use ab_glyph::Font as _;
+    let probe = |font: ab_glyph::FontRef| {
+        ["中", "文", "界"]
+            .iter()
+            .all(|c| font.glyph_id(c.chars().next().unwrap()).0 != 0)
+    };
+    if let Ok(f) = ab_glyph::FontRef::try_from_slice(data) {
+        probe(f)
+    } else if let Ok(f) = ab_glyph::FontRef::try_from_slice_and_index(data, 0) {
+        probe(f)
+    } else {
+        false
+    }
+}
+
+/// One OS system-UI font: fixed registration key, file path, TTC index.
+pub(crate) struct OsUiFont {
+    /// Fixed key used in egui's font_data ("os-ui" = Latin UI face,
+    /// "os-ui-cjk" = the system's Chinese face).
+    pub key: &'static str,
+    pub path: PathBuf,
+    pub index: u32,
+}
+
+/// Parse one line of `fc-match -f "%{file}\t%{index}\t%{family}"`.
+/// Returns (file, ttc index). Family names are NOT used as keys — the
+/// caller registers under the fixed "os-ui"/"os-ui-cjk" keys.
+fn parse_fc_match(line: &str) -> Option<(String, u32)> {
+    // Trim only the trailing newline — a leading tab means an EMPTY
+    // file field, which must stay empty (and be rejected).
+    let mut parts = line.trim_end().split('\t');
+    let file = parts.next()?.trim();
+    // Non-TTC faces report "-1" (or omit the field): face 0 is right.
+    let index = parts
+        .next()
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or(0);
+    if file.is_empty() {
+        return None;
+    }
+    Some((file.to_string(), index))
+}
+
+/// Probe the OS's own UI font files once per process. "system-ui"
+/// themes head the Proportional stack with these so the whole app —
+/// Chinese labels included — matches the desktop's configured font.
+fn detect_os_ui_fonts() -> Vec<OsUiFont> {
+    let mut out: Vec<OsUiFont> = Vec::new();
+    match std::env::consts::OS {
+        "linux" => {
+            // fontconfig owns the answer on Linux; fc-match resolves the
+            // generic family to a concrete file (<50ms).
+            for (pattern, key) in [
+                ("sans-serif", "os-ui"),
+                ("sans-serif:lang=zh-cn", "os-ui-cjk"),
+            ] {
+                if let Ok(output) = std::process::Command::new("fc-match")
+                    .args(["-f", "%{file}\t%{index}\t%{family}", pattern])
+                    .output()
+                {
+                    if let Some((file, index)) =
+                        parse_fc_match(&String::from_utf8_lossy(&output.stdout))
+                    {
+                        out.push(OsUiFont {
+                            key,
+                            path: PathBuf::from(file),
+                            index,
+                        });
+                    }
+                }
+            }
+        }
+        "windows" => {
+            if let Some(windir) = std::env::var_os("WINDIR") {
+                let fonts = PathBuf::from(windir).join("Fonts");
+                out.push(OsUiFont {
+                    key: "os-ui",
+                    path: fonts.join("segoeui.ttf"),
+                    index: 0,
+                });
+                out.push(OsUiFont {
+                    key: "os-ui-cjk",
+                    path: fonts.join("msyh.ttc"),
+                    index: 0,
+                });
+            }
+        }
+        "macos" => {
+            out.push(OsUiFont {
+                key: "os-ui",
+                path: PathBuf::from("/System/Library/Fonts/Helvetica.ttc"),
+                index: 0,
+            });
+            out.push(OsUiFont {
+                key: "os-ui-cjk",
+                path: PathBuf::from("/System/Library/Fonts/PingFang.ttc"),
+                index: 0,
+            });
+        }
+        _ => {}
+    }
+    out.retain(|f| f.path.is_file());
+    out
+}
+
 fn is_valid_font_data(data: &[u8]) -> bool {
+    // Single faces parse directly; TTC collections need an index
+    // (index 0 validates the container — FontData carries the real
+    // index at load time).
     ab_glyph::FontRef::try_from_slice(data).is_ok()
+        || ab_glyph::FontRef::try_from_slice_and_index(data, 0).is_ok()
 }
 
 /// Symbol/dingbat/ornament fonts (OpenSymbol, Standard Symbols PS,
@@ -1401,21 +1588,27 @@ enum DialogKind {
 }
 
 /// Pages of the Unity-style settings window. The numeric order matches
-/// the nav listing; `as u8` is persisted.
+/// the nav listing; `as u8` is persisted. (Pre-split legacy values 1/2
+/// meant Shortcuts/Lock — a one-shot page-memory mismatch after
+/// upgrading is harmless, so the new pages simply take 1/2.)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SettingsPage {
     General = 0,
-    Shortcuts = 1,
-    Lock = 2,
-    Theme = 3,
+    AiAssistant = 1,
+    Remote = 2,
+    Shortcuts = 3,
+    Lock = 4,
+    Theme = 5,
 }
 
 impl SettingsPage {
     fn from_u8(v: u8) -> Self {
         match v {
-            1 => SettingsPage::Shortcuts,
-            2 => SettingsPage::Lock,
-            3..=6 => SettingsPage::Theme,
+            1 => SettingsPage::AiAssistant,
+            2 => SettingsPage::Remote,
+            3 => SettingsPage::Shortcuts,
+            4 => SettingsPage::Lock,
+            5..=8 => SettingsPage::Theme,
             _ => SettingsPage::General,
         }
     }
@@ -1568,6 +1761,9 @@ pub struct App {
     /// System fonts scanned+validated once; Arc-shared into every font
     /// atlas rebuild (see rebuild_fonts).
     font_asset_cache: Option<Vec<(String, std::sync::Arc<egui::FontData>)>>,
+    /// Fonts (from the asset cache) that provide CJK glyphs — drives the
+    /// theme editor's "· CJK" badges and the no-CJK fallback hint.
+    font_cjk_names: std::collections::HashSet<String>,
     /// Corruption/recovery notices queued at startup, drained into the
     /// toast channel one per frame once the UI is live.
     startup_warnings: Vec<String>,
@@ -2119,6 +2315,7 @@ impl App {
             terminal_search: None,
             proc_sample_tx: None,
             font_asset_cache: None,
+            font_cjk_names: Default::default(),
             startup_warnings: Vec::new(),
             startup_check_consumed: false,
             fav_folders: Vec::new(),
@@ -3180,6 +3377,7 @@ impl App {
             discard: te.discard.clone(),
             ui_font_label_short: te.ui_font_label_short.clone(),
             ui_font_size_label: te.ui_font_size_label.clone(),
+            font_cjk_hint: te.font_cjk_hint.clone(),
             terminal_font_label_short: te.terminal_font_label_short.clone(),
             terminal_font_size_label: te.terminal_font_size_label.clone(),
             cell_spacing_label: te.cell_spacing_label.clone(),
@@ -3274,6 +3472,7 @@ impl App {
                             crate::theme::ui::ThemeEditorSubtab::UiAppearance,
                             &mut theme_dialog,
                             &editor_labels,
+                            &self.font_cjk_names,
                         );
                         // (No separator between the System UI and Terminal
                         // blocks — spacing alone separates them.)
@@ -3288,6 +3487,7 @@ impl App {
                             crate::theme::ui::ThemeEditorSubtab::Terminal,
                             &mut theme_dialog,
                             &editor_labels,
+                            &self.font_cjk_names,
                         ));
                         actions_out = actions;
                     });
@@ -3397,6 +3597,7 @@ impl App {
     fn rebuild_fonts(&mut self, ctx: &egui::Context) {
         if self.font_asset_cache.is_none() {
             let mut loaded: Vec<(String, std::sync::Arc<egui::FontData>)> = Vec::new();
+            let mut cjk_names = std::collections::HashSet::new();
             for (name, path) in scan_system_fonts() {
                 let path = std::path::PathBuf::from(path);
                 match std::fs::read(&path) {
@@ -3410,11 +3611,43 @@ impl App {
                             log::warn!("skipping invalid font file {}: {}", name, path.display());
                             continue;
                         }
+                        if font_file_has_cjk(&data) {
+                            cjk_names.insert(name.clone());
+                        }
                         loaded.push((name, std::sync::Arc::new(egui::FontData::from_owned(data))));
                     }
                     Err(e) => log::warn!("unreadable font file {}: {}", path.display(), e),
                 }
             }
+            // The OS's own UI faces (fixed "os-ui"/"os-ui-cjk" keys, NOT
+            // in the picker list): "system-ui" themes head Proportional
+            // with these so the app matches the desktop font, Chinese
+            // labels included.
+            for os in detect_os_ui_fonts() {
+                match std::fs::read(&os.path) {
+                    Ok(data) if is_valid_font_data(&data) => {
+                        if font_file_has_cjk(&data) {
+                            cjk_names.insert(os.key.to_string());
+                        }
+                        // FontData must carry the TTC index so the right
+                        // face inside a collection is used.
+                        loaded.push((
+                            os.key.to_string(),
+                            std::sync::Arc::new(egui::FontData {
+                                font: data.into(),
+                                index: os.index,
+                                tweak: Default::default(),
+                            }),
+                        ));
+                    }
+                    _ => log::warn!("unreadable system UI font {}", os.path.display()),
+                }
+            }
+            // The bundled CJK font ("noto-cjk" key, see
+            // load_multilingual_fonts) always covers Chinese regardless
+            // of what the system offers.
+            cjk_names.insert("noto-cjk".into());
+            self.font_cjk_names = cjk_names;
             self.font_asset_cache = Some(loaded);
         }
         let system_fonts = self.font_asset_cache.as_ref().unwrap();
@@ -3530,15 +3763,28 @@ impl App {
             .first()
             .cloned()
             .unwrap_or_default();
-        // Symbol fonts must never head a generic family (a user theme
-        // saved with e.g. NotoColorEmoji selected rendered decorated
-        // glyphs across the whole UI); fall back to the default stack.
-        if !ui_font.is_empty()
-            && ui_font != "system-ui"
-            && !is_symbol_font_name(&ui_font)
-            && fonts.font_data.contains_key(&ui_font)
-        {
-            if let Some(family) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
+        if let Some(family) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
+            if ui_font == "system-ui" {
+                // Follow the OS: the desktop's UI face heads the stack and
+                // its Chinese face comes right after, so BOTH Latin and
+                // Chinese labels match the system font (a plain "insert
+                // nothing" here used to pin the UI on egui's built-in
+                // Ubuntu-Light + bundled CJK — ignoring whatever the user
+                // configured system-wide).
+                if fonts.font_data.contains_key("os-ui") {
+                    family.insert(0, "os-ui".to_string());
+                }
+                if fonts.font_data.contains_key("os-ui-cjk") {
+                    family.insert(1, "os-ui-cjk".to_string());
+                }
+            } else if !ui_font.is_empty()
+                && !is_symbol_font_name(&ui_font)
+                && fonts.font_data.contains_key(&ui_font)
+            {
+                // Symbol fonts must never head a generic family (a user
+                // theme saved with e.g. NotoColorEmoji selected rendered
+                // decorated glyphs across the whole UI); fall back to the
+                // default stack.
                 family.insert(0, ui_font);
             }
         }
@@ -4789,6 +5035,33 @@ impl eframe::App for App {
             }
         }
 
+        // Escape closes the floating panels (AI assistant / remote
+        // control) BEFORE the terminal sees the escape — both were
+        // otherwise unclosable from the keyboard (no Esc path at all,
+        // while every other popup in the app closes on Esc). Real modal
+        // dialogs keep priority: they own the Esc while open.
+        let ai_panel_open = self.show_ai_panel;
+        let remote_panel_open = self
+            .remote
+            .as_ref()
+            .map(|s| s.panel_visible)
+            .unwrap_or(false)
+            || self.show_remote_panel;
+        if !any_modal_open_excluding_ai(self)
+            && (ai_panel_open || remote_panel_open)
+            && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+        {
+            if ai_panel_open {
+                self.show_ai_panel = false;
+            }
+            if remote_panel_open {
+                if let Some(session) = self.remote.as_mut() {
+                    session.panel_visible = false;
+                }
+                self.show_remote_panel = false;
+            }
+        }
+
         // Escape: close history menu
         if !workspace_renaming
             && !history_menu_handled
@@ -4912,15 +5185,30 @@ impl eframe::App for App {
                 }
             }
         }
-        if shortcuts_allowed && check_shortcut(ctx, &binds, "workspace_up") && self.active_panel > 0
+        // Move the active workspace one slot up/down. No-repeat: holding
+        // the combo must not cycle at ~30 switches/s (repaint thrash).
+        // restore_workspace_focus re-points focused_terminal at the new
+        // workspace's active tab — without it the old terminal's focus
+        // lock survived while the NEW workspace's terminals all
+        // surrendered focus, so egui kept routing Text events to a
+        // widget that was no longer rendered (keyboard died app-wide
+        // until restart). Clearing terminal_focus_id releases the stale
+        // focus-lock filter in raw_input_hook.
+        if shortcuts_allowed
+            && check_shortcut_no_repeat(ctx, &binds, "workspace_up")
+            && self.active_panel > 0
         {
             self.active_panel -= 1;
+            self.terminal_focus_id = None;
+            self.restore_workspace_focus(self.active_panel);
         }
         if shortcuts_allowed
-            && check_shortcut(ctx, &binds, "workspace_down")
+            && check_shortcut_no_repeat(ctx, &binds, "workspace_down")
             && self.active_panel + 1 < self.panels.len()
         {
             self.active_panel += 1;
+            self.terminal_focus_id = None;
+            self.restore_workspace_focus(self.active_panel);
         }
         if shortcuts_allowed && check_shortcut(ctx, &binds, "panel_left") {
             self.focus_adjacent_panel(-1);
@@ -5066,14 +5354,6 @@ impl eframe::App for App {
                             self.workspace_sidebar_visible = !self.workspace_sidebar_visible;
                             ui.close_menu();
                         }
-                        let visible = self.show_ai_panel;
-                        if ui
-                            .selectable_label(visible, &self.texts.view_menu.ai_assistant)
-                            .clicked()
-                        {
-                            self.show_ai_panel = !self.show_ai_panel;
-                            ui.close_menu();
-                        }
                         let visible = self.show_monitor;
                         if ui
                             .selectable_label(visible, &self.texts.view_menu.monitor)
@@ -5082,23 +5362,55 @@ impl eframe::App for App {
                             self.show_monitor = !self.show_monitor;
                             ui.close_menu();
                         }
-                        let visible = self
-                            .remote
-                            .as_ref()
-                            .map(|s| s.panel_visible)
-                            .unwrap_or(self.show_remote_panel);
-                        if ui
-                            .selectable_label(visible, &self.texts.view_menu.remote)
-                            .clicked()
-                        {
-                            if let Some(session) = self.remote.as_mut() {
-                                session.panel_visible = !session.panel_visible;
-                            } else {
-                                self.show_remote_panel = !self.show_remote_panel;
-                            }
-                            ui.close_menu();
-                        }
                     });
+                    // Top-level toggle buttons: AI assistant & remote
+                    // control (pulled out of the View menu — frequent
+                    // single-click actions). Accent text marks the ON
+                    // state.
+                    let accent = self.active_theme.app.accent.to_egui();
+                    let menu_btn_toggled =
+                        |ui: &mut egui::Ui, label: &str, active: bool| -> egui::Response {
+                            let color = if active { accent } else { fg_menu };
+                            let galley = ui.fonts(|f| {
+                                f.layout_no_wrap(
+                                    label.to_string(),
+                                    egui::FontId::proportional(12.0),
+                                    color,
+                                )
+                            });
+                            let pad = 8.0;
+                            let size =
+                                egui::vec2(galley.size().x + pad * 2.0, galley.size().y + 8.0);
+                            let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
+                            let _fg = chrome.paint(ui, rect, &resp);
+                            ui.painter()
+                                .galley(rect.center() - galley.size() / 2.0, galley, color);
+                            resp
+                        };
+                    let ai_label = self.texts.view_menu.ai_assistant.clone();
+                    let ai_active = self.show_ai_panel;
+                    if menu_btn_toggled(ui, &ai_label, ai_active).clicked() {
+                        self.show_ai_panel = !self.show_ai_panel;
+                    }
+                    let remote_label = self.texts.view_menu.remote.clone();
+                    let remote_active = self
+                        .remote
+                        .as_ref()
+                        .map(|s| s.panel_visible)
+                        .unwrap_or(self.show_remote_panel);
+                    if menu_btn_toggled(ui, &remote_label, remote_active).clicked() {
+                        if let Some(session) = self.remote.as_mut() {
+                            session.panel_visible = !session.panel_visible;
+                            // Keep both visibility sources in sync or
+                            // the panel resurrects after closing (the
+                            // pre-start toggle may still be set).
+                            if !session.panel_visible {
+                                self.show_remote_panel = false;
+                            }
+                        } else {
+                            self.show_remote_panel = !self.show_remote_panel;
+                        }
+                    }
                     let label = self.texts.menu.theme.clone();
                     dropdown(ui, &label, "menu_theme", &mut |ui| {
                         ui.set_min_width(120.0);
@@ -5432,6 +5744,16 @@ impl eframe::App for App {
                         }
                         if nav_item(
                             nav_ui,
+                            &texts.settings.nav.ai_assistant,
+                            SettingsPage::AiAssistant,
+                        ) {
+                            self.settings_tab = SettingsPage::AiAssistant as u8;
+                        }
+                        if nav_item(nav_ui, &texts.settings.nav.remote, SettingsPage::Remote) {
+                            self.settings_tab = SettingsPage::Remote as u8;
+                        }
+                        if nav_item(
+                            nav_ui,
                             &texts.settings.nav.shortcuts,
                             SettingsPage::Shortcuts,
                         ) {
@@ -5470,6 +5792,12 @@ impl eframe::App for App {
                                             match page {
                                                 SettingsPage::General => {
                                                     self.settings_page_general(ui)
+                                                }
+                                                SettingsPage::AiAssistant => {
+                                                    self.settings_page_ai(ui)
+                                                }
+                                                SettingsPage::Remote => {
+                                                    self.settings_page_remote(ui)
                                                 }
                                                 SettingsPage::Shortcuts => {
                                                     self.settings_page_shortcuts(ui)
@@ -6379,9 +6707,10 @@ impl eframe::App for App {
                         }),
                 )
                 .show(ctx, |ui| {
-                    // Header row: square icon buttons on the LEFT (新建
-                    // leftmost, 模板 to its right) — background fill only,
-                    // no stroke, no rounding, Phosphor regular glyphs.
+                    // Header row: "工作区" title on the left, square icon
+                    // buttons anchored RIGHT (模板 left of the rightmost
+                    // 新建) — background fill only, no stroke, no rounding,
+                    // Phosphor regular glyphs.
                     ui.horizontal(|ui| {
                         let fg = self.active_theme.app.button_fg.to_egui();
                         let icon_active = self.active_theme.app.text.to_egui();
@@ -6389,81 +6718,99 @@ impl eframe::App for App {
 
                         let btn_size = 18.5;
                         let glyph = 12.0;
-                        // 新建 (leftmost): flat PLUS glyph, no background.
-                        let (new_rect, new_resp) = ui.allocate_exact_size(
-                            egui::vec2(btn_size, btn_size),
-                            egui::Sense::click(),
+                        // Section title, flush left.
+                        ui.label(
+                            egui::RichText::new(&self.texts.workspace.heading)
+                                .size(12.0)
+                                .color(fg),
                         );
-                        let new_color = if new_resp.hovered() { icon_active } else { fg };
-                        let new_galley = ui.fonts(|f| {
-                            f.layout_no_wrap(
-                                egui_phosphor::regular::PLUS.to_string(),
-                                egui::FontId::proportional(glyph),
+                        // Right-aligned cluster: RTL layout paints the FIRST
+                        // control rightmost, so 新建 comes first.
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            // 新建 (rightmost): flat PLUS glyph, no background.
+                            let (new_rect, new_resp) = ui.allocate_exact_size(
+                                egui::vec2(btn_size, btn_size),
+                                egui::Sense::click(),
+                            );
+                            let new_color = if new_resp.hovered() { icon_active } else { fg };
+                            let new_galley = ui.fonts(|f| {
+                                f.layout_no_wrap(
+                                    egui_phosphor::regular::PLUS.to_string(),
+                                    egui::FontId::proportional(glyph),
+                                    new_color,
+                                )
+                            });
+                            ui.painter().galley(
+                                new_rect.center()
+                                    - egui::vec2(
+                                        new_galley.size().x / 2.0,
+                                        new_galley.size().y / 2.0,
+                                    ),
+                                new_galley,
                                 new_color,
-                            )
-                        });
-                        ui.painter().galley(
-                            new_rect.center()
-                                - egui::vec2(new_galley.size().x / 2.0, new_galley.size().y / 2.0),
-                            new_galley,
-                            new_color,
-                        );
-                        let new_hovered = new_resp.hovered();
-                        let new_clicked = new_resp.clicked();
-                        let _ = new_resp.on_hover_text(&self.texts.workspace.new);
-                        if new_clicked {
-                            self.add_panel(ui.ctx());
-                        }
-                        let _ = new_hovered;
-
-                        // 模板: flat STACK glyph, no background, left-click menu
-                        // via BarState (same as the row three-dot).
-                        let (tpl_rect, tpl_resp) = ui.allocate_exact_size(
-                            egui::vec2(btn_size, btn_size),
-                            egui::Sense::click(),
-                        );
-                        let tpl_color = if tpl_resp.hovered() { icon_active } else { fg };
-                        let tpl_galley = ui.fonts(|f| {
-                            f.layout_no_wrap(
-                                egui_phosphor::regular::STACK.to_string(),
-                                egui::FontId::proportional(glyph),
-                                tpl_color,
-                            )
-                        });
-                        ui.painter().galley(
-                            tpl_rect.center()
-                                - egui::vec2(tpl_galley.size().x / 2.0, tpl_galley.size().y / 2.0),
-                            tpl_galley,
-                            tpl_color,
-                        );
-                        let bar_id = tpl_resp.id;
-                        if self.cached_template_files.is_empty() {
-                            self.refresh_template_files();
-                        }
-                        let template_files = self.cached_template_files.clone();
-                        let mut bar_state = egui::menu::BarState::load(ui.ctx(), bar_id);
-                        bar_state.bar_menu(&tpl_resp, |ui| {
-                            if template_files.is_empty() {
-                                ui.label(&self.texts.workspace.templates_empty);
-                            } else {
-                                for (display_name, path) in &template_files {
-                                    let path = path.clone();
-                                    let display_name = display_name.clone();
-                                    ui.horizontal(|ui| {
-                                        if ui.button(display_name.as_str()).clicked() {
-                                            self.pending_load_from_template = Some(path.clone());
-                                            ui.close_menu();
-                                        }
-                                        if ui.small_button(egui_phosphor::regular::X).clicked() {
-                                            self.pending_delete_template = Some(path);
-                                            ui.close_menu();
-                                        }
-                                    });
-                                }
+                            );
+                            let new_hovered = new_resp.hovered();
+                            let new_clicked = new_resp.clicked();
+                            let _ = new_resp.on_hover_text(&self.texts.workspace.new);
+                            if new_clicked {
+                                self.add_panel(ui.ctx());
                             }
+                            let _ = new_hovered;
+
+                            // 模板: flat STACK glyph, no background, left-click menu
+                            // via BarState (same as the row three-dot).
+                            let (tpl_rect, tpl_resp) = ui.allocate_exact_size(
+                                egui::vec2(btn_size, btn_size),
+                                egui::Sense::click(),
+                            );
+                            let tpl_color = if tpl_resp.hovered() { icon_active } else { fg };
+                            let tpl_galley = ui.fonts(|f| {
+                                f.layout_no_wrap(
+                                    egui_phosphor::regular::STACK.to_string(),
+                                    egui::FontId::proportional(glyph),
+                                    tpl_color,
+                                )
+                            });
+                            ui.painter().galley(
+                                tpl_rect.center()
+                                    - egui::vec2(
+                                        tpl_galley.size().x / 2.0,
+                                        tpl_galley.size().y / 2.0,
+                                    ),
+                                tpl_galley,
+                                tpl_color,
+                            );
+                            let bar_id = tpl_resp.id;
+                            if self.cached_template_files.is_empty() {
+                                self.refresh_template_files();
+                            }
+                            let template_files = self.cached_template_files.clone();
+                            let mut bar_state = egui::menu::BarState::load(ui.ctx(), bar_id);
+                            bar_state.bar_menu(&tpl_resp, |ui| {
+                                if template_files.is_empty() {
+                                    ui.label(&self.texts.workspace.templates_empty);
+                                } else {
+                                    for (display_name, path) in &template_files {
+                                        let path = path.clone();
+                                        let display_name = display_name.clone();
+                                        ui.horizontal(|ui| {
+                                            if ui.button(display_name.as_str()).clicked() {
+                                                self.pending_load_from_template =
+                                                    Some(path.clone());
+                                                ui.close_menu();
+                                            }
+                                            if ui.small_button(egui_phosphor::regular::X).clicked()
+                                            {
+                                                self.pending_delete_template = Some(path);
+                                                ui.close_menu();
+                                            }
+                                        });
+                                    }
+                                }
+                            });
+                            bar_state.store(ui.ctx(), bar_id);
+                            let _ = tpl_resp.on_hover_text(&self.texts.workspace.templates);
                         });
-                        bar_state.store(ui.ctx(), bar_id);
-                        let _ = tpl_resp.on_hover_text(&self.texts.workspace.templates);
                     });
                     // Fixed bottom cluster FIRST: a bottom panel inside
                     // the sidebar reserves its height up front, so the
@@ -6571,9 +6918,46 @@ impl eframe::App for App {
                                             self.active_theme.app.button_bg.to_egui()
                                         },
                                     );
+                                    // Activity strip: the LEFT 4px of the row
+                                    // button itself doubles as the indicator —
+                                    // no separate dot. It watches THIS
+                                    // workspace's focused terminal (the
+                                    // highlighted tab), even when the
+                                    // workspace is not on screen. Red = PTY
+                                    // output or user input within the last
+                                    // 30s, green = silent longer, neutral =
+                                    // nothing to watch.
+                                    let focus_tab = self.dock_states.get_mut(&i).and_then(|tree| {
+                                        tree.find_active_focused().map(|(_, t)| t.clone())
+                                    });
+                                    let activity_ms = focus_tab
+                                        .and_then(|tab| self.terminals.get(&tab))
+                                        .map(|td| td.instance.last_activity_ms());
+                                    let strip_color = match workspace_activity_state(
+                                        activity_ms,
+                                        egui_term::unix_ms(),
+                                    ) {
+                                        WorkspaceActivity::Active => {
+                                            self.active_theme.app.danger.to_egui()
+                                        }
+                                        WorkspaceActivity::Idle => {
+                                            self.active_theme.app.success.to_egui()
+                                        }
+                                        WorkspaceActivity::Unknown => {
+                                            self.active_theme.app.weak_text.to_egui()
+                                        }
+                                    };
+                                    ui.painter().rect_filled(
+                                        egui::Rect::from_min_size(
+                                            row_rect.min,
+                                            egui::vec2(4.0, row_rect.height()),
+                                        ),
+                                        0.0,
+                                        strip_color,
+                                    );
                                     self.panel_rects[i] = row_rect;
 
-                                    // Layout: [≡ drag icon] [name (flex)] [lock btn | three-dot]
+                                    // Layout: [name (flex)] [lock btn][≡ drag icon]
                                     // Use a child Ui inside row_rect so we can place
                                     // items by their own rect, not via add_sized.
                                     let mut child = ui.new_child(
@@ -6581,31 +6965,6 @@ impl eframe::App for App {
                                             egui::Layout::left_to_right(egui::Align::Center),
                                         ),
                                     );
-                                    // Drag handle on the left — always visible
-                                    // (brighter when hovered).
-                                    let drag_w = 14.0;
-                                    let (handle_rect, handle_resp) = child.allocate_exact_size(
-                                        egui::vec2(drag_w, row_h - 4.0),
-                                        egui::Sense::drag(),
-                                    );
-                                    let handle_color = if handle_resp.hovered() {
-                                        self.active_theme.app.text.to_egui()
-                                    } else {
-                                        self.active_theme.app.weak_text.to_egui()
-                                    };
-                                    child.painter().text(
-                                        handle_rect.center(),
-                                        egui::Align2::CENTER_CENTER,
-                                        egui_phosphor::regular::DOTS_SIX_VERTICAL,
-                                        egui::FontId::proportional(12.0),
-                                        handle_color,
-                                    );
-                                    if handle_resp.drag_started() {
-                                        self.drag_src_panel = Some(i);
-                                        self.drag_dst_panel = None;
-                                    }
-                                    let _ = handle_rect;
-
                                     // Name (clickable, fills middle). Flat text drawn
                                     // directly on the row's shared button_bg — no
                                     // SelectableLabel so hover never paints its own
@@ -6630,7 +6989,9 @@ impl eframe::App for App {
                                     });
                                     child.painter().galley(
                                         egui::pos2(
-                                            name_rect.min.x + 2.0,
+                                            // 12px indent: keeps the label clear
+                                            // of the 4px activity strip.
+                                            name_rect.min.x + 12.0,
                                             name_rect.center().y - name_galley.size().y / 2.0,
                                         ),
                                         name_galley,
@@ -6682,15 +7043,16 @@ impl eframe::App for App {
                                     });
 
                                     // Right-side action cluster, anchored to the
-                                    // right edge with right-to-left layout. The lock
-                                    // and three-dot icons are always rendered and
-                                    // sit flush against each other (no divider, no
-                                    // item spacing inside the cluster). Lock is the
-                                    // rightmost target; the three-dot menu button
-                                    // sits to its left.
+                                    // right edge with right-to-left layout. The
+                                    // drag handle (reorder) is the rightmost
+                                    // item and the lock button sits to its
+                                    // left; icons sit flush against each other
+                                    // (no divider, no item spacing inside the
+                                    // cluster).
                                     let btn_w = 17.0;
                                     let btn_h = row_h;
-                                    let action_cluster_w = btn_w;
+                                    let drag_w = 14.0;
+                                    let action_cluster_w = btn_w + drag_w;
                                     let mut actions_ui = ui.new_child(
                                         egui::UiBuilder::new()
                                             .max_rect(egui::Rect::from_min_size(
@@ -6709,7 +7071,34 @@ impl eframe::App for App {
                                     let button_fg = self.active_theme.app.button_fg.to_egui();
                                     let icon_active = self.active_theme.app.text.to_egui();
 
-                                    // Lock / unlock button (rightmost, the only action). Always painted so the
+                                    // Drag handle (rightmost): grab to reorder
+                                    // the workspace (brighter when hovered).
+                                    let (handle_rect, handle_resp) = actions_ui
+                                        .allocate_exact_size(
+                                            egui::vec2(drag_w, btn_h),
+                                            egui::Sense::drag(),
+                                        );
+                                    let handle_color = if handle_resp.hovered() {
+                                        icon_active
+                                    } else {
+                                        button_fg
+                                    };
+                                    actions_ui.painter().text(
+                                        handle_rect.center(),
+                                        egui::Align2::CENTER_CENTER,
+                                        egui_phosphor::regular::DOTS_SIX_VERTICAL,
+                                        egui::FontId::proportional(12.0),
+                                        handle_color,
+                                    );
+                                    if handle_resp.drag_started() {
+                                        self.drag_src_panel = Some(i);
+                                        self.drag_dst_panel = None;
+                                    }
+                                    let _ = handle_resp
+                                        .on_hover_text(&self.texts.workspace.drag_handle_hint);
+
+                                    // Lock / unlock button (left of the drag
+                                    // handle). Always painted so the
                                     let (lock_rect, lock_resp) = actions_ui.allocate_exact_size(
                                         egui::vec2(btn_w, btn_h),
                                         egui::Sense::click(),
@@ -7272,11 +7661,43 @@ fn format_memory(bytes: Option<u64>) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        binding_to_key, default_key_binds, is_monospace_family_name, is_symbol_font_name,
-        toggle_history_menu, update_alt_key_state, AltKeyState, AppSettings, HistoryNav,
-        ShortcutBinding, TerminalStatePersist,
+        binding_to_key, check_shortcut_no_repeat, default_key_binds, is_monospace_family_name,
+        is_symbol_font_name, toggle_history_menu, update_alt_key_state, workspace_activity_state,
+        AltKeyState, AppSettings, HistoryNav, ShortcutBinding, TerminalStatePersist,
+        WorkspaceActivity, WORKSPACE_IDLE_MS,
     };
     use egui_dock::DockState;
+
+    /// The sidebar activity dot: red inside the 30s window, green after
+    /// it, neutral when there is no focused terminal to watch.
+    #[test]
+    fn workspace_activity_states_follow_the_idle_window() {
+        let now = 1_000_000_000u64;
+        assert_eq!(
+            workspace_activity_state(Some(now - 1_000), now),
+            WorkspaceActivity::Active
+        );
+        // Exactly at the boundary: 30s elapsed = idle.
+        assert_eq!(
+            workspace_activity_state(Some(now - WORKSPACE_IDLE_MS), now),
+            WorkspaceActivity::Idle
+        );
+        assert_eq!(
+            workspace_activity_state(Some(now - WORKSPACE_IDLE_MS - 1), now),
+            WorkspaceActivity::Idle
+        );
+        // No focused terminal: neutral regardless of the clock.
+        assert_eq!(
+            workspace_activity_state(None, now),
+            WorkspaceActivity::Unknown
+        );
+        // Clock skew (activity in the "future"): saturating subtraction
+        // keeps it inside the window → active, never a panic.
+        assert_eq!(
+            workspace_activity_state(Some(now + 5_000), now),
+            WorkspaceActivity::Active
+        );
+    }
 
     /// The unified dialog keyboard protocol: a fresh dialog starts on
     /// CANCEL, Enter activates the selected side, Escape closes, and the
@@ -7382,6 +7803,147 @@ mod tests {
                 let out = super::dialog_keys(ctx, &mut kb, false);
                 // Arrow ignored; Enter still reported raw.
                 assert!(out.enter && out.cancel && !out.confirm);
+            },
+        );
+    }
+
+    /// fc-match output parsing: file + TTC index, family ignored,
+    /// non-numeric index falls back to face 0, garbage rejected.
+    #[test]
+    fn fc_match_output_parses_file_and_index() {
+        assert_eq!(
+            super::parse_fc_match(
+                "/usr/share/fonts/noto/NotoSansCJK-Regular.ttc\t0\tNoto Sans CJK SC,Noto Sans CJK SC Medium"
+            ),
+            Some((
+                "/usr/share/fonts/noto/NotoSansCJK-Regular.ttc".to_string(),
+                0
+            ))
+        );
+        // Non-TTC faces report -1: face 0.
+        assert_eq!(
+            super::parse_fc_match(
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf\t-1\tDejaVu Sans"
+            ),
+            Some((
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf".to_string(),
+                0
+            ))
+        );
+        // TTC at index 2.
+        assert_eq!(
+            super::parse_fc_match("/fonts/some.ttc\t2\tFamily"),
+            Some(("/fonts/some.ttc".to_string(), 2))
+        );
+        // Garbage: no file field.
+        assert_eq!(super::parse_fc_match("\t0\tFamily"), None);
+        assert_eq!(super::parse_fc_match(""), None);
+    }
+
+    /// The CJK probe must recognise the bundled CJK font and reject a
+    /// Latin/Devanagari font — this drives the editor's fallback hint.
+    #[test]
+    fn font_cjk_probe_matches_bundled_fonts() {
+        assert!(super::font_file_has_cjk(include_bytes!(
+            "../assets/fonts/NotoSansCJK-Regular.ttc"
+        )));
+        assert!(!super::font_file_has_cjk(include_bytes!(
+            "../assets/fonts/Lohit-Devanagari.ttf"
+        )));
+        assert!(!super::font_file_has_cjk(b"not a font"));
+    }
+
+    /// The workspace-switch shortcut fires once per PHYSICAL press:
+    /// auto-repeat events are neither counted as a trigger nor leaked
+    /// to the focused terminal as bare arrow-key escapes.
+    #[test]
+    fn workspace_shortcut_ignores_key_autorepeat() {
+        let binds = default_key_binds();
+
+        // Non-repeat press: exactly one hit.
+        let ctx = egui::Context::default();
+        let _ = ctx.run(
+            egui::RawInput {
+                events: vec![egui::Event::Key {
+                    key: egui::Key::ArrowDown,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::CTRL,
+                    physical_key: None,
+                }],
+                ..Default::default()
+            },
+            |ctx| {
+                assert!(check_shortcut_no_repeat(ctx, &binds, "workspace_down"));
+            },
+        );
+
+        // Auto-repeat press: NOT a hit; the repeat event is consumed so
+        // it cannot leak into the PTY as an escape sequence. egui
+        // normalizes a single injected repeat:true to false ("first
+        // press" - the key is not down yet), so the repeat must be
+        // simulated across TWO frames (press, then repeat).
+        let ctx = egui::Context::default();
+        let _ = ctx.run(
+            egui::RawInput {
+                events: vec![egui::Event::Key {
+                    key: egui::Key::ArrowDown,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::CTRL,
+                    physical_key: None,
+                }],
+                ..Default::default()
+            },
+            |ctx| {
+                assert!(check_shortcut_no_repeat(ctx, &binds, "workspace_down"));
+            },
+        );
+        let _ = ctx.run(
+            egui::RawInput {
+                events: vec![egui::Event::Key {
+                    key: egui::Key::ArrowDown,
+                    pressed: true,
+                    repeat: true,
+                    modifiers: egui::Modifiers::CTRL,
+                    physical_key: None,
+                }],
+                ..Default::default()
+            },
+            |ctx| {
+                assert!(!check_shortcut_no_repeat(ctx, &binds, "workspace_down"));
+                let leftover = ctx.input(|i| {
+                    i.events.iter().any(|e| {
+                        matches!(
+                            e,
+                            egui::Event::Key {
+                                key: egui::Key::ArrowDown,
+                                pressed: true,
+                                ..
+                            }
+                        )
+                    })
+                });
+                assert!(!leftover);
+            },
+        );
+
+        // Plain ArrowDown (no Ctrl): untouched by the workspace shortcut.
+        let ctx = egui::Context::default();
+        let _ = ctx.run(
+            egui::RawInput {
+                events: vec![egui::Event::Key {
+                    key: egui::Key::ArrowDown,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                    physical_key: None,
+                }],
+                ..Default::default()
+            },
+            |ctx| {
+                assert!(!check_shortcut_no_repeat(ctx, &binds, "workspace_down"));
+                assert_eq!(ctx.input(|i| i.events.len()), 1);
             },
         );
     }

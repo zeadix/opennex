@@ -864,7 +864,12 @@ impl App {
         if let Some(session) = self.remote.as_mut() {
             session.panel_visible = still_open;
         }
-        if !still_open && self.remote.is_none() {
+        // The panel has TWO visibility sources: session.panel_visible
+        // (remote running) and show_remote_panel (pre-start toggle).
+        // Closing the window via X must clear BOTH — clearing only the
+        // active one left the other set and the window reappeared the
+        // next frame (it could never be closed until the app restart).
+        if !still_open {
             self.show_remote_panel = false;
         }
     }

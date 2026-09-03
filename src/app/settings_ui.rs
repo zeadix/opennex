@@ -193,7 +193,81 @@ impl App {
         });
         self.settings_edit.ssh_prod_banner = prod_banner;
 
-        // AI assistant: user-supplied OpenAI-compatible endpoint.
+        self.settings_group(ui, &b.data_section);
+        let mut max_h = self.settings_edit.max_history;
+        let mut sb = self.settings_edit.scrollback;
+        self.settings_row(ui, &t.max_history, |ui| {
+            ui.add_sized(
+                [180.0, 20.0],
+                egui::DragValue::new(&mut max_h).range(10..=10000),
+            );
+        });
+        self.settings_row(ui, &t.scrollback, |ui| {
+            ui.add_sized(
+                [180.0, 20.0],
+                egui::DragValue::new(&mut sb).range(100..=50000),
+            );
+        });
+        self.settings_edit.max_history = max_h;
+        self.settings_edit.scrollback = sb;
+
+        // Default shell for NEW terminals (Windows multi-shell support;
+        // a single detected shell hides the row on other platforms).
+        if self.detected_shells.len() > 1 {
+            let mut shell_id = self.settings_edit.default_shell.clone();
+            let shells = self.detected_shells.clone();
+            self.settings_row(ui, "默认 Shell", |ui| {
+                let selected = shells.iter().position(|s| s.id == shell_id).unwrap_or(0);
+                let names: Vec<String> = shells.iter().map(shell_display_name).collect();
+                let mut chosen = selected;
+                egui::ComboBox::from_id_salt("default_shell")
+                    .selected_text(&names[selected])
+                    .width(180.0)
+                    .show_ui(ui, |ui| {
+                        for (i, name) in names.iter().enumerate() {
+                            ui.selectable_value(&mut chosen, i, name.clone());
+                        }
+                    });
+                if chosen != selected {
+                    shell_id = shells[chosen].id.to_string();
+                }
+            });
+            self.settings_edit.default_shell = shell_id;
+        }
+
+        // Maintenance action: plain button (same style as all other
+        // settings buttons), flush left, no divider; clicking opens a
+        // confirmation dialog. The favorites-clear button sits beside it.
+        let mut clear = false;
+        let mut clear_favs = false;
+        let clear_label = t.clear_all_history.clone();
+        let clear_favs_label = self.texts.terminal.clear_favorites.clone();
+        self.settings_action_row(ui, |ui| {
+            if ui.button(&clear_label).clicked() {
+                clear = true;
+            }
+            ui.add_space(8.0);
+            if ui.button(clear_favs_label).clicked() {
+                clear_favs = true;
+            }
+        });
+        if clear {
+            self.show_clear_history_confirm = true;
+            self.settings_clear_just_opened = true;
+        }
+        if clear_favs {
+            self.show_clear_favorites_confirm = true;
+            self.fav_clear_just_opened = true;
+        }
+
+        // Group footer: path hints as weak, wrapping small text.
+        ui.add_space(8.0);
+        ui.weak(egui::RichText::new(format!("{}  {}", t.scene_path, t.templates_path)).small());
+    }
+
+    /// AI assistant page: enable switch, OpenAI-compatible endpoint,
+    /// key, model and agent step cap.
+    pub(crate) fn settings_page_ai(&mut self, ui: &mut egui::Ui) {
         let ta = self.texts.ai.clone();
         self.settings_group(ui, &ta.settings_section);
         let mut ai_on = self.settings_edit.ai_enabled;
@@ -232,8 +306,11 @@ impl App {
             });
             self.settings_edit.agent_max_steps = max_steps;
         }
+    }
 
-        // Remote phone control group.
+    /// Remote phone control page: server port + the frp relay channel
+    /// editor (edits apply instantly — see remote_sync_frp).
+    pub(crate) fn settings_page_remote(&mut self, ui: &mut egui::Ui) {
         let tr = self.texts.remote.clone();
         self.settings_group(ui, &tr.settings_section);
         let mut port = self.settings_edit.remote_port;
@@ -316,77 +393,6 @@ impl App {
                 enabled: false,
             });
         }
-
-        self.settings_group(ui, &b.data_section);
-        let mut max_h = self.settings_edit.max_history;
-        let mut sb = self.settings_edit.scrollback;
-        self.settings_row(ui, &t.max_history, |ui| {
-            ui.add_sized(
-                [180.0, 20.0],
-                egui::DragValue::new(&mut max_h).range(10..=10000),
-            );
-        });
-        self.settings_row(ui, &t.scrollback, |ui| {
-            ui.add_sized(
-                [180.0, 20.0],
-                egui::DragValue::new(&mut sb).range(100..=50000),
-            );
-        });
-        self.settings_edit.max_history = max_h;
-        self.settings_edit.scrollback = sb;
-
-        // Default shell for NEW terminals (Windows multi-shell support;
-        // a single detected shell hides the row on other platforms).
-        if self.detected_shells.len() > 1 {
-            let mut shell_id = self.settings_edit.default_shell.clone();
-            let shells = self.detected_shells.clone();
-            self.settings_row(ui, "默认 Shell", |ui| {
-                let selected = shells.iter().position(|s| s.id == shell_id).unwrap_or(0);
-                let names: Vec<String> = shells.iter().map(shell_display_name).collect();
-                let mut chosen = selected;
-                egui::ComboBox::from_id_salt("default_shell")
-                    .selected_text(&names[selected])
-                    .width(180.0)
-                    .show_ui(ui, |ui| {
-                        for (i, name) in names.iter().enumerate() {
-                            ui.selectable_value(&mut chosen, i, name.clone());
-                        }
-                    });
-                if chosen != selected {
-                    shell_id = shells[chosen].id.to_string();
-                }
-            });
-            self.settings_edit.default_shell = shell_id;
-        }
-
-        // Maintenance action: plain button (same style as all other
-        // settings buttons), flush left, no divider; clicking opens a
-        // confirmation dialog. The favorites-clear button sits beside it.
-        let mut clear = false;
-        let mut clear_favs = false;
-        let clear_label = t.clear_all_history.clone();
-        let clear_favs_label = self.texts.terminal.clear_favorites.clone();
-        self.settings_action_row(ui, |ui| {
-            if ui.button(&clear_label).clicked() {
-                clear = true;
-            }
-            ui.add_space(8.0);
-            if ui.button(clear_favs_label).clicked() {
-                clear_favs = true;
-            }
-        });
-        if clear {
-            self.show_clear_history_confirm = true;
-            self.settings_clear_just_opened = true;
-        }
-        if clear_favs {
-            self.show_clear_favorites_confirm = true;
-            self.fav_clear_just_opened = true;
-        }
-
-        // Group footer: path hints as weak, wrapping small text.
-        ui.add_space(8.0);
-        ui.weak(egui::RichText::new(format!("{}  {}", t.scene_path, t.templates_path)).small());
     }
     pub(crate) fn settings_page_shortcuts(&mut self, ui: &mut egui::Ui) {
         let texts = self.texts.clone();

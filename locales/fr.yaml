@@ -26,6 +26,8 @@ settings:
     lock: Verrouillage
   nav:
     general: Général
+    ai_assistant: Assistant IA
+    remote: Télécommande
     themes: Thèmes
     shortcuts: Raccourcis
     lock: Verrouiller
@@ -364,6 +366,7 @@ theme_editor:
   text_label: 'Texte normal :'
   ui_appearance: Apparence UI
   ui_font_label_short: 'Police UI :'
+  font_cjk_hint: Cette police ne contient pas de glyphes CJK. Le texte chinois de l'interface continue d'utiliser Noto Sans CJK intégré (seuls les caractères latins/chiffres changent).
   ui_font_size_label: 'Taille police UI :'
   unsaved: ● non enregistré
   warning_label: 'Avertissement :'

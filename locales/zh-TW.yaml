@@ -26,6 +26,8 @@ settings:
     lock: 鎖定
   nav:
     general: 一般
+    ai_assistant: AI 助手
+    remote: 遠端控制
     themes: 主題
     shortcuts: 快速鍵
     lock: 鎖定
@@ -363,6 +365,7 @@ theme_editor:
   text_label: '普通文字:'
   ui_appearance: UI 外觀
   ui_font_label_short: 'UI 字體:'
+  font_cjk_hint: 該字型不含中文字形，介面中文將繼續使用內建 Noto Sans CJK 渲染（僅英文/數字外觀變化）。
   ui_font_size_label: 'UI 字號:'
   unsaved: ● 未儲存
   warning_label: '警告:'

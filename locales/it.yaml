@@ -26,6 +26,8 @@ settings:
     lock: Blocco
   nav:
     general: Generale
+    ai_assistant: Assistente IA
+    remote: Controllo remoto
     themes: Temi
     shortcuts: Scorciatoie
     lock: Blocco
@@ -364,6 +366,7 @@ theme_editor:
   text_label: 'Testo normale:'
   ui_appearance: Aspetto UI
   ui_font_label_short: 'Font UI:'
+  font_cjk_hint: Questo font non contiene glifi CJK. Il testo cinese dell'interfaccia continua a usare Noto Sans CJK integrato (cambiano solo lettere/cifre latine).
   ui_font_size_label: 'Dimensione font UI:'
   unsaved: ● non salvato
   warning_label: 'Avviso:'

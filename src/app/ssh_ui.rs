@@ -115,23 +115,43 @@ impl App {
         ui.separator();
         ui.add_space(2.0);
 
-        // Header: section label left, add button right.
+        // Header: IDENTICAL geometry to the workspace header above —
+        // 12px title flush left, one 18.5px hand-drawn Phosphor button
+        // anchored right (hover brightens, no frame), so both header
+        // rows share height, size, colors and alignment.
         ui.horizontal(|ui| {
+            let fg = self.active_theme.app.button_fg.to_egui();
+            let icon_active = self.active_theme.app.text.to_egui();
+            let btn_size = 18.5;
+            let glyph = 12.0;
+            // Section title, flush left (same style as 工作区).
             ui.label(
                 egui::RichText::new(&self.texts.ssh.section)
-                    .size(10.0)
-                    .color(self.active_theme.app.weak_text.to_egui()),
+                    .size(12.0)
+                    .color(fg),
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let add_btn = ui.add(
-                    egui::Button::new(egui::RichText::new(egui_phosphor::regular::PLUS).size(11.0))
-                        .frame(false),
+                let (add_rect, add_resp) =
+                    ui.allocate_exact_size(egui::vec2(btn_size, btn_size), egui::Sense::click());
+                let add_color = if add_resp.hovered() { icon_active } else { fg };
+                let add_galley = ui.fonts(|f| {
+                    f.layout_no_wrap(
+                        egui_phosphor::regular::PLUS.to_string(),
+                        egui::FontId::proportional(glyph),
+                        add_color,
+                    )
+                });
+                ui.painter().galley(
+                    add_rect.center()
+                        - egui::vec2(add_galley.size().x / 2.0, add_galley.size().y / 2.0),
+                    add_galley,
+                    add_color,
                 );
-                if add_btn.clicked() {
+                if add_resp.clicked() {
                     self.ssh_dialog = Some(SshHostDialog::new());
                     self.ssh_dialog_just_opened = true;
                 }
-                let _ = add_btn.on_hover_text(&self.texts.ssh.add);
+                let _ = add_resp.on_hover_text(&self.texts.ssh.add);
             });
         });
 

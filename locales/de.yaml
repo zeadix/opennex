@@ -26,6 +26,8 @@ settings:
     lock: Sperre
   nav:
     general: Allgemein
+    ai_assistant: KI-Assistent
+    remote: Fernsteuerung
     themes: Designs
     shortcuts: Tastenkürzel
     lock: Sperren
@@ -364,6 +366,7 @@ theme_editor:
   text_label: 'Normaler Text:'
   ui_appearance: UI-Erscheinung
   ui_font_label_short: 'UI-Schrift:'
+  font_cjk_hint: Diese Schrift enthält keine CJK-Glyphen. Chinesischer UI-Text nutzt weiterhin das integrierte Noto Sans CJK (nur Latein/Ziffern ändern sich).
   ui_font_size_label: 'UI-Schriftgröße:'
   unsaved: ● ungespeichert
   warning_label: 'Warnung:'

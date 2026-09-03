@@ -51,6 +51,11 @@ pub struct TerminalInstance {
     /// the integration (SSH, PowerShell, cmd, fish) never bump it; the
     /// agent falls back to screen-stability heuristics there.
     pub prompt_seq: u64,
+    /// UNIX-time ms of the last USER input routed through `write()`
+    /// (typing, remote control, AI insert, broadcast, history menu).
+    /// Kept alongside the backend's output timestamp: input with echo
+    /// off (password prompts) produces no PTY output but IS activity.
+    pub last_input_ms: u64,
     osc_buffer: String,
 }
 
@@ -266,6 +271,7 @@ impl TerminalInstance {
             shell_info,
             history_nav: None,
             prompt_seq: 0,
+            last_input_ms: egui_term::unix_ms(),
             osc_buffer: String::new(),
         };
 
@@ -279,8 +285,16 @@ impl TerminalInstance {
     pub fn resize(&mut self, _cols: u16, _rows: u16) {}
 
     pub fn write(&mut self, data: &[u8]) {
+        self.last_input_ms = egui_term::unix_ms();
         self.backend
             .process_command(egui_term::BackendCommand::Write(data.to_vec()));
+    }
+
+    /// UNIX-time ms of the last ACTIVITY on this terminal: the later of
+    /// the last PTY output and the last user input. The workspace
+    /// sidebar's activity indicator is derived from this.
+    pub fn last_activity_ms(&self) -> u64 {
+        self.last_input_ms.max(self.backend.last_output_ms())
     }
 
     /// Pixel size of one terminal cell (width, height) from the last

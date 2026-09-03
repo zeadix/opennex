@@ -26,6 +26,8 @@ settings:
     lock: Lock
   nav:
     general: General
+    ai_assistant: AI Assistant
+    remote: Remote Control
     themes: Themes
     shortcuts: Shortcuts
     lock: Lock
@@ -364,6 +366,7 @@ theme_editor:
   text_label: 'Normal text:'
   ui_appearance: UI Appearance
   ui_font_label_short: 'UI font:'
+  font_cjk_hint: This font has no CJK glyphs. Chinese UI text keeps rendering with the bundled Noto Sans CJK (only Latin/digits change).
   ui_font_size_label: 'UI font size:'
   unsaved: ● unsaved
   warning_label: 'Warning:'
