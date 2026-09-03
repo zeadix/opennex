@@ -1884,9 +1884,6 @@ pub struct App {
     agent: Option<AgentRun>,
     /// The remote phone-control session (None when off).
     remote: Option<RemoteSession>,
-    /// "Open the remote panel" intent (view-menu toggle; lives even
-    /// while no session runs).
-    show_remote_panel: bool,
     /// The sidebar SSH host search box holds keyboard focus - the
     /// terminal must not reclaim it every frame.
     sidebar_input_focused: bool,
@@ -2358,7 +2355,6 @@ impl App {
             agent_goal: String::new(),
             agent_confirm_just_opened: false,
             remote: None,
-            show_remote_panel: false,
             sidebar_input_focused: false,
             snippet_fill: None,
             snippet_fill_just_opened: false,
@@ -5044,9 +5040,7 @@ impl eframe::App for App {
         let remote_panel_open = self
             .remote
             .as_ref()
-            .map(|s| s.panel_visible)
-            .unwrap_or(false)
-            || self.show_remote_panel;
+            .is_some_and(|s| s.lan_panel_visible || s.wan_panel_visible);
         if !any_modal_open_excluding_ai(self)
             && (ai_panel_open || remote_panel_open)
             && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
@@ -5055,10 +5049,9 @@ impl eframe::App for App {
                 self.show_ai_panel = false;
             }
             if remote_panel_open {
-                if let Some(session) = self.remote.as_mut() {
-                    session.panel_visible = false;
-                }
-                self.show_remote_panel = false;
+                // Esc closes the remote panels AND stops the session
+                // (server + tunnel + frp).
+                self.remote_stop();
             }
         }
 
@@ -5392,24 +5385,43 @@ impl eframe::App for App {
                     if menu_btn_toggled(ui, &ai_label, ai_active).clicked() {
                         self.show_ai_panel = !self.show_ai_panel;
                     }
+                    // Remote control: a DROPDOWN with the two channels —
+                    // clicking an entry IS the start action (opens the
+                    // channel's own panel immediately; no separate start
+                    // buttons inside). Both panels can be open at once.
                     let remote_label = self.texts.view_menu.remote.clone();
                     let remote_active = self
                         .remote
                         .as_ref()
-                        .map(|s| s.panel_visible)
-                        .unwrap_or(self.show_remote_panel);
-                    if menu_btn_toggled(ui, &remote_label, remote_active).clicked() {
-                        if let Some(session) = self.remote.as_mut() {
-                            session.panel_visible = !session.panel_visible;
-                            // Keep both visibility sources in sync or
-                            // the panel resurrects after closing (the
-                            // pre-start toggle may still be set).
-                            if !session.panel_visible {
-                                self.show_remote_panel = false;
+                        .is_some_and(|s| s.lan_panel_visible || s.wan_panel_visible);
+                    {
+                        let btn = menu_btn_toggled(ui, &remote_label, remote_active);
+                        let mut bar =
+                            egui::menu::BarState::load(ui.ctx(), egui::Id::new("menu_remote"));
+                        let overlay = ui.interact(
+                            btn.rect,
+                            egui::Id::new(("menu_remote", "hit")),
+                            egui::Sense::click(),
+                        );
+                        bar.bar_menu(&overlay, |ui| {
+                            let lan_on = self.remote.as_ref().is_some_and(|s| s.lan_panel_visible);
+                            if ui
+                                .selectable_label(lan_on, &self.texts.remote.menu_lan)
+                                .clicked()
+                            {
+                                self.remote_toggle_lan();
+                                ui.close_menu();
                             }
-                        } else {
-                            self.show_remote_panel = !self.show_remote_panel;
-                        }
+                            let wan_on = self.remote.as_ref().is_some_and(|s| s.wan_panel_visible);
+                            if ui
+                                .selectable_label(wan_on, &self.texts.remote.menu_wan)
+                                .clicked()
+                            {
+                                self.remote_toggle_wan();
+                                ui.close_menu();
+                            }
+                        });
+                        bar.store(ui.ctx(), egui::Id::new("menu_remote"));
                     }
                     let label = self.texts.menu.theme.clone();
                     dropdown(ui, &label, "menu_theme", &mut |ui| {
@@ -6346,7 +6358,10 @@ impl eframe::App for App {
         self.render_ssh_delete_confirm(ctx);
         self.render_ai_panel(ctx);
         self.render_ai_exec_confirm(ctx);
-        self.render_remote_panel(ctx);
+        // Two INDEPENDENT remote panels: LAN and WAN can be open at the
+        // same time (both share the one embedded server session).
+        self.render_lan_panel(ctx);
+        self.render_wan_panel(ctx);
         self.render_agent_confirm(ctx);
         self.render_monitor_panel(ctx);
         self.render_search_bar(ctx);
@@ -7690,6 +7705,12 @@ mod tests {
         assert_eq!(
             workspace_activity_state(None, now),
             WorkspaceActivity::Unknown
+        );
+        // Fresh/never-armed terminal reports 0 (activity epoch) — it
+        // must read as IDLE (green), not as "active 30+ years ago".
+        assert_eq!(
+            workspace_activity_state(Some(0), now),
+            WorkspaceActivity::Idle
         );
         // Clock skew (activity in the "future"): saturating subtraction
         // keeps it inside the window → active, never a panic.

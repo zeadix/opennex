@@ -502,4 +502,8 @@ remote:
   relay_delete: 삭제
   relay_retry: 다시 시도
   relay_hint: 위 채널을 선택하면 자동으로 연결됩니다. 처음 사용 시 frpc(약 10MB)가 자동 다운로드되며, <데이터 디렉터리>/tunnel/frpc에 직접 배치할 수도 있습니다.
+  menu_lan: LAN 제어
+  menu_wan: WAN 제어
+  lan_panel_title: 원격 · LAN
+  wan_panel_title: 원격 · WAN
 

@@ -22,7 +22,12 @@ pub(crate) struct RemoteSession {
     pub frame_seq: HashMap<String, u64>,
     /// Last serialized ANSI per tab - the change detector.
     pub last_ansi: HashMap<String, String>,
-    pub panel_visible: bool,
+    /// LAN panel visible (menu → 局域网控制). While ANY panel is
+    /// visible the embedded server stays up; both closed = full stop.
+    pub lan_panel_visible: bool,
+    /// WAN panel visible (menu → 外网控制): tunnel/frp channels run
+    /// only while this panel is open.
+    pub wan_panel_visible: bool,
     /// Public IPv6 for direct cellular access (None = no global route).
     pub ipv6: Option<String>,
     /// Managed cloudflared quick tunnel (None = not started).
@@ -57,11 +62,10 @@ pub(crate) struct RemoteSession {
     /// The tab the phone is currently watching (drives on-demand frame
     /// serialization; None = nobody focused yet).
     pub remote_focus_tab: Option<String>,
-    /// QR cache: (url, dark-module matrix) - regenerating the QR per
-    /// frame cost ~1.7k painter shapes at 60fps for a static image.
-    pub qr_cache: Option<(String, Vec<bool>)>,
-    /// Module count per side of the cached QR.
-    pub qr_width: usize,
+    /// QR caches per URL: the LAN and WAN panels can be open at the
+    /// same time showing two different codes — a single-entry cache
+    /// would thrash between them every frame.
+    pub qr_caches: HashMap<String, (Vec<bool>, usize)>,
 }
 
 /// Which entry URL the QR code shows.
@@ -144,7 +148,8 @@ impl App {
             last_refresh: Instant::now() - Duration::from_secs(1),
             frame_seq: HashMap::new(),
             last_ansi: HashMap::new(),
-            panel_visible: true,
+            lan_panel_visible: false,
+            wan_panel_visible: false,
             ipv6: crate::remote::protocol::public_ipv6(),
             tunnel: None,
             tunnel_joiner: None,
@@ -163,8 +168,7 @@ impl App {
             frp_failed_profile: None,
             qr_target: QrTarget::default(),
             remote_focus_tab: None,
-            qr_cache: None,
-            qr_width: 0,
+            qr_caches: HashMap::new(),
         });
         Ok(())
     }
@@ -180,6 +184,87 @@ impl App {
             if let Some(mut frp) = session.frp.take() {
                 frp.stop();
             }
+        }
+    }
+
+    /// Menu → 局域网控制: start the embedded server if needed, then
+    /// toggle the LAN panel. Closing the LAST panel stops everything.
+    pub(crate) fn remote_toggle_lan(&mut self) {
+        if self.remote.is_none() {
+            if let Err(err) = self.remote_start() {
+                self.update_toast = Some((
+                    format!("{}: {err}", self.texts.remote.bind_failed),
+                    Instant::now() + Duration::from_secs(8),
+                ));
+                return;
+            }
+        }
+        let Some(session) = self.remote.as_mut() else {
+            return;
+        };
+        session.lan_panel_visible = !session.lan_panel_visible;
+        self.remote_stop_if_idle();
+    }
+
+    /// Menu → 外网控制: start the server AND the cloudflared quick
+    /// tunnel immediately (no extra "start tunnel" click), then toggle
+    /// the WAN panel. frp channels follow the WAN panel's selector.
+    pub(crate) fn remote_toggle_wan(&mut self) {
+        if self.remote.is_none() {
+            if let Err(err) = self.remote_start() {
+                self.update_toast = Some((
+                    format!("{}: {err}", self.texts.remote.bind_failed),
+                    Instant::now() + Duration::from_secs(8),
+                ));
+                return;
+            }
+        }
+        let opening;
+        {
+            let Some(session) = self.remote.as_mut() else {
+                return;
+            };
+            session.wan_panel_visible = !session.wan_panel_visible;
+            opening = session.wan_panel_visible;
+        }
+        if opening {
+            // Direct start: the menu click IS the start action.
+            self.remote_tunnel_start();
+        }
+        self.remote_stop_if_idle();
+    }
+
+    /// Panel X / Esc close: drop the visibility and stop the whole
+    /// session when no panel remains (server + tunnel + frp all die).
+    /// Closing the WAN panel also stops its channels (tunnel + frp).
+    pub(crate) fn remote_close_panel(&mut self, lan: bool) {
+        let Some(session) = self.remote.as_mut() else {
+            return;
+        };
+        if lan {
+            session.lan_panel_visible = false;
+        } else {
+            session.wan_panel_visible = false;
+            // The WAN channels stop with their panel.
+            if let Some(mut tunnel) = session.tunnel.take() {
+                tunnel.stop();
+            }
+            session.tunnel_joiner = None;
+            session.tunnel_url = None;
+            session.tunnel_error = None;
+            session.tunnel_progress = None;
+            session.tunnel_starting = false;
+        }
+        self.remote_stop_if_idle();
+    }
+
+    fn remote_stop_if_idle(&mut self) {
+        let idle = self
+            .remote
+            .as_ref()
+            .is_some_and(|s| !s.lan_panel_visible && !s.wan_panel_visible);
+        if idle {
+            self.remote_stop();
         }
     }
 
@@ -212,20 +297,29 @@ impl App {
         session.frp_failed_profile = None;
     }
 
-    /// Keep the single active frp relay channel in sync with the
+    /// Keep the single active frp relay channel in sync with the WAN
     /// panel's selected target and the settings config (instant apply).
     ///
-    /// Desired state = the profile the address selector points at.
-    /// When the desired profile differs from what is running (config
-    /// edited, target switched), the old frpc is stopped and a new one
-    /// spawned within the same frame - no restart needed. A config
-    /// that just FAILED blocks auto-respawn until edited or reselected.
+    /// frp runs ONLY while the WAN panel is open (closing the panel
+    /// stops the channel, same as the tunnel). Desired state = the
+    /// profile the address selector points at. When the desired profile
+    /// differs from what is running (config edited, target switched),
+    /// the old frpc is stopped and a new one spawned within the same
+    /// frame - no restart needed. A config that just FAILED blocks
+    /// auto-respawn until edited or reselected.
     pub(crate) fn remote_sync_frp(&mut self) {
         // Compute the desired channel without holding the session borrow.
-        let desired = {
-            let Some(session) = self.remote.as_ref() else {
-                return;
-            };
+        let wan_open = self.remote.as_ref().is_some_and(|s| s.wan_panel_visible);
+        let desired = if !wan_open {
+            // WAN panel closed: the channel stops with it.
+            if let Some(session) = self.remote.as_mut() {
+                if session.frp.is_some() || session.frp_joiner.is_some() {
+                    Self::remote_frp_reset(session);
+                }
+            }
+            None
+        } else {
+            let session = self.remote.as_ref().unwrap();
             match session.qr_target {
                 QrTarget::Frp(i) => self
                     .settings
@@ -650,20 +744,67 @@ impl App {
         }
     }
 
-    /// The remote-control panel: toggle, URL, QR code, status.
-    pub(crate) fn render_remote_panel(&mut self, ctx: &egui::Context) {
-        let visible = self
+    /// LAN control panel: fixed LAN address + QR. One of the TWO
+    /// independent remote panels (the other is the WAN panel); both can
+    /// be open at the same time — the embedded server is shared.
+    pub(crate) fn render_lan_panel(&mut self, ctx: &egui::Context) {
+        let visible = self.remote.as_ref().is_some_and(|s| s.lan_panel_visible);
+        if !visible {
+            return;
+        }
+        let url = self
             .remote
             .as_ref()
-            .map(|s| s.panel_visible)
-            .unwrap_or(false)
-            || self.show_remote_panel;
+            .filter(|s| !s.ip.is_empty())
+            .map(|s| s.url());
+        let mut open = true;
+        egui::Window::new(&self.texts.remote.lan_panel_title)
+            .id(egui::Id::new("remote_lan_panel"))
+            .open(&mut open)
+            .default_width(320.0)
+            .default_pos(screen_center(ctx) + egui::vec2(-60.0, 40.0))
+            .show(ctx, |ui| {
+                let t = self.texts.remote.clone();
+                let weak = self.active_theme.app.weak_text.to_egui();
+                let accent = self.active_theme.app.accent.to_egui();
+                let Some(url) = url.clone() else {
+                    ui.label(egui::RichText::new(&t.no_addr).size(11.0).color(weak));
+                    return;
+                };
+                ui.label(egui::RichText::new(&t.on_hint).size(11.0).color(weak));
+                ui.label(egui::RichText::new(&url).size(11.0).color(accent));
+                ui.add_space(6.0);
+                self.remote_draw_qr(ui, &url);
+                ui.add_space(4.0);
+                ui.label(egui::RichText::new(&t.security_hint).size(10.0).color(weak));
+                ui.horizontal(|ui| {
+                    if ui.button(&t.copy_url).clicked() {
+                        ui.ctx().copy_text(url.clone());
+                        self.update_toast =
+                            Some((t.copied.clone(), Instant::now() + Duration::from_secs(4)));
+                    }
+                    if ui.button(&t.stop).clicked() {
+                        // Stop EVERYTHING (both panels + channels).
+                        self.remote_stop();
+                    }
+                });
+            });
+        if !open {
+            self.remote_close_panel(true);
+        }
+    }
+
+    /// WAN control panel: IPv6 direct / cloudflared quick tunnel /
+    /// frp relay channels. Selecting a target switches the QR; relay
+    /// channels auto-start on selection (instant apply).
+    pub(crate) fn render_wan_panel(&mut self, ctx: &egui::Context) {
+        let visible = self.remote.as_ref().is_some_and(|s| s.wan_panel_visible);
         if !visible {
             return;
         }
         let mut open = true;
-        egui::Window::new(&self.texts.remote.panel_title)
-            .id(egui::Id::new("remote_panel"))
+        egui::Window::new(&self.texts.remote.wan_panel_title)
+            .id(egui::Id::new("remote_wan_panel"))
             .open(&mut open)
             .default_width(320.0)
             .default_pos(screen_center(ctx) + egui::vec2(60.0, 40.0))
@@ -671,240 +812,207 @@ impl App {
                 let t = self.texts.remote.clone();
                 let weak = self.active_theme.app.weak_text.to_egui();
                 let accent = self.active_theme.app.accent.to_egui();
-                match self.remote.as_ref() {
-                    None => {
-                        ui.label(egui::RichText::new(&t.off_hint).size(11.0).color(weak));
-                        if ui.button(&t.start).clicked() {
-                            match self.remote_start() {
-                                Ok(()) => {}
-                                Err(err) => {
-                                    self.update_toast = Some((
-                                        format!("{}: {err}", t.bind_failed),
-                                        Instant::now() + Duration::from_secs(8),
-                                    ));
-                                }
-                            }
+                // Address target selector (IPv6 / tunnel / relay
+                // channels — LAN lives in its own panel). Selecting a
+                // relay channel auto-starts it within a frame.
+                let ipv6 = self.remote.as_ref().and_then(|s| s.ipv6.clone());
+                let tunnel_state = self
+                    .remote
+                    .as_ref()
+                    .map(|s| (s.tunnel_url.clone(), s.tunnel_starting, s.tunnel_progress))
+                    .unwrap_or((None, false, None));
+                let frp_state = self
+                    .remote
+                    .as_ref()
+                    .map(|s| {
+                        (
+                            s.frp_url.clone(),
+                            s.frp_starting,
+                            s.frp_progress,
+                            s.frp_error.clone(),
+                        )
+                    })
+                    .unwrap_or((None, false, None, None));
+                let relay_channels: Vec<(usize, String)> = self
+                    .settings
+                    .remote_tunnels
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, p)| p.enabled)
+                    .map(|(i, p)| (i, p.name.clone()))
+                    .collect();
+                ui.horizontal(|ui| {
+                    let target = self.remote.as_ref().unwrap().qr_target;
+                    let mut pick = target;
+                    if let Some(ip) = ipv6.as_ref() {
+                        if ui
+                            .selectable_label(
+                                target == QrTarget::Ipv6,
+                                format!("{} {}", t.addr_ipv6, &ip[..ip.len().min(12)]),
+                            )
+                            .clicked()
+                        {
+                            pick = QrTarget::Ipv6;
                         }
                     }
-                    Some(_) => {
-                        // Address target selector (LAN / IPv6 / tunnel /
-                        // relay channels). Selecting a relay channel
-                        // auto-starts it within a frame (instant apply).
-                        let ipv6 = self.remote.as_ref().and_then(|s| s.ipv6.clone());
-                        let tunnel_state = self
-                            .remote
-                            .as_ref()
-                            .map(|s| (s.tunnel_url.clone(), s.tunnel_starting, s.tunnel_progress))
-                            .unwrap_or((None, false, None));
-                        let frp_state = self
-                            .remote
-                            .as_ref()
-                            .map(|s| {
-                                (
-                                    s.frp_url.clone(),
-                                    s.frp_starting,
-                                    s.frp_progress,
-                                    s.frp_error.clone(),
-                                )
-                            })
-                            .unwrap_or((None, false, None, None));
-                        let relay_channels: Vec<(usize, String)> = self
-                            .settings
-                            .remote_tunnels
-                            .iter()
-                            .enumerate()
-                            .filter(|(_, p)| p.enabled)
-                            .map(|(i, p)| (i, p.name.clone()))
-                            .collect();
-                        ui.label(egui::RichText::new(&t.on_hint).size(11.0).color(weak));
-                        ui.horizontal(|ui| {
-                            let target = self.remote.as_ref().unwrap().qr_target;
-                            let mut pick = target;
-                            if ui
-                                .selectable_label(target == QrTarget::Lan, &t.addr_lan)
-                                .clicked()
-                            {
-                                pick = QrTarget::Lan;
-                            }
-                            if let Some(ip) = ipv6.as_ref() {
-                                if ui
-                                    .selectable_label(
-                                        target == QrTarget::Ipv6,
-                                        format!("{} {}", t.addr_ipv6, &ip[..ip.len().min(12)]),
-                                    )
-                                    .clicked()
-                                {
-                                    pick = QrTarget::Ipv6;
-                                }
-                            }
-                            if tunnel_state.0.is_some()
-                                && ui
-                                    .selectable_label(target == QrTarget::Tunnel, &t.addr_tunnel)
-                                    .clicked()
-                            {
-                                pick = QrTarget::Tunnel;
-                            }
-                            for (i, name) in &relay_channels {
-                                if ui
-                                    .selectable_label(target == QrTarget::Frp(*i), name.clone())
-                                    .clicked()
-                                {
-                                    pick = QrTarget::Frp(*i);
-                                }
-                            }
-                            if pick != target {
-                                self.remote.as_mut().unwrap().qr_target = pick;
-                            }
-                        });
-                        // Relay-channel status row (only while a relay
-                        // target is selected; the channel lifecycle is
-                        // driven by remote_sync_frp, not by buttons).
-                        if matches!(self.remote.as_ref().unwrap().qr_target, QrTarget::Frp(_)) {
-                            ui.horizontal(|ui| {
-                                if frp_state.1 {
-                                    let pct = frp_state
-                                        .2
-                                        .map(|p| format!(" ({:.0}%)", p * 100.0))
-                                        .unwrap_or_default();
-                                    ui.label(
-                                        egui::RichText::new(format!("{}{pct}", t.tunnel_starting))
-                                            .size(11.0)
-                                            .color(weak),
-                                    );
-                                } else if frp_state.0.is_some() {
-                                    ui.label(
-                                        egui::RichText::new(&t.tunnel_ready)
-                                            .size(11.0)
-                                            .color(accent),
-                                    );
-                                } else if let Some(err) = frp_state.3.as_ref() {
-                                    ui.label(
-                                        egui::RichText::new(format!("{}: {err}", t.tunnel_failed))
-                                            .size(10.0)
-                                            .color(self.active_theme.app.danger.to_egui()),
-                                    );
-                                    if ui.button(&t.relay_retry).clicked() {
-                                        // Forget the failure so the sync
-                                        // respawns the channel.
-                                        if let Some(session) = self.remote.as_mut() {
-                                            session.frp_failed_profile = None;
-                                        }
-                                    }
-                                }
-                            });
-                            ui.label(egui::RichText::new(&t.relay_hint).size(10.0).color(weak));
+                    if tunnel_state.0.is_some()
+                        && ui
+                            .selectable_label(target == QrTarget::Tunnel, &t.addr_tunnel)
+                            .clicked()
+                    {
+                        pick = QrTarget::Tunnel;
+                    }
+                    for (i, name) in &relay_channels {
+                        if ui
+                            .selectable_label(target == QrTarget::Frp(*i), name.clone())
+                            .clicked()
+                        {
+                            pick = QrTarget::Frp(*i);
                         }
-                        // Tunnel control row.
-                        ui.horizontal(|ui| {
-                            if tunnel_state.1 {
-                                let pct = tunnel_state
-                                    .2
-                                    .map(|p| format!(" ({:.0}%)", p * 100.0))
-                                    .unwrap_or_default();
-                                ui.label(
-                                    egui::RichText::new(format!("{}{pct}", t.tunnel_starting))
-                                        .size(11.0)
-                                        .color(weak),
-                                );
-                            } else if tunnel_state.0.is_some() {
-                                ui.label(
-                                    egui::RichText::new(&t.tunnel_ready)
-                                        .size(11.0)
-                                        .color(accent),
-                                );
-                            } else {
-                                if let Some(err) =
-                                    self.remote.as_ref().and_then(|s| s.tunnel_error.clone())
-                                {
-                                    ui.label(
-                                        egui::RichText::new(format!("{}: {err}", t.tunnel_failed))
-                                            .size(10.0)
-                                            .color(self.active_theme.app.danger.to_egui()),
-                                    );
-                                }
-                                if ui.button(&t.tunnel_start).clicked() {
-                                    self.remote_tunnel_start();
-                                }
-                            }
-                            if ui.button(&t.copy_url).clicked() {
-                                if let Some(url) = self.remote_qr_url() {
-                                    ui.ctx().copy_text(url.clone());
-                                    self.update_toast = Some((
-                                        t.copied.clone(),
-                                        Instant::now() + Duration::from_secs(4),
-                                    ));
-                                }
-                            }
-                            if ui.button(&t.stop).clicked() {
-                                self.remote_stop();
-                            }
-                        });
-                        // QR for the selected target.
-                        if let Some(url) = self.remote_qr_url() {
-                            ui.label(egui::RichText::new(&url).size(11.0).color(accent));
-                            ui.add_space(6.0);
-                            self.remote_draw_qr(ui, &url);
-                        } else if self.remote.as_ref().is_some_and(|s| s.ip.is_empty()) {
-                            ui.label(egui::RichText::new(&t.no_addr).size(11.0).color(weak));
-                        }
-                        ui.add_space(4.0);
-                        ui.label(egui::RichText::new(&t.security_hint).size(10.0).color(weak));
-                        if tunnel_state.0.is_some() {
+                    }
+                    if pick != target {
+                        self.remote.as_mut().unwrap().qr_target = pick;
+                    }
+                });
+                // Relay-channel status row (only while a relay target is
+                // selected; the channel lifecycle is driven by
+                // remote_sync_frp, not by buttons).
+                if matches!(self.remote.as_ref().unwrap().qr_target, QrTarget::Frp(_)) {
+                    ui.horizontal(|ui| {
+                        if frp_state.1 {
+                            let pct = frp_state
+                                .2
+                                .map(|p| format!(" ({:.0}%)", p * 100.0))
+                                .unwrap_or_default();
                             ui.label(
-                                egui::RichText::new(&t.tunnel_warning)
-                                    .size(10.0)
+                                egui::RichText::new(format!("{}{pct}", t.tunnel_starting))
+                                    .size(11.0)
                                     .color(weak),
                             );
+                        } else if frp_state.0.is_some() {
+                            ui.label(
+                                egui::RichText::new(&t.tunnel_ready)
+                                    .size(11.0)
+                                    .color(accent),
+                            );
+                        } else if let Some(err) = frp_state.3.as_ref() {
+                            ui.label(
+                                egui::RichText::new(format!("{}: {err}", t.tunnel_failed))
+                                    .size(10.0)
+                                    .color(self.active_theme.app.danger.to_egui()),
+                            );
+                            if ui.button(&t.relay_retry).clicked() {
+                                // Forget the failure so the sync
+                                // respawns the channel.
+                                if let Some(session) = self.remote.as_mut() {
+                                    session.frp_failed_profile = None;
+                                }
+                            }
+                        }
+                    });
+                    ui.label(egui::RichText::new(&t.relay_hint).size(10.0).color(weak));
+                }
+                // Tunnel control row (the quick tunnel auto-starts when
+                // the panel opens; this row shows progress and retries).
+                ui.horizontal(|ui| {
+                    if tunnel_state.1 {
+                        let pct = tunnel_state
+                            .2
+                            .map(|p| format!(" ({:.0}%)", p * 100.0))
+                            .unwrap_or_default();
+                        ui.label(
+                            egui::RichText::new(format!("{}{pct}", t.tunnel_starting))
+                                .size(11.0)
+                                .color(weak),
+                        );
+                    } else if tunnel_state.0.is_some() {
+                        ui.label(
+                            egui::RichText::new(&t.tunnel_ready)
+                                .size(11.0)
+                                .color(accent),
+                        );
+                    } else {
+                        if let Some(err) = self.remote.as_ref().and_then(|s| s.tunnel_error.clone())
+                        {
+                            ui.label(
+                                egui::RichText::new(format!("{}: {err}", t.tunnel_failed))
+                                    .size(10.0)
+                                    .color(self.active_theme.app.danger.to_egui()),
+                            );
+                        }
+                        if ui.button(&t.tunnel_start).clicked() {
+                            self.remote_tunnel_start();
                         }
                     }
+                    if ui.button(&t.copy_url).clicked() {
+                        if let Some(url) = self.remote_qr_url() {
+                            ui.ctx().copy_text(url.clone());
+                            self.update_toast =
+                                Some((t.copied.clone(), Instant::now() + Duration::from_secs(4)));
+                        }
+                    }
+                });
+                // QR for the selected target.
+                if let Some(url) = self.remote_qr_url() {
+                    ui.label(egui::RichText::new(&url).size(11.0).color(accent));
+                    ui.add_space(6.0);
+                    self.remote_draw_qr(ui, &url);
+                } else {
+                    ui.label(
+                        egui::RichText::new(&t.tunnel_starting)
+                            .size(11.0)
+                            .color(weak),
+                    );
+                }
+                ui.add_space(4.0);
+                ui.label(egui::RichText::new(&t.security_hint).size(10.0).color(weak));
+                if tunnel_state.0.is_some() {
+                    ui.label(
+                        egui::RichText::new(&t.tunnel_warning)
+                            .size(10.0)
+                            .color(weak),
+                    );
+                }
+                if ui.button(&t.stop).clicked() {
+                    // Stop EVERYTHING (both panels + channels).
+                    self.remote_stop();
                 }
             });
-        // Persist the panel visibility choice.
-        let still_open = open;
-        if let Some(session) = self.remote.as_mut() {
-            session.panel_visible = still_open;
-        }
-        // The panel has TWO visibility sources: session.panel_visible
-        // (remote running) and show_remote_panel (pre-start toggle).
-        // Closing the window via X must clear BOTH — clearing only the
-        // active one left the other set and the window reappeared the
-        // next frame (it could never be closed until the app restart).
-        if !still_open {
-            self.show_remote_panel = false;
+        if !open {
+            self.remote_close_panel(false);
         }
     }
 
-    /// Draw the QR matrix with plain rects (no image dependency). The
-    /// matrix is cached per URL so a static QR costs nothing after the
-    /// first frame.
+    /// Draw the QR matrix with plain rects (no image dependency).
+    /// Caches are keyed per URL: the LAN and WAN panels can show two
+    /// different codes in the same frame.
     fn remote_draw_qr(&mut self, ui: &mut egui::Ui, url: &str) {
-        let cache_hit = self
+        let cached = self
             .remote
             .as_ref()
-            .and_then(|s| s.qr_cache.as_ref())
-            .is_some_and(|(cached_url, _)| cached_url == url);
-        if !cache_hit {
-            let Ok(code) = qrcode::QrCode::new(url.as_bytes()) else {
-                ui.label("QR error");
-                return;
-            };
-            let width = code.width();
-            let modules: Vec<bool> = code
-                .to_colors()
-                .into_iter()
-                .map(|c| matches!(c, qrcode::Color::Dark))
-                .collect();
-            if let Some(session) = self.remote.as_mut() {
-                session.qr_cache = Some((url.to_string(), modules));
-                session.qr_width = width;
+            .and_then(|s| s.qr_caches.get(url))
+            .cloned();
+        let (modules, width) = match cached {
+            Some(hit) => hit,
+            None => {
+                let Ok(code) = qrcode::QrCode::new(url.as_bytes()) else {
+                    ui.label("QR error");
+                    return;
+                };
+                let width = code.width();
+                let modules: Vec<bool> = code
+                    .to_colors()
+                    .into_iter()
+                    .map(|c| matches!(c, qrcode::Color::Dark))
+                    .collect();
+                if let Some(session) = self.remote.as_mut() {
+                    session
+                        .qr_caches
+                        .insert(url.to_string(), (modules.clone(), width));
+                }
+                (modules, width)
             }
-        }
-        let Some(session) = self.remote.as_ref() else {
-            return;
         };
-        let Some((_, modules)) = session.qr_cache.as_ref() else {
-            return;
-        };
-        draw_qr_modules(ui, modules, session.qr_width);
+        draw_qr_modules(ui, &modules, width);
     }
 }

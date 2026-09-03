@@ -437,6 +437,15 @@ pub struct RemoteTexts {
     pub relay_retry: String,
     #[serde(default)]
     pub relay_hint: String,
+    /// Menu-bar dropdown entries + per-panel window titles.
+    #[serde(default)]
+    pub menu_lan: String,
+    #[serde(default)]
+    pub menu_wan: String,
+    #[serde(default)]
+    pub lan_panel_title: String,
+    #[serde(default)]
+    pub wan_panel_title: String,
 }
 
 /// Floating monitor panel strings.
@@ -1251,6 +1260,10 @@ impl Texts {
                 relay_delete: "删除".into(),
                 relay_retry: "重试".into(),
                 relay_hint: "选中上方通道即自动连接；首次使用将自动下载 frpc（约 10MB），也可手动放置到数据目录 tunnel/frpc。".into(),
+                menu_lan: "局域网控制".into(),
+                menu_wan: "外网控制".into(),
+                lan_panel_title: "远程控制 · 局域网".into(),
+                wan_panel_title: "远程控制 · 外网".into(),
             },
             monitor: MonitorTexts {
                 title: "监控面板".into(),

@@ -55,7 +55,17 @@ pub struct TerminalInstance {
     /// (typing, remote control, AI insert, broadcast, history menu).
     /// Kept alongside the backend's output timestamp: input with echo
     /// off (password prompts) produces no PTY output but IS activity.
+    /// 0 until the first input (see `activity_armed`).
     pub last_input_ms: u64,
+    /// Activity arming: a fresh terminal reports IDLE (green dot) no
+    /// matter how much the shell prints while starting up (prompt,
+    /// login messages, shell integration, first cd) — the user has not
+    /// interacted yet, so none of that is "activity". The FIRST
+    /// `write()` arms the clock: inputs stamp `last_input_ms`, and only
+    /// output produced AFTER that moment counts (shell startup output
+    /// that was still in flight is excluded via `armed_at_ms`).
+    activity_armed: bool,
+    armed_at_ms: u64,
     osc_buffer: String,
 }
 
@@ -271,7 +281,9 @@ impl TerminalInstance {
             shell_info,
             history_nav: None,
             prompt_seq: 0,
-            last_input_ms: egui_term::unix_ms(),
+            last_input_ms: 0,
+            activity_armed: false,
+            armed_at_ms: 0,
             osc_buffer: String::new(),
         };
 
@@ -285,7 +297,15 @@ impl TerminalInstance {
     pub fn resize(&mut self, _cols: u16, _rows: u16) {}
 
     pub fn write(&mut self, data: &[u8]) {
-        self.last_input_ms = egui_term::unix_ms();
+        let now = egui_term::unix_ms();
+        // First input arms the activity clock: everything the shell
+        // printed BEFORE this moment (startup banner, prompt, MOTD,
+        // shell integration) is not user-visible activity.
+        if !self.activity_armed {
+            self.activity_armed = true;
+            self.armed_at_ms = now;
+        }
+        self.last_input_ms = now;
         self.backend
             .process_command(egui_term::BackendCommand::Write(data.to_vec()));
     }
@@ -293,8 +313,18 @@ impl TerminalInstance {
     /// UNIX-time ms of the last ACTIVITY on this terminal: the later of
     /// the last PTY output and the last user input. The workspace
     /// sidebar's activity indicator is derived from this.
+    ///
+    /// Returns 0 (→ idle/green) while the terminal has never received
+    /// user input: startup output must not look like activity. After
+    /// arming, only output newer than the arming moment counts, so the
+    /// startup burst still in flight is excluded.
     pub fn last_activity_ms(&self) -> u64 {
-        self.last_input_ms.max(self.backend.last_output_ms())
+        if !self.activity_armed {
+            return 0;
+        }
+        let out = self.backend.last_output_ms();
+        let out = if out >= self.armed_at_ms { out } else { 0 };
+        self.last_input_ms.max(out)
     }
 
     /// Pixel size of one terminal cell (width, height) from the last
@@ -1014,6 +1044,51 @@ mod tests {
         // (the prompt's) terminates the prompt; the recorded command
         // keeps its own redirection.
         assert_eq!(strip("C:\\proj>echo hi > out.txt"), "echo hi > out.txt");
+    }
+
+    /// A fresh terminal must read as IDLE (activity epoch 0) no matter
+    /// how much the shell printed while starting up; the FIRST user
+    /// input arms the clock and only post-arm output counts.
+    #[cfg(unix)]
+    #[test]
+    fn fresh_terminal_is_idle_until_first_input() {
+        let mut instance = TerminalInstance::create(
+            &egui::Context::default(),
+            12,
+            "bash",
+            "/tmp",
+            80,
+            24,
+            &[],
+            100,
+        )
+        .expect("shell should start");
+        // Let the startup burst (prompt, shell integration) fully land.
+        assert!(pump_until_quiet(&mut instance, 8_000), "startup output");
+        // Unarmed: green regardless of the startup output.
+        assert_eq!(
+            instance.last_activity_ms(),
+            0,
+            "startup output must not count as activity"
+        );
+
+        // First input arms the clock: the input itself is activity.
+        let before = instance.last_activity_ms();
+        instance.write(b"\r");
+        let after = instance.last_activity_ms();
+        assert!(after >= before, "armed");
+        assert!(after > 0, "input must stamp activity");
+
+        // Post-arm output counts (the empty-line redraw arrives now).
+        for _ in 0..20 {
+            std::thread::sleep(std::time::Duration::from_millis(25));
+            instance.backend.set_dirty();
+            let _ = instance.backend.sync();
+        }
+        assert!(
+            instance.last_activity_ms() > 0,
+            "post-arm output must count as activity"
+        );
     }
 
     #[cfg(unix)]

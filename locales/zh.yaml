@@ -502,4 +502,8 @@ remote:
   relay_delete: 删除
   relay_retry: 重试
   relay_hint: 选中上方通道即自动连接；首次使用将自动下载 frpc（约 10MB），也可手动放置到数据目录 tunnel/frpc。
+  menu_lan: 局域网控制
+  menu_wan: 外网控制
+  lan_panel_title: 远程控制 · 局域网
+  wan_panel_title: 远程控制 · 外网
 

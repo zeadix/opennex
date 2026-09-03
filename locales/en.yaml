@@ -503,4 +503,8 @@ remote:
   relay_delete: Delete
   relay_retry: Retry
   relay_hint: Select a channel above to connect automatically. frpc (~10 MB) downloads on first use; you can also place it manually at <data dir>/tunnel/frpc.
+  menu_lan: LAN Control
+  menu_wan: WAN Control
+  lan_panel_title: Remote · LAN
+  wan_panel_title: Remote · WAN
 
