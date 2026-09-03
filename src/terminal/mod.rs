@@ -1091,6 +1091,69 @@ mod tests {
         );
     }
 
+    /// THE user-reported bug at very narrow widths: type a few chars —
+    /// they must extend the prompt line (wrap ONLY at the real grid
+    /// edge), appear exactly once each (readline never overwrites its
+    /// own echo), and the grid cursor must track them. This pins the
+    /// GRID/PTY side; if this passes but the screen still misbehaves,
+    /// the renderer is at fault.
+    #[cfg(unix)]
+    #[test]
+    fn narrow_pane_typing_extends_prompt_without_wrapping_early() {
+        let mut instance = TerminalInstance::create(
+            &egui::Context::default(),
+            13,
+            "bash",
+            "/tmp",
+            80,
+            24,
+            &[],
+            200,
+        )
+        .expect("shell should start");
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        instance.backend.set_dirty();
+        let _ = instance.backend.sync();
+        instance.write(b"export PS1='kunpengwang@test-Victus-by-HP-Gaming-Laptop-16-r0xxx:~/proj/my/open_zoo$ '\r");
+        assert!(pump_until_quiet(&mut instance, 8_000), "PS1 not applied");
+
+        // Very narrow: 24 columns. The 73-char prompt wraps to 4 rows.
+        instance
+            .backend
+            .process_command(egui_term::BackendCommand::Resize(
+                egui_term::Size::from(egui::vec2(240.0, 400.0)),
+                egui_term::Size::from(egui::vec2(10.0, 20.0)),
+            ));
+        assert!(pump_until_quiet(&mut instance, 8_000), "redraw 1");
+        assert!(pump_until_quiet(&mut instance, 8_000), "redraw 2");
+
+        // Type 'abcde' one char at a time (each echo settled).
+        for c in "abcde".chars() {
+            instance.write(&[c as u8]);
+            assert!(
+                pump_until_quiet(&mut instance, 8_000),
+                "echo of {c} not settled"
+            );
+        }
+
+        let text = screen_text_of(&mut instance);
+        // The echoes stay contiguous on ONE row (appended right after
+        // the prompt's last physical row) — readline never overwrote
+        // or duplicated its echo, and no premature wrap split 'abcde'.
+        assert!(text.contains(" abcde"), "echoes not contiguous: {text:?}");
+        // The grid cursor sits right after the last echoed char, NOT
+        // at column 0 of yet another row (a double-wrap would put it
+        // there).
+        instance.backend.set_dirty();
+        let content = instance.backend.sync();
+        use alacritty_terminal::grid::Dimensions;
+        let cur = content.grid.cursor.point;
+        assert!(
+            cur.column.0 > 0,
+            "cursor wrapped early to column 0: {cur:?}"
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn records_command_typed_right_after_narrowing() {

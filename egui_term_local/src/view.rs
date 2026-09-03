@@ -642,7 +642,7 @@ impl<'a> TerminalView<'a> {
         // raw Vec index, so probing them would PANIC. Paint only the
         // cells that exist; the leftover viewport stays background.
         let drawable_cols = columns
-            .min((layout.rect.width() / cell_width.max(1.0)).ceil() as usize);
+            .min((layout.rect.width() / cell_width.max(1.0)).floor() as usize);
         for row in 0..screen_lines {
             for col in 0..drawable_cols.min(columns) {
                 let point = viewport_to_point(
