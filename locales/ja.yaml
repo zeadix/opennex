@@ -413,6 +413,9 @@ ssh:
   prod_banner: PROD
   close_remote_message: このリモート接続を閉じますか？
   ssh_unavailable: ssh が見つかりません。OpenSSH クライアントをインストールしてください
+  connected_to: 接続済み
+  virtual_keys_label: 仮想キー（スマホページのツールバー）
+  virtual_key_add: 仮想キーを追加
   host_missing_fallback: ホスト「{}」は削除済みのため、ローカル shell で起動しました
   menu_entry: SSH 接続...
 ai:
@@ -502,6 +505,8 @@ remote:
   relay_delete: 削除
   relay_retry: 再試行
   relay_hint: 上のチャネルを選択すると自動接続します。初回使用時に frpc（約10MB）を自動ダウンロードします。手動で <データディレクトリ>/tunnel/frpc に配置することも可能です。
+  virtual_keys_label: 仮想キー（スマホページのツールバー）
+  virtual_key_add: 仮想キーを追加
   menu_lan: LAN 操作
   menu_wan: WAN 操作
   lan_panel_title: リモート · LAN

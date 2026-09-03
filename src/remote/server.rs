@@ -666,6 +666,7 @@ mod tests {
                 name: "ws1".into(),
                 locked: false,
                 terminals: vec![],
+                activity: 0,
             });
         }
         let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();

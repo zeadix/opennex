@@ -80,7 +80,18 @@ impl App {
         self.tab_counter += 1;
         let tab_id = format!("terminal-{}", self.tab_counter);
         let snapshot = host.ref_snapshot();
-        let name = host.name.clone();
+        // Display-name dedup: two connections to the same host in one
+        // workspace must stay distinguishable ("host", "host (2)", ...).
+        let name = {
+            let base = host.name.clone();
+            let mut candidate = base.clone();
+            let mut n = 1;
+            while self.terminals.values().any(|t| t.name == candidate) {
+                n += 1;
+                candidate = format!("{base} ({n})");
+            }
+            candidate
+        };
         self.terminals.insert(
             tab_id.clone(),
             TerminalData {
@@ -98,15 +109,40 @@ impl App {
         Some(tab_id)
     }
     /// Sidebar entry point: connect to a host in the ACTIVE workspace's
-    /// focused leaf (the leaf holding the current tab).
+    /// focused leaf, ACTIVATE the new tab immediately (it must be
+    /// visible the moment it exists — a silent background tab was
+    /// invisible to users who didn't watch the tab bar), and tell the
+    /// user WHERE it landed via toast.
     fn connect_ssh_host(&mut self, ctx: &egui::Context, host_id: i64) {
+        let host_name = self
+            .ssh_hosts
+            .iter()
+            .find(|h| h.id == host_id)
+            .map(|h| h.name.clone())
+            .unwrap_or_default();
+        let ws_name = self
+            .panels
+            .get(self.active_panel)
+            .map(|p| p.name.clone())
+            .unwrap_or_default();
         let Some(tab_id) = self.connect_ssh_host_inner(ctx, host_id) else {
             return;
         };
         if let Some(tree) = self.dock_states.get_mut(&self.active_panel) {
             tree.push_to_focused_leaf(tab_id.clone());
+            // Activate the freshly pushed tab (find its leaf).
+            if let Some((surface, node, _)) = tree.find_tab(&tab_id) {
+                tree.set_focused_node_and_surface((surface, node));
+            }
         }
         self.focused_terminal = Some(tab_id);
+        self.update_toast = Some((
+            format!(
+                "{} {} → {}",
+                self.texts.ssh.connected_to, host_name, ws_name
+            ),
+            std::time::Instant::now() + std::time::Duration::from_secs(4),
+        ));
     }
     /// Sidebar SSH host section: header + search + one row per host.
     /// A row click connects in the active workspace's focused leaf.

@@ -413,6 +413,9 @@ ssh:
   prod_banner: PROD
   close_remote_message: 이 원격 연결을 닫을까요?
   ssh_unavailable: ssh 를 찾을 수 없습니다. OpenSSH 클라이언트를 설치해 주세요
+  connected_to: 연결됨
+  virtual_keys_label: 가상 키(휴대폰 툴바)
+  virtual_key_add: 가상 키 추가
   host_missing_fallback: 호스트 "{}"이(가) 삭제되어 로컬 shell 로 시작했습니다
   menu_entry: SSH 연결...
 ai:
@@ -502,6 +505,8 @@ remote:
   relay_delete: 삭제
   relay_retry: 다시 시도
   relay_hint: 위 채널을 선택하면 자동으로 연결됩니다. 처음 사용 시 frpc(약 10MB)가 자동 다운로드되며, <데이터 디렉터리>/tunnel/frpc에 직접 배치할 수도 있습니다.
+  virtual_keys_label: 가상 키(휴대폰 툴바)
+  virtual_key_add: 가상 키 추가
   menu_lan: LAN 제어
   menu_wan: WAN 제어
   lan_panel_title: 원격 · LAN

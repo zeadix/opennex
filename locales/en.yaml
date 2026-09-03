@@ -414,6 +414,9 @@ ssh:
   prod_banner: PROD
   close_remote_message: Close this remote connection?
   ssh_unavailable: ssh not found — please install an OpenSSH client
+  connected_to: Connected
+  virtual_keys_label: Virtual keys (phone toolbar)
+  virtual_key_add: Add virtual key
   host_missing_fallback: 'Host "{}" was deleted; terminal fell back to a local shell'
   menu_entry: SSH Connection...
 ai:
@@ -503,6 +506,8 @@ remote:
   relay_delete: Delete
   relay_retry: Retry
   relay_hint: Select a channel above to connect automatically. frpc (~10 MB) downloads on first use; you can also place it manually at <data dir>/tunnel/frpc.
+  virtual_keys_label: Virtual keys (phone toolbar)
+  virtual_key_add: Add virtual key
   menu_lan: LAN Control
   menu_wan: WAN Control
   lan_panel_title: Remote · LAN

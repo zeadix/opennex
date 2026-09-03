@@ -309,7 +309,8 @@ impl App {
     }
 
     /// Remote phone control page: server port + the frp relay channel
-    /// editor (edits apply instantly — see remote_sync_frp).
+    /// editor (edits apply instantly — see remote_sync_frp) + the
+    /// panel-toggle shortcut recorder (single key or any modifier combo).
     pub(crate) fn settings_page_remote(&mut self, ui: &mut egui::Ui) {
         let tr = self.texts.remote.clone();
         self.settings_group(ui, &tr.settings_section);
@@ -321,6 +322,68 @@ impl App {
             );
         });
         self.settings_edit.remote_port = port;
+
+        // Virtual keys for the phone web page's bottom toolbar: add /
+        // edit (label + recorded byte sequence) / delete. Rendered on
+        // the web page in list order whenever the keyboard toggle is on.
+        self.settings_group(ui, &tr.virtual_keys_label);
+        let mut vkeys = self.settings_edit.remote_keys.clone();
+        let mut delete_idx: Option<usize> = None;
+        let mut record_idx: Option<usize> = None;
+        for (i, vk) in vkeys.iter_mut().enumerate() {
+            let recording = self.virtual_key_recording == Some(i);
+            let mut label = vk.label.clone();
+            let mut action_btn = None;
+            self.settings_action_row(ui, |ui| {
+                ui.add_sized(
+                    [110.0, 20.0],
+                    egui::TextEdit::singleline(&mut label).hint_text("label"),
+                );
+                let seq_text = if recording {
+                    "…".to_string()
+                } else {
+                    display_seq(&vk.action)
+                };
+                if ui
+                    .add(
+                        egui::Button::new(egui::RichText::new(seq_text).monospace())
+                            .min_size(egui::vec2(110.0, 0.0)),
+                    )
+                    .clicked()
+                {
+                    action_btn = Some(true);
+                }
+                if ui.button("🗑").clicked() {
+                    delete_idx = Some(i);
+                }
+            });
+            vk.label = label;
+            if action_btn.is_some() {
+                record_idx = Some(i);
+            }
+        }
+        if let Some(i) = delete_idx {
+            vkeys.remove(i);
+            if self.virtual_key_recording == Some(i) {
+                self.virtual_key_recording = None;
+            }
+        }
+        if let Some(i) = record_idx {
+            self.virtual_key_recording = Some(i);
+        }
+        self.settings_edit.remote_keys = vkeys;
+        let mut add = false;
+        self.settings_action_row(ui, |ui| {
+            if ui.button(&tr.virtual_key_add).clicked() {
+                add = true;
+            }
+        });
+        if add {
+            self.settings_edit.remote_keys.push(VirtualKey {
+                label: String::new(),
+                action: String::new(),
+            });
+        }
 
         // Relay channels (WAN phone access through user-hosted frp
         // relays, e.g. an Aliyun ECS). Edits apply instantly: the sync

@@ -643,13 +643,32 @@ impl App {
     fn remote_refresh(&mut self) {
         // --- snapshot (workspaces + terminals, locked ones redacted) ---
         let mut snapshot = RemoteSnapshot::default();
+        let now_ms = egui_term::unix_ms();
         for (i, panel) in self.panels.iter().enumerate() {
             let locked = self.locked_panels.contains(&i);
             let mut ws = WsInfo {
                 name: panel.name.clone(),
                 locked,
                 terminals: Vec::new(),
+                activity: 2,
             };
+            // Activity state mirrors the desktop sidebar's strip: the
+            // focused terminal's last output/input vs the 30s window.
+            if let Some(tab) = self
+                .dock_states
+                .get_mut(&i)
+                .and_then(|tree| tree.find_active_focused().map(|(_, t)| t.clone()))
+            {
+                let activity_ms = self
+                    .terminals
+                    .get(&tab)
+                    .map(|td| td.instance.last_activity_ms());
+                ws.activity = match crate::app::workspace_activity_state(activity_ms, now_ms) {
+                    crate::app::WorkspaceActivity::Active => 1,
+                    crate::app::WorkspaceActivity::Idle => 0,
+                    crate::app::WorkspaceActivity::Unknown => 2,
+                };
+            }
             if !locked {
                 if let Some(tree) = self.dock_states.get(&i) {
                     for (_, tab_id) in tree.iter_all_tabs() {
@@ -670,6 +689,8 @@ impl App {
             snapshot.workspaces.push(ws);
         }
         snapshot.focused = self.focused_terminal.clone();
+        // Phone toolbar virtual keys follow the desktop settings live.
+        snapshot.virtual_keys = self.settings.remote_keys.clone();
         if let Some(session) = self.remote.as_ref() {
             *session.shared.snapshot.write().unwrap() = snapshot;
         } else {

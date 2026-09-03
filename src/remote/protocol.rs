@@ -23,11 +23,16 @@ pub struct TermInfo {
 }
 
 /// One workspace. A locked workspace hides its terminals entirely.
+/// `activity` mirrors the desktop sidebar's indicator: 0 = idle (green,
+/// no output/input for 30s), 1 = active (red), 2 = unknown (no focused
+/// terminal to watch).
 #[derive(Debug, Clone, Serialize)]
 pub struct WsInfo {
     pub name: String,
     pub locked: bool,
     pub terminals: Vec<TermInfo>,
+    #[serde(default)]
+    pub activity: u8,
 }
 
 /// The full state the phone page renders its workspace/tab bars from.
@@ -35,6 +40,9 @@ pub struct WsInfo {
 pub struct RemoteSnapshot {
     pub workspaces: Vec<WsInfo>,
     pub focused: Option<String>,
+    /// Virtual keys for the phone's bottom toolbar (desktop settings).
+    #[serde(default)]
+    pub virtual_keys: Vec<crate::app::VirtualKey>,
 }
 
 /// A command the phone sent, executed by the UI thread on the next

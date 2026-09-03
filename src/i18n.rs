@@ -437,6 +437,11 @@ pub struct RemoteTexts {
     pub relay_retry: String,
     #[serde(default)]
     pub relay_hint: String,
+    /// Virtual-keys editor (phone web toolbar), settings → remote page.
+    #[serde(default)]
+    pub virtual_keys_label: String,
+    #[serde(default)]
+    pub virtual_key_add: String,
     /// Menu-bar dropdown entries + per-panel window titles.
     #[serde(default)]
     pub menu_lan: String,
@@ -748,6 +753,9 @@ pub struct SshTexts {
     pub prod_banner: String,
     pub close_remote_message: String,
     pub ssh_unavailable: String,
+    /// Toast: "{connected_to} {host} → {workspace}" after a sidebar
+    /// connect, telling the user WHERE the new tab landed.
+    pub connected_to: String,
     /// "{}" is replaced with the host name.
     pub host_missing_fallback: String,
     pub menu_entry: String,
@@ -1177,6 +1185,7 @@ impl Texts {
                 prod_banner: "PROD".into(),
                 close_remote_message: "确定要关闭此远程连接吗？".into(),
                 ssh_unavailable: "未找到 ssh 程序，请先安装 OpenSSH 客户端".into(),
+                connected_to: "已连接".into(),
                 host_missing_fallback: "主机「{}」已删除，终端已回退为本地 shell".into(),
                 menu_entry: "SSH 连接...".into(),
             },
@@ -1260,6 +1269,8 @@ impl Texts {
                 relay_delete: "删除".into(),
                 relay_retry: "重试".into(),
                 relay_hint: "选中上方通道即自动连接；首次使用将自动下载 frpc（约 10MB），也可手动放置到数据目录 tunnel/frpc。".into(),
+                virtual_keys_label: "虚拟按键（手机页底部工具栏）".into(),
+                virtual_key_add: "添加虚拟按键".into(),
                 menu_lan: "局域网控制".into(),
                 menu_wan: "外网控制".into(),
                 lan_panel_title: "远程控制 · 局域网".into(),

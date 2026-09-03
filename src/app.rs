@@ -30,6 +30,11 @@ use self::ssh_ui::SshHostDialog;
 
 static DEFAULT_SHELL_ID: std::sync::RwLock<String> = std::sync::RwLock::new(String::new());
 
+/// Master switch for the AI-assistant UI entries (menu-bar button +
+/// settings page). The agent/AI code paths stay compiled in; flipping
+/// this to `true` restores every entry.
+const AI_UI_ENABLED: bool = false;
+
 const DEFAULT_FONT_SIZE: f32 = 14.0;
 const MIN_FONT_SIZE: f32 = 8.0;
 const MAX_FONT_SIZE: f32 = 32.0;
@@ -60,6 +65,41 @@ pub(crate) struct TunnelProfile {
 
 fn default_relay_port() -> u16 {
     7000
+}
+
+/// One configurable virtual key for the phone web page's bottom
+/// toolbar. `action` starting with `@` is a builtin behavior (`@paste`,
+/// `@copy`, `@bottom`); anything else is a byte sequence sent verbatim
+/// to the PTY (escape sequences stored raw, e.g. "\x1b[A" = ArrowUp).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct VirtualKey {
+    pub label: String,
+    pub action: String,
+}
+
+fn default_virtual_keys() -> Vec<VirtualKey> {
+    let k = |label: &str, action: &str| VirtualKey {
+        label: label.into(),
+        action: action.into(),
+    };
+    vec![
+        k("Esc", "\x1b"),
+        k("Tab", "\t"),
+        k("↑", "\x1b[A"),
+        k("↓", "\x1b[B"),
+        k("←", "\x1b[D"),
+        k("→", "\x1b[C"),
+        k("PgUp", "\x1b[5~"),
+        k("PgDn", "\x1b[6~"),
+        k("Home", "\x1b[H"),
+        k("End", "\x1b[F"),
+        k("Ctrl+C", "\x03"),
+        k("Ctrl+D", "\x04"),
+        k("Ctrl+L", "\x0c"),
+        k("Paste", "@paste"),
+        k("Copy", "@copy"),
+        k("⤓", "@bottom"),
+    ]
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -124,6 +164,10 @@ struct AppSettings {
     /// Relay channels for WAN phone access (frp servers etc.).
     #[serde(default)]
     remote_tunnels: Vec<TunnelProfile>,
+    /// Virtual keys rendered on the phone web page's bottom toolbar
+    /// (user-configurable; defaults mirror the legacy hardcoded set).
+    #[serde(default = "default_virtual_keys")]
+    remote_keys: Vec<VirtualKey>,
 }
 
 fn default_agent_approval_mode() -> String {
@@ -1333,6 +1377,7 @@ impl Default for AppSettings {
             smooth_rendering: true,
             smooth_level: default_smooth_level(),
             remote_tunnels: Vec::new(),
+            remote_keys: default_virtual_keys(),
         }
     }
 }
@@ -1450,6 +1495,219 @@ fn detect_os_ui_fonts() -> Vec<OsUiFont> {
     }
     out.retain(|f| f.path.is_file());
     out
+}
+
+/// Convert a captured key event into a virtual-key byte sequence and a
+/// suggested display label. `None` = the key cannot produce a sequence
+/// (treated as cancel by the caller). CSI-key modifier suffix follows
+/// the xterm convention: 1 + shift(1) + alt(2) + ctrl(4).
+fn virtual_key_from_capture(
+    key: egui::Key,
+    modifiers: egui::Modifiers,
+) -> Option<(String, String)> {
+    use egui::Key as K;
+    let m = (modifiers.shift as u8) | ((modifiers.alt as u8) << 1) | ((modifiers.ctrl as u8) << 2);
+    let mod_code = 1 + m;
+    let csi = |final_byte: char, base: &str| -> (String, String) {
+        let seq = if mod_code == 1 {
+            format!("\x1b{base}")
+        } else {
+            format!("\x1b[1;{mod_code}{final_byte}")
+        };
+        (seq, String::new())
+    };
+    let (seq, mut label): (String, String) = match key {
+        K::ArrowUp => csi('A', "[A"),
+        K::ArrowDown => csi('B', "[B"),
+        K::ArrowRight => csi('C', "[C"),
+        K::ArrowLeft => csi('D', "[D"),
+        K::Home => csi('H', "[H"),
+        K::End => csi('F', "[F"),
+        K::PageUp => {
+            let seq = if mod_code == 1 {
+                "\x1b[5~".into()
+            } else {
+                format!("\x1b[5;{mod_code}~")
+            };
+            (seq, String::new())
+        }
+        K::PageDown => {
+            let seq = if mod_code == 1 {
+                "\x1b[6~".into()
+            } else {
+                format!("\x1b[6;{mod_code}~")
+            };
+            (seq, String::new())
+        }
+        K::Insert => csi('~', "[2~"),
+        K::Delete => csi('~', "[3~"),
+        K::Enter => ("\r".into(), "Enter".into()),
+        K::Tab => ("\t".into(), "Tab".into()),
+        K::Backspace => ("\x7f".into(), "Bksp".into()),
+        K::Space => (" ".into(), "Space".into()),
+        K::F1 => ("\x1bOP".into(), "F1".into()),
+        K::F2 => ("\x1bOQ".into(), "F2".into()),
+        K::F3 => ("\x1bOR".into(), "F3".into()),
+        K::F4 => ("\x1bOS".into(), "F4".into()),
+        K::F5 => ("\x1b[15~".into(), "F5".into()),
+        K::F6 => ("\x1b[17~".into(), "F6".into()),
+        K::F7 => ("\x1b[18~".into(), "F7".into()),
+        K::F8 => ("\x1b[19~".into(), "F8".into()),
+        K::F9 => ("\x1b[20~".into(), "F9".into()),
+        K::F10 => ("\x1b[21~".into(), "F10".into()),
+        K::F11 => ("\x1b[23~".into(), "F11".into()),
+        K::F12 => ("\x1b[24~".into(), "F12".into()),
+        _ => {
+            // Letters/digits/punctuation: bare char, Ctrl -> control
+            // byte, Alt -> ESC prefix.
+            let ch = key_to_char(key)?;
+            let mut seq = String::new();
+            if modifiers.ctrl {
+                seq.push((ch.to_ascii_uppercase() as u8 % 32) as char);
+            } else {
+                seq.push(ch);
+            }
+            if modifiers.alt {
+                seq.insert(0, '\x1b');
+            }
+            let mut label = String::new();
+            if modifiers.ctrl {
+                label.push_str("Ctrl+");
+            }
+            if modifiers.alt {
+                label.push_str("Alt+");
+            }
+            if modifiers.shift && !modifiers.ctrl {
+                label.push_str("Shift+");
+            }
+            label.push(ch.to_ascii_uppercase());
+            (seq, label)
+        }
+    };
+    if label.is_empty() {
+        // Direction/CSI keys: synthesize the label from the modifiers.
+        if modifiers.any() {
+            let mut l = String::new();
+            if modifiers.ctrl {
+                l.push_str("Ctrl+");
+            }
+            if modifiers.alt {
+                l.push_str("Alt+");
+            }
+            if modifiers.shift {
+                l.push_str("Shift+");
+            }
+            l.push_str(base_key_name(key));
+            label = l;
+        } else {
+            label = base_key_name(key).to_string();
+        }
+    }
+    Some((seq, label))
+}
+
+fn base_key_name(key: egui::Key) -> &'static str {
+    use egui::Key as K;
+    match key {
+        K::ArrowUp => "↑",
+        K::ArrowDown => "↓",
+        K::ArrowLeft => "←",
+        K::ArrowRight => "→",
+        K::Home => "Home",
+        K::End => "End",
+        K::PageUp => "PgUp",
+        K::PageDown => "PgDn",
+        K::Insert => "Ins",
+        K::Delete => "Del",
+        K::Enter => "Enter",
+        K::Tab => "Tab",
+        K::Backspace => "Bksp",
+        K::Space => "Space",
+        K::F1 => "F1",
+        K::F2 => "F2",
+        K::F3 => "F3",
+        K::F4 => "F4",
+        K::F5 => "F5",
+        K::F6 => "F6",
+        K::F7 => "F7",
+        K::F8 => "F8",
+        K::F9 => "F9",
+        K::F10 => "F10",
+        K::F11 => "F11",
+        K::F12 => "F12",
+        _ => "",
+    }
+}
+
+/// Printable character for letter/digit/punctuation keys (None for
+/// specials — those map to escape sequences in virtual_key_from_capture).
+fn key_to_char(key: egui::Key) -> Option<char> {
+    use egui::Key as K;
+    Some(match key {
+        K::A => 'a',
+        K::B => 'b',
+        K::C => 'c',
+        K::D => 'd',
+        K::E => 'e',
+        K::F => 'f',
+        K::G => 'g',
+        K::H => 'h',
+        K::I => 'i',
+        K::J => 'j',
+        K::K => 'k',
+        K::L => 'l',
+        K::M => 'm',
+        K::N => 'n',
+        K::O => 'o',
+        K::P => 'p',
+        K::Q => 'q',
+        K::R => 'r',
+        K::S => 's',
+        K::T => 't',
+        K::U => 'u',
+        K::V => 'v',
+        K::W => 'w',
+        K::X => 'x',
+        K::Y => 'y',
+        K::Z => 'z',
+        K::Num0 => '0',
+        K::Num1 => '1',
+        K::Num2 => '2',
+        K::Num3 => '3',
+        K::Num4 => '4',
+        K::Num5 => '5',
+        K::Num6 => '6',
+        K::Num7 => '7',
+        K::Num8 => '8',
+        K::Num9 => '9',
+        K::Minus => '-',
+        K::Period => '.',
+        K::Comma => ',',
+        K::Plus => '+',
+        K::Equals => '=',
+        K::Semicolon => ';',
+        K::Slash => '/',
+        K::Backslash => '\\',
+        K::Quote => '\'',
+        K::OpenBracket => '[',
+        K::CloseBracket => ']',
+        K::Backtick => '`',
+        _ => return None,
+    })
+}
+
+/// Human-visible rendering of a stored byte sequence (settings list):
+/// ESC / control bytes become ^X-style markers.
+fn display_seq(seq: &str) -> String {
+    seq.chars()
+        .map(|c| match c {
+            '\x1b' => "ESC".to_string(),
+            '\r' => "^M".to_string(),
+            '\t' => "^I".to_string(),
+            c if (c as u32) < 32 => format!("^{}", (b'@' + c as u8) as char),
+            c => c.to_string(),
+        })
+        .collect()
 }
 
 fn is_valid_font_data(data: &[u8]) -> bool {
@@ -1604,7 +1862,10 @@ enum SettingsPage {
 impl SettingsPage {
     fn from_u8(v: u8) -> Self {
         match v {
-            1 => SettingsPage::AiAssistant,
+            // 1 = AI page, but while AI_UI_ENABLED is off the entry is
+            // hidden — fall back to General (stale page memory must not
+            // open a page the nav doesn't show).
+            1 if AI_UI_ENABLED => SettingsPage::AiAssistant,
             2 => SettingsPage::Remote,
             3 => SettingsPage::Shortcuts,
             4 => SettingsPage::Lock,
@@ -1884,6 +2145,10 @@ pub struct App {
     agent: Option<AgentRun>,
     /// The remote phone-control session (None when off).
     remote: Option<RemoteSession>,
+    /// Recording state for a virtual key's sequence (index into
+    /// settings_edit.remote_keys). Independent from the shortcut
+    /// recorder; only one of the two can be active at a time.
+    virtual_key_recording: Option<usize>,
     /// The sidebar SSH host search box holds keyboard focus - the
     /// terminal must not reclaim it every frame.
     sidebar_input_focused: bool,
@@ -2355,6 +2620,7 @@ impl App {
             agent_goal: String::new(),
             agent_confirm_just_opened: false,
             remote: None,
+            virtual_key_recording: None,
             sidebar_input_focused: false,
             snippet_fill: None,
             snippet_fill_just_opened: false,
@@ -5114,6 +5380,107 @@ impl eframe::App for App {
             }
         }
 
+        // Handle virtual-key sequence recording in settings (remote page).
+        // Runs only when the SHORTCUT recorder is idle; Esc cancels.
+        if let Some(idx) = self.virtual_key_recording {
+            if self.binding_recording.is_some() {
+                // Shortcut recording takes precedence this frame.
+            } else {
+                #[derive(Default)]
+                struct Captured {
+                    seq: String,
+                    label: String,
+                    cancel: bool,
+                }
+                let captured = ctx.input(|i| {
+                    let mut out = Captured::default();
+                    for event in &i.events {
+                        match event {
+                            egui::Event::Key {
+                                key,
+                                pressed: true,
+                                repeat: false,
+                                modifiers,
+                                ..
+                            } => {
+                                if *key == egui::Key::Escape {
+                                    out.cancel = true;
+                                    return out;
+                                }
+                                if let Some((seq, label)) =
+                                    virtual_key_from_capture(*key, *modifiers)
+                                {
+                                    out.seq = seq;
+                                    out.label = label;
+                                    return out;
+                                }
+                            }
+                            egui::Event::Text(t) if !t.is_empty() => {
+                                out.seq = t.clone();
+                                out.label = t.trim().to_string();
+                                return out;
+                            }
+                            // egui-winit SWALLOWS Ctrl+C / Ctrl+X / Ctrl+V
+                            // (and their Shift variants) on Linux/Windows:
+                            // they arrive here as Copy/Cut/Paste with the
+                            // original Key event dropped. The frame's
+                            // modifiers still carry the full combo, so
+                            // Ctrl+Shift+C records with its Shift intact —
+                            // emitted as the xterm modifyOtherKeys form
+                            // (\x1b[27;mod;char) so TUIs can tell it apart
+                            // from plain Ctrl+C.
+                            egui::Event::Copy | egui::Event::Cut | egui::Event::Paste(_) => {
+                                let m = i.modifiers;
+                                let (plain_byte, ch, shift_relevant) = match event {
+                                    egui::Event::Copy => ('\x03', 'c', true),
+                                    egui::Event::Cut => ('\x18', 'x', false),
+                                    _ => ('\x16', 'v', true),
+                                };
+                                let mut seq = String::new();
+                                if m.alt {
+                                    seq.push('\x1b');
+                                }
+                                if shift_relevant && m.shift {
+                                    // mod = 1 + shift(1) + alt(2) + ctrl(4)
+                                    let code = 1
+                                        + (m.shift as u8)
+                                        + ((m.alt as u8) << 1)
+                                        + ((m.ctrl as u8) << 2);
+                                    seq.push_str(&format!("\x1b[27;{};{}", code, ch as u8));
+                                } else {
+                                    seq.push(plain_byte);
+                                }
+                                let mut label = String::from("Ctrl+");
+                                if m.alt {
+                                    label.push_str("Alt+");
+                                }
+                                if shift_relevant && m.shift {
+                                    label.push_str("Shift+");
+                                }
+                                label.push(ch.to_ascii_uppercase());
+                                out.seq = seq;
+                                out.label = label;
+                                return out;
+                            }
+                            _ => {}
+                        }
+                    }
+                    out
+                });
+                if captured.cancel {
+                    self.virtual_key_recording = None;
+                } else if !captured.seq.is_empty() {
+                    if let Some(vk) = self.settings_edit.remote_keys.get_mut(idx) {
+                        vk.action = captured.seq;
+                        if vk.label.is_empty() {
+                            vk.label = captured.label;
+                        }
+                    }
+                    self.virtual_key_recording = None;
+                }
+            }
+        }
+
         // Configurable shortcuts
 
         if shortcuts_allowed && check_shortcut(ctx, &binds, "new_terminal") {
@@ -5380,10 +5747,12 @@ impl eframe::App for App {
                                 .galley(rect.center() - galley.size() / 2.0, galley, color);
                             resp
                         };
-                    let ai_label = self.texts.view_menu.ai_assistant.clone();
-                    let ai_active = self.show_ai_panel;
-                    if menu_btn_toggled(ui, &ai_label, ai_active).clicked() {
-                        self.show_ai_panel = !self.show_ai_panel;
+                    if AI_UI_ENABLED {
+                        let ai_label = self.texts.view_menu.ai_assistant.clone();
+                        let ai_active = self.show_ai_panel;
+                        if menu_btn_toggled(ui, &ai_label, ai_active).clicked() {
+                            self.show_ai_panel = !self.show_ai_panel;
+                        }
                     }
                     // Remote control: a DROPDOWN with the two channels —
                     // clicking an entry IS the start action (opens the
@@ -5754,11 +6123,13 @@ impl eframe::App for App {
                         if nav_item(nav_ui, &texts.settings.nav.general, SettingsPage::General) {
                             self.settings_tab = SettingsPage::General as u8;
                         }
-                        if nav_item(
-                            nav_ui,
-                            &texts.settings.nav.ai_assistant,
-                            SettingsPage::AiAssistant,
-                        ) {
+                        if AI_UI_ENABLED
+                            && nav_item(
+                                nav_ui,
+                                &texts.settings.nav.ai_assistant,
+                                SettingsPage::AiAssistant,
+                            )
+                        {
                             self.settings_tab = SettingsPage::AiAssistant as u8;
                         }
                         if nav_item(nav_ui, &texts.settings.nav.remote, SettingsPage::Remote) {
@@ -7828,6 +8199,40 @@ mod tests {
         );
     }
 
+    /// Virtual-key capture: CSI keys with optional modifiers, control
+    /// bytes for Ctrl+letter, and a readable display form for settings.
+    #[test]
+    fn virtual_key_capture_and_display() {
+        use egui::Key as K;
+        let Some((seq, label)) = super::virtual_key_from_capture(K::ArrowUp, egui::Modifiers::NONE)
+        else {
+            panic!("capture failed");
+        };
+        assert_eq!(seq, "\x1b[A");
+        assert_eq!(label, "↑");
+        let Some((seq, _)) = super::virtual_key_from_capture(K::ArrowUp, egui::Modifiers::CTRL)
+        else {
+            panic!("capture failed");
+        };
+        assert_eq!(seq, "\x1b[1;5A");
+        let Some((seq, label)) = super::virtual_key_from_capture(K::C, egui::Modifiers::CTRL)
+        else {
+            panic!("capture failed");
+        };
+        assert_eq!(seq, "\x03");
+        assert_eq!(label, "Ctrl+C");
+        let Some((seq, _)) = super::virtual_key_from_capture(K::X, egui::Modifiers::ALT) else {
+            panic!("capture failed");
+        };
+        assert_eq!(seq, "\x1bx");
+        let Some((seq, _)) = super::virtual_key_from_capture(K::F5, egui::Modifiers::NONE) else {
+            panic!("capture failed");
+        };
+        assert_eq!(seq, "\x1b[15~");
+        assert_eq!(super::display_seq("\x1b[A"), "ESC[A");
+        assert_eq!(super::display_seq("\x03"), "^C");
+    }
+
     /// fc-match output parsing: file + TTC index, family ignored,
     /// non-numeric index falls back to face 0, garbage rejected.
     #[test]
@@ -8672,6 +9077,15 @@ struct TerminalTabViewer<'a> {
 
 impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
     type Tab = String;
+
+    /// The egui_dock default derives the egui widget Id from the tab
+    /// TITLE — two same-named SSH tabs in one workspace then collided
+    /// ("first use of widget id" spam + broken click handling). Key the
+    /// widget Id off the unique tab id (terminal-N) instead; titles are
+    /// display-only.
+    fn id(&mut self, tab: &mut Self::Tab) -> egui::Id {
+        egui::Id::new(tab.as_str())
+    }
 
     fn title(&mut self, tab: &mut Self::Tab) -> egui::WidgetText {
         let Some(d) = self.terminals.get(tab) else {

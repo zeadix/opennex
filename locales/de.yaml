@@ -414,6 +414,9 @@ ssh:
   prod_banner: PROD
   close_remote_message: Diese Remote-Verbindung schließen?
   ssh_unavailable: ssh nicht gefunden – bitte OpenSSH-Client installieren
+  connected_to: Verbunden
+  virtual_keys_label: Virtuelle Tasten (Telefon-Toolbar)
+  virtual_key_add: Virtuelle Taste hinzufügen
   host_missing_fallback: Host "{}" wurde gelöscht; Terminal fällt auf lokale Shell zurück
   menu_entry: SSH-Verbindung...
 ai:
@@ -503,6 +506,8 @@ remote:
   relay_delete: Löschen
   relay_retry: Wiederholen
   relay_hint: Kanal oben auswählen, um automatisch zu verbinden. frpc (~10 MB) wird beim ersten Einsatz geladen oder manuell unter <Datenverzeichnis>/tunnel/frpc abgelegt.
+  virtual_keys_label: Virtuelle Tasten (Telefon-Toolbar)
+  virtual_key_add: Virtuelle Taste hinzufügen
   menu_lan: LAN-Steuerung
   menu_wan: WAN-Steuerung
   lan_panel_title: Fernsteuerung · LAN

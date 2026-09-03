@@ -14,6 +14,7 @@
   .tab { padding: 6px 12px; margin: 0 2px; border-radius: 6px; font-size: 13px; color: #9aa0aa; cursor: pointer; flex-shrink: 0; }
   .tab.active { background: #2f6fed; color: #fff; }
   .tab.locked { color: #e0a800; }
+  .tab .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
   #term { flex: 1; position: relative; background: #0c0d10; overflow: hidden; }
   #term .xterm { position: absolute; left: 0; top: 0; }
   .status { padding: 3px 8px; font-size: 11px; color: #9aa0aa; background: #1e2128; border-top: 1px solid #2c3038; }
@@ -57,27 +58,7 @@
     <input id="cmd-input" type="text" autocomplete="off" autocapitalize="off" spellcheck="false">
     <button id="cmd-send">Run</button>
   </div>
-  <div id="keys">
-    <div class="key" data-k="esc">Esc</div>
-    <div class="key" data-k="tab">Tab</div>
-    <div class="key" data-k="ctrl" id="ctrl-key">Ctrl</div>
-    <div class="key" data-k="up">↑</div>
-    <div class="key" data-k="down">↓</div>
-    <div class="key" data-k="left">←</div>
-    <div class="key" data-k="right">→</div>
-    <div class="key" data-k="pgup">PgUp</div>
-    <div class="key" data-k="pgdn">PgDn</div>
-    <div class="key" data-k="home">Home</div>
-    <div class="key" data-k="end">End</div>
-    <div class="key" data-k="ctrlc">Ctrl+C</div>
-    <div class="key" data-k="ctrld">Ctrl+D</div>
-    <div class="key" data-k="ctrll">Ctrl+L</div>
-    <div class="key" data-k="paste">Paste</div>
-    <div class="key" data-k="copy">Copy</div>
-    <div class="key" data-k="bottom">⤓</div>
-    <div class="key tool" data-k="cmdbar">Aa</div>
-    <div class="key tool" data-k="collapse">▾</div>
-  </div>
+  <div id="keys"></div>
   <div class="status" id="status"><span id="status-text"></span> <span class="key" id="follow-btn" style="padding:2px 8px;font-size:10px;float:right;">Follow</span></div>
   <div id="copybox">
     <textarea id="copy-text" readonly></textarea>
@@ -96,7 +77,7 @@
     var m = location.search.match(/[?&]token=([^&]+)/);
     return m ? m[1] : '';
   })();
-  var state = { ws: [], wsIndex: 0, termIndex: 0, locked: false };
+  var state = { ws: [], wsIndex: 0, termIndex: 0, locked: false, vkeys: [] };
   var term = new Terminal({
     fontFamily: '"Cascadia Mono", Consolas, "Courier New", monospace',
     fontSize: 13,
@@ -110,7 +91,6 @@
   var unlockEl = document.getElementById('unlock');
   var ws = null;
   var wsOk = false;
-  var ctrlMode = false;
   var lastFrame = { cols: 0, rows: 0, alt: null, app_cursor: null, seq: -1 };
   var reconnectDelay = 500;
   var fallbackPoll = null;
@@ -165,27 +145,117 @@
 
   // ----- xterm input -----
   term.onData(function (d) {
-    if (ctrlMode && d.length === 1) {
+    if (stickyCtrl && d.length === 1) {
       // Sticky Ctrl: map the next plain char to its control code.
       var c = d.toUpperCase().charCodeAt(0);
       if (c >= 64 && c <= 95) d = String.fromCharCode(c - 64);
-      ctrlMode = false;
+      stickyCtrl = false;
       document.getElementById('ctrl-key').className = 'key';
     }
     sendInput(d);
   });
 
-  // ----- special key toolbar -----
-  var REPEAT_KEYS = { up: 1, down: 1, left: 1, right: 1, pgup: 1, pgdn: 1 };
-  function keySeq(k) {
-    var map = {
-      esc: '\x1b', tab: '\t', up: '\x1b[A', down: '\x1b[B',
-      right: '\x1b[C', left: '\x1b[D',
-      pgup: '\x1b[5~', pgdn: '\x1b[6~', home: '\x1b[H', end: '\x1b[F',
-      ctrlc: '\x03', ctrld: '\x04', ctrll: '\x0c'
-    };
-    return map[k] || null;
+  // ----- toolbar action dispatch -----
+  // Special actions for @-style virtual keys and the fixed tool keys.
+  function runAction(action, el) {
+    if (action === 'paste') { pasteIntoTerminal(); return; }
+    if (action === 'copy') { copyTerminalOutput(); return; }
+    if (action === 'bottom') { scrollBottom(); return; }
+    if (action === 'cmdbar') {
+      var bar = document.getElementById('cmdbar');
+      var on = bar.className === 'show';
+      bar.className = on ? '' : 'show';
+      el.className = 'key tool' + (on ? '' : ' on');
+      if (!on) document.getElementById('cmd-input').focus();
+      else term.focus();
+      return;
+    }
+    if (action === 'collapse') {
+      var keys = document.getElementById('keys');
+      keys.className = keys.className === 'collapsed' ? '' : 'collapsed';
+      return;
+    }
   }
+  var stickyCtrl = false;
+  function sendCtrlKey(d) {
+    if (stickyCtrl && d.length === 1) {
+      var c = d.toUpperCase().charCodeAt(0);
+      if (c >= 64 && c <= 95) d = String.fromCharCode(c - 64);
+      stickyCtrl = false;
+      var ck = document.getElementById('ctrl-key');
+      if (ck) ck.className = 'key';
+    }
+    sendInput(d);
+  }
+
+  // Virtual-key toolbar: rendered from the snapshot's virtual_keys
+  // (desktop settings), fixed tool keys appended at the end. Rebuilt
+  // only when the config changes.
+  var renderedKeysSig = '';
+  function renderKeys() {
+    var sig = JSON.stringify(state.vkeys || []);
+    if (sig === renderedKeysSig) return;
+    renderedKeysSig = sig;
+    var el = document.getElementById('keys');
+    var html = '<div class="key" data-k="ctrl" id="ctrl-key">Ctrl</div>';
+    var vks = state.vkeys || [];
+    for (var i = 0; i < vks.length; i++) {
+      html += '<div class="key" data-vk="' + i + '">' +
+        escapeHtml(vks[i].label) + '</div>';
+    }
+    html += '<div class="key tool" data-k="cmdbar">Aa</div>';
+    html += '<div class="key tool" data-k="collapse">⌨</div>';
+    el.innerHTML = html;
+  }
+
+  document.getElementById('keys').addEventListener('click', function (e) {
+    var target = e.target;
+    var vk = target.getAttribute && target.getAttribute('data-vk');
+    if (vk !== null && vk !== undefined && state.vkeys && state.vkeys[vk] !== undefined) {
+      var action = state.vkeys[vk].action;
+      if (action === '@paste') { pasteIntoTerminal(); }
+      else if (action === '@copy') { copyTerminalOutput(); }
+      else if (action === '@bottom') { scrollBottom(); }
+      else { sendCtrlKey(action); }
+      term.focus();
+      return;
+    }
+    var k = target.getAttribute && target.getAttribute('data-k');
+    if (!k) return;
+    if (k === 'ctrl') {
+      stickyCtrl = !stickyCtrl;
+      target.className = 'key' + (stickyCtrl ? ' on' : '');
+      return;
+    }
+    runAction(k, target);
+    term.focus();
+  });
+  // Long-press auto-repeat: arrows / PgUp / PgDn virtual keys (seq
+  // matched), same feel as the old hardcoded set.
+  var REPEAT_SEQS = { '\x1b[A': 1, '\x1b[B': 1, '\x1b[C': 1, '\x1b[D': 1, '\x1b[5~': 1, '\x1b[6~': 1 };
+  document.getElementById('keys').addEventListener('pointerdown', function (e) {
+    var target = e.target;
+    var vk = target.getAttribute && target.getAttribute('data-vk');
+    if (vk === null || vk === undefined || !state.vkeys || !state.vkeys[vk]) return;
+    var seq = state.vkeys[vk].action;
+    if (seq.charAt(0) === '@' || !REPEAT_SEQS[seq]) return;
+    var timer = null;
+    var started = false;
+    var start = function () {
+      started = true;
+      timer = setInterval(function () { sendInput(seq); }, 80);
+    };
+    var delay = setTimeout(start, 400);
+    var stop = function () {
+      clearTimeout(delay);
+      if (timer) clearInterval(timer);
+      if (!started) sendInput(seq);
+      document.removeEventListener('pointerup', stop);
+      document.removeEventListener('pointercancel', stop);
+    };
+    document.addEventListener('pointerup', stop);
+    document.addEventListener('pointercancel', stop);
+  });
   function pasteIntoTerminal() {
     if (navigator.clipboard && navigator.clipboard.readText) {
       navigator.clipboard.readText().then(function (text) {
@@ -223,62 +293,6 @@
     }
     term.scrollToBottom();
   }
-  function toolbarAction(k, el) {
-    if (k === 'ctrl') {
-      ctrlMode = !ctrlMode;
-      el.className = 'key' + (ctrlMode ? ' on' : '');
-      return;
-    }
-    if (k === 'paste') { pasteIntoTerminal(); return; }
-    if (k === 'copy') { copyTerminalOutput(); return; }
-    if (k === 'bottom') { scrollBottom(); return; }
-    if (k === 'collapse') {
-      var keys = document.getElementById('keys');
-      keys.className = keys.className === 'collapsed' ? '' : 'collapsed';
-      el.textContent = keys.className === 'collapsed' ? '▴' : '▾';
-      return;
-    }
-    if (k === 'cmdbar') {
-      var bar = document.getElementById('cmdbar');
-      var on = bar.className === 'show';
-      bar.className = on ? '' : 'show';
-      el.className = 'key tool' + (on ? '' : ' on');
-      if (!on) document.getElementById('cmd-input').focus();
-      else term.focus();
-      return;
-    }
-    var seq = keySeq(k);
-    if (seq) sendInput(seq);
-    term.focus();
-  }
-  document.getElementById('keys').addEventListener('click', function (e) {
-    var k = e.target.getAttribute && e.target.getAttribute('data-k');
-    if (!k) return;
-    toolbarAction(k, e.target);
-  });
-  // Long-press auto-repeat for arrows/PgUp/PgDn (vim/less navigation).
-  document.getElementById('keys').addEventListener('pointerdown', function (e) {
-    var k = e.target.getAttribute && e.target.getAttribute('data-k');
-    if (!k || !REPEAT_KEYS[k]) return;
-    var seq = keySeq(k);
-    if (!seq) return;
-    var timer = null;
-    var started = false;
-    var start = function () {
-      started = true;
-      timer = setInterval(function () { sendInput(seq); }, 80);
-    };
-    var delay = setTimeout(start, 400);
-    var stop = function () {
-      clearTimeout(delay);
-      if (timer) clearInterval(timer);
-      if (!started) sendInput(seq);
-      document.removeEventListener('pointerup', stop);
-      document.removeEventListener('pointercancel', stop);
-    };
-    document.addEventListener('pointerup', stop);
-    document.addEventListener('pointercancel', stop);
-  });
 
   // ----- command bar (line mode) -----
   document.getElementById('cmd-send').addEventListener('click', function () {
@@ -450,7 +464,7 @@
       // top of a half-drawn buffer (reconnect used to duplicate history).
       term.reset();
       lastFrame = { cols: 0, rows: 0, alt: null, app_cursor: null, seq: -1 };
-      ctrlMode = false;
+      stickyCtrl = false;
       var ctrlKey = document.getElementById('ctrl-key');
       if (ctrlKey) ctrlKey.className = 'key';
       ws.send(JSON.stringify({ t: 'hello' }));
@@ -541,7 +555,7 @@
     // previous terminal must not leak into the new one.
     lastFrame = { cols: 0, rows: 0, alt: null, app_cursor: null, seq: -1 };
     term.reset();
-    ctrlMode = false;
+    stickyCtrl = false;
     var ctrlKey = document.getElementById('ctrl-key');
     if (ctrlKey) ctrlKey.className = 'key';
     var tab = currentTab();
@@ -565,7 +579,9 @@
     var wsel = document.getElementById('wstabs');
     var html = '';
     for (var i = 0; i < wsArr.length; i++) {
+      var dotColor = wsArr[i].activity === 1 ? '#ef4444' : (wsArr[i].activity === 0 ? '#22c55e' : '#6b7280');
       html += '<div class="tab' + (i === state.wsIndex ? ' active' : '') + (wsArr[i].locked ? ' locked' : '') + '" data-ws="' + i + '">' +
+        '<span class="dot" style="background:' + dotColor + '"></span>' +
         escapeHtml(wsArr[i].name) + (wsArr[i].locked ? ' 🔒' : '') + '</div>';
     }
     wsel.innerHTML = html;
@@ -631,6 +647,8 @@
       lastRtt = Date.now() - t0;
       var s = JSON.parse(body);
       state.ws = s.workspaces || [];
+      state.vkeys = s.virtual_keys || [];
+      renderKeys();
       if (!state.ws.length) { setStatus(T.noWs); return; }
       // Optional follow-the-desktop focus (off by default: the phone is
       // usually the viewer and must not chase the desktop's typing).
