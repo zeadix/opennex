@@ -31,7 +31,10 @@ enum InputAction {
     Ignore,
 }
 
-const RESIZE_DEBOUNCE_SECS: f64 = 0.08;
+/// 30ms: long enough to skip sub-cell jitter while dragging, short
+/// enough that the layout/grid desync window is barely noticeable
+/// (and keyboard input force-commits through it anyway).
+const RESIZE_DEBOUNCE_SECS: f64 = 0.03;
 
 pub fn terminal_focus_event_filter() -> egui::EventFilter {
     egui::EventFilter {
@@ -105,7 +108,7 @@ impl Widget for TerminalView<'_> {
         self.draw_scrollbar(ui, &mut state, &layout);
 
         self.focus(&layout)
-            .resize(&layout, &mut state)
+            .resize(&layout, &mut state, false)
             .process_input(&layout, &mut state)
             .show(&mut state, &layout, &painter);
 
@@ -184,7 +187,18 @@ impl<'a> TerminalView<'a> {
     /// Compute stable integer cols/rows and only apply backend resize when
     /// the grid size actually changes and has settled (debounce). This avoids
     /// thrashing reflow when dock splitters / window edges jitter by <1 cell.
-    fn resize(self, layout: &Response, state: &mut TerminalViewState) -> Self {
+    ///
+    /// `force` skips the debounce wait: typing during the pending window
+    /// MUST first commit the resize, or the keystroke lands in a PTY
+    /// whose winsize is the OLD width — readline wraps at the old
+    /// columns while the layout already shows the new ones (the "one
+    /// character wraps even though space remains" bug).
+    fn resize(
+        self,
+        layout: &Response,
+        state: &mut TerminalViewState,
+        force: bool,
+    ) -> Self {
         let font_size = self.font.font_measure(&layout.ctx);
         let layout_size = Size::from(layout.rect.size());
 
@@ -222,43 +236,60 @@ impl<'a> TerminalView<'a> {
         }
 
         let now = layout.ctx.input(|i| i.time);
-
-        // Size still changing: restart debounce timer.
-        if cols != state.pending_cols || rows != state.pending_rows {
-            state.pending_cols = cols;
-            state.pending_rows = rows;
-            state.pending_since = Some(now);
-            layout.ctx.request_repaint_after(
-                std::time::Duration::from_secs_f64(RESIZE_DEBOUNCE_SECS),
-            );
-            return self;
-        }
-
-        // Pending size stable long enough — commit reflow once.
-        if let Some(since) = state.pending_since {
-            let elapsed = now - since;
-            if elapsed >= RESIZE_DEBOUNCE_SECS {
-                state.last_cols = cols;
-                state.last_rows = rows;
-                state.pending_since = None;
-                self.backend.process_command(BackendCommand::Resize(
-                    layout_size,
-                    font_size,
-                ));
-            } else {
+        let committed = if force {
+            // Input-forced commit: use the FRESH cols/rows above.
+            true
+        } else {
+            // Size still changing: restart debounce timer.
+            if cols != state.pending_cols || rows != state.pending_rows {
+                state.pending_cols = cols;
+                state.pending_rows = rows;
+                state.pending_since = Some(now);
                 layout.ctx.request_repaint_after(
-                    std::time::Duration::from_secs_f64(
-                        RESIZE_DEBOUNCE_SECS - elapsed,
-                    ),
+                    std::time::Duration::from_secs_f64(RESIZE_DEBOUNCE_SECS),
                 );
+                false
+            } else {
+                match state.pending_since {
+                    Some(since) if now - since >= RESIZE_DEBOUNCE_SECS => true,
+                    Some(since) => {
+                        layout.ctx.request_repaint_after(
+                            std::time::Duration::from_secs_f64(
+                                RESIZE_DEBOUNCE_SECS - (now - since),
+                            ),
+                        );
+                        false
+                    },
+                    None => {
+                        state.pending_cols = cols;
+                        state.pending_rows = rows;
+                        state.pending_since = Some(now);
+                        layout.ctx.request_repaint_after(
+                            std::time::Duration::from_secs_f64(
+                                RESIZE_DEBOUNCE_SECS,
+                            ),
+                        );
+                        false
+                    },
+                }
             }
+        };
+
+        if committed {
+            state.last_cols = cols;
+            state.last_rows = rows;
+            state.pending_since = None;
+            self.backend.process_command(BackendCommand::Resize(
+                layout_size,
+                font_size,
+            ));
         }
 
         self
     }
 
     fn process_input(
-        self,
+        mut self,
         layout: &Response,
         state: &mut TerminalViewState,
     ) -> Self {
@@ -268,6 +299,28 @@ impl<'a> TerminalView<'a> {
         // activating its tab — the pointer's position inside the pane is
         // the only gate (checked per-event below).
         let has_focus = layout.has_focus();
+
+        // Typing forces any PENDING resize to commit RIGHT NOW: the
+        // keystroke must land in a PTY whose winsize matches the layout,
+        // or readline wraps at the OLD width while the screen shows the
+        // new one ("one char wraps though space remains"). Without this
+        // the 80ms debounce window swallowed every fast type-after-drag.
+        if has_focus && state.pending_since.is_some() {
+            let wants_input = layout.ctx.input(|i| {
+                i.events.iter().any(|e| {
+                    matches!(
+                        e,
+                        egui::Event::Text(_)
+                            | egui::Event::Paste(_)
+                            | egui::Event::Ime(egui::ImeEvent::Commit(_))
+                            | egui::Event::Key { pressed: true, .. }
+                    )
+                })
+            });
+            if wants_input {
+                self = self.resize(layout, state, true);
+            }
+        }
 
         // Pointer events only count when the terminal's own layer is the
         // topmost at the pointer: floating overlays above it (e.g. the
@@ -583,8 +636,15 @@ impl<'a> TerminalView<'a> {
         use alacritty_terminal::grid::Dimensions;
         let columns = content.grid.columns();
         let screen_lines = content.grid.screen_lines();
+        // The LAYOUT may be wider than the GRID for a few frames while
+        // a resize debounce is pending (dragging the splitter wider):
+        // columns beyond the grid have no cell — and Row's Index is a
+        // raw Vec index, so probing them would PANIC. Paint only the
+        // cells that exist; the leftover viewport stays background.
+        let drawable_cols = columns
+            .min((layout.rect.width() / cell_width.max(1.0)).ceil() as usize);
         for row in 0..screen_lines {
-            for col in 0..columns {
+            for col in 0..drawable_cols.min(columns) {
                 let point = viewport_to_point(
                     display_offset,
                     TerminalGridPoint::new(row, Column(col)),
