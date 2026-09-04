@@ -297,7 +297,7 @@ jobs:
           # Prefer the tag annotation message (first non-blank lines).
           msg = ""
           try:
-              msg = subprocess.run(["git", "tag", "-l", "--format=%(contents)", tag],
+              msg = subprocess.run(["git", "tag", "-l", "--format=%(contents:body)", tag],
                                    capture_output=True, text=True).stdout.strip()
           except Exception:
               pass
