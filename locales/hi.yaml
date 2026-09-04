@@ -256,7 +256,7 @@ update:
   ready: अपडेट तैयार
   failed: 'अपडेट विफल: {}'
   available: नया संस्करण v{} मिला — डाउनलोड तैयार
-  badge: 'नया v{}'
+  badge: 'v{} पर अपडेट करें'
   up_to_date: आप अद्यतित हैं
   check: अपडेट देखें
   update_now: अभी अपडेट करें
@@ -515,7 +515,7 @@ remote:
   wan_panel_title: रिमोट · WAN
 
 help:
-  title: सहायता
+  title: ट्यूटोरियल
   content: |
     OpenNex एक क्रॉस-प्लेटफ़ॉर्म स्टैक्ड टर्मिनल मैनेजर है।
 

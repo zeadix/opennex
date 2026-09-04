@@ -256,7 +256,7 @@ update:
   ready: Aggiornamento pronto
   failed: 'Aggiornamento fallito: {}'
   available: Nuova versione v{} trovata — pronto al download
-  badge: 'Nuova v{}'
+  badge: 'Aggiorna alla v{}'
   up_to_date: Già aggiornato
   check: Cerca aggiornamenti
   update_now: Aggiorna ora
@@ -515,7 +515,7 @@ remote:
   wan_panel_title: Controllo remoto · WAN
 
 help:
-  title: Aiuto
+  title: Tutorial
   content: |
     OpenNex è un gestore di terminali impilati multipiattaforma.
 

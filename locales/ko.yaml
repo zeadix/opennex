@@ -255,7 +255,7 @@ update:
   ready: 업데이트 준비 완료
   failed: '업데이트 실패: {}'
   available: 새 버전 v{} 발견 — 다운로드 준비됨
-  badge: '새 버전 v{}'
+  badge: 'v{} 버전으로 업데이트'
   up_to_date: 최신 버전입니다
   check: 업데이트 확인
   update_now: 지금 업데이트
@@ -514,7 +514,7 @@ remote:
   wan_panel_title: 원격 · WAN
 
 help:
-  title: 도움말
+  title: 사용 튜토리얼
   content: |
     OpenNex는 크로스 플랫폼 스택형 터미널 관리자입니다.
 

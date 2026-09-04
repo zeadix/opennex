@@ -255,7 +255,7 @@ update:
   ready: 更新已准备就绪
   failed: '更新失败: {}'
   available: 发现新版本 v{} — 准备下载
-  badge: '新版本 v{}'
+  badge: '更新至 v{}'
   up_to_date: 当前已是最新版本
   check: 检查更新
   update_now: 立即更新
@@ -514,7 +514,7 @@ remote:
   wan_panel_title: 远程控制 · 外网
 
 help:
-  title: 帮助
+  title: 使用教程
   content: |
     OpenNex 是一个跨平台的堆叠式终端管理器。
 

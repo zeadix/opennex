@@ -256,7 +256,7 @@ update:
   ready: Update ready to install
   failed: 'Update failed: {}'
   available: New version v{} found — ready to download
-  badge: 'New v{}'
+  badge: 'Update to v{}'
   up_to_date: You are up to date
   check: Check for Updates
   update_now: Update Now
@@ -515,7 +515,7 @@ remote:
   wan_panel_title: Remote · WAN
 
 help:
-  title: Help
+  title: Tutorial
   content: |
     OpenNex is a cross-platform stacked terminal manager.
 

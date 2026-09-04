@@ -2395,11 +2395,6 @@ fn spawn_startup_update_check(ctx: &egui::Context) {
 }
 
 /// Formats the menu-bar update button label, e.g. "更新版本: 0.1.22".
-fn update_button_label(version: &str) -> String {
-    // TODO(i18n): replace the hardcoded prefix once a texts key exists.
-    format!("更新版本: {version}")
-}
-
 /// The subset of a theme that feeds `rebuild_fonts`. Dragging color or
 /// spacing sliders in the theme editor changes the draft WITHOUT
 /// touching these, so the expensive font-atlas rebuild (full system
@@ -5857,57 +5852,62 @@ impl eframe::App for App {
                     if menu_btn(ui, &self.texts.about.menu_label).clicked() {
                         self.show_about = true;
                     }
-                    // Help dropdown: About / Help / Update (the update
-                    // window auto-checks on open).
+                    // Help dropdown: Tutorial, then About at the bottom.
+                    // The update entry is a STANDALONE right-corner button.
                     let help_label = self.texts.menu.help.clone();
                     dropdown(ui, &help_label, "menu_help", &mut |ui| {
                         if ui.button(&self.texts.help.title).clicked() {
                             self.show_help_window = true;
                             ui.close_menu();
                         }
-                        if ui.button(&self.texts.update_window.title).clicked() {
-                            self.show_update_window = true;
+                        ui.separator();
+                        if ui.button(&self.texts.about.menu_label).clicked() {
+                            self.show_about = true;
                             ui.close_menu();
                         }
                     });
 
-                    // Right-aligned extras: app version (+ update badge
-                    // when a newer release is available).
+                    // Right-aligned extras: a PERSISTENT update button
+                    // (rightmost) + the app version to its left. The
+                    // button label follows the last check: an available
+                    // release reads "更新至 v{x}" (accent), anything else
+                    // reads "检查更新". Clicking opens the update window,
+                    // which re-checks and drives the download flow.
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let weak = self.active_theme.app.weak_text.to_egui();
-                        // Update badge FIRST (right_to_left ⇒ lands RIGHT
-                        // of the version label): shown only while an
-                        // update is available (startup auto-check or
-                        // manual check). Clicking opens the About window,
-                        // whose status panel drives the download/restart
-                        // flow.
-                        if let crate::updater::UpdateState::Available(info) = &self.update_state {
-                            let label_text = update_button_label(&info.version.clone());
-                            let label_color = self.active_theme.app.accent.to_egui();
-                            let pad = 8.0;
-                            let galley = ui.fonts(|f| {
-                                f.layout_no_wrap(
-                                    label_text.clone(),
-                                    egui::FontId::proportional(11.0),
-                                    label_color,
-                                )
-                            });
-                            let size =
-                                egui::vec2(galley.size().x + pad * 2.0, galley.size().y + 6.0);
-                            let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
-                            let hover_bg = self.active_theme.app.hover.to_egui();
-                            if resp.contains_pointer() {
-                                ui.painter().rect_filled(rect, 0.0, hover_bg);
-                            }
-                            ui.painter().galley(
-                                rect.center() - galley.size() / 2.0,
-                                galley,
+                        let fg = self.active_theme.app.button_fg.to_egui();
+                        let accent = self.active_theme.app.accent.to_egui();
+                        let hover_bg = self.active_theme.app.hover.to_egui();
+
+                        let (label_text, label_color) =
+                            if let crate::updater::UpdateState::Available(info) = &self.update_state
+                            {
+                                (self.texts.update.badge.replace("{}", &info.version), accent)
+                            } else {
+                                (self.texts.update.check.clone(), fg)
+                            };
+                        let pad = 8.0;
+                        let galley = ui.fonts(|f| {
+                            f.layout_no_wrap(
+                                label_text.clone(),
+                                egui::FontId::proportional(11.0),
                                 label_color,
-                            );
-                            if resp.clicked() {
-                                self.show_update_window = true;
-                            }
+                            )
+                        });
+                        let size = egui::vec2(galley.size().x + pad * 2.0, galley.size().y + 6.0);
+                        let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
+                        if resp.contains_pointer() {
+                            ui.painter().rect_filled(rect, 0.0, hover_bg);
                         }
+                        ui.painter().galley(
+                            rect.center() - galley.size() / 2.0,
+                            galley,
+                            label_color,
+                        );
+                        if resp.clicked() {
+                            self.show_update_window = true;
+                        }
+
                         ui.label(
                             egui::RichText::new(format!("v{}", env!("CARGO_PKG_VERSION")))
                                 .color(weak)

@@ -255,7 +255,7 @@ update:
   ready: アップデート準備完了
   failed: 'アップデート失敗: {}'
   available: 新バージョン v{} を発見 — ダウンロード準備完了
-  badge: '新バージョン v{}'
+  badge: 'v{} に更新'
   up_to_date: 最新です
   check: 更新を確認
   update_now: 今すぐ更新
@@ -514,7 +514,7 @@ remote:
   wan_panel_title: リモート · WAN
 
 help:
-  title: ヘルプ
+  title: チュートリアル
   content: |
     OpenNex はクロスプラットフォームのスタック型ターミナルマネージャーです。
 

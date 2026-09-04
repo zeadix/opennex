@@ -256,7 +256,7 @@ update:
   ready: Update bereit
   failed: 'Update fehlgeschlagen: {}'
   available: Neue Version v{} gefunden — bereit zum Download
-  badge: 'Neu: v{}'
+  badge: 'Aktualisieren auf v{}'
   up_to_date: Aktuellste Version
   check: Nach Updates suchen
   update_now: Jetzt aktualisieren
@@ -515,7 +515,7 @@ remote:
   wan_panel_title: Fernsteuerung · WAN
 
 help:
-  title: Hilfe
+  title: Anleitung
   content: |
     OpenNex ist ein plattformübergreifender, gestapelter Terminal-Manager.
 

@@ -1052,7 +1052,7 @@ impl Texts {
                 verifying: "正在校验文件完整性...".into(),
                 ready: "更新已准备就绪".into(),
                 failed: "更新失败: {}".into(),
-                badge: "新版本 v{}".into(),
+                badge: "更新至 v{}".into(),
                 available: "发现新版本 v{} — 准备下载".into(),
                 up_to_date: "当前已是最新版本".into(),
                 check: "检查更新".into(),
@@ -1063,7 +1063,7 @@ impl Texts {
                 restart_confirm: "重启".into(),
             },
             help: HelpTexts {
-                title: "帮助".into(),
+                title: "使用教程".into(),
                 content: "OpenNex 是一个跨平台的堆叠式终端管理器。\n\n工作区：左侧栏可创建多个工作区，各自独立布局与锁定；拖拽手柄调整顺序。\n分屏与标签：终端支持水平/垂直分屏与嵌套标签；快捷键可在设置中自定义。\nSSH 主机：左下角管理 SSH 主机，点击即在本工作区新建连接，支持 PROD 标记提醒。\n远程控制：菜单栏“远程控制”选择局域网/外网，手机扫码后可实时查看与操作终端；手机底部虚拟按键可在设置中自定义。\n历史与补全：Alt 呼出命令历史；输入时自动补全历史与 PATH 命令。\n监控面板：视图菜单开启，查看各终端进程的 CPU/内存。\n搜索：Ctrl+F 在当前终端滚动回溯中搜索。\n快捷键：设置 → 快捷键 页可查看与录制所有快捷键。".into(),
             },
             update_window: UpdateWindowTexts {

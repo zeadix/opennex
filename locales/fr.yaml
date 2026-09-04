@@ -256,7 +256,7 @@ update:
   ready: Mise à jour prête
   failed: 'Échec de la mise à jour : {}'
   available: Nouvelle version v{} disponible — prêt à télécharger
-  badge: 'Nouvelle v{}'
+  badge: 'Mettre à jour vers v{}'
   up_to_date: Déjà à jour
   check: Vérifier les mises à jour
   update_now: Mettre à jour
@@ -515,7 +515,7 @@ remote:
   wan_panel_title: Télécommande · WAN
 
 help:
-  title: Aide
+  title: Tutoriel
   content: |
     OpenNex est un gestionnaire de terminaux empilés multiplateforme.
 
