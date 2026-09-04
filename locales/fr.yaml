@@ -519,14 +519,15 @@ help:
   content: |
     OpenNex est un gestionnaire de terminaux empilés multiplateforme.
 
-    Espaces de travail : plusieurs espaces dans la barre latérale, chacun avec sa disposition et son verrouillage ; poignées pour réordonner.
-    Splits & onglets : divisions horizontales/verticales et onglets imbriqués ; raccourcis personnalisables.
-    Hôtes SSH : gérés en bas à gauche, un clic connecte dans l'espace courant ; hôtes PROD signalés.
-    Télécommande : menu Télécommande → LAN/WAN, scannez le QR pour contrôler les terminaux en direct ; touches virtuelles configurables.
+    Espaces de travail : créez-en plusieurs dans la barre latérale, chacun avec disposition et verrouillage ; poignées pour réordonner.
+    Splits & onglets : divisions horizontales/verticales et onglets imbriqués.
+    Hôtes SSH : bibliothèque en bas à gauche, un clic connecte dans l'espace courant ; hôtes PROD signalés.
+    Télécommande : choisissez LAN/WAN dans le menu, scannez le QR pour opérer les terminaux en direct.
+    Touches virtuelles : personnalisez la barre du téléphone dans Paramètres -> Télécommande.
     Historique & complétion : Alt ouvre l'historique ; la saisie auto-complète.
     Moniteur : menu Affichage, CPU/RAM par terminal.
     Recherche : Ctrl+F dans le défilement du terminal.
-    Raccourcis : Paramètres → Raccourcis liste et enregistre tout.
+    Raccourcis : tout consulter et enregistrer dans Paramètres -> Raccourcis.
 
 update_window:
   title: Mettre à jour

@@ -6726,6 +6726,7 @@ impl eframe::App for App {
                 .show(ctx, |ui| {
                     let h = self.texts.help.clone();
                     let weak = self.active_theme.app.weak_text.to_egui();
+                    let accent = self.active_theme.app.accent.to_egui();
                     egui::ScrollArea::vertical()
                         .id_salt("help_content_scroll")
                         .max_height(420.0)
@@ -6733,11 +6734,35 @@ impl eframe::App for App {
                         .show(ui, |ui| {
                             for para in h.content.split('\n') {
                                 if para.trim().is_empty() {
-                                    ui.add_space(4.0);
+                                    ui.add_space(6.0);
                                     continue;
                                 }
-                                ui.label(egui::RichText::new(para).size(12.0));
-                                let _ = weak;
+                                // "功能名：描述" renders as a two-tone row:
+                                // the feature name in accent+bold, the
+                                // description regular. Both full-width
+                                // (CJK locales) and ASCII ": " separators
+                                // are recognized. Lines without either
+                                // (the intro) stay plain and dimmed.
+                                let head_body = para
+                                    .split_once('：')
+                                    .or_else(|| para.split_once(": "))
+                                    .map(|(h, b)| (h.to_string(), b.to_string()));
+                                match head_body {
+                                    Some((head, body)) => {
+                                        ui.horizontal_wrapped(|ui| {
+                                            ui.label(
+                                                egui::RichText::new(format!("{head}:"))
+                                                    .size(12.0)
+                                                    .strong()
+                                                    .color(accent),
+                                            );
+                                            ui.label(egui::RichText::new(body).size(12.0));
+                                        });
+                                    }
+                                    None => {
+                                        ui.label(egui::RichText::new(para).size(11.0).color(weak));
+                                    }
+                                }
                             }
                         });
                 });

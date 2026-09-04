@@ -520,13 +520,14 @@ help:
     OpenNex is a cross-platform stacked terminal manager.
 
     Workspaces: create multiple workspaces in the left sidebar, each with its own layout and lock; drag handles to reorder.
-    Splits & tabs: terminals support horizontal/vertical splits and nested tabs; shortcuts are customizable in Settings.
-    SSH hosts: manage hosts at the bottom-left, click to connect in the current workspace; PROD hosts show a warning.
-    Remote control: menu Remote → LAN/WAN, scan the QR with your phone to view and operate terminals live; phone virtual keys are configurable in Settings.
+    Splits & tabs: horizontal/vertical splits and nested tabs.
+    SSH hosts: manage the host library at the bottom-left, one click connects in the current workspace; PROD hosts stand out.
+    Remote control: pick LAN/WAN from the menu, scan the QR to view and operate terminals live.
+    Virtual keys: customize the phone toolbar under Settings -> Remote.
     History & completion: Alt opens command history; typing auto-completes history and PATH commands.
-    Monitor: View menu opens the per-terminal CPU/memory panel.
+    Monitor: the View menu opens a per-terminal CPU/memory panel.
     Search: Ctrl+F searches the current terminal's scrollback.
-    Shortcuts: Settings → Shortcuts lists and records all key bindings.
+    Shortcuts: view and record every key binding under Settings -> Shortcuts.
 
 update_window:
   title: Update

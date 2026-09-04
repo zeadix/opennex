@@ -519,14 +519,15 @@ help:
   content: |
     OpenNex è un gestore di terminali impilati multipiattaforma.
 
-    Aree di lavoro: più aree nella barra laterale, ognuna con layout e blocco propri; maniglie per riordinare.
-    Split e schede: divisioni orizzontali/verticali e schede annidate; scorciatoie personalizzabili.
-    Host SSH: gestiti in basso a sinistra, un clic connette nell'area corrente; host PROD evidenziati.
-    Controllo remoto: menu Controllo remoto → LAN/WAN, scansiona il QR per operare i terminali in diretta; tasti virtuali configurabili.
+    Aree di lavoro: più aree nella barra laterale, ognuna con layout e blocco; maniglie per riordinare.
+    Split e schede: divisioni orizzontali/verticali e schede annidate.
+    Host SSH: libreria in basso a sinistra, un clic connette nell'area corrente; host PROD evidenziati.
+    Controllo remoto: scegli LAN/WAN dal menu, scansiona il QR per operare i terminali in diretta.
+    Tasti virtuali: personalizza la barra del telefono in Impostazioni -> Controllo remoto.
     Cronologia e completamento: Alt apre la cronologia; la digitazione auto-completa.
     Monitor: menu Vista, CPU/RAM per terminale.
     Ricerca: Ctrl+F nello scrollback del terminale.
-    Scorciatoie: Impostazioni → Scorciatoie elenca e registra tutto.
+    Scorciatoie: consulta e registra tutti i binding in Impostazioni -> Scorciatoie.
 
 update_window:
   title: Aggiorna

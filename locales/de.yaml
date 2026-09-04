@@ -519,14 +519,15 @@ help:
   content: |
     OpenNex ist ein plattformübergreifender, gestapelter Terminal-Manager.
 
-    Arbeitsbereiche: mehrere Arbeitsbereiche in der linken Leiste, jeweils eigenes Layout und Sperre; Ziehpunkte zum Sortieren.
-    Splits & Tabs: horizontale/vertikale Splits und verschachtelte Tabs; Tastenkürzel in den Einstellungen anpassbar.
-    SSH-Hosts: unten links verwalten, Klick verbindet im aktuellen Arbeitsbereich; PROD-Hosts zeigen eine Warnung.
-    Fernsteuerung: Menü Fernsteuerung → LAN/WAN, QR-Code scannen und Terminals live bedienen; virtuelle Tasten in den Einstellungen konfigurierbar.
-    Verlauf & Vervollständigung: Alt öffnet den Befehlsverlauf; Eingabe vervollständigt automatisch.
-    Monitor: Ansichtsmenü öffnet CPU/RAM pro Terminal.
+    Arbeitsbereiche: mehrere Arbeitsbereiche in der linken Leiste, eigenes Layout und Sperre, Ziehpunkte zum Sortieren.
+    Splits & Tabs: horizontale/vertikale Splits und verschachtelte Tabs.
+    SSH-Hosts: Host-Bibliothek unten links verwalten, ein Klick verbindet im aktuellen Arbeitsbereich; PROD-Hosts fallen auf.
+    Fernsteuerung: LAN/WAN im Menü wählen, QR scannen und Terminals live bedienen.
+    Virtuelle Tasten: Telefon-Toolbar unter Einstellungen -> Fernsteuerung anpassen.
+    Verlauf & Vervollständigung: Alt öffnet den Verlauf; Eingabe vervollständigt automatisch.
+    Monitor: Ansichtsmenü, CPU/RAM pro Terminal.
     Suche: Ctrl+F durchsucht den Scrollback des Terminals.
-    Tastenkürzel: Einstellungen → Tastenkürzel zeigt und zeichnet alle auf.
+    Tastenkürzel: alle Bindungen unter Einstellungen -> Tastenkürzel ansehen und aufnehmen.
 
 update_window:
   title: Aktualisieren
