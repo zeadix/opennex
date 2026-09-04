@@ -760,27 +760,22 @@ mod tests {
 
         // Install a 40-char prompt in a 20-col grid → the prompt alone
         // wraps onto 2+ rows.
-        instance.write(b"export PS1='kunpengwang@test-Victus-by-HP-Gaming-Laptop-16-r0xxx:~/proj/my/open_zoo$ '
-");
-        // Let the shell apply it.
-        for _ in 0..30 {
-            std::thread::sleep(std::time::Duration::from_millis(25));
-            instance.backend.set_dirty();
-            let _ = instance.backend.sync();
-        }
+        instance.write(b"export PS1='kunpengwang@test-Victus-by-HP-Gaming-Laptop-16-r0xxx:~/proj/my/open_zoo$ '\r");
+        // Let the shell apply it (quiescence, not fixed sleeps — the
+        // fixed windows raced the echo under full-suite load).
+        assert!(pump_until_quiet(&mut instance, 8_000), "PS1 not applied");
 
         instance.write(b"cd");
-        for _ in 0..40 {
-            std::thread::sleep(std::time::Duration::from_millis(25));
-            instance.backend.set_dirty();
-            let _ = instance.backend.sync();
-        }
+        assert!(pump_until_quiet(&mut instance, 8_000), "echo not settled");
 
-        let word = instance.current_input_word();
-        assert!(
-            word.contains("cd"),
-            "word after a wrapped long prompt must be the typed text, got: {word:?}"
+        // Retried read: absorbs echo/repaint races without resending.
+        let word = pump_word_until(
+            &mut instance,
+            "cd",
+            8_000,
+            "word after a wrapped long prompt",
         );
+        assert_eq!(word, "cd");
     }
 
     /// Re-read current_input_word until it equals `want` (or fail with

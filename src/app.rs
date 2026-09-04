@@ -5870,10 +5870,7 @@ impl eframe::App for App {
                         self.theme_message = None;
                         self.theme_dirty = false;
                     }
-                    if menu_btn(ui, &self.texts.about.menu_label).clicked() {
-                        self.show_about = true;
-                    }
-                    // Help dropdown: Tutorial, then About at the bottom.
+                    // Help dropdown: Tutorial + About (at the bottom).
                     // The update entry is a STANDALONE right-corner button.
                     let help_label = self.texts.menu.help.clone();
                     dropdown(ui, &help_label, "menu_help", &mut |ui| {
