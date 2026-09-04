@@ -48,10 +48,27 @@ impl RemoteServer {
     pub fn start(port: u16, token: String) -> Result<(RemoteShared, Self), String> {
         // Dual-stack: `[::]` accepts IPv6 AND (via v4-mapped addresses)
         // IPv4 on every mainstream platform, enabling public-IPv6 direct
-        // phone access. Fall back to plain `0.0.0.0` where v6 is
-        // unavailable (IPv6 disabled, or Windows v6-only sockets).
+        // phone access. Windows defaults IPV6_V6ONLY=1 (Linux=0), so the
+        // clear-it step below is REQUIRED there — without it a `[::]`
+        // listener accepts IPv6 only and every IPv4 phone/test connection
+        // is refused (WSAECONNREFUSED 10061). Fall back to a plain
+        // `0.0.0.0` bind when v6 is unavailable or dual-stack can't be
+        // enabled (IPv6 disabled, Windows v6-only sockets).
         let listener = match TcpListener::bind((std::net::Ipv6Addr::UNSPECIFIED, port)) {
-            Ok(l) => l,
+            Ok(l) => {
+                #[cfg(target_os = "windows")]
+                {
+                    if !enable_dual_stack(&l) {
+                        drop(l);
+                        TcpListener::bind((std::net::Ipv4Addr::UNSPECIFIED, port))
+                            .map_err(|e| format!("bind port {port} failed: {e}"))?
+                    } else {
+                        l
+                    }
+                }
+                #[cfg(not(target_os = "windows"))]
+                l
+            }
             Err(_) => TcpListener::bind((std::net::Ipv4Addr::UNSPECIFIED, port))
                 .map_err(|e| format!("bind port {port} failed: {e}"))?,
         };
@@ -104,6 +121,26 @@ impl RemoteShared {
             token: self.token.clone(),
             port: self.port,
         }
+    }
+}
+
+/// Windows-only: clear IPV6_V6ONLY on the `[::]` listener so IPv4
+/// (v4-mapped) connections are accepted too. Returns false when the
+/// option can't be applied — the caller rebinds IPv4-only.
+#[cfg(target_os = "windows")]
+fn enable_dual_stack(listener: &TcpListener) -> bool {
+    use std::os::windows::io::AsRawSocket;
+    use windows_sys::Win32::Networking::WinSock::{setsockopt, IPPROTO_IPV6, IPV6_V6ONLY};
+    const V6ONLY_OFF: i32 = 0;
+    let zero: i32 = V6ONLY_OFF;
+    unsafe {
+        setsockopt(
+            listener.as_raw_socket() as usize,
+            IPPROTO_IPV6,
+            IPV6_V6ONLY,
+            &zero as *const i32 as *const u8,
+            std::mem::size_of::<i32>() as i32,
+        ) == 0
     }
 }
 
