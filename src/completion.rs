@@ -42,7 +42,7 @@ fn path_executables_uncached() -> Vec<String> {
                 #[cfg(target_os = "windows")]
                 let stem = {
                     let lower = raw.to_lowercase();
-                    match EXEC_EXTENSIONS.iter().find(|ext| lower.ends_with(ext)) {
+                    match EXEC_EXTENSIONS.iter().find(|ext| lower.ends_with(*ext)) {
                         Some(ext) => raw[..raw.len() - ext.len()].to_string(),
                         None => continue,
                     }
