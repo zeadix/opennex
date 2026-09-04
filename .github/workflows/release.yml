@@ -284,11 +284,14 @@ jobs:
             echo "$RAW_SUBJECTS"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
-          # Structured `changes` array: conventional-commit subjects are
-          # mapped to user-facing notes (feat->新增, fix->修复, rest->
-          # 其他), deduplicated, one concise line each. A tag ANNOTATION
-          # message overrides the commit-derived list (write the release
-          # notes by hand into the tag when precision matters).
+          # Structured `changes` array: ONLY user-facing work is
+          # recorded — feat commits map to "新增: ...", fix commits to
+          # "修复: ...". Everything else (ci/chore/docs/refactor and the
+          # CI-repair commits created by failed-release retries) is
+          # deliberately EXCLUDED. Deduplicated, one concise line each.
+          # A tag ANNOTATION message overrides the commit-derived list
+          # (write the release notes by hand into the tag when precision
+          # matters; non-feature/fix lines in it are dropped too).
           {
             echo "changes_json<<EOF"
             python3 - "$GITHUB_REF_NAME" << PYCHANGES
@@ -301,23 +304,24 @@ jobs:
                                    capture_output=True, text=True).stdout.strip()
           except Exception:
               pass
+          def map_line(l):
+              l = l.strip()
+              if not l:
+                  return None
+              low = l.lower()
+              for prefix, kind in (("feat", "新增"), ("fix", "修复")):
+                  if low.startswith(prefix) or l.startswith(kind):
+                      return kind + ": " + (l.split(":", 1)[1].strip() if ":" in l else l)
+              return None  # ci/chore/docs/refactor/release — never recorded
+
           lines = []
           if msg:
-              lines = [l.strip() for l in msg.splitlines() if l.strip() and not l.startswith("-----BEGIN")]
+              lines = [m for m in (map_line(l) for l in msg.splitlines()
+                                   if l.strip() and not l.startswith("-----BEGIN"))
+                       if m]
           else:
               raw = """$RAW_SUBJECTS"""
-              for l in raw.splitlines():
-                  l = l.strip()
-                  if not l:
-                      continue
-                  low = l.lower()
-                  if low.startswith("feat") or low.startswith("新增"):
-                      text = "新增: " + l.split(":", 1)[1].strip() if ":" in l else l
-                  elif low.startswith("fix") or low.startswith("修复"):
-                      text = "修复: " + l.split(":", 1)[1].strip() if ":" in l else l
-                  else:
-                      text = "其他: " + (l.split(":", 1)[1].strip() if ":" in l else l)
-                  lines.append(text)
+              lines = [m for m in (map_line(l) for l in raw.splitlines()) if m]
           # Deduplicate, keep order, cap at 30.
           seen = set()
           out = []
@@ -411,6 +415,27 @@ jobs:
           except Exception:
               current["changes"] = []
           old_history = json.loads('''${OLD_HISTORY}''')
+
+          # Retro-fix HISTORY entries: legacy versions carry no `changes`
+          # (or carry "其他: ..." noise from the old extractor). Rebuild
+          # each entry's notes from its changelog, keeping ONLY
+          # 新增/修复 lines — never CI-repair or chore noise.
+          def map_note(l):
+              l = l.strip()
+              if not l:
+                  return None
+              low = l.lower()
+              for prefix, kind in (("feat", "新增"), ("fix", "修复")):
+                  if low.startswith(prefix) or l.startswith(kind):
+                      return kind + ": " + (l.split(":", 1)[1].strip() if ":" in l else l)
+              return None
+          for h in old_history:
+              if h.get("changes"):
+                  h["changes"] = [l for l in h["changes"]
+                                  if not l.strip().startswith("其他:")]
+              else:
+                  cl = h.get("changelog", "") or ""
+                  h["changes"] = [m for m in (map_note(l) for l in cl.splitlines()) if m]
 
           # Build new history: current version first, then old ones, max 3
           new_history = [current] + old_history
