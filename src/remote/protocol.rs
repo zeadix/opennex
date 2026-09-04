@@ -24,7 +24,7 @@ pub struct TermInfo {
 
 /// One workspace. A locked workspace hides its terminals entirely.
 /// `activity` mirrors the desktop sidebar's indicator: 0 = idle (green,
-/// no output/input for 30s), 1 = active (red), 2 = unknown (no focused
+/// no output/input for 10s), 1 = active (red), 2 = unknown (no busy
 /// terminal to watch).
 #[derive(Debug, Clone, Serialize)]
 pub struct WsInfo {

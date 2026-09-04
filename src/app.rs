@@ -680,10 +680,10 @@ fn terminal_should_have_focus(
     terminal_is_active && !workspace_is_renaming && !terminal_is_renaming
 }
 
-/// A workspace whose focused terminal went ≥30s without PTY output or
+/// A workspace whose terminals went ≥10s without PTY output or
 /// user input counts as IDLE (green dot); anything inside the window
 /// is ACTIVE (red dot). No focused terminal → UNKNOWN (neutral dot).
-pub(crate) const WORKSPACE_IDLE_MS: u64 = 30_000;
+pub(crate) const WORKSPACE_IDLE_MS: u64 = 10_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum WorkspaceActivity {
@@ -7460,7 +7460,7 @@ impl eframe::App for App {
                                     // the highlighted tab), even when the
                                     // workspace is not on screen. Red = PTY
                                     // output or user input on ANY of them
-                                    // within the last 30s, green = all silent
+                                    // within the last 10s, green = all silent
                                     // longer, neutral = nothing to watch.
                                     let activity_ms = self.workspace_activity_ms(i);
                                     let strip_color = match workspace_activity_state(
@@ -8198,7 +8198,7 @@ mod tests {
     };
     use egui_dock::DockState;
 
-    /// The sidebar activity dot: red inside the 30s window, green after
+    /// The sidebar activity dot: red inside the 10s window, green after
     /// it, neutral when there is no focused terminal to watch.
     #[test]
     fn workspace_activity_states_follow_the_idle_window() {
@@ -8207,7 +8207,7 @@ mod tests {
             workspace_activity_state(Some(now - 1_000), now),
             WorkspaceActivity::Active
         );
-        // Exactly at the boundary: 30s elapsed = idle.
+        // Exactly at the boundary: 10s elapsed = idle.
         assert_eq!(
             workspace_activity_state(Some(now - WORKSPACE_IDLE_MS), now),
             WorkspaceActivity::Idle
