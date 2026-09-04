@@ -653,22 +653,16 @@ impl App {
                 activity: 2,
             };
             // Activity state mirrors the desktop sidebar's strip: the
-            // focused terminal's last output/input vs the 30s window.
-            if let Some(tab) = self
-                .dock_states
-                .get_mut(&i)
-                .and_then(|tree| tree.find_active_focused().map(|(_, t)| t.clone()))
-            {
-                let activity_ms = self
-                    .terminals
-                    .get(&tab)
-                    .map(|td| td.instance.last_activity_ms());
-                ws.activity = match crate::app::workspace_activity_state(activity_ms, now_ms) {
+            // LATEST activity across EVERY terminal of the workspace
+            // (any busy terminal marks it red).
+            ws.activity = match self.workspace_activity_ms(i) {
+                Some(ms) => match crate::app::workspace_activity_state(Some(ms), now_ms) {
                     crate::app::WorkspaceActivity::Active => 1,
                     crate::app::WorkspaceActivity::Idle => 0,
                     crate::app::WorkspaceActivity::Unknown => 2,
-                };
-            }
+                },
+                None => 2,
+            };
             if !locked {
                 if let Some(tree) = self.dock_states.get(&i) {
                     for (_, tab_id) in tree.iter_all_tabs() {

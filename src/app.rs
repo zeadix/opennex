@@ -703,6 +703,27 @@ fn workspace_activity_state(activity_ms: Option<u64>, now_ms: u64) -> WorkspaceA
     }
 }
 
+impl App {
+    /// Latest activity across EVERY terminal of a workspace (max of
+    /// their last_activity_ms): any one busy terminal marks the whole
+    /// workspace active — the sidebar strip and the phone page's dot
+    /// both read this. None = the workspace has no terminals at all.
+    pub(crate) fn workspace_activity_ms(&self, panel_idx: usize) -> Option<u64> {
+        let tree = self.dock_states.get(&panel_idx)?;
+        let mut latest: Option<u64> = None;
+        for (_, tab_id) in tree.iter_all_tabs() {
+            if let Some(td) = self.terminals.get(tab_id) {
+                let ms = td.instance.last_activity_ms();
+                latest = Some(match latest {
+                    Some(cur) if cur >= ms => cur,
+                    _ => ms,
+                });
+            }
+        }
+        latest
+    }
+}
+
 fn terminal_focus_lock_allowed(workspace_is_renaming: bool, terminal_is_renaming: bool) -> bool {
     !workspace_is_renaming && !terminal_is_renaming
 }
@@ -7437,19 +7458,14 @@ impl eframe::App for App {
                                     );
                                     // Activity strip: the LEFT 4px of the row
                                     // button itself doubles as the indicator —
-                                    // no separate dot. It watches THIS
-                                    // workspace's focused terminal (the
-                                    // highlighted tab), even when the
+                                    // no separate dot. It watches EVERY
+                                    // terminal in THIS workspace (not just
+                                    // the highlighted tab), even when the
                                     // workspace is not on screen. Red = PTY
-                                    // output or user input within the last
-                                    // 30s, green = silent longer, neutral =
-                                    // nothing to watch.
-                                    let focus_tab = self.dock_states.get_mut(&i).and_then(|tree| {
-                                        tree.find_active_focused().map(|(_, t)| t.clone())
-                                    });
-                                    let activity_ms = focus_tab
-                                        .and_then(|tab| self.terminals.get(&tab))
-                                        .map(|td| td.instance.last_activity_ms());
+                                    // output or user input on ANY of them
+                                    // within the last 30s, green = all silent
+                                    // longer, neutral = nothing to watch.
+                                    let activity_ms = self.workspace_activity_ms(i);
                                     let strip_color = match workspace_activity_state(
                                         activity_ms,
                                         egui_term::unix_ms(),
