@@ -275,13 +275,58 @@ jobs:
           # grep exits 1 when no other tags exist (first release); guard it.
           PREV_TAG=$(git tag --sort=-v:refname | grep -v "${GITHUB_REF_NAME}" | head -1 || true)
           if [ -n "$PREV_TAG" ]; then
-            CHANGELOG=$(git log --no-merges --pretty=format:'%s' "$PREV_TAG..${GITHUB_REF_NAME}" | head -30)
+            RAW_SUBJECTS=$(git log --no-merges --pretty=format:'%s' "$PREV_TAG..${GITHUB_REF_NAME}" | head -30)
           else
-            CHANGELOG="首次发布"
+            RAW_SUBJECTS="首次发布"
           fi
           {
             echo "changelog<<EOF"
-            echo "$CHANGELOG"
+            echo "$RAW_SUBJECTS"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          # Structured `changes` array: conventional-commit subjects are
+          # mapped to user-facing notes (feat->新增, fix->修复, rest->
+          # 其他), deduplicated, one concise line each. A tag ANNOTATION
+          # message overrides the commit-derived list (write the release
+          # notes by hand into the tag when precision matters).
+          {
+            echo "changes_json<<EOF"
+            python3 - "$GITHUB_REF_NAME" << PYCHANGES
+          import json, subprocess, sys
+          tag = sys.argv[1]
+          # Prefer the tag annotation message (first non-blank lines).
+          msg = ""
+          try:
+              msg = subprocess.run(["git", "tag", "-l", "--format=%(contents)", tag],
+                                   capture_output=True, text=True).stdout.strip()
+          except Exception:
+              pass
+          lines = []
+          if msg:
+              lines = [l.strip() for l in msg.splitlines() if l.strip() and not l.startswith("-----BEGIN")]
+          else:
+              raw = """$RAW_SUBJECTS"""
+              for l in raw.splitlines():
+                  l = l.strip()
+                  if not l:
+                      continue
+                  low = l.lower()
+                  if low.startswith("feat") or low.startswith("新增"):
+                      text = "新增: " + l.split(":", 1)[1].strip() if ":" in l else l
+                  elif low.startswith("fix") or low.startswith("修复"):
+                      text = "修复: " + l.split(":", 1)[1].strip() if ":" in l else l
+                  else:
+                      text = "其他: " + (l.split(":", 1)[1].strip() if ":" in l else l)
+                  lines.append(text)
+          # Deduplicate, keep order, cap at 30.
+          seen = set()
+          out = []
+          for l in lines:
+              if l not in seen:
+                  seen.add(l)
+                  out.append(l)
+          print(json.dumps(out[:30], ensure_ascii=False))
+          PYCHANGES
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
@@ -291,6 +336,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           VERSION: ${{ steps.version.outputs.VERSION }}
           CHANGELOG: ${{ steps.changelog.outputs.changelog }}
+          CHANGES_JSON: ${{ steps.changelog.outputs.changes_json }}
           R2_PUBLIC_URL: ${{ env.R2_PUBLIC_URL }}
           R2_BUCKET: ${{ env.R2_BUCKET }}
         run: |
@@ -360,6 +406,10 @@ jobs:
 
           current = json.loads('''${CURRENT_ENTRY}''')
           current["changelog"] = os.environ.get("CHANGELOG", "")
+          try:
+              current["changes"] = json.loads(os.environ.get("CHANGES_JSON", "[]"))
+          except Exception:
+              current["changes"] = []
           old_history = json.loads('''${OLD_HISTORY}''')
 
           # Build new history: current version first, then old ones, max 3

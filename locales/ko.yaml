@@ -4,6 +4,7 @@ menu:
   view: 보기
   language: 언어
   theme: 테마
+  help: 도움말
 file_menu:
   save: 저장
   load: 불러오기
@@ -512,3 +513,23 @@ remote:
   lan_panel_title: 원격 · LAN
   wan_panel_title: 원격 · WAN
 
+help:
+  title: 도움말
+  content: |
+    OpenNex는 크로스 플랫폼 스택형 터미널 관리자입니다.
+
+    작업 공간: 왼쪽 사이드바에서 여러 개 생성, 각각 독립 레이아웃과 잠금; 핸들로 순서 변경.
+    분할과 탭: 수평/수직 분할과 중첩 탭; 단축키는 설정에서 변경 가능.
+    SSH 호스트: 왼쪽 하단에서 관리, 클릭하면 현재 작업 공간에 연결; PROD 호스트 경고 표시.
+    원격 제어: 메뉴 원격 제어 → LAN/WAN, QR을 스캔하면 실시간 조작 가능; 가상 키는 설정에서 변경 가능.
+    기록과 완성: Alt로 명령 기록 열기; 입력 시 자동 완성.
+    모니터: 보기 메뉴에서 터미널별 CPU/메모리 표시.
+    검색: Ctrl+F로 스크롤백 검색.
+    단축키: 설정 → 단축키에서 모두 확인과 녹음.
+
+update_window:
+  title: 업데이트
+  current_version: 현재 버전
+  log_title: 업데이트 내용
+  recheck: 다시 확인
+  no_logs: (이 버전의 업데이트 노트 없음)

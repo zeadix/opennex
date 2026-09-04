@@ -4,6 +4,7 @@ menu:
   view: 视图
   language: 语言
   theme: 主题
+  help: 帮助
 file_menu:
   save: 保存
   load: 加载
@@ -512,3 +513,23 @@ remote:
   lan_panel_title: 远程控制 · 局域网
   wan_panel_title: 远程控制 · 外网
 
+help:
+  title: 帮助
+  content: |
+    OpenNex 是一个跨平台的堆叠式终端管理器。
+
+    工作区：左侧栏可创建多个工作区，各自独立布局与锁定；拖拽手柄调整顺序。
+    分屏与标签：终端支持水平/垂直分屏与嵌套标签；快捷键可在设置中自定义。
+    SSH 主机：左下角管理 SSH 主机，点击即在本工作区新建连接，支持 PROD 标记提醒。
+    远程控制：菜单栏“远程控制”选择局域网/外网，手机扫码后可实时查看与操作终端；手机底部虚拟按键可在设置中自定义。
+    历史与补全：Alt 呼出命令历史；输入时自动补全历史与 PATH 命令。
+    监控面板：视图菜单开启，查看各终端进程的 CPU/内存。
+    搜索：Ctrl+F 在当前终端滚动回溯中搜索。
+    快捷键：设置 → 快捷键 页可查看与录制所有快捷键。
+
+update_window:
+  title: 更新
+  current_version: 当前版本
+  log_title: 更新日志
+  recheck: 重新检查
+  no_logs: （该版本没有提供更新日志）

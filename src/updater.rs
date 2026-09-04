@@ -158,6 +158,10 @@ pub struct ReleaseInfo {
     pub version: String,
     #[serde(default)]
     pub changelog: Option<String>,
+    /// Structured, concise release notes (one entry per line: "新增:
+    /// ..." / "修复: ..."). Preferred over `changelog` when present.
+    #[serde(default)]
+    pub changes: Vec<String>,
     pub files: ReleaseFiles,
 }
 
@@ -218,7 +222,12 @@ pub struct UpdateInfo {
     pub version: String,
     pub download_url: String,
     pub sha256: String,
+    /// Legacy single-string notes (kept for compatibility).
     pub changelog: String,
+    /// Structured release notes for the update window's list ("新增:
+    /// ..." / "修复: ..."). Falls back to splitting `changelog` by
+    /// lines when the manifest has no `changes` array.
+    pub changes: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -296,11 +305,24 @@ pub fn check_for_update() -> Result<Option<UpdateInfo>, String> {
     let (download_url, sha256) = file.pick_for_running_arch();
 
     if version_is_newer(&resp.version, env!("CARGO_PKG_VERSION")) {
+        let changelog = resp.changelog.unwrap_or_default();
+        // Prefer the structured `changes` array; legacy manifests fall
+        // back to splitting the single-string changelog by lines.
+        let changes = if resp.changes.is_empty() && !changelog.is_empty() {
+            changelog
+                .lines()
+                .map(|l| l.trim().to_string())
+                .filter(|l| !l.is_empty())
+                .collect()
+        } else {
+            resp.changes.clone()
+        };
         Ok(Some(UpdateInfo {
             version: resp.version,
             download_url: download_url.to_string(),
             sha256: sha256.to_string(),
-            changelog: resp.changelog.unwrap_or_default(),
+            changelog,
+            changes,
         }))
     } else {
         Ok(None)
@@ -800,6 +822,33 @@ mod tests {
         assert!(!version_is_newer("0.1.0", "0.1.0"));
         assert!(!version_is_newer("0.0.9", "0.1.0"));
         assert!(version_is_newer("v0.2.0", "0.1.0"));
+    }
+
+    /// The manifest's `changes` array parses and wins over the legacy
+    /// changelog string; a legacy-only manifest falls back to splitting
+    /// the changelog by lines.
+    #[test]
+    fn release_changes_parse_with_changelog_fallback() {
+        let modern: ReleaseInfo = serde_json::from_str(
+            r#"{"version":"0.2.0","changes":["新增: A","修复: B"],
+                "changelog":"old","files":{}}"#,
+        )
+        .unwrap();
+        assert_eq!(modern.changes, vec!["新增: A", "修复: B"]);
+
+        let legacy: ReleaseInfo = serde_json::from_str(
+            r#"{"version":"0.2.0","changelog":"新增: A\n修复: B","files":{}}"#,
+        )
+        .unwrap();
+        assert!(legacy.changes.is_empty());
+        let changes: Vec<String> = legacy
+            .changelog
+            .unwrap_or_default()
+            .lines()
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .collect();
+        assert_eq!(changes, vec!["新增: A", "修复: B"]);
     }
 }
 

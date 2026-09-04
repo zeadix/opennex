@@ -4,6 +4,7 @@ menu:
   view: 檢視
   language: 語言
   theme: 佈景主題
+  help: 說明
 file_menu:
   save: 儲存
   load: 載入
@@ -512,3 +513,23 @@ remote:
   lan_panel_title: 遠端控制 · 區網
   wan_panel_title: 遠端控制 · 外網
 
+help:
+  title: 說明
+  content: |
+    OpenNex 是一個跨平台的堆疊式終端管理器。
+
+    工作區：左側欄可建立多個工作區，各自獨立佈局與鎖定；拖曳手柄調整順序。
+    分屏與標籤：終端支援水平/垂直分屏與巢狀標籤；快捷鍵可在設定中自訂。
+    SSH 主機：左下角管理 SSH 主機，點擊即在本工作區新建連線，支援 PROD 標記提醒。
+    遠端控制：選單列「遠端控制」選擇區網/外網，手機掃碼後可即時檢視與操作終端；手機底部虛擬按鍵可在設定中自訂。
+    歷史與補全：Alt 呼叫命令歷史；輸入時自動補全歷史與 PATH 命令。
+    監控面板：檢視選單開啟，檢視各終端程序的 CPU/記憶體。
+    搜尋：Ctrl+F 在目前終端捲動回溯中搜尋。
+    快捷鍵：設定 → 快捷鍵 頁可檢視與錄製所有快捷鍵。
+
+update_window:
+  title: 更新
+  current_version: 目前版本
+  log_title: 更新日誌
+  recheck: 重新檢查
+  no_logs: （此版本未提供更新日誌）

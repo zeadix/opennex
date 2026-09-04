@@ -4,6 +4,7 @@ menu:
   view: Ansicht
   language: Sprache
   theme: Design
+  help: Hilfe
 file_menu:
   save: Speichern
   load: Laden
@@ -513,3 +514,23 @@ remote:
   lan_panel_title: Fernsteuerung · LAN
   wan_panel_title: Fernsteuerung · WAN
 
+help:
+  title: Hilfe
+  content: |
+    OpenNex ist ein plattformübergreifender, gestapelter Terminal-Manager.
+
+    Arbeitsbereiche: mehrere Arbeitsbereiche in der linken Leiste, jeweils eigenes Layout und Sperre; Ziehpunkte zum Sortieren.
+    Splits & Tabs: horizontale/vertikale Splits und verschachtelte Tabs; Tastenkürzel in den Einstellungen anpassbar.
+    SSH-Hosts: unten links verwalten, Klick verbindet im aktuellen Arbeitsbereich; PROD-Hosts zeigen eine Warnung.
+    Fernsteuerung: Menü Fernsteuerung → LAN/WAN, QR-Code scannen und Terminals live bedienen; virtuelle Tasten in den Einstellungen konfigurierbar.
+    Verlauf & Vervollständigung: Alt öffnet den Befehlsverlauf; Eingabe vervollständigt automatisch.
+    Monitor: Ansichtsmenü öffnet CPU/RAM pro Terminal.
+    Suche: Ctrl+F durchsucht den Scrollback des Terminals.
+    Tastenkürzel: Einstellungen → Tastenkürzel zeigt und zeichnet alle auf.
+
+update_window:
+  title: Aktualisieren
+  current_version: Aktuelle Version
+  log_title: Änderungen
+  recheck: Erneut prüfen
+  no_logs: (keine Versionshinweise für diese Version)

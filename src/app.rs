@@ -912,6 +912,8 @@ fn any_modal_open(app: &App) -> bool {
 fn any_modal_open_excluding_ai(app: &App) -> bool {
     app.show_settings
         || app.show_about
+        || app.show_update_window
+        || app.show_help_window
         || app.theme_editor_open
         || app.pw_popup.is_some()
         || app.unlock_popup.is_some()
@@ -1905,6 +1907,16 @@ pub struct App {
     settings: AppSettings,
     show_settings: bool,
     show_about: bool,
+    /// Standalone update window (menu 帮助 → 更新, or the right-corner
+    /// update badge). Opening it auto-triggers a version check.
+    show_update_window: bool,
+    /// Standalone help window (menu 帮助 → 帮助): implemented-features
+    /// overview.
+    show_help_window: bool,
+    /// Release notes captured while the state was Available, so the
+    /// changelog list keeps showing during Downloading/Ready (the
+    /// UpdateState no longer carries info then).
+    update_notes_cache: (Vec<String>, String),
     settings_edit: AppSettings,
     /// Active settings page (see `SettingsPage`). Stored as u8 for serde
     /// compatibility with the persisted `settings_window` payload.
@@ -2506,6 +2518,9 @@ impl App {
             settings,
             show_settings: false,
             show_about: false,
+            show_update_window: false,
+            show_help_window: false,
+            update_notes_cache: (Vec::new(), String::new()),
             settings_edit: AppSettings::default(),
             settings_tab: 0,
             settings_applied_toast: None,
@@ -3844,9 +3859,9 @@ impl App {
 
     /// Kick off a download for the available update info.
     fn kick_download(&mut self, ctx: &egui::Context, info: &crate::updater::UpdateInfo) {
-        // Open the about window so the user can watch progress; the
+        // Open the update window so the user can watch progress; the
         // status line + progress bar live in-place inside it.
-        self.show_about = true;
+        self.show_update_window = true;
         self.start_download(ctx, info);
     }
 
@@ -5842,6 +5857,19 @@ impl eframe::App for App {
                     if menu_btn(ui, &self.texts.about.menu_label).clicked() {
                         self.show_about = true;
                     }
+                    // Help dropdown: About / Help / Update (the update
+                    // window auto-checks on open).
+                    let help_label = self.texts.menu.help.clone();
+                    dropdown(ui, &help_label, "menu_help", &mut |ui| {
+                        if ui.button(&self.texts.help.title).clicked() {
+                            self.show_help_window = true;
+                            ui.close_menu();
+                        }
+                        if ui.button(&self.texts.update_window.title).clicked() {
+                            self.show_update_window = true;
+                            ui.close_menu();
+                        }
+                    });
 
                     // Right-aligned extras: app version (+ update badge
                     // when a newer release is available).
@@ -5877,7 +5905,7 @@ impl eframe::App for App {
                                 label_color,
                             );
                             if resp.clicked() {
-                                self.show_about = true;
+                                self.show_update_window = true;
                             }
                         }
                         ui.label(
@@ -6385,7 +6413,6 @@ impl eframe::App for App {
                 self.show_about = false;
             }
             let mut open = self.show_about;
-            let mut clicked_close = false;
             egui::Window::new(format!("OpenNex v{}", env!("CARGO_PKG_VERSION")))
                 .id(egui::Id::new("about_window"))
                 .open(&mut open)
@@ -6430,170 +6457,274 @@ impl eframe::App for App {
                     ui.weak(self.texts.about.credits_label.as_str());
                     ui.weak(self.texts.about.credits.as_str());
                     ui.add_space(6.0);
+                });
+            if !open {
+                self.show_about = false;
+            }
+        }
 
-                    // In-place update status + progress bar. No popups
-                    // open during this flow; the bar and status line sit
-                    // above the action row.
-                    {
-                        use crate::updater::UpdateState;
-                        let pct: Option<f32> =
-                            if let UpdateState::Downloading(p) = self.update_state {
-                                Some(p)
-                            } else {
-                                None
-                            };
-                        let ut = self.texts.update.clone();
-                        let (text, color) = match &self.update_state {
-                            UpdateState::Idle | UpdateState::Checking => {
-                                ("".to_string(), egui::Color32::WHITE)
-                            }
-                            UpdateState::Downloading(_) => {
-                                (ut.downloading.clone(), self.active_theme.app.info.to_egui())
-                            }
-                            UpdateState::Verifying => {
-                                (ut.verifying.clone(), self.active_theme.app.accent.to_egui())
-                            }
-                            UpdateState::Ready(_) => {
-                                (ut.ready.clone(), self.active_theme.app.success.to_egui())
-                            }
-                            UpdateState::Error(msg) => (
-                                ut.failed.replace("{}", msg),
-                                self.active_theme.app.danger.to_egui(),
-                            ),
-                            UpdateState::Available(info) => (
-                                ut.available.replace("{}", &info.version),
-                                self.active_theme.app.success.to_egui(),
-                            ),
-                            UpdateState::UpToDate => (
-                                ut.up_to_date.clone(),
-                                self.active_theme.app.neutral.to_egui(),
-                            ),
-                        };
-                        if !text.is_empty() {
-                            ui.colored_label(color, text);
-                        }
-                        if let Some(p) = pct {
-                            // Draw a custom square-cornered progress bar so we
-                            // can position the percentage label exactly in the
-                            // center (ProgressBar's built-in percent text is
-                            // hard-coded to the left edge).
-                            let height = 18.0;
-                            let (rect, _) = ui.allocate_exact_size(
-                                egui::vec2(ui.available_width(), height),
-                                egui::Sense::hover(),
-                            );
-                            let painter = ui.painter_at(rect);
-                            let visuals = ui.style().visuals.clone();
-                            painter.rect_filled(
-                                rect,
-                                egui::CornerRadius::ZERO,
-                                visuals.extreme_bg_color,
-                            );
-                            let filled = egui::Rect::from_min_size(
-                                rect.min,
-                                egui::vec2(rect.width() * p, rect.height()),
-                            );
-                            let filled_color = self.active_theme.app.info.to_egui();
-                            painter.rect_filled(filled, egui::CornerRadius::ZERO, filled_color);
-                            let pct_text = format!("{}%", (p * 100.0) as i32);
-                            let galley = ui.fonts(|f| {
-                                f.layout_no_wrap(
-                                    pct_text,
-                                    egui::FontId::proportional(12.0),
-                                    visuals.override_text_color.unwrap_or(visuals.text_color()),
-                                )
+        // Standalone UPDATE window (menu 帮助 → 更新, or the corner
+        // badge). Opening it triggers ONE version check (temp latch
+        // cleared on close); the UpdateState state machine drives the
+        // display, reusing the old About-page flow.
+        if self.show_update_window {
+            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+                self.show_update_window = false;
+            }
+            let checked_latch = egui::Id::new("update_window_checked");
+            let already_checked =
+                ctx.memory(|m| m.data.get_temp::<bool>(checked_latch).unwrap_or(false));
+            if !already_checked {
+                ctx.memory_mut(|m| m.data.insert_temp(checked_latch, true));
+                self.start_manual_check();
+                self.check_update_manual(ctx);
+            }
+            let mut open = true;
+            egui::Window::new(&self.texts.update_window.title)
+                .id(egui::Id::new("update_window"))
+                .open(&mut open)
+                .resizable(false)
+                .collapsible(false)
+                .default_pos(screen_center(ctx))
+                .pivot(egui::Align2::CENTER_CENTER)
+                .default_size([520.0, 460.0])
+                .default_width(520.0)
+                .min_width(460.0)
+                .show(ctx, |ui| {
+                    let ut = self.texts.update.clone();
+                    let uw = self.texts.update_window.clone();
+                    let weak = self.active_theme.app.weak_text.to_egui();
+                    let accent = self.active_theme.app.accent.to_egui();
+                    use crate::updater::UpdateState;
+
+                    // Current version (always visible).
+                    ui.horizontal(|ui| {
+                        ui.weak(
+                            egui::RichText::new(&uw.current_version)
+                                .size(12.0)
+                                .color(weak),
+                        );
+                        ui.label(
+                            egui::RichText::new(format!("v{}", env!("CARGO_PKG_VERSION")))
+                                .size(12.0),
+                        );
+                    });
+                    ui.add_space(6.0);
+
+                    // Status line per state.
+                    match &self.update_state {
+                        UpdateState::Idle | UpdateState::Checking => {
+                            ui.horizontal(|ui| {
+                                ui.spinner();
+                                ui.label(&ut.checking);
                             });
-                            let text_pos = egui::pos2(
-                                rect.center().x - galley.size().x / 2.0,
-                                rect.center().y - galley.size().y / 2.0,
+                        }
+                        UpdateState::UpToDate => {
+                            ui.label(
+                                egui::RichText::new(&ut.up_to_date)
+                                    .size(12.0)
+                                    .color(self.active_theme.app.success.to_egui()),
                             );
-                            painter.galley(text_pos, galley, visuals.text_color());
+                        }
+                        UpdateState::Available(info) => {
+                            ui.label(
+                                egui::RichText::new(ut.available.replace("{}", &info.version))
+                                    .size(13.0)
+                                    .color(accent),
+                            );
+                        }
+                        UpdateState::Downloading(_) => {
+                            ui.label(
+                                egui::RichText::new(&ut.downloading)
+                                    .size(12.0)
+                                    .color(self.active_theme.app.info.to_egui()),
+                            );
+                        }
+                        UpdateState::Verifying => {
+                            ui.label(egui::RichText::new(&ut.verifying).size(12.0).color(accent));
+                        }
+                        UpdateState::Ready(_) => {
+                            ui.label(
+                                egui::RichText::new(&ut.ready)
+                                    .size(13.0)
+                                    .color(self.active_theme.app.success.to_egui()),
+                            );
+                        }
+                        UpdateState::Error(msg) => {
+                            ui.label(
+                                egui::RichText::new(ut.failed.replace("{}", msg))
+                                    .size(12.0)
+                                    .color(self.active_theme.app.danger.to_egui()),
+                            );
                         }
                     }
+                    ui.add_space(6.0);
 
+                    // Release notes: visible for EVERY post-check state so
+                    // the changelog and the progress bar coexist on screen.
+                    let show_logs = matches!(
+                        self.update_state,
+                        UpdateState::Available(_)
+                            | UpdateState::Downloading(_)
+                            | UpdateState::Verifying
+                            | UpdateState::Ready(_)
+                    );
+                    if show_logs {
+                        ui.weak(egui::RichText::new(&uw.log_title).size(11.0).color(weak));
+                        // Keep the notes visible through Downloading/Ready:
+                        // cache them while Available, reuse afterwards.
+                        let (changes, changelog) = match &self.update_state {
+                            UpdateState::Available(info) => {
+                                let c = (info.changes.clone(), info.changelog.clone());
+                                self.update_notes_cache = c.clone();
+                                c
+                            }
+                            _ => self.update_notes_cache.clone(),
+                        };
+                        // Cached from the Available state: download keeps
+                        // the notes on screen without re-borrowing info.
+                        egui::ScrollArea::vertical()
+                            .id_salt("update_changelog_scroll")
+                            .max_height(200.0)
+                            .min_scrolled_height(60.0)
+                            .auto_shrink([false, true])
+                            .show(ui, |ui| {
+                                if changes.is_empty() && changelog.is_empty() {
+                                    ui.weak(
+                                        egui::RichText::new(&uw.no_logs).size(11.0).color(weak),
+                                    );
+                                }
+                                for line in &changes {
+                                    ui.label(egui::RichText::new(line).size(12.0));
+                                }
+                                if changes.is_empty() && !changelog.is_empty() {
+                                    ui.label(egui::RichText::new(&changelog).size(12.0));
+                                }
+                            });
+                        ui.add_space(8.0);
+                    }
+
+                    // Progress bar (download only), below the notes.
+                    if let UpdateState::Downloading(p) = &self.update_state {
+                        let p = *p;
+                        let height = 18.0;
+                        let (rect, _) = ui.allocate_exact_size(
+                            egui::vec2(ui.available_width(), height),
+                            egui::Sense::hover(),
+                        );
+                        let painter = ui.painter_at(rect);
+                        let visuals = ui.style().visuals.clone();
+                        painter.rect_filled(
+                            rect,
+                            egui::CornerRadius::ZERO,
+                            visuals.extreme_bg_color,
+                        );
+                        let filled = egui::Rect::from_min_size(
+                            rect.min,
+                            egui::vec2(rect.width() * p, rect.height()),
+                        );
+                        painter.rect_filled(
+                            filled,
+                            egui::CornerRadius::ZERO,
+                            self.active_theme.app.info.to_egui(),
+                        );
+                        let pct_text = format!("{}%", (p * 100.0) as i32);
+                        let galley = ui.fonts(|f| {
+                            f.layout_no_wrap(
+                                pct_text,
+                                egui::FontId::proportional(12.0),
+                                visuals.override_text_color.unwrap_or(visuals.text_color()),
+                            )
+                        });
+                        painter.galley(
+                            egui::pos2(
+                                rect.center().x - galley.size().x / 2.0,
+                                rect.center().y - galley.size().y / 2.0,
+                            ),
+                            galley,
+                            visuals.text_color(),
+                        );
+                        ui.add_space(6.0);
+                    }
+
+                    // Bottom action row (single primary action per state).
                     ui.vertical_centered(|ui| {
-                        ui.horizontal(|ui| {
-                            let is_checking_only =
-                                matches!(self.update_state, crate::updater::UpdateState::Checking);
-                            // Show the spinner only while waiting for the
-                            // check response, not during the download
-                            // itself (where the progress bar is the cue).
-                            if is_checking_only {
-                                ui.spinner();
-                            }
-                            // The button stays disabled for the entire
-                            // busy window (check + download + verify) so
-                            // the user can't double-trigger.
-                            let is_busy = matches!(
-                                self.update_state,
-                                crate::updater::UpdateState::Checking
-                                    | crate::updater::UpdateState::Downloading(_)
-                                    | crate::updater::UpdateState::Verifying
-                            );
-                            // The primary action button changes label
-                            // depending on the current state.
-                            enum PrimaryAction {
-                                Check,
-                                StartDownload,
-                                Restart,
-                            }
-                            let primary = match &self.update_state {
-                                crate::updater::UpdateState::Idle
-                                | crate::updater::UpdateState::Checking => PrimaryAction::Check,
-                                crate::updater::UpdateState::Available(_) => {
-                                    PrimaryAction::StartDownload
+                        let is_busy = matches!(
+                            self.update_state,
+                            UpdateState::Checking
+                                | UpdateState::Downloading(_)
+                                | UpdateState::Verifying
+                        );
+                        if is_busy {
+                            ui.add_enabled(false, egui::Button::new(&ut.check));
+                        } else {
+                            match &self.update_state {
+                                UpdateState::Available(info) => {
+                                    if ui.button(&ut.update_now).clicked() {
+                                        let info_clone = info.clone();
+                                        self.kick_download(ctx, &info_clone);
+                                    }
                                 }
-                                crate::updater::UpdateState::Downloading(_)
-                                | crate::updater::UpdateState::Verifying => {
-                                    // Show "检查更新" disabled while busy
-                                    PrimaryAction::Check
+                                UpdateState::Ready(path) => {
+                                    if ui.button(&ut.restart).clicked() {
+                                        let path = path.clone();
+                                        self.apply_update_and_restart(ctx, path);
+                                    }
                                 }
-                                crate::updater::UpdateState::Ready(_) => PrimaryAction::Restart,
-                                crate::updater::UpdateState::Error(_)
-                                | crate::updater::UpdateState::UpToDate => PrimaryAction::Check,
-                            };
-                            let label = match primary {
-                                PrimaryAction::Check => self.texts.update.check.as_str(),
-                                PrimaryAction::StartDownload => {
-                                    self.texts.update.update_now.as_str()
-                                }
-                                PrimaryAction::Restart => self.texts.update.restart.as_str(),
-                            };
-                            if ui.add_enabled(!is_busy, egui::Button::new(label)).clicked() {
-                                match primary {
-                                    PrimaryAction::Check => {
+                                _ => {
+                                    if ui.button(&uw.recheck).clicked() {
                                         self.start_manual_check();
                                         self.check_update_manual(ctx);
                                     }
-                                    PrimaryAction::StartDownload => {
-                                        if let crate::updater::UpdateState::Available(info) =
-                                            &self.update_state
-                                        {
-                                            let info_clone = info.clone();
-                                            self.kick_download(ctx, &info_clone);
-                                        }
-                                    }
-                                    PrimaryAction::Restart => {
-                                        if let crate::updater::UpdateState::Ready(path) =
-                                            &self.update_state
-                                        {
-                                            let path = path.clone();
-                                            self.apply_update_and_restart(ctx, path);
-                                        }
-                                    }
                                 }
                             }
-                            if ui.button(&self.texts.about.close).clicked() {
-                                clicked_close = true;
-                            }
-                        });
+                        }
                     });
                 });
-            if !open || clicked_close {
-                // Closing the about window does NOT clear update_state —
-                // re-opening it shows the latest progress, and a completed
-                // download remains installable via the "重启应用" button.
-                self.show_about = false;
+            if !open {
+                self.show_update_window = false;
+                ctx.memory_mut(|m| {
+                    m.data
+                        .remove_temp::<bool>(egui::Id::new("update_window_checked"))
+                });
+            }
+        }
+
+        // Standalone HELP window: an overview of the implemented
+        // features (content is a single i18n blob, split by lines).
+        if self.show_help_window {
+            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+                self.show_help_window = false;
+            }
+            let mut open = true;
+            egui::Window::new(&self.texts.help.title)
+                .id(egui::Id::new("help_window"))
+                .open(&mut open)
+                .resizable(false)
+                .collapsible(false)
+                .default_pos(screen_center(ctx))
+                .pivot(egui::Align2::CENTER_CENTER)
+                .default_width(460.0)
+                .show(ctx, |ui| {
+                    let h = self.texts.help.clone();
+                    let weak = self.active_theme.app.weak_text.to_egui();
+                    egui::ScrollArea::vertical()
+                        .id_salt("help_content_scroll")
+                        .max_height(420.0)
+                        .auto_shrink([false, true])
+                        .show(ui, |ui| {
+                            for para in h.content.split('\n') {
+                                if para.trim().is_empty() {
+                                    ui.add_space(4.0);
+                                    continue;
+                                }
+                                ui.label(egui::RichText::new(para).size(12.0));
+                                let _ = weak;
+                            }
+                        });
+                });
+            if !open {
+                self.show_help_window = false;
             }
         }
 

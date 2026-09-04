@@ -18,6 +18,10 @@ pub struct Texts {
     pub theme: ThemeTexts,
     pub about: AboutTexts,
     pub update: UpdateTexts,
+    #[serde(default)]
+    pub help: HelpTexts,
+    #[serde(default)]
+    pub update_window: UpdateWindowTexts,
     pub theme_editor: ThemeEditorTexts,
     pub stats: StatsTexts,
     pub ssh: SshTexts,
@@ -32,6 +36,8 @@ pub struct MenuTexts {
     pub view: String,
     pub language: String,
     pub theme: String,
+    #[serde(default)]
+    pub help: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -570,6 +576,25 @@ pub struct AboutTexts {
     pub close: String,
 }
 
+/// Help window: an overview of the app's main implemented features.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct HelpTexts {
+    /// Menu + window title ("帮助").
+    pub title: String,
+    /// Multi-paragraph feature overview (split by '\n' when rendered).
+    pub content: String,
+}
+
+/// Standalone update window (split from the About page).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct UpdateWindowTexts {
+    pub title: String,
+    pub current_version: String,
+    pub log_title: String,
+    pub recheck: String,
+    pub no_logs: String,
+}
+
 /// About-window update section strings.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct UpdateTexts {
@@ -770,6 +795,7 @@ impl Texts {
                 view: "视图".into(),
                 language: "语言".into(),
                 theme: "主题".into(),
+                help: "帮助".into(),
             },
             file_menu: FileMenuTexts {
                 save: "保存".into(),
@@ -1035,6 +1061,17 @@ impl Texts {
                 restart_title: "更新已准备就绪".into(),
                 restart_body: "新版本已下载，是否立即重启应用？".into(),
                 restart_confirm: "重启".into(),
+            },
+            help: HelpTexts {
+                title: "帮助".into(),
+                content: "OpenNex 是一个跨平台的堆叠式终端管理器。\n\n工作区：左侧栏可创建多个工作区，各自独立布局与锁定；拖拽手柄调整顺序。\n分屏与标签：终端支持水平/垂直分屏与嵌套标签；快捷键可在设置中自定义。\nSSH 主机：左下角管理 SSH 主机，点击即在本工作区新建连接，支持 PROD 标记提醒。\n远程控制：菜单栏“远程控制”选择局域网/外网，手机扫码后可实时查看与操作终端；手机底部虚拟按键可在设置中自定义。\n历史与补全：Alt 呼出命令历史；输入时自动补全历史与 PATH 命令。\n监控面板：视图菜单开启，查看各终端进程的 CPU/内存。\n搜索：Ctrl+F 在当前终端滚动回溯中搜索。\n快捷键：设置 → 快捷键 页可查看与录制所有快捷键。".into(),
+            },
+            update_window: UpdateWindowTexts {
+                title: "更新".into(),
+                current_version: "当前版本".into(),
+                log_title: "更新日志".into(),
+                recheck: "重新检查".into(),
+                no_logs: "（该版本没有提供更新日志）".into(),
             },
             theme_editor: ThemeEditorTexts {
                 colors: ColorNameTexts {

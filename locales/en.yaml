@@ -4,6 +4,7 @@ menu:
   view: View
   language: Language
   theme: Theme
+  help: Help
 file_menu:
   save: Save
   load: Load
@@ -513,3 +514,23 @@ remote:
   lan_panel_title: Remote · LAN
   wan_panel_title: Remote · WAN
 
+help:
+  title: Help
+  content: |
+    OpenNex is a cross-platform stacked terminal manager.
+
+    Workspaces: create multiple workspaces in the left sidebar, each with its own layout and lock; drag handles to reorder.
+    Splits & tabs: terminals support horizontal/vertical splits and nested tabs; shortcuts are customizable in Settings.
+    SSH hosts: manage hosts at the bottom-left, click to connect in the current workspace; PROD hosts show a warning.
+    Remote control: menu Remote → LAN/WAN, scan the QR with your phone to view and operate terminals live; phone virtual keys are configurable in Settings.
+    History & completion: Alt opens command history; typing auto-completes history and PATH commands.
+    Monitor: View menu opens the per-terminal CPU/memory panel.
+    Search: Ctrl+F searches the current terminal's scrollback.
+    Shortcuts: Settings → Shortcuts lists and records all key bindings.
+
+update_window:
+  title: Update
+  current_version: Current version
+  log_title: What's new
+  recheck: Check again
+  no_logs: (no release notes for this version)
