@@ -281,6 +281,9 @@ theme_editor:
     selection_text: 选中文字
     border: 边框
     lock: 锁定
+    lock_bg: 锁定按钮背景
+    activity_active: 活跃指示
+    activity_idle: 空闲指示
     window_shadow: 阴影
     tab_highlight: 焦点标签
     fg: 前景

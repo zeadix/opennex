@@ -282,6 +282,9 @@ theme_editor:
     selection_text: Auswahl-Text
     border: Rahmen
     lock: Sperre
+    lock_bg: Sperrtaste-Hintergrund
+    activity_active: Aktiv-Anzeige
+    activity_idle: Leerlauf-Anzeige
     window_shadow: Schatten
     tab_highlight: Fokussierter Tab
     fg: Vordergrund

@@ -282,6 +282,9 @@ theme_editor:
     selection_text: Texte sélection
     border: Bordure
     lock: Verrou
+    lock_bg: Fond du bouton verrou
+    activity_active: Indicateur actif
+    activity_idle: Indicateur inactif
     window_shadow: Ombre
     tab_highlight: Onglet actif
     fg: Premier plan

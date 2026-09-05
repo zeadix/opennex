@@ -281,6 +281,9 @@ theme_editor:
     selection_text: 選択文字
     border: 枠線
     lock: ロック
+    lock_bg: ロックボタン背景
+    activity_active: アクティブ表示
+    activity_idle: アイドル表示
     window_shadow: 影
     tab_highlight: フォーカスタブ
     fg: 前景

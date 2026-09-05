@@ -66,6 +66,9 @@ pub struct ColorLabels {
     pub selection_text: String,
     pub border: String,
     pub lock: String,
+    pub lock_bg: String,
+    pub activity_active: String,
+    pub activity_idle: String,
     pub window_shadow: String,
     pub tab_highlight: String,
     pub fg: String,
@@ -365,7 +368,7 @@ fn show_ui_appearance_editor(
     // Color grid: 3 columns × ~6 rows of compact color cells.
     // Each row: 3 swatch+hex combos using minimal vertical space.
     let c = &labels.colors;
-    let pairs: [(&mut ThemeColor, &str, &'static str); 17] = [
+    let pairs: [(&mut ThemeColor, &str, &'static str); 20] = [
         (&mut draft.app.app_bg, c.app_bg.as_str(), "app_bg"),
         (&mut draft.app.sidebar, c.sidebar.as_str(), "sidebar"),
         (&mut draft.app.panel, c.panel.as_str(), "panel"),
@@ -389,6 +392,17 @@ fn show_ui_appearance_editor(
         ),
         (&mut draft.app.border, c.border.as_str(), "border"),
         (&mut draft.app.lock, c.lock.as_str(), "lock"),
+        (&mut draft.app.lock_bg, c.lock_bg.as_str(), "lock_bg"),
+        (
+            &mut draft.app.activity_active,
+            c.activity_active.as_str(),
+            "activity_active",
+        ),
+        (
+            &mut draft.app.activity_idle,
+            c.activity_idle.as_str(),
+            "activity_idle",
+        ),
         (
             &mut draft.app.window_shadow,
             c.window_shadow.as_str(),

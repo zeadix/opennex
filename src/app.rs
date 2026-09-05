@@ -642,13 +642,12 @@ fn preview_mono_family() -> egui::FontFamily {
 }
 
 fn workspace_lock_icon(is_locked: bool) -> &'static str {
-    // Two COMPLETELY different glyph shapes so the state is unambiguous:
-    // locked = solid padlock with key; unlocked = dashed circle ("not
-    // protected"). Lock-vs-open-lock glyphs read as near-identical at 13px.
+    // Two clearly different glyphs so the state is unambiguous:
+    // locked = closed padlock with key; unlocked = open padlock.
     if is_locked {
         egui_phosphor::regular::LOCK_KEY
     } else {
-        egui_phosphor::regular::CIRCLE_DASHED
+        egui_phosphor::regular::LOCK_KEY_OPEN
     }
 }
 
@@ -3691,6 +3690,9 @@ impl App {
                 selection_text: te.colors.selection_text.clone(),
                 border: te.colors.border.clone(),
                 lock: te.colors.lock.clone(),
+                lock_bg: te.colors.lock_bg.clone(),
+                activity_active: te.colors.activity_active.clone(),
+                activity_idle: te.colors.activity_idle.clone(),
                 window_shadow: te.colors.window_shadow.clone(),
                 tab_highlight: te.colors.tab_highlight.clone(),
                 fg: te.colors.fg.clone(),
@@ -7493,10 +7495,10 @@ impl eframe::App for App {
                                         egui_term::unix_ms(),
                                     ) {
                                         WorkspaceActivity::Active => {
-                                            self.active_theme.app.danger.to_egui()
+                                            self.active_theme.app.activity_active.to_egui()
                                         }
                                         WorkspaceActivity::Idle => {
-                                            self.active_theme.app.success.to_egui()
+                                            self.active_theme.app.activity_idle.to_egui()
                                         }
                                         WorkspaceActivity::Unknown => {
                                             self.active_theme.app.weak_text.to_egui()
@@ -7653,10 +7655,31 @@ impl eframe::App for App {
                                         .on_hover_text(&self.texts.workspace.drag_handle_hint);
 
                                     // Lock / unlock button (left of the drag
-                                    // handle). Always painted so the
+                                    // handle): transparent background with a
+                                    // rounded outline; a LOCKED workspace
+                                    // fills it with the theme's lock_bg so
+                                    // the protected state pops.
                                     let (lock_rect, lock_resp) = actions_ui.allocate_exact_size(
                                         egui::vec2(btn_w, btn_h),
                                         egui::Sense::click(),
+                                    );
+                                    if is_locked {
+                                        actions_ui.painter().rect_filled(
+                                            lock_rect.shrink(1.0),
+                                            4.0,
+                                            self.active_theme.app.lock_bg.to_egui(),
+                                        );
+                                    }
+                                    let outline = if lock_resp.hovered() {
+                                        self.active_theme.app.text.to_egui()
+                                    } else {
+                                        self.active_theme.app.border.to_egui()
+                                    };
+                                    actions_ui.painter().rect_stroke(
+                                        lock_rect.shrink(1.0),
+                                        4.0,
+                                        egui::Stroke::new(1.0, outline),
+                                        egui::StrokeKind::Inside,
                                     );
                                     let lock_color = if is_locked {
                                         self.active_theme.app.lock.to_egui()
@@ -8688,7 +8711,7 @@ mod tests {
         );
         assert_eq!(
             super::workspace_lock_icon(false),
-            egui_phosphor::regular::CIRCLE_DASHED
+            egui_phosphor::regular::LOCK_KEY_OPEN
         );
     }
 

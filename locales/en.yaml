@@ -282,6 +282,9 @@ theme_editor:
     selection_text: Selection text
     border: Border
     lock: Lock
+    lock_bg: Lock button background
+    activity_active: Active indicator
+    activity_idle: Idle indicator
     window_shadow: Shadow
     tab_highlight: Focused tab
     fg: Foreground

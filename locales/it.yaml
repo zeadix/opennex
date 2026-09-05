@@ -282,6 +282,9 @@ theme_editor:
     selection_text: Testo selezione
     border: Bordo
     lock: Blocco
+    lock_bg: Sfondo pulsante blocco
+    activity_active: Indicatore attivo
+    activity_idle: Indicatore inattivo
     window_shadow: Ombra
     tab_highlight: Scheda attiva
     fg: Primo piano

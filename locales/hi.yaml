@@ -282,6 +282,9 @@ theme_editor:
     selection_text: चयन पाठ
     border: किनारा
     lock: लॉक
+    lock_bg: लॉक बटन पृष्ठभूमि
+    activity_active: सक्रिय संकेतक
+    activity_idle: निष्क्रिय संकेतक
     window_shadow: छाया
     tab_highlight: फ़ोकस टैब
     fg: अग्रभूमि
