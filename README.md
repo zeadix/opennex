@@ -1,61 +1,61 @@
 # OpenNex
 
-一款面向 AI 应用场景与命令行重度使用者的多窗口堆叠式终端管理器。
+OpenNex 是一款**多窗口堆叠式 AI 终端管理器**——将任何 AI Coding 或 Agent 工具变为可多开、可远程操控的智能工作平台。
 
-支持自由排布终端窗口布局、标签堆叠管理大量会话，布局可保存与加载；内置无限会话命令记忆、全局界面缩放、自定义主题美化、工作区加密保护，自定义快捷键等能力，一站式管控复杂的终端运行环境。
+OpenNex is a **multi-window stacked AI terminal manager** — turning any AI Coding or Agent tool into a multi-instance, remotely controllable smart workstation.
 
-基于 Rust 构建，高性能引擎可稳定支撑 **6000+ 活动窗口并行运行**，原生跨平台支持 Linux、Windows、macOS，并提供 20+ 国际化语言。
-如在使用中遇到 Bug 或有功能优化建议，欢迎反馈。   给我英文版
-
-A multi-window stacked terminal manager designed for AI application scenarios and heavy command-line users.
-It supports freely arranged terminal window layouts, tab stacking for mass session management, and one-click layout saving & loading. Built-in capabilities include unlimited session command history persistence, global UI scaling, customizable themes, encrypted workspaces, and custom keyboard shortcuts, providing one-stop control for complex terminal environments.
-Built with Rust, this high-performance engine stably supports6000+ concurrent active terminal windows. It is natively cross-platform for Linux, Windows, and macOS, and supports more than 20 international languages.
-Bug reports and feature suggestions are highly welcome.
-
-## 下载安装 / Download & Install
-
-- 访问 [opennex.zeadix.com](https://opennex.zeadix.com) 获取 Windows（.msi / .zip）、Linux（.deb / .tar.gz）、macOS（.dmg / .tar.gz）安装包。
-- Get Windows (.msi / .zip), Linux (.deb / .tar.gz) and macOS (.dmg / .tar.gz) installers at [opennex.zeadix.com](https://opennex.zeadix.com).
+| | |
+|---|---|
+| **1000+** | 活动窗口并行运行 / concurrent active windows |
+| **20+** | 国际化语言 / UI languages |
+| **3** | 原生跨平台（Linux / Windows / macOS）/ native platforms |
 
 ## 核心特性 / Key Features
 
-### 多窗口与可堆叠布局 / Multi-Window & Stackable Layouts
+**✦ AI 自动执行**（即将上线 / Coming soon）
+AI 自主规划并执行终端任务，全程可介入、可暂停。*AI plans and runs terminal tasks on its own, with full interrupt and pause control.*
 
-支持多终端会话同时运行，每个终端独立管理。水平/垂直分屏，可自由拖拽调整布局。嵌套选项卡系统，支持多层级 TabSet。
+**🌐 广域网远程控制**（即将上线 / Coming soon）
+突破局域网限制，手机、平板、电脑均可随时随地远程接管终端会话。*Take over terminal sessions from phones, tablets and PCs beyond the LAN.*
 
-Run multiple terminal sessions simultaneously with independent management. Split panes horizontally/vertically with free drag-to-resize. Nested tab system with multi-level TabSets.
+**▦ 灵活窗口布局**
+自由排布、堆叠终端窗口，布局可保存与加载，AI 工具多开井然有序。*Freely arrange and stack terminal windows; layouts save & load, keeping multi-instance AI tools tidy.*
 
-### 可保存的终端布局 / Persistent Terminal Layouts
+**↩ 指令记忆**
+无限记录输入过的每条指令，快捷键一键召回，告别重复输入。*Unlimited command history with one-keystroke recall — no more retyping.*
 
-工作区布局自动持久化，重启后完整恢复。支持保存/加载自定义布局模板。多工作区管理，侧边栏快速切换。
+**★ 收藏系统**
+常用指令一键收藏，高频命令随时调用。*One-click favorites for your most-used commands.*
 
-Workspace layouts auto-persist and fully restore after restart. Save/load custom layout templates. Multi-workspace management with quick sidebar switching.
+**◈ 主题配置**
+自定义主题美化，打造专属终端外观。*Custom themes for a personal terminal look.*
 
-### 无限指令记忆菜单 / Unlimited Command History Menu
+**🔒 工作区加密**
+主密码锁屏与工作区加密，敏感环境安心使用。*Master-password lock screen and encrypted workspaces for sensitive environments.*
 
-记录当前终端窗口的所有指令，支持快捷键召回。按 `Alt` 命出历史菜单，上下键快速导航，`Enter` 一键召回，自动去重置顶。
+**⇄ 局域网远程控制**
+同一局域网内，手机、平板、电脑均可远程接管终端会话，工作现场随处可达。*Control terminal sessions from any device on the same LAN.*
 
-Records all commands per terminal session with quick recall via shortcuts. Press `Alt` to open history menu, navigate with arrow keys, `Enter` to recall, with automatic deduplication and most-recent-first ordering.
+**◉ 工作区闲忙检测**
+实时监测各工作区运行状态，忙闲一目了然。*Live idle/busy status for every workspace at a glance.*
 
-### 加密终端工作区 / Encrypted Terminal Workspaces
+**⇅ SSH 主机连接**
+内置 SSH 主机管理，远程服务器一键直达。*Built-in SSH host management for one-click access to remote servers.*
 
-密码保护工作区，防止未授权访问。一键锁定/解锁，支持快捷键操作。遮罩层覆盖，锁定状态下隐藏所有终端内容。
+**⚡ 性能监控**
+实时掌握窗口与系统资源占用，运行状态尽在掌握。*Live window and system resource monitoring.*
 
-Password-protect workspaces against unauthorized access. One-click lock/unlock with keyboard shortcuts. Overlay mask hides all terminal content when locked.
+**⟲ 工作区记忆**
+工作区状态自动保存，重开即恢复上次现场。*Workspace state auto-saves and restores on relaunch.*
 
-### 便捷快捷键 / Convenient Shortcuts
+**🖥 系统信息监控**
+实时查看主机系统信息与资源占用状态。*Real-time host system info and resource usage.*
 
-11 个可自定义快捷键动作，支持交互式录制。`F1` 显示/隐藏工作区侧栏。`Alt` 呼出历史指令菜单。支持恢复默认快捷键。
+**⤺ 路径复原**
+重启后自动恢复各窗口工作路径，无缝续接任务。*Working directories restore automatically after restart.*
 
-11 customizable shortcut actions with interactive recording. `F1` to toggle workspace sidebar. `Alt` for command history menu. Reset to defaults supported.
-
-### 更多功能 / More Features
-
-- **命令历史**：SQLite 存储，自动去重置顶，按终端会话隔离
-- **多语言支持**：中文、繁体中文、英语、德语、法语、日语、意大利语、韩语、印地语
-- **视觉主题系统**：5 套内嵌主题（OpenNex Dark/Light、Solarized、Gruvbox、Dracula），统一应用界面与终端 ANSI 配色，支持自定义、导入导出 `.opennex-theme.json`，跨平台通用
-- **跨平台 CWD 跟踪**：OSC shell 集成（bash/zsh/powershell），重启后恢复终端工作目录
-- **在线自动更新**：检测新版本 → 一键下载 → SHA256 校验 → 自动替换重启
+**🌐 多语言**
+内置 20+ 国际化语言，一键切换。*20+ UI languages with one-click switching.*
 
 ## 多平台支持
 
