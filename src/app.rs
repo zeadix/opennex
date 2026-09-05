@@ -7501,15 +7501,15 @@ impl eframe::App for App {
                                             self.active_theme.app.button_bg.to_egui()
                                         },
                                     );
-                                    // Activity strip: the LEFT 4px of the row
-                                    // button itself doubles as the indicator —
-                                    // no separate dot. It watches EVERY
-                                    // terminal in THIS workspace (not just
-                                    // the highlighted tab), even when the
-                                    // workspace is not on screen. Red = PTY
-                                    // output or user input on ANY of them
-                                    // within the last 10s, green = all silent
-                                    // longer, neutral = nothing to watch.
+                                    // Activity DOT: a small circle pinned to
+                                    // the left edge of the row button. It
+                                    // watches EVERY terminal in THIS
+                                    // workspace (not just the highlighted
+                                    // tab), even when the workspace is not
+                                    // on screen. Red = PTY output or user
+                                    // input on ANY of them within the last
+                                    // 10s, green = all silent longer,
+                                    // neutral = nothing to watch.
                                     let activity_ms = self.workspace_activity_ms(i);
                                     let strip_color = match workspace_activity_state(
                                         activity_ms,
@@ -7525,12 +7525,9 @@ impl eframe::App for App {
                                             self.active_theme.app.weak_text.to_egui()
                                         }
                                     };
-                                    ui.painter().rect_filled(
-                                        egui::Rect::from_min_size(
-                                            row_rect.min,
-                                            egui::vec2(4.0, row_rect.height()),
-                                        ),
-                                        0.0,
+                                    ui.painter().circle_filled(
+                                        egui::pos2(row_rect.min.x + 6.0, row_rect.center().y),
+                                        3.5,
                                         strip_color,
                                     );
                                     self.panel_rects[i] = row_rect;
