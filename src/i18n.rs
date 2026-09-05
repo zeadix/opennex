@@ -1041,7 +1041,7 @@ impl Texts {
                 menu_label: "关于".into(),
                 title: "关于 OpenNex".into(),
                 version_label: "版本".into(),
-                description: "一款面向 AI 应用场景与命令行重度使用者的多窗口堆叠式终端管理器。\n\n支持自由排布终端窗口布局、标签堆叠管理大量会话，布局可保存与加载；内置无限会话命令记忆、全局界面缩放、自定义主题美化、工作区加密保护，自定义快捷键等能力，一站式管控复杂的终端运行环境。\n\n基于 Rust 构建，高性能引擎可稳定支撑6000+ 活动窗口并行运行，原生跨平台支持 Linux、Windows、macOS，并提供 20+ 国际化语言。\n如在使用中遇到 Bug 或有功能优化建议，欢迎反馈。".into(),
+                description: "将任何 AI Coding 或 Agent 工具变为可多开、可远程操控的智能工作平台：灵活窗口布局、指令记忆与收藏、主题配置、工作区加密、局域网远程控制、工作区闲忙检测、SSH 主机连接、性能监控、20+ 多语言、Windows/Mac/Linux 多平台支持。基于 Rust 构建，稳定支撑 1000+ 活动窗口并行运行。".into(),
                 homepage_label: "主页".into(),
                 source_label: "开源".into(),
                 license_label: "开源协议".into(),

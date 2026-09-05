@@ -233,16 +233,8 @@ about:
   menu_label: Informazioni
   title: Informazioni su OpenNex
   version_label: Versione
-  description: 'Un gestore di terminali multi-finestra a schede impilate, pensato per flussi di lavoro AI e utilizzatori intensivi della riga di comando.
-
-
-    Disponi liberamente i layout delle finestre dei terminali e impila le schede per gestire numerose sessioni; i layout si salvano e ricaricano. Include cronologia comandi illimitata per sessione, zoom
-    globale dell''interfaccia, temi personalizzati, aree di lavoro cifrate e scorciatoie configurabili — tutto per dominare un ambiente terminale complesso.
-
-
-    Costruito in Rust: il motore ad alte prestazioni regge stabilmente 6000+ finestre attive in parallelo, con supporto nativo per Linux, Windows e macOS, e oltre 20 lingue.
-
-    Trovato un bug o hai un suggerimento? Feedback benvenuto.'
+  description: >
+    Trasforma qualsiasi strumento AI Coding o Agent in una smart workstation multi-istanza e controllabile da remoto: layout flessibile, memoria e preferiti dei comandi, configurazione temi, crittografia delle aree, controllo remoto LAN, rilevamento attività, connessioni SSH, monitoraggio prestazioni, 20+ lingue, Windows/Mac/Linux. Costruito in Rust, stabile con 1000+ finestre attive.
   homepage_label: Sito web
   source_label: Codice sorgente
   license_label: Licenza
@@ -520,17 +512,38 @@ remote:
 help:
   title: Tutorial
   content: |
-    OpenNex è un gestore di terminali impilati multipiattaforma.
+    # Aree di lavoro
+    Crea più aree nella barra laterale, ognuna con layout e blocco; trascina le maniglie per riordinare. La banda colorata mostra se UN terminale dell'area è stato attivo negli ultimi 10 secondi.
 
-    Aree di lavoro: più aree nella barra laterale, ognuna con layout e blocco; maniglie per riordinare.
-    Split e schede: divisioni orizzontali/verticali e schede annidate.
-    Host SSH: libreria in basso a sinistra, un clic connette nell'area corrente; host PROD evidenziati.
-    Controllo remoto: scegli LAN/WAN dal menu, scansiona il QR per operare i terminali in diretta.
-    Tasti virtuali: personalizza la barra del telefono in Impostazioni -> Controllo remoto.
-    Cronologia e completamento: Alt apre la cronologia; la digitazione auto-completa.
-    Monitor: menu Vista, CPU/RAM per terminale.
-    Ricerca: Ctrl+F nello scrollback del terminale.
-    Scorciatoie: consulta e registra tutti i binding in Impostazioni -> Scorciatoie.
+    # Split e schede
+    Il menu + della barra delle schede crea un terminale (scelta shell); clic destro su una scheda: rinomina, divisione orizzontale/verticale; trascina il separatore.
+
+    # Memoria e preferiti
+    Alt apre la cronologia, Invio riesegue; la digitazione auto-completa cronologia e PATH; i comandi preferiti vanno in gruppi, i {segnaposto} chiedono i valori all'inserimento.
+
+    # Host SSH
+    Gestisci la libreria host in basso a sinistra (crea, raggruppa, cerca); un clic connette nell'area corrente; gli host PROD portano un avviso rosso.
+
+    # Controllo remoto
+    Menu Controllo remoto -> LAN/WAN, scansiona il QR per pilotare tutti i terminali in diretta; i tasti virtuali del telefono si modificano in Impostazioni -> Controllo remoto.
+
+    # Temi
+    Impostazioni -> Temi: più palette con cambio a un clic, editor personalizzato e import/export; il font segue il sistema.
+
+    # Blocco area
+    Imposta una password in Impostazioni -> Blocco, poi blocca qualsiasi area; lo sblocco richiede la password.
+
+    # Monitor prestazioni
+    Vista -> Monitor: CPU e RAM per terminale in diretta; clic su una riga per focalizzarlo.
+
+    # Lingue
+    Impostazioni -> Lingua cambia la lingua all'istante.
+
+    # Ricerca
+    Ctrl+F cerca nello scrollback del terminale, corrispondenze evidenziate e navigabili.
+
+    # Scorciatoie
+    Impostazioni -> Scorciatoie elenca tutti i binding; registra nuovi tasti o ripristina.
 
 update_window:
   title: Aggiorna

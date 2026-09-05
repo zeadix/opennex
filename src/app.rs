@@ -5876,6 +5876,28 @@ impl eframe::App for App {
                     // The update entry is a STANDALONE right-corner button.
                     let help_label = self.texts.menu.help.clone();
                     dropdown(ui, &help_label, "menu_help", &mut |ui| {
+                        // The default popup width hugs the narrow trigger
+                        // button and wraps the labels — size it to the
+                        // longest entry so buttons stay on one line.
+                        let help_w = ui.fonts(|f| {
+                            f.layout_no_wrap(
+                                self.texts.help.title.clone(),
+                                egui::FontId::proportional(14.0),
+                                egui::Color32::PLACEHOLDER,
+                            )
+                            .size()
+                            .x
+                        });
+                        let about_w = ui.fonts(|f| {
+                            f.layout_no_wrap(
+                                self.texts.about.menu_label.clone(),
+                                egui::FontId::proportional(14.0),
+                                egui::Color32::PLACEHOLDER,
+                            )
+                            .size()
+                            .x
+                        });
+                        ui.set_min_width(help_w.max(about_w) + 40.0);
                         if ui.button(&self.texts.help.title).clicked() {
                             self.show_help_window = true;
                             ui.close_menu();
@@ -6727,43 +6749,43 @@ impl eframe::App for App {
                 .default_width(460.0)
                 .show(ctx, |ui| {
                     let h = self.texts.help.clone();
-                    let weak = self.active_theme.app.weak_text.to_egui();
                     let accent = self.active_theme.app.accent.to_egui();
                     egui::ScrollArea::vertical()
                         .id_salt("help_content_scroll")
                         .max_height(420.0)
                         .auto_shrink([false, true])
                         .show(ui, |ui| {
+                            // Content grammar: "# Section" = heading,
+                            // blank lines = spacing. Each section ends
+                            // with a separator so features read as
+                            // distinct blocks; everything scrolls.
+                            let mut first_section = true;
                             for para in h.content.split('\n') {
-                                if para.trim().is_empty() {
-                                    ui.add_space(6.0);
+                                let line = para.trim();
+                                if line.is_empty() {
                                     continue;
                                 }
-                                // "功能名：描述" renders as a two-tone row:
-                                // the feature name in accent+bold, the
-                                // description regular. Both full-width
-                                // (CJK locales) and ASCII ": " separators
-                                // are recognized. Lines without either
-                                // (the intro) stay plain and dimmed.
-                                let head_body = para
-                                    .split_once('：')
-                                    .or_else(|| para.split_once(": "))
-                                    .map(|(h, b)| (h.to_string(), b.to_string()));
-                                match head_body {
-                                    Some((head, body)) => {
-                                        ui.horizontal_wrapped(|ui| {
-                                            ui.label(
-                                                egui::RichText::new(format!("{head}:"))
-                                                    .size(12.0)
-                                                    .strong()
-                                                    .color(accent),
-                                            );
-                                            ui.label(egui::RichText::new(body).size(12.0));
-                                        });
+                                if let Some(section) = line.strip_prefix("# ") {
+                                    if !first_section {
+                                        ui.add_space(4.0);
+                                        ui.separator();
+                                        ui.add_space(2.0);
                                     }
-                                    None => {
-                                        ui.label(egui::RichText::new(para).size(11.0).color(weak));
-                                    }
+                                    first_section = false;
+                                    ui.label(
+                                        egui::RichText::new(section)
+                                            .size(13.0)
+                                            .strong()
+                                            .color(accent),
+                                    );
+                                    ui.add_space(2.0);
+                                } else {
+                                    ui.label(
+                                        egui::RichText::new(line)
+                                            .size(12.0)
+                                            .color(self.active_theme.app.text.to_egui()),
+                                    );
+                                    ui.add_space(2.0);
                                 }
                             }
                         });

@@ -233,16 +233,8 @@ about:
   menu_label: Über
   title: Über OpenNex
   version_label: Version
-  description: 'Ein Multi-Window-Stacking-Terminal-Manager für KI-Workflows und Vielnutzer der Kommandozeile.
-
-
-    Terminal-Fensterlayouts frei anordnen und Sitzungen über Tab-Stacking verwalten; Layouts speichern und laden. Enthält unbegrenzte Sitzungs-Befehlshistorie, globale Interface-Skalierung, eigene Themes,
-    verschlüsselte Arbeitsbereiche und konfigurierbare Shortcuts — alles für die Kontrolle komplexer Terminal-Umgebungen.
-
-
-    In Rust gebaut: Die Hochleistungs-Engine betreibt stabil 6000+ aktive Fenster parallel, mit nativer Plattformunterstützung für Linux, Windows und macOS sowie 20+ Sprachen.
-
-    Fehler gefunden oder Verbesserungsvorschläge? Feedback ist willkommen.'
+  description: >
+    Verwandle jedes AI-Coding- oder Agent-Tool in eine multi-instanzfähige, fernsteuerbare intelligente Arbeitsplattform: flexibles Fensterlayout, Befehlsspeicher & Favoriten, Theme-Konfiguration, Arbeitsbereichsverschlüsselung, LAN-Fernsteuerung, Idle/Busy-Erkennung, SSH-Host-Verbindungen, Performance-Monitoring, 20+ Sprachen, Windows/Mac/Linux. Mit Rust gebaut, stabil für 1000+ parallele Fenster.
   homepage_label: Webseite
   source_label: Quellcode
   license_label: Lizenz
@@ -520,17 +512,38 @@ remote:
 help:
   title: Anleitung
   content: |
-    OpenNex ist ein plattformübergreifender, gestapelter Terminal-Manager.
+    # Arbeitsbereiche
+    Mehrere Arbeitsbereiche in der linken Leiste, jeweils eigenes Layout und Sperre; Ziehpunkte zum Sortieren. Der Farbstreifen zeigt, ob IRGENDEIN Terminal im Arbeitsbereich in den letzten 10 Sekunden aktiv war.
 
-    Arbeitsbereiche: mehrere Arbeitsbereiche in der linken Leiste, eigenes Layout und Sperre, Ziehpunkte zum Sortieren.
-    Splits & Tabs: horizontale/vertikale Splits und verschachtelte Tabs.
-    SSH-Hosts: Host-Bibliothek unten links verwalten, ein Klick verbindet im aktuellen Arbeitsbereich; PROD-Hosts fallen auf.
-    Fernsteuerung: LAN/WAN im Menü wählen, QR scannen und Terminals live bedienen.
-    Virtuelle Tasten: Telefon-Toolbar unter Einstellungen -> Fernsteuerung anpassen.
-    Verlauf & Vervollständigung: Alt öffnet den Verlauf; Eingabe vervollständigt automatisch.
-    Monitor: Ansichtsmenü, CPU/RAM pro Terminal.
-    Suche: Ctrl+F durchsucht den Scrollback des Terminals.
-    Tastenkürzel: alle Bindungen unter Einstellungen -> Tastenkürzel ansehen und aufnehmen.
+    # Splits & Tabs
+    Das +-Menü der Tab-Leiste startet ein Terminal (Shell wählbar); Rechtsklick auf einen Tab: umbenennen, horizontal/vertikal teilen; Trenner ziehen zum Skalieren.
+
+    # Befehlsspeicher & Favoriten
+    Alt öffnet den Verlauf, Enter führt erneut aus; Eingabe vervollständigt Verlauf und PATH; Befehle in Gruppen favorisieren, {Platzhalter} werden beim Einfügen abgefragt.
+
+    # SSH-Hosts
+    Host-Bibliothek unten in der Leiste (anlegen, gruppieren, suchen); ein Klick verbindet im aktuellen Arbeitsbereich; PROD-Hosts tragen eine rote Warnung.
+
+    # Fernsteuerung
+    Menü Fernsteuerung -> LAN/WAN, QR mit dem Handy scannen und alle Terminals live bedienen; die virtuellen Tasten des Telefons sind unter Einstellungen -> Fernsteuerung frei editierbar.
+
+    # Themes
+    Einstellungen -> Themes: mehrere Paletten mit Ein-Klick-Wechsel, eigener Editor sowie Import/Export; die UI-Schrift kann dem System folgen.
+
+    # Arbeitsbereichs-Sperre
+    Passwort unter Einstellungen -> Sperren setzen, dann any Arbeitsbereich gegen Fehleingaben sperren; Entsperren erfordert das Passwort.
+
+    # Performance-Monitor
+    Ansicht -> Monitor zeigt CPU und RAM pro Terminal live; Klick fokussiert das Terminal.
+
+    # Sprachen
+    Einstellungen -> Sprache wechselt die Oberflächensprache sofort.
+
+    # Suche
+    Ctrl+F durchsucht den Scrollback des Terminals, Treffer werden hervorgehoben und zyklisch navigiert.
+
+    # Tastenkürzel
+    Einstellungen -> Tastenkürzel listet alle Bindungen; neue aufnehmen oder Standard wiederherstellen.
 
 update_window:
   title: Aktualisieren

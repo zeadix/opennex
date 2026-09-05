@@ -233,16 +233,8 @@ about:
   menu_label: About
   title: About OpenNex
   version_label: Version
-  description: 'A multi-window stacked terminal manager built for AI workflows and heavy command-line users.
-
-
-    Freely arrange terminal window layouts and stack tabs to manage many sessions; layouts can be saved and loaded. Ships with unlimited session command history, global interface scaling, custom themes,
-    encrypted workspaces, and configurable shortcuts — everything you need to tame a complex terminal environment.
-
-
-    Built in Rust: the high-performance engine comfortably runs 6000+ active windows in parallel, with native cross-platform support for Linux, Windows, and macOS, plus 20+ localized languages.
-
-    Found a bug or have a suggestion? Feedback is welcome.'
+  description: >
+    Turn any AI Coding or Agent tool into a multi-instance, remotely controllable smart workstation: flexible window layout, command memory & favorites, theme configuration, workspace encryption, LAN remote control, workspace idle/busy detection, SSH host connections, performance monitoring, 20+ languages, and Windows/Mac/Linux support. Built with Rust, stably running 1000+ live windows.
   homepage_label: Homepage
   source_label: Source
   license_label: License
@@ -520,17 +512,38 @@ remote:
 help:
   title: Tutorial
   content: |
-    OpenNex is a cross-platform stacked terminal manager.
+    # Workspaces
+    Create multiple workspaces in the left sidebar, each with its own layout and lock; drag row handles to reorder, click a name to switch. The color strip shows whether ANY terminal in the workspace was active in the last 10 seconds.
 
-    Workspaces: create multiple workspaces in the left sidebar, each with its own layout and lock; drag handles to reorder.
-    Splits & tabs: horizontal/vertical splits and nested tabs.
-    SSH hosts: manage the host library at the bottom-left, one click connects in the current workspace; PROD hosts stand out.
-    Remote control: pick LAN/WAN from the menu, scan the QR to view and operate terminals live.
-    Virtual keys: customize the phone toolbar under Settings -> Remote.
-    History & completion: Alt opens command history; typing auto-completes history and PATH commands.
-    Monitor: the View menu opens a per-terminal CPU/memory panel.
-    Search: Ctrl+F searches the current terminal's scrollback.
-    Shortcuts: view and record every key binding under Settings -> Shortcuts.
+    # Splits & tabs
+    The + menu on the tab bar spawns a terminal (choose the shell type); right-click a tab to rename, split horizontally/vertically; drag the splitter to resize.
+
+    # Command memory & favorites
+    Alt opens the command history, Enter re-runs; typing auto-completes history and PATH commands; favorite commands into groups with {placeholder} prompts on insert.
+
+    # SSH hosts
+    Manage the host library at the bottom of the sidebar (create, group, search); clicking a host connects in the current workspace; PROD hosts carry a red warning.
+
+    # Remote control
+    Menu Remote -> LAN/WAN, scan the QR with your phone to view and operate every terminal live; the phone's bottom virtual keys are freely editable under Settings -> Remote.
+
+    # Themes
+    Settings -> Themes ships several palettes with one-click switching, plus a custom editor and import/export; the UI font can follow the system.
+
+    # Workspace lock
+    Configure a password in Settings -> Lock, then lock any workspace against accidental input; unlocking requires the password.
+
+    # Performance monitor
+    View -> Monitor shows per-terminal CPU and memory in real time; click a row to focus that terminal.
+
+    # Languages
+    Settings -> Language switches the UI language instantly.
+
+    # Search
+    Ctrl+F searches the current terminal's scrollback with highlighted matches and cycle navigation.
+
+    # Shortcuts
+    Settings -> Shortcuts lists every binding; record new keys or restore defaults.
 
 update_window:
   title: Update

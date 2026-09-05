@@ -233,16 +233,9 @@ about:
   menu_label: À propos
   title: À propos d'OpenNex
   version_label: Version
-  description: 'Un gestionnaire de terminaux empilables multi-fenêtres, pensé pour les workflows IA et les utilisateurs intensifs de la ligne de commande.
-
-
-    Disposez librement les fenêtres de terminaux et empilez les onglets pour gérer de nombreuses sessions ; les dispositions s''enregistrent et se rechargent. Intègre un historique illimité des commandes
-    par session, un zoom global de l''interface, des thèmes personnalisés, des espaces chiffrés et des raccourcis configurables — tout pour maîtriser un environnement de terminaux complexe.
-
-
-    Conçu en Rust : le moteur haute performance fait tourner 6000+ fenêtres actives en parallèle, avec un support natif de Linux, Windows et macOS, et plus de 20 langues.
-
-    Un bug ou une suggestion ? Vos retours sont les bienvenus.'
+  description: >
+    Transformez n'importe quel outil AI Coding ou Agent en plateforme de travail intelligente multi-instances et télécommandable : mise en page flexible, mémoire et favoris de commandes, configuration des thèmes, chiffrement des espaces, contrôle à distance LAN, détection d'activité, connexions SSH, supervision, 20+ langues, Windows/Mac/Linux. Construit en Rust, stable avec 1000+ fenêtres actives.
+        Un bug ou une suggestion ? Les retours sont bienvenus.
   homepage_label: Page d'accueil
   source_label: Code source
   license_label: Licence
@@ -520,17 +513,38 @@ remote:
 help:
   title: Tutoriel
   content: |
-    OpenNex est un gestionnaire de terminaux empilés multiplateforme.
+    # Espaces de travail
+    Créez plusieurs espaces dans la barre latérale, chacun avec disposition et verrouillage ; poignées pour réordonner. La bande colorée indique si UN terminal de l'espace a été actif ces 10 dernières secondes.
 
-    Espaces de travail : créez-en plusieurs dans la barre latérale, chacun avec disposition et verrouillage ; poignées pour réordonner.
-    Splits & onglets : divisions horizontales/verticales et onglets imbriqués.
-    Hôtes SSH : bibliothèque en bas à gauche, un clic connecte dans l'espace courant ; hôtes PROD signalés.
-    Télécommande : choisissez LAN/WAN dans le menu, scannez le QR pour opérer les terminaux en direct.
-    Touches virtuelles : personnalisez la barre du téléphone dans Paramètres -> Télécommande.
-    Historique & complétion : Alt ouvre l'historique ; la saisie auto-complète.
-    Moniteur : menu Affichage, CPU/RAM par terminal.
-    Recherche : Ctrl+F dans le défilement du terminal.
-    Raccourcis : tout consulter et enregistrer dans Paramètres -> Raccourcis.
+    # Splits & onglets
+    Le menu + de la barre d'onglets crée un terminal (choix du shell) ; clic droit : renommer, diviser horizontalement/verticalement ; tirez le séparateur.
+
+    # Mémoire & favoris
+    Alt ouvre l'historique, Entrée relance ; la saisie auto-complète l'historique et le PATH ; favoris en groupes, {espaces réservés} remplis à l'insertion.
+
+    # Hôtes SSH
+    Bibliothèque d'hôtes en bas de la barre (créer, grouper, chercher) ; un clic connecte dans l'espace courant ; hôtes PROD signalés en rouge.
+
+    # Télécommande
+    Menu Télécommande -> LAN/WAN, scannez le QR pour piloter tous les terminaux en direct ; les touches virtuelles du téléphone s'éditent dans Paramètres -> Télécommande.
+
+    # Thèmes
+    Paramètres -> Thèmes : plusieurs palettes en un clic, éditeur personnalisé et import/export ; la police peut suivre le système.
+
+    # Verrouillage
+    Définissez un mot de passe dans Paramètres -> Verrouillage, puis verrouillez tout espace ; le déverrouillage exige le mot de passe.
+
+    # Moniteur
+    Affichage -> Moniteur : CPU et RAM par terminal en direct ; cliquez une ligne pour focaliser.
+
+    # Langues
+    Paramètres -> Langue change la langue instantanément.
+
+    # Recherche
+    Ctrl+F cherche dans le défilement du terminal, correspondances surlignées et navigables.
+
+    # Raccourcis
+    Paramètres -> Raccourcis liste tous les raccourcis ; enregistrement et réinitialisation.
 
 update_window:
   title: Mettre à jour
