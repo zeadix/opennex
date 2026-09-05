@@ -7481,12 +7481,13 @@ impl eframe::App for App {
                                         egui::vec2(ui.available_width(), row_h),
                                         egui::Sense::click_and_drag(),
                                     );
-                                    // `on_hover_text` consumes the Response; bind
-                                    // back to the original so we can still use it
-                                    // below.
+                                    // NOTE: no row-level tooltip here — the
+                                    // activity dot registers its own (worked/
+                                    // idle seconds) and egui shows only the
+                                    // FIRST tooltip registered per frame; a
+                                    // row-wide one would shadow it. The drag
+                                    // hint lives on the handle's own response.
                                     let _is_row_hovered = row_resp.hovered();
-                                    let _row_resp = row_resp
-                                        .on_hover_text(&self.texts.workspace.drag_handle_hint);
                                     // Background: whole row uses button_bg so every
                                     // click target inside the row shares one
                                     // continuous surface. The selected row fills
@@ -7591,9 +7592,10 @@ impl eframe::App for App {
                                     });
                                     child.painter().galley(
                                         egui::pos2(
-                                            // 26px indent: 120% more clearance
-                                            // after the activity dot.
-                                            name_rect.min.x + 26.0,
+                                            // 24px indent: double the original
+                                            // 12px clearance (100% more) after
+                                            // the activity dot.
+                                            name_rect.min.x + 24.0,
                                             name_rect.center().y - name_galley.size().y / 2.0,
                                         ),
                                         name_galley,
