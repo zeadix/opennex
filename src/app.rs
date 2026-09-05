@@ -7568,6 +7568,36 @@ impl eframe::App for App {
                                             egui::Layout::left_to_right(egui::Align::Center),
                                         ),
                                     );
+                                    // Activity dot (12px slot, allocated like the
+                                    // lock button so its hover tooltip WORKS —
+                                    // the old paint-only dot + late ui.interact
+                                    // never won egui's hit-test). Watches EVERY
+                                    // terminal in THIS workspace, even when the
+                                    // workspace is off screen. Red = PTY output
+                                    // or user input on ANY of them within 10s,
+                                    // green = all silent longer, neutral =
+                                    // nothing to watch.
+                                    let (dot_rect, dot_resp) = child.allocate_exact_size(
+                                        egui::vec2(12.0, row_h),
+                                        egui::Sense::hover(),
+                                    );
+                                    child.painter().circle_filled(
+                                        egui::pos2(dot_rect.min.x + 6.0, dot_rect.center().y),
+                                        3.5,
+                                        strip_color,
+                                    );
+                                    if let Some(ms) = activity_ms {
+                                        let wt = &self.texts.workspace;
+                                        let secs = now_ms.saturating_sub(ms) / 1000;
+                                        let tip =
+                                            match workspace_activity_state(activity_ms, now_ms) {
+                                                WorkspaceActivity::Active => {
+                                                    wt.worked_for.replace("{s}", &secs.to_string())
+                                                }
+                                                _ => wt.idle_for.replace("{s}", &secs.to_string()),
+                                            };
+                                        let _ = dot_resp.on_hover_text(tip);
+                                    }
                                     // Name (clickable, fills middle). Flat text drawn
                                     // directly on the row's shared button_bg — no
                                     // SelectableLabel so hover never paints its own
@@ -7592,10 +7622,9 @@ impl eframe::App for App {
                                     });
                                     child.painter().galley(
                                         egui::pos2(
-                                            // 24px indent: double the original
-                                            // 12px clearance (100% more) after
-                                            // the activity dot.
-                                            name_rect.min.x + 24.0,
+                                            // 60% more clearance than the
+                                            // original 12px indent.
+                                            name_rect.min.x + 19.0,
                                             name_rect.center().y - name_galley.size().y / 2.0,
                                         ),
                                         name_galley,
