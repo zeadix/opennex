@@ -7536,10 +7536,14 @@ impl eframe::App for App {
                                         egui::pos2(row_rect.min.x + 6.0, row_rect.center().y),
                                         egui::vec2(12.0, row_h),
                                     );
+                                    // Sense::click is REQUIRED: a hover-only
+                                    // interact loses egui's hit-test to the
+                                    // row's click_and_drag response and its
+                                    // tooltip never shows.
                                     let dot_resp = ui.interact(
                                         dot_rect,
                                         egui::Id::new(("ws_activity_dot", i)),
-                                        egui::Sense::hover(),
+                                        egui::Sense::click(),
                                     );
                                     if let Some(ms) = activity_ms {
                                         let wt = &self.texts.workspace;
@@ -7587,10 +7591,9 @@ impl eframe::App for App {
                                     });
                                     child.painter().galley(
                                         egui::pos2(
-                                            // 48px indent: generous clearance
-                                            // after the activity dot (4x the
-                                            // previous 12px).
-                                            name_rect.min.x + 48.0,
+                                            // 26px indent: 120% more clearance
+                                            // after the activity dot.
+                                            name_rect.min.x + 26.0,
                                             name_rect.center().y - name_galley.size().y / 2.0,
                                         ),
                                         name_galley,
