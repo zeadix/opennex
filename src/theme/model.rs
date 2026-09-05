@@ -157,10 +157,6 @@ pub struct AppTheme {
     #[serde(default = "default_neutral")]
     pub neutral: ThemeColor,
     pub lock: ThemeColor,
-    /// Sidebar workspace-lock button: background fill while the
-    /// workspace IS locked (locked = colored, unlocked = transparent).
-    #[serde(default = "default_lock_bg")]
-    pub lock_bg: ThemeColor,
     /// Workspace activity strip: the ACTIVE (recent output/input)
     /// color. Optional; defaults to the danger red.
     #[serde(default = "default_activity_active")]
@@ -250,9 +246,6 @@ fn default_sidebar_border() -> ThemeColor {
 }
 fn default_tab_highlight() -> ThemeColor {
     ThemeColor::from_rgb_opaque(0x33, 0x38, 0x40)
-}
-fn default_lock_bg() -> ThemeColor {
-    ThemeColor::from_rgb_opaque(0x2f, 0x6f, 0xed)
 }
 fn default_activity_active() -> ThemeColor {
     ThemeColor::from_rgb_opaque(0xe0, 0x5a, 0x65)
@@ -433,7 +426,6 @@ mod tests {
                     info: ThemeColor::from_rgb_opaque(0x3b, 0x82, 0xf6),
                     neutral: ThemeColor::from_rgb_opaque(0x6b, 0x72, 0x80),
                     lock: ThemeColor::from_rgb_opaque(0xd9, 0xa4, 0x41),
-                    lock_bg: default_lock_bg(),
                     activity_active: default_activity_active(),
                     activity_idle: default_activity_idle(),
                     input_bg: ThemeColor::from_rgb_opaque(0x1a, 0x1d, 0x21),
