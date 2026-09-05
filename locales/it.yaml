@@ -137,6 +137,8 @@ shortcut_labels:
   shortcuts_heading: Scorciatoie
 workspace:
   heading: Aree di lavoro
+  worked_for: 'Attivo: {s}s'
+  idle_for: 'Inattivo: {s}s'
   new: + Nuova area
   rename: Rinomina
   save_as_template: Salva come modello

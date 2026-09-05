@@ -137,6 +137,8 @@ shortcut_labels:
   shortcuts_heading: 단축키
 workspace:
   heading: 작업공간
+  worked_for: '작업 중: {s}s'
+  idle_for: '유휴: {s}s'
   new: + 새 작업공간
   rename: 이름 변경
   save_as_template: 템플릿으로 저장

@@ -7511,25 +7511,48 @@ impl eframe::App for App {
                                     // 10s, green = all silent longer,
                                     // neutral = nothing to watch.
                                     let activity_ms = self.workspace_activity_ms(i);
-                                    let strip_color = match workspace_activity_state(
-                                        activity_ms,
-                                        egui_term::unix_ms(),
-                                    ) {
-                                        WorkspaceActivity::Active => {
-                                            self.active_theme.app.activity_active.to_egui()
-                                        }
-                                        WorkspaceActivity::Idle => {
-                                            self.active_theme.app.activity_idle.to_egui()
-                                        }
-                                        WorkspaceActivity::Unknown => {
-                                            self.active_theme.app.weak_text.to_egui()
-                                        }
-                                    };
+                                    let now_ms = egui_term::unix_ms();
+                                    let strip_color =
+                                        match workspace_activity_state(activity_ms, now_ms) {
+                                            WorkspaceActivity::Active => {
+                                                self.active_theme.app.activity_active.to_egui()
+                                            }
+                                            WorkspaceActivity::Idle => {
+                                                self.active_theme.app.activity_idle.to_egui()
+                                            }
+                                            WorkspaceActivity::Unknown => {
+                                                self.active_theme.app.weak_text.to_egui()
+                                            }
+                                        };
                                     ui.painter().circle_filled(
                                         egui::pos2(row_rect.min.x + 6.0, row_rect.center().y),
                                         3.5,
                                         strip_color,
                                     );
+                                    // Hover tooltip on the dot: seconds since
+                                    // the last activity (idle) or since the
+                                    // terminal was created (working).
+                                    let dot_rect = egui::Rect::from_center_size(
+                                        egui::pos2(row_rect.min.x + 6.0, row_rect.center().y),
+                                        egui::vec2(12.0, row_h),
+                                    );
+                                    let dot_resp = ui.interact(
+                                        dot_rect,
+                                        egui::Id::new(("ws_activity_dot", i)),
+                                        egui::Sense::hover(),
+                                    );
+                                    if let Some(ms) = activity_ms {
+                                        let wt = &self.texts.workspace;
+                                        let secs = now_ms.saturating_sub(ms) / 1000;
+                                        let tip =
+                                            match workspace_activity_state(activity_ms, now_ms) {
+                                                WorkspaceActivity::Active => {
+                                                    wt.worked_for.replace("{s}", &secs.to_string())
+                                                }
+                                                _ => wt.idle_for.replace("{s}", &secs.to_string()),
+                                            };
+                                        let _ = dot_resp.on_hover_text(tip);
+                                    }
                                     self.panel_rects[i] = row_rect;
 
                                     // Layout: [name (flex)] [lock btn][≡ drag icon]
@@ -7564,9 +7587,10 @@ impl eframe::App for App {
                                     });
                                     child.painter().galley(
                                         egui::pos2(
-                                            // 12px indent: keeps the label clear
-                                            // of the 4px activity strip.
-                                            name_rect.min.x + 12.0,
+                                            // 48px indent: generous clearance
+                                            // after the activity dot (4x the
+                                            // previous 12px).
+                                            name_rect.min.x + 48.0,
                                             name_rect.center().y - name_galley.size().y / 2.0,
                                         ),
                                         name_galley,

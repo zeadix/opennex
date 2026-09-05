@@ -264,6 +264,13 @@ pub struct ShortcutLabelTexts {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct WorkspaceTexts {
     pub heading: String,
+    /// Activity-dot tooltip: "已工作: {s}s" while the workspace is busy
+    /// ({s} = seconds since the terminal was created / last activity).
+    #[serde(default)]
+    pub worked_for: String,
+    /// Activity-dot tooltip: "已闲置: {s}s" while idle.
+    #[serde(default)]
+    pub idle_for: String,
     pub new: String,
     pub rename: String,
     pub save_as_template: String,
@@ -939,6 +946,8 @@ impl Texts {
             },
             workspace: WorkspaceTexts {
                 heading: "工作区".into(),
+                worked_for: "已工作: {s}s".into(),
+                idle_for: "已闲置: {s}s".into(),
                 new: "+ 新建工作区".into(),
                 rename: "重命名".into(),
                 save_as_template: "保存为模版".into(),

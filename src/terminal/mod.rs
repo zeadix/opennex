@@ -57,6 +57,9 @@ pub struct TerminalInstance {
     /// off (password prompts) produces no PTY output but IS activity.
     /// 0 until the first input (see `activity_armed`).
     pub last_input_ms: u64,
+    /// UNIX-time ms of the terminal's creation — the "uptime" baseline
+    /// for the workspace activity tooltip (已工作: <uptime>s).
+    pub created_at_ms: u64,
     /// Activity arming: a fresh terminal reports IDLE (green dot) no
     /// matter how much the shell prints while starting up (prompt,
     /// login messages, shell integration, first cd) — the user has not
@@ -281,6 +284,7 @@ impl TerminalInstance {
             shell_info,
             history_nav: None,
             prompt_seq: 0,
+            created_at_ms: egui_term::unix_ms(),
             last_input_ms: 0,
             activity_armed: false,
             armed_at_ms: 0,

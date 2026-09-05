@@ -137,6 +137,8 @@ shortcut_labels:
   shortcuts_heading: Raccourcis
 workspace:
   heading: Espaces de travail
+  worked_for: 'Actif : {s}s'
+  idle_for: 'Inactif : {s}s'
   new: + Nouvel espace
   rename: Renommer
   save_as_template: Enregistrer comme modèle

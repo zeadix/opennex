@@ -137,6 +137,8 @@ shortcut_labels:
   shortcuts_heading: 捷徑
 workspace:
   heading: 工作區
+  worked_for: '已工作: {s}s'
+  idle_for: '已閒置: {s}s'
   new: + 新增工作區
   rename: 重新命名
   save_as_template: 儲存為範本

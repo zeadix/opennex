@@ -137,6 +137,8 @@ shortcut_labels:
   shortcuts_heading: शॉर्टकट
 workspace:
   heading: कार्यक्षेत्र
+  worked_for: 'कार्यरत: {s}s'
+  idle_for: 'निष्क्रिय: {s}s'
   new: + नया कार्यक्षेत्र
   rename: नाम बदलें
   save_as_template: टेम्पलेट के रूप में सहेजें

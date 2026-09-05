@@ -137,6 +137,8 @@ shortcut_labels:
   shortcuts_heading: 快捷键
 workspace:
   heading: 工作区
+  worked_for: '已工作: {s}s'
+  idle_for: '已闲置: {s}s'
   new: + 新建工作区
   rename: 重命名
   save_as_template: 保存为模版

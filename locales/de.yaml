@@ -137,6 +137,8 @@ shortcut_labels:
   shortcuts_heading: Tastenkürzel
 workspace:
   heading: Arbeitsbereiche
+  worked_for: 'Aktiv: {s}s'
+  idle_for: 'Inaktiv: {s}s'
   new: + Neuer Arbeitsbereich
   rename: Umbenennen
   save_as_template: Als Vorlage speichern

@@ -137,6 +137,8 @@ shortcut_labels:
   shortcuts_heading: ショートカット
 workspace:
   heading: ワークスペース
+  worked_for: '稼働中: {s}s'
+  idle_for: 'アイドル: {s}s'
   new: + 新規ワークスペース
   rename: 名前変更
   save_as_template: テンプレートとして保存

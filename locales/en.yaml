@@ -137,6 +137,8 @@ shortcut_labels:
   shortcuts_heading: Shortcuts
 workspace:
   heading: Workspaces
+  worked_for: 'Working: {s}s'
+  idle_for: 'Idle: {s}s'
   new: + New Workspace
   rename: Rename
   save_as_template: Save as Template
