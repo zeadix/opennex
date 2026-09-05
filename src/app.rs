@@ -702,6 +702,31 @@ fn workspace_activity_state(activity_ms: Option<u64>, now_ms: u64) -> WorkspaceA
     }
 }
 
+/// State-transition clock for the workspace indicator: returns the
+/// state and the moment it WAS ENTERED. A flip re-zeros the clock —
+/// idle->active starts at the triggering activity (raw), every other
+/// flip starts at `now_ms`. Same state keeps its clock running. This is
+/// what makes the tooltip read "已工作: 3s" (3s after the flip) instead
+/// of a raw distance-to-last-activity, and it fixes the huge idle
+/// numbers right after launch (first observation starts at now).
+fn activity_since_next(
+    prev: Option<(WorkspaceActivity, u64)>,
+    state: WorkspaceActivity,
+    raw: Option<u64>,
+    now_ms: u64,
+) -> (WorkspaceActivity, u64) {
+    match prev {
+        Some((prev_state, since)) if prev_state == state => (state, since),
+        _ => {
+            let since = match (state, raw) {
+                (WorkspaceActivity::Active, Some(raw_ms)) => raw_ms.min(now_ms),
+                _ => now_ms,
+            };
+            (state, since)
+        }
+    }
+}
+
 impl App {
     /// Latest activity across EVERY terminal of a workspace (max of
     /// their last_activity_ms): any one busy terminal marks the whole
@@ -720,6 +745,23 @@ impl App {
             }
         }
         latest
+    }
+
+    /// Per-workspace activity STATE + the moment it was entered (the
+    /// tooltip's clock baseline). Transitions re-zero the clock (see
+    /// activity_since_next); the tracker lives in a HashMap keyed by
+    /// panel index.
+    pub(crate) fn workspace_activity_since(
+        &mut self,
+        panel_idx: usize,
+        now_ms: u64,
+    ) -> (WorkspaceActivity, u64) {
+        let raw = self.workspace_activity_ms(panel_idx);
+        let state = workspace_activity_state(raw, now_ms);
+        let prev = self.workspace_activity_since.get(&panel_idx).copied();
+        let next = activity_since_next(prev, state, raw, now_ms);
+        self.workspace_activity_since.insert(panel_idx, next);
+        next
     }
 }
 
@@ -1927,6 +1969,10 @@ pub struct App {
     settings: AppSettings,
     show_settings: bool,
     show_about: bool,
+    /// Per-workspace indicator state machine: (state, entered-at ms).
+    /// Drives the tooltip's worked/idle seconds with a re-zero on every
+    /// state flip (see activity_since_next).
+    workspace_activity_since: HashMap<usize, (WorkspaceActivity, u64)>,
     /// Standalone update window (menu 帮助 → 更新, or the right-corner
     /// update badge). Opening it auto-triggers a version check.
     show_update_window: bool,
@@ -2533,6 +2579,7 @@ impl App {
             settings,
             show_settings: false,
             show_about: false,
+            workspace_activity_since: HashMap::new(),
             show_update_window: false,
             show_help_window: false,
             update_notes_cache: (Vec::new(), String::new()),
@@ -7502,81 +7549,42 @@ impl eframe::App for App {
                                             self.active_theme.app.button_bg.to_egui()
                                         },
                                     );
-                                    // Activity DOT: a small circle pinned to
-                                    // the left edge of the row button. It
-                                    // watches EVERY terminal in THIS
-                                    // workspace (not just the highlighted
-                                    // tab), even when the workspace is not
-                                    // on screen. Red = PTY output or user
-                                    // input on ANY of them within the last
-                                    // 10s, green = all silent longer,
-                                    // neutral = nothing to watch.
-                                    let activity_ms = self.workspace_activity_ms(i);
+                                    // Activity dot: watches EVERY terminal
+                                    // in THIS workspace (not just the
+                                    // highlighted tab), even when the
+                                    // workspace is not on screen. Red = PTY
+                                    // output or user input on ANY of them
+                                    // within the last 10s, green = all
+                                    // silent longer, neutral = nothing to
+                                    // watch. The state machine re-zeros the
+                                    // tooltip clock on every flip.
                                     let now_ms = egui_term::unix_ms();
-                                    let strip_color =
-                                        match workspace_activity_state(activity_ms, now_ms) {
-                                            WorkspaceActivity::Active => {
-                                                self.active_theme.app.activity_active.to_egui()
-                                            }
-                                            WorkspaceActivity::Idle => {
-                                                self.active_theme.app.activity_idle.to_egui()
-                                            }
-                                            WorkspaceActivity::Unknown => {
-                                                self.active_theme.app.weak_text.to_egui()
-                                            }
-                                        };
-                                    ui.painter().circle_filled(
-                                        egui::pos2(row_rect.min.x + 6.0, row_rect.center().y),
-                                        3.5,
-                                        strip_color,
-                                    );
-                                    // Hover tooltip on the dot: seconds since
-                                    // the last activity (idle) or since the
-                                    // terminal was created (working).
-                                    let dot_rect = egui::Rect::from_center_size(
-                                        egui::pos2(row_rect.min.x + 6.0, row_rect.center().y),
-                                        egui::vec2(12.0, row_h),
-                                    );
-                                    // Sense::click is REQUIRED: a hover-only
-                                    // interact loses egui's hit-test to the
-                                    // row's click_and_drag response and its
-                                    // tooltip never shows.
-                                    let dot_resp = ui.interact(
-                                        dot_rect,
-                                        egui::Id::new(("ws_activity_dot", i)),
-                                        egui::Sense::click(),
-                                    );
-                                    if let Some(ms) = activity_ms {
-                                        let wt = &self.texts.workspace;
-                                        let secs = now_ms.saturating_sub(ms) / 1000;
-                                        let tip =
-                                            match workspace_activity_state(activity_ms, now_ms) {
-                                                WorkspaceActivity::Active => {
-                                                    wt.worked_for.replace("{s}", &secs.to_string())
-                                                }
-                                                _ => wt.idle_for.replace("{s}", &secs.to_string()),
-                                            };
-                                        let _ = dot_resp.on_hover_text(tip);
-                                    }
+                                    let (ws_state, since_ms) =
+                                        self.workspace_activity_since(i, now_ms);
+                                    let strip_color = match ws_state {
+                                        WorkspaceActivity::Active => {
+                                            self.active_theme.app.activity_active.to_egui()
+                                        }
+                                        WorkspaceActivity::Idle => {
+                                            self.active_theme.app.activity_idle.to_egui()
+                                        }
+                                        WorkspaceActivity::Unknown => {
+                                            self.active_theme.app.weak_text.to_egui()
+                                        }
+                                    };
                                     self.panel_rects[i] = row_rect;
 
-                                    // Layout: [name (flex)] [lock btn][≡ drag icon]
-                                    // Use a child Ui inside row_rect so we can place
-                                    // items by their own rect, not via add_sized.
+                                    // Layout: [dot][name (flex)] [lock][drag]
+                                    // Use a child Ui inside row_rect so we can
+                                    // place items by their own rect.
                                     let mut child = ui.new_child(
                                         egui::UiBuilder::new().max_rect(row_rect).layout(
                                             egui::Layout::left_to_right(egui::Align::Center),
                                         ),
                                     );
-                                    // Activity dot (12px slot, allocated like the
-                                    // lock button so its hover tooltip WORKS —
-                                    // the old paint-only dot + late ui.interact
-                                    // never won egui's hit-test). Watches EVERY
-                                    // terminal in THIS workspace, even when the
-                                    // workspace is off screen. Red = PTY output
-                                    // or user input on ANY of them within 10s,
-                                    // green = all silent longer, neutral =
-                                    // nothing to watch.
+                                    // Allocated (not paint-only) so the hover
+                                    // tooltip reliably wins the hit-test —
+                                    // same pattern as the lock button.
                                     let (dot_rect, dot_resp) = child.allocate_exact_size(
                                         egui::vec2(12.0, row_h),
                                         egui::Sense::hover(),
@@ -7586,16 +7594,15 @@ impl eframe::App for App {
                                         3.5,
                                         strip_color,
                                     );
-                                    if let Some(ms) = activity_ms {
+                                    if ws_state != WorkspaceActivity::Unknown {
                                         let wt = &self.texts.workspace;
-                                        let secs = now_ms.saturating_sub(ms) / 1000;
-                                        let tip =
-                                            match workspace_activity_state(activity_ms, now_ms) {
-                                                WorkspaceActivity::Active => {
-                                                    wt.worked_for.replace("{s}", &secs.to_string())
-                                                }
-                                                _ => wt.idle_for.replace("{s}", &secs.to_string()),
-                                            };
+                                        let secs = now_ms.saturating_sub(since_ms) / 1000;
+                                        let tip = match ws_state {
+                                            WorkspaceActivity::Active => {
+                                                wt.worked_for.replace("{s}", &secs.to_string())
+                                            }
+                                            _ => wt.idle_for.replace("{s}", &secs.to_string()),
+                                        };
                                         let _ = dot_resp.on_hover_text(tip);
                                     }
                                     // Name (clickable, fills middle). Flat text drawn
@@ -8482,8 +8489,67 @@ mod tests {
         assert_eq!(super::display_seq("\x03"), "^C");
     }
 
+    /// The indicator's transition clock: a flip re-zeros (idle->active
+    /// starts at the triggering activity, other flips at now), the same
+    /// state keeps its clock running, and the FIRST observation starts
+    /// at now (fixes the huge idle numbers right after launch).
+    #[test]
+    fn activity_since_rezeros_on_every_state_flip() {
+        use egui::Key as _;
+        let now = 1_000_000_000u64;
+        // First observation ever: clock starts at now.
+        assert_eq!(
+            super::activity_since_next(
+                None,
+                super::WorkspaceActivity::Idle,
+                Some(now - 60_000),
+                now
+            ),
+            (super::WorkspaceActivity::Idle, now)
+        );
+        // Idle -> Active: zero at the triggering activity, not at now.
+        assert_eq!(
+            super::activity_since_next(
+                Some((super::WorkspaceActivity::Idle, now)),
+                super::WorkspaceActivity::Active,
+                Some(now - 2_000),
+                now
+            ),
+            (super::WorkspaceActivity::Active, now - 2_000)
+        );
+        // Still Active (more output later): clock keeps running.
+        assert_eq!(
+            super::activity_since_next(
+                Some((super::WorkspaceActivity::Active, now - 2_000)),
+                super::WorkspaceActivity::Active,
+                Some(now),
+                now
+            ),
+            (super::WorkspaceActivity::Active, now - 2_000)
+        );
+        // Active -> Idle: zero at now (the 10s window just elapsed).
+        assert_eq!(
+            super::activity_since_next(
+                Some((super::WorkspaceActivity::Active, now - 2_000)),
+                super::WorkspaceActivity::Idle,
+                Some(now - 12_000),
+                now
+            ),
+            (super::WorkspaceActivity::Idle, now)
+        );
+        // Unknown -> Active (terminal created): zero at now.
+        assert_eq!(
+            super::activity_since_next(
+                Some((super::WorkspaceActivity::Unknown, now)),
+                super::WorkspaceActivity::Active,
+                Some(now),
+                now
+            ),
+            (super::WorkspaceActivity::Active, now)
+        );
+    }
+
     /// fc-match output parsing: file + TTC index, family ignored,
-    /// non-numeric index falls back to face 0, garbage rejected.
     #[test]
     fn fc_match_output_parses_file_and_index() {
         assert_eq!(
