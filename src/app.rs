@@ -7629,9 +7629,8 @@ impl eframe::App for App {
                                     });
                                     child.painter().galley(
                                         egui::pos2(
-                                            // 5px gap after the dot's right edge
-                                            // (dot slot ends at 9.5px).
-                                            name_rect.min.x + 2.5,
+                                            // Flush after the dot slot.
+                                            name_rect.min.x,
                                             name_rect.center().y - name_galley.size().y / 2.0,
                                         ),
                                         name_galley,
