@@ -177,6 +177,12 @@ impl App {
         if smooth {
             let mut level = self.settings_edit.smooth_level;
             self.settings_row(ui, &t.smooth_level, |ui| {
+                // egui draws the slider RAIL with widgets.inactive.bg_fill,
+                // which the theme apply paints TRANSPARENT (rows/buttons
+                // rely on borderless inactive widgets) — the rail would be
+                // invisible. Give THIS slider's Ui a visible rail color.
+                ui.style_mut().visuals.widgets.inactive.bg_fill =
+                    self.active_theme.app.button_hover_bg.to_egui();
                 ui.add(
                     egui::Slider::new(&mut level, 0.0..=2.0)
                         .show_value(true)
