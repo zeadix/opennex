@@ -7629,9 +7629,9 @@ impl eframe::App for App {
                                     });
                                     child.painter().galley(
                                         egui::pos2(
-                                            // 60% more clearance than the
-                                            // original 12px indent.
-                                            name_rect.min.x + 19.0,
+                                            // 5px gap after the dot's right edge
+                                            // (dot slot ends at 9.5px).
+                                            name_rect.min.x + 2.5,
                                             name_rect.center().y - name_galley.size().y / 2.0,
                                         ),
                                         name_galley,
