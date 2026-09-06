@@ -7963,7 +7963,7 @@ impl eframe::App for App {
 
                     // Centered card.
                     let card =
-                        egui::Rect::from_center_size(rect.center(), egui::vec2(340.0, 216.0));
+                        egui::Rect::from_center_size(rect.center(), egui::vec2(340.0, 190.0));
                     let card_bg = app.panel.to_egui();
                     painter.rect_filled(card, 4.0, card_bg);
                     painter.rect_stroke(
@@ -8000,98 +8000,167 @@ impl eframe::App for App {
                                         .size(12.0)
                                         .color(app.text.to_egui()),
                                 );
-                                // Password row: input + eye visibility toggle.
-                                // The unlock button below spans the exact same
-                                // width (input's left edge -> eye's right
-                                // edge), so both rows align perfectly.
+                                // Password row: one input with the eye
+                                // toggle living INSIDE its left edge (the
+                                // input reserves left margin for the icon
+                                // and the icon + click area are overlaid on
+                                // top), plus the unlock button to its right.
                                 let row_w = 240.0f32.min(ui.available_width());
                                 let eye_w = 26.0;
-                                let mut unlock_now = false;
+                                // 30% narrower than the old 210px input
+                                // (desired text width; the frame adds the
+                                // icon band + right padding on top).
+                                let input_text_w = 147.0f32.min(row_w - eye_w - 6.0);
+                                let input_w = input_text_w + eye_w + 6.0;
+                                let row_h = 24.0;
+                                let gap_w = 6.0;
+                                // Unlock button hugs its label: 6px side
+                                // padding, natural width, same height as the
+                                // input. Measured with the exact font the
+                                // Button renders, so the row can be sized to
+                                // the real total and centered — the input's
+                                // left edge and the button's right edge then
+                                // sit at equal distances from the card edges.
+                                let btn_label = self.texts.lock_overlay.unlock_button.clone();
+                                let btn_font = egui::TextStyle::Button.resolve(ui.style());
+                                let btn_w = ui
+                                    .fonts(|f| {
+                                        f.layout_no_wrap(btn_label, btn_font, egui::Color32::WHITE)
+                                            .rect
+                                            .width()
+                                    })
+                                    + 12.0;
+                                let total_w = (input_w + gap_w + btn_w).min(row_w);
                                 ui.allocate_ui_with_layout(
-                                    egui::vec2(row_w, ui.spacing().interact_size.y.max(20.0)),
+                                    egui::vec2(total_w, row_h),
                                     egui::Layout::left_to_right(egui::Align::Center),
                                     |ui| {
-                                        // Same input style as the settings-page
-                                        // password popups (default text style,
-                                        // 150px input, explicit label-free).
+                                        ui.style_mut().spacing.item_spacing.x = 0.0;
+                                        // Exact metrics for this row: the
+                                        // button keeps 6px side padding and
+                                        // both widgets stay at row_h.
+                                        ui.style_mut().spacing.button_padding =
+                                            egui::vec2(6.0, 2.0);
+                                        ui.style_mut().spacing.interact_size.y = row_h;
                                         let resp = ui.add(
                                             egui::TextEdit::singleline(
                                                 &mut self.lock_password_input,
                                             )
                                             .password(!self.lock_password_visible)
-                                            .desired_width(row_w - eye_w - 4.0)
+                                            .margin(egui::Margin {
+                                                left: eye_w as i8,
+                                                right: 6,
+                                                top: 2,
+                                                bottom: 2,
+                                            })
+                                            .desired_width(input_text_w)
+                                            .min_size(egui::vec2(input_w, row_h))
                                             .id(pw_id),
+                                        );
+                                        // TextEdit reports the text rect (its
+                                        // margin excluded), so rebuild the
+                                        // full frame rect for the icon.
+                                        let input_rect = egui::Rect::from_min_max(
+                                            egui::pos2(
+                                                resp.rect.left() - eye_w,
+                                                resp.rect.top() - 2.0,
+                                            ),
+                                            egui::pos2(
+                                                resp.rect.right() + 6.0,
+                                                resp.rect.bottom() + 2.0,
+                                            ),
+                                        );
+                                        let icon_rect = egui::Rect::from_center_size(
+                                            egui::pos2(
+                                                input_rect.left() + eye_w * 0.5,
+                                                input_rect.center().y,
+                                            ),
+                                            egui::vec2(eye_w, input_rect.height()),
                                         );
                                         // Enter in the focused input submits
                                         // (standard lost_focus+Enter pattern;
                                         // TextEdit consumes the raw key event).
                                         let enter_in_input = resp.lost_focus()
                                             && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                                        if enter_in_input {
-                                            unlock_now = true;
-                                        }
                                         if ui.ctx().memory(|m| m.focused().is_none()) {
                                             resp.request_focus();
                                         }
-                                        // Eye toggle: EYE (hidden) / EYE_SLASH (visible).
+                                        // Eye toggle: EYE (hidden) / EYE_SLASH
+                                        // (visible). Hit area registered after
+                                        // the input, so it wins clicks there.
                                         let eye = if self.lock_password_visible {
                                             egui_phosphor::regular::EYE_SLASH
                                         } else {
                                             egui_phosphor::regular::EYE
                                         };
-                                        if ui
-                                            .add(
-                                                egui::Button::new(
-                                                    egui::RichText::new(eye)
-                                                        .size(14.0)
-                                                        .color(app.text.to_egui()),
-                                                )
-                                                .fill(egui::Color32::TRANSPARENT)
-                                                .stroke(egui::Stroke::NONE)
-                                                .min_size(egui::vec2(eye_w, 0.0)),
+                                        let eye_resp = ui.interact(
+                                            icon_rect,
+                                            egui::Id::new("lock_overlay_pw_eye"),
+                                            egui::Sense::click(),
+                                        );
+                                        let text_col = app.text.to_egui();
+                                        let eye_color = if eye_resp.hovered() {
+                                            text_col
+                                        } else {
+                                            egui::Color32::from_rgba_unmultiplied(
+                                                text_col.r(),
+                                                text_col.g(),
+                                                text_col.b(),
+                                                150,
                                             )
+                                        };
+                                        ui.painter().text(
+                                            icon_rect.center(),
+                                            egui::Align2::CENTER_CENTER,
+                                            eye,
+                                            egui::FontId::proportional(14.0),
+                                            eye_color,
+                                        );
+                                        let eye_clicked = eye_resp
+                                            .on_hover_cursor(egui::CursorIcon::PointingHand)
                                             .on_hover_text(&self.texts.lock_overlay.password_label)
-                                            .clicked()
-                                        {
+                                            .clicked();
+                                        if eye_clicked {
                                             self.lock_password_visible =
                                                 !self.lock_password_visible;
                                         }
+                                        // Unlock button: accent-filled, to the
+                                        // input's right; Enter in the password
+                                        // input also triggers it. Natural
+                                        // width = label + 2x6px padding,
+                                        // height locked to row_h.
+                                        ui.add_space(gap_w);
+                                        let unlock_clicked = ui
+                                            .add(
+                                                egui::Button::new(
+                                                    egui::RichText::new(
+                                                        &self.texts.lock_overlay.unlock_button,
+                                                    )
+                                                    .strong()
+                                                    .color(app.text.to_egui()),
+                                                )
+                                                .fill(app.accent.to_egui())
+                                                .min_size(egui::vec2(0.0, row_h)),
+                                            )
+                                            .clicked();
+                                        if enter_in_input || unlock_clicked {
+                                            if self.settings.lock_password.is_empty()
+                                                || verify_lock_password(
+                                                    &self.lock_password_input.clone(),
+                                                    &self.settings.lock_password.clone(),
+                                                )
+                                            {
+                                                self.locked_panels.remove(&self.active_panel);
+                                                self.lock_password_input.clear();
+                                                self.pw_message.clear();
+                                            } else {
+                                                self.pw_message =
+                                                    self.texts.lock_overlay.wrong_password.clone();
+                                                self.lock_password_input.clear();
+                                            }
+                                        }
                                     },
                                 );
-                                ui.add_space(4.0);
-                                // Unlock button: accent-filled, spans the same
-                                // width as the password row above. Enter in
-                                // the password input also triggers it.
-                                if unlock_now
-                                    || ui
-                                        .add(
-                                            egui::Button::new(
-                                                egui::RichText::new(
-                                                    &self.texts.lock_overlay.unlock_button,
-                                                )
-                                                .strong()
-                                                .color(app.text.to_egui()),
-                                            )
-                                            .fill(app.accent.to_egui())
-                                            .min_size(egui::vec2(row_w, 0.0)),
-                                        )
-                                        .clicked()
-                                {
-                                    if self.settings.lock_password.is_empty()
-                                        || verify_lock_password(
-                                            &self.lock_password_input.clone(),
-                                            &self.settings.lock_password.clone(),
-                                        )
-                                    {
-                                        self.locked_panels.remove(&self.active_panel);
-                                        self.lock_password_input.clear();
-                                        self.pw_message.clear();
-                                    } else {
-                                        self.pw_message =
-                                            self.texts.lock_overlay.wrong_password.clone();
-                                        self.lock_password_input.clear();
-                                    }
-                                }
                                 // Error message under the button.
                                 if !self.pw_message.is_empty() {
                                     ui.add_space(2.0);
