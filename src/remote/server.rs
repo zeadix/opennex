@@ -45,36 +45,42 @@ pub struct RemoteServer {
 impl RemoteServer {
     /// Bind and start serving. Fails (without spawning) when the port is
     /// taken - the caller surfaces a toast instead of silently disabling.
+    /// `port = 0` binds an OS-assigned port; the actual port is reported
+    /// in `shared.port`.
     pub fn start(port: u16, token: String) -> Result<(RemoteShared, Self), String> {
-        // Dual-stack: `[::]` accepts IPv6 AND (via v4-mapped addresses)
-        // IPv4 on every mainstream platform, enabling public-IPv6 direct
-        // phone access. Windows defaults IPV6_V6ONLY=1 (Linux=0), so the
-        // clear-it step below is REQUIRED there — without it a `[::]`
-        // listener accepts IPv6 only and every IPv4 phone/test connection
-        // is refused (WSAECONNREFUSED 10061). Fall back to a plain
-        // `0.0.0.0` bind when v6 is unavailable or dual-stack can't be
-        // enabled (IPv6 disabled, Windows v6-only sockets).
-        let listener = match TcpListener::bind((std::net::Ipv6Addr::UNSPECIFIED, port)) {
-            Ok(l) => {
-                #[cfg(target_os = "windows")]
-                {
-                    if !enable_dual_stack(&l) {
-                        drop(l);
-                        TcpListener::bind((std::net::Ipv4Addr::UNSPECIFIED, port))
-                            .map_err(|e| format!("bind port {port} failed: {e}"))?
-                    } else {
-                        l
-                    }
-                }
-                #[cfg(not(target_os = "windows"))]
-                l
-            }
-            Err(_) => TcpListener::bind((std::net::Ipv4Addr::UNSPECIFIED, port))
-                .map_err(|e| format!("bind port {port} failed: {e}"))?,
+        // Dual-stack WITHOUT per-OS setsockopt. BSD/macOS and Windows
+        // default `IPV6_V6ONLY=1` (a `[::]` listener accepts IPv6 only)
+        // while Linux defaults to 0 (dual-stack). So: bind `[::]` first,
+        // then try `0.0.0.0` on the SAME port. EADDRINUSE means the v6
+        // socket already serves IPv4 too (Linux) - one listener is
+        // enough; a successful v4 bind means the platform is v6-only and
+        // IPv4 needs its own listener. (macOS used to get `[::]` only,
+        // which silently refused every IPv4 phone on the LAN.) The dual
+        // probe also closes a race: previously tests picked a free port,
+        // dropped it and rebound - on v6-only platforms the rebound
+        // `[::]` does NOT conflict with an IPv4 claimant of that port,
+        // so a stolen port silently served nothing (EOF on connect).
+        let v6 = TcpListener::bind((std::net::Ipv6Addr::UNSPECIFIED, port)).ok();
+        let v4 = match &v6 {
+            // Probe the v6 listener's ACTUAL port (port may be 0).
+            Some(l) => TcpListener::bind((std::net::Ipv4Addr::UNSPECIFIED, port_of(l))).ok(),
+            None => Some(
+                TcpListener::bind((std::net::Ipv4Addr::UNSPECIFIED, port))
+                    .map_err(|e| format!("bind port {port} failed: {e}"))?,
+            ),
         };
-        listener
-            .set_nonblocking(true)
-            .map_err(|e| format!("set_nonblocking failed: {e}"))?;
+        let mut listeners = Vec::new();
+        if let Some(l) = v6 {
+            listeners.push(l);
+        }
+        if let Some(l) = v4 {
+            listeners.push(l);
+        }
+        let real_port = port_of(&listeners[0]);
+        for l in &listeners {
+            l.set_nonblocking(true)
+                .map_err(|e| format!("set_nonblocking failed: {e}"))?;
+        }
         let shared = RemoteShared {
             snapshot: Arc::new(RwLock::new(RemoteSnapshot::default())),
             frames: Arc::new(RwLock::new(HashMap::new())),
@@ -82,14 +88,14 @@ impl RemoteServer {
             subscribers: Arc::new(Mutex::new(Vec::new())),
             shutdown: Arc::new(AtomicBool::new(false)),
             token,
-            port,
+            port: real_port,
         };
         let shutdown = Arc::new(AtomicBool::new(false));
         let thread_shared = shared.clone_arcs();
         let thread_shutdown = shutdown.clone();
         let handle = std::thread::Builder::new()
             .name("opennex-remote".into())
-            .spawn(move || accept_loop(listener, thread_shared, thread_shutdown))
+            .spawn(move || accept_loop(listeners, thread_shared, thread_shutdown))
             .map_err(|e| format!("spawn failed: {e}"))?;
         Ok((
             shared,
@@ -124,42 +130,32 @@ impl RemoteShared {
     }
 }
 
-/// Windows-only: clear IPV6_V6ONLY on the `[::]` listener so IPv4
-/// (v4-mapped) connections are accepted too. Returns false when the
-/// option can't be applied — the caller rebinds IPv4-only.
-#[cfg(target_os = "windows")]
-fn enable_dual_stack(listener: &TcpListener) -> bool {
-    use std::os::windows::io::AsRawSocket;
-    use windows_sys::Win32::Networking::WinSock::{setsockopt, IPPROTO_IPV6, IPV6_V6ONLY};
-    const V6ONLY_OFF: i32 = 0;
-    let zero: i32 = V6ONLY_OFF;
-    unsafe {
-        setsockopt(
-            listener.as_raw_socket() as usize,
-            IPPROTO_IPV6,
-            IPV6_V6ONLY,
-            &zero as *const i32 as *const u8,
-            std::mem::size_of::<i32>() as i32,
-        ) == 0
-    }
+/// Actual bound port of a listener (0 resolves to the OS-assigned one).
+fn port_of(l: &TcpListener) -> u16 {
+    l.local_addr().map(|a| a.port()).unwrap_or(0)
 }
 
-fn accept_loop(listener: TcpListener, shared: RemoteShared, shutdown: Arc<AtomicBool>) {
+fn accept_loop(listeners: Vec<TcpListener>, shared: RemoteShared, shutdown: Arc<AtomicBool>) {
     while !shutdown.load(Ordering::SeqCst) {
-        match listener.accept() {
-            Ok((stream, _addr)) => {
-                let shared = shared.clone_arcs();
-                std::thread::spawn(move || {
-                    let _ = handle_connection(stream, &shared);
-                });
+        let mut served = false;
+        for listener in &listeners {
+            match listener.accept() {
+                Ok((stream, _addr)) => {
+                    served = true;
+                    let shared = shared.clone_arcs();
+                    std::thread::spawn(move || {
+                        let _ = handle_connection(stream, &shared);
+                    });
+                }
+                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+                Err(_) => {
+                    // This listener is gone (e.g. dropped family); the
+                    // others keep serving.
+                }
             }
-            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                std::thread::sleep(Duration::from_millis(50));
-            }
-            Err(_) => {
-                // Listener gone; stop serving.
-                break;
-            }
+        }
+        if !served {
+            std::thread::sleep(Duration::from_millis(50));
         }
     }
 }
@@ -611,10 +607,10 @@ mod tests {
     #[test]
     fn server_binds_and_serves_index() {
         // Pick a random high port to avoid CI collisions.
-        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-        let port = listener.local_addr().unwrap().port();
-        drop(listener);
-        let (shared, server) = RemoteServer::start(port, "test-token".into()).unwrap();
+        // port 0: the server binds an OS-assigned port atomically (the
+        // old pick-drop-rebind dance raced with other sockets on CI).
+        let (shared, server) = RemoteServer::start(0, "test-token".into()).unwrap();
+        let port = shared.port;
         // Plain std HTTP GET to the served page.
         let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
         stream
@@ -633,10 +629,8 @@ mod tests {
         // The page references /xterm.js and /xterm.css WITHOUT the token
         // query (browsers do not append it) - the token gate must skip
         // these two routes or the phone page cannot boot at all.
-        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-        let port = listener.local_addr().unwrap().port();
-        drop(listener);
-        let (_shared, server) = RemoteServer::start(port, "t".into()).unwrap();
+        let (shared, server) = RemoteServer::start(0, "t".into()).unwrap();
+        let port = shared.port;
         for path in ["/xterm.js", "/xterm.css"] {
             let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
             let req = format!("GET {path} HTTP/1.1\r\nHost: x\r\n\r\n");
@@ -654,10 +648,8 @@ mod tests {
         // the head. The body bytes land in the head buffer - the server
         // must split them off instead of stalling on read_exact (v2.5 bug:
         // every POST failed with an empty body and a 5s delay).
-        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-        let port = listener.local_addr().unwrap().port();
-        drop(listener);
-        let (shared, server) = RemoteServer::start(port, "t".into()).unwrap();
+        let (shared, server) = RemoteServer::start(0, "t".into()).unwrap();
+        let port = shared.port;
         let body = r#"{"tab":"terminal-1"}"#;
         let request = format!(
             "POST /api/focus?token=t HTTP/1.1\r\nHost: x\r\nContent-Length: {}\r\n\r\n{}",
@@ -677,10 +669,8 @@ mod tests {
 
     #[test]
     fn wrong_token_is_forbidden() {
-        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-        let port = listener.local_addr().unwrap().port();
-        drop(listener);
-        let (_shared, server) = RemoteServer::start(port, "good-token".into()).unwrap();
+        let (shared, server) = RemoteServer::start(0, "good-token".into()).unwrap();
+        let port = shared.port;
         let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
         stream
             .write_all(b"GET /?token=bad-token HTTP/1.1\r\nHost: x\r\n\r\n")
@@ -693,10 +683,8 @@ mod tests {
 
     #[test]
     fn api_state_serves_the_shared_snapshot() {
-        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-        let port = listener.local_addr().unwrap().port();
-        drop(listener);
-        let (shared, server) = RemoteServer::start(port, "t".into()).unwrap();
+        let (shared, server) = RemoteServer::start(0, "t".into()).unwrap();
+        let port = shared.port;
         {
             let mut snap = shared.snapshot.write().unwrap();
             snap.workspaces.push(super::super::protocol::WsInfo {
@@ -721,10 +709,8 @@ mod tests {
     #[test]
     fn ws_handshake_and_frame_push_roundtrip() {
         use base64::Engine as _;
-        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-        let port = listener.local_addr().unwrap().port();
-        drop(listener);
-        let (shared, server) = RemoteServer::start(port, "t".into()).unwrap();
+        let (shared, server) = RemoteServer::start(0, "t".into()).unwrap();
+        let port = shared.port;
 
         let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
         // Random-ish key; must be base64 of 16 bytes.

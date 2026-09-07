@@ -8023,13 +8023,11 @@ impl eframe::App for App {
                                 // sit at equal distances from the card edges.
                                 let btn_label = self.texts.lock_overlay.unlock_button.clone();
                                 let btn_font = egui::TextStyle::Button.resolve(ui.style());
-                                let btn_w = ui
-                                    .fonts(|f| {
-                                        f.layout_no_wrap(btn_label, btn_font, egui::Color32::WHITE)
-                                            .rect
-                                            .width()
-                                    })
-                                    + 12.0;
+                                let btn_w = ui.fonts(|f| {
+                                    f.layout_no_wrap(btn_label, btn_font, egui::Color32::WHITE)
+                                        .rect
+                                        .width()
+                                }) + 12.0;
                                 let total_w = (input_w + gap_w + btn_w).min(row_w);
                                 ui.allocate_ui_with_layout(
                                     egui::vec2(total_w, row_h),
@@ -8563,7 +8561,6 @@ mod tests {
     /// at now (fixes the huge idle numbers right after launch).
     #[test]
     fn activity_since_rezeros_on_every_state_flip() {
-        use egui::Key as _;
         let now = 1_000_000_000u64;
         // First observation ever: clock starts at now.
         assert_eq!(

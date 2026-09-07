@@ -1145,7 +1145,6 @@ mod tests {
         // there).
         instance.backend.set_dirty();
         let content = instance.backend.sync();
-        use alacritty_terminal::grid::Dimensions;
         let cur = content.grid.cursor.point;
         assert!(
             cur.column.0 > 0,
