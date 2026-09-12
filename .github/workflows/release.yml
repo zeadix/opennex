@@ -295,7 +295,7 @@ jobs:
           {
             echo "changes_json<<EOF"
             python3 - "$GITHUB_REF_NAME" << PYCHANGES
-          import json, subprocess, sys
+          import json, subprocess, sys, re
           tag = sys.argv[1]
           # Prefer the tag annotation message (first non-blank lines).
           msg = ""
@@ -304,14 +304,26 @@ jobs:
                                    capture_output=True, text=True).stdout.strip()
           except Exception:
               pass
+          # Match feat/fix (optionally with a scope), but reject ENGINEERING
+          # scopes: `feat(ci):` / `feat(deps):` are not user-facing work.
+          # `feat(ui):` / `fix(ssh):` still count (scope = feature area).
+          ENGINEERING_SCOPES = r"(?:ci|deps|build|chore|docs|refactor|style|test|perf|release)"
+          RE_FEAT = re.compile(r"^feat(?:\((?!ENG)(?P<scope>[^)]*)\))?:(?P<rest>.*)$".replace("ENG", ENGINEERING_SCOPES), re.I)
+          RE_FIX = re.compile(r"^fix(?:\((?!ENG)(?P<scope>[^)]*)\))?:(?P<rest>.*)$".replace("ENG", ENGINEERING_SCOPES), re.I)
           def map_line(l):
               l = l.strip()
               if not l:
                   return None
               low = l.lower()
-              for prefix, kind in (("feat", "新增"), ("fix", "修复")):
-                  if low.startswith(prefix) or l.startswith(kind):
-                      return kind + ": " + (l.split(":", 1)[1].strip() if ":" in l else l)
+              if low.startswith("新增"):
+                  return "新增: " + (l.split(":", 1)[1].strip() if ":" in l else l)
+              if low.startswith("修复"):
+                  return "修复: " + (l.split(":", 1)[1].strip() if ":" in l else l)
+              for kind, rx in (("新增", RE_FEAT), ("修复", RE_FIX)):
+                  m = rx.match(l)
+                  if m:
+                      rest = m.group("rest").strip()
+                      return kind + ": " + rest
               return None  # ci/chore/docs/refactor/release — never recorded
 
           lines = []
@@ -333,6 +345,47 @@ jobs:
           PYCHANGES
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
+
+      - name: Generate GitHub Release body
+        id: release_body
+        env:
+          VERSION: ${{ steps.version.outputs.VERSION }}
+          CHANGES_JSON: ${{ steps.changelog.outputs.changes_json }}
+        run: |
+          # Human-readable release notes for the GitHub Release page —
+          # SAME source as the client's update window and the website
+          # (the changes array), so all three surfaces tell the same
+          # story. The old `generate_release_notes: true` showed GitHub's
+          # raw commit list, which read like engineering noise, not
+          # software update notes.
+          mkdir -p deploy
+          python3 << PYRELEASE
+          import json, os
+          version = os.environ.get("VERSION", "v0.0.0")
+          try:
+              changes = json.loads(os.environ.get("CHANGES_JSON", "[]"))
+          except Exception:
+              changes = []
+          feats = [c for c in changes if c.startswith("新增:")]
+          fixes = [c for c in changes if c.startswith("修复:")]
+          lines = [f"# OpenNex {version}", ""]
+          if feats:
+              lines.append("## 新增")
+              lines.extend(f"- {c[3:].strip()}" for c in feats)
+              lines.append("")
+          if fixes:
+              lines.append("## 修复")
+              lines.extend(f"- {c[3:].strip()}" for c in fixes)
+              lines.append("")
+          if not feats and not fixes:
+              lines.append("稳定性与内部工程改进。")
+              lines.append("")
+          body = "\n".join(lines).rstrip() + "\n"
+          with open("deploy/release_body.md", "w") as f:
+              f.write(body)
+          print(body)
+          PYRELEASE
+          echo "release_body_path=deploy/release_body.md" >> "$GITHUB_OUTPUT"
 
       - name: Generate latest.json with version history
         env:
@@ -536,9 +589,13 @@ jobs:
 
       - name: Create GitHub Release
         # Archive every release on GitHub: attach all installers as
-        # release assets for historical download. Best-effort — a GitHub
-        # hiccup must not fail the publish (R2 is the primary channel).
-        continue-on-error: true
+        # release assets for historical download, with the curated
+        # release body (same changes as the client update window). No
+        # longer best-effort: this step runs AFTER R2 + latest.json +
+        # signature are all published, so a failure here only red-flags
+        # the job (nothing already published is rolled back) — a missing
+        # GitHub Release used to be silently skipped, which is why only
+        # 19 of 54 tags ever got a release. Rerunning the job retries it.
         uses: softprops/action-gh-release@v2
         with:
           files: |
@@ -547,7 +604,7 @@ jobs:
             artifacts/**/*.tar.gz
             artifacts/**/*.dmg
             artifacts/**/*.deb
-          generate_release_notes: true
+          body_path: deploy/release_body.md
           fail_on_unmatched_files: false
 
       - name: Trigger website rebuild
