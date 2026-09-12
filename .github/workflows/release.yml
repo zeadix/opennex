@@ -223,6 +223,15 @@ jobs:
     needs: [build-windows, build-macos, build-linux]
     steps:
       - uses: actions/checkout@v4
+        # FULL history + ALL tags. The default shallow checkout fetches
+        # ONLY the pushed tag ref — `git tag` on the runner then sees a
+        # single (or zero) tag, so PREV_TAG resolved to empty on EVERY
+        # release: RAW_SUBJECTS degraded to "首次发布" and the changes
+        # array shipped EMPTY (v0.1.52/53/54 all affected). The tag
+        # annotation reader is equally dependent on the tag objects.
+        with:
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Get version
         id: version
@@ -284,7 +293,7 @@ jobs:
             echo "$RAW_SUBJECTS"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
-          # Structured `changes` array: ONLY user-facing work is
+          # Structured changes array: ONLY user-facing work is
           # recorded — feat commits map to "新增: ...", fix commits to
           # "修复: ...". Everything else (ci/chore/docs/refactor and the
           # CI-repair commits created by failed-release retries) is
@@ -298,15 +307,21 @@ jobs:
           import json, subprocess, sys, re
           tag = sys.argv[1]
           # Prefer the tag annotation message (first non-blank lines).
+          # git stores the annotation as subject + body: git tag -a -m
+          # puts the FIRST line in subject and any LATER lines (after a
+          # blank line) in body. Read BOTH so either layout works — the
+          # old body-only read silently fell back to raw commit subjects
+          # for tags whose notes lived in the subject.
           msg = ""
           try:
-              msg = subprocess.run(["git", "tag", "-l", "--format=%(contents:body)", tag],
-                                   capture_output=True, text=True).stdout.strip()
+              msg = subprocess.run(
+                  ["git", "tag", "-l", "--format=%(contents:subject)%0a%(contents:body)", tag],
+                  capture_output=True, text=True).stdout.strip()
           except Exception:
               pass
           # Match feat/fix (optionally with a scope), but reject ENGINEERING
-          # scopes: `feat(ci):` / `feat(deps):` are not user-facing work.
-          # `feat(ui):` / `fix(ssh):` still count (scope = feature area).
+          # scopes: feat(ci) / feat(deps) are not user-facing work.
+          # feat(ui) / fix(ssh) still count (scope = feature area).
           ENGINEERING_SCOPES = r"(?:ci|deps|build|chore|docs|refactor|style|test|perf|release)"
           RE_FEAT = re.compile(r"^feat(?:\((?!ENG)(?P<scope>[^)]*)\))?:(?P<rest>.*)$".replace("ENG", ENGINEERING_SCOPES), re.I)
           RE_FIX = re.compile(r"^fix(?:\((?!ENG)(?P<scope>[^)]*)\))?:(?P<rest>.*)$".replace("ENG", ENGINEERING_SCOPES), re.I)
@@ -355,7 +370,7 @@ jobs:
           # Human-readable release notes for the GitHub Release page —
           # SAME source as the client's update window and the website
           # (the changes array), so all three surfaces tell the same
-          # story. The old `generate_release_notes: true` showed GitHub's
+          # story. The old generate_release_notes mode showed GitHub's
           # raw commit list, which read like engineering noise, not
           # software update notes.
           mkdir -p deploy
@@ -459,7 +474,7 @@ jobs:
 
           # Build new latest.json with history using Python
           python3 << PYEOF
-          import json, os
+          import json, os, re, subprocess
 
           current = json.loads('''${CURRENT_ENTRY}''')
           current["changelog"] = os.environ.get("CHANGELOG", "")
@@ -469,26 +484,68 @@ jobs:
               current["changes"] = []
           old_history = json.loads('''${OLD_HISTORY}''')
 
-          # Retro-fix HISTORY entries: legacy versions carry no `changes`
-          # (or carry "其他: ..." noise from the old extractor). Rebuild
-          # each entry's notes from its changelog, keeping ONLY
-          # 新增/修复 lines — never CI-repair or chore noise.
+          # Shared extractor: feat/fix (optionally scoped) -> 新增/修复.
+          # ENGINEERING scopes (feat(ci)/feat(deps)/fix(release)/...) are
+          # NOT user-facing work and never recorded.
+          ENGINEERING_SCOPES = "(?:ci|deps|build|chore|docs|refactor|style|test|perf|release)"
+          RE_FEAT = re.compile(r"^feat(?:\((?!(?:" + ENGINEERING_SCOPES + r")\))(?P<scope>[^)]*)\))?:(?P<rest>.*)$", re.I)
+          RE_FIX = re.compile(r"^fix(?:\((?!(?:" + ENGINEERING_SCOPES + r")\))(?P<scope>[^)]*)\))?:(?P<rest>.*)$", re.I)
+
           def map_note(l):
               l = l.strip()
               if not l:
                   return None
               low = l.lower()
-              for prefix, kind in (("feat", "新增"), ("fix", "修复")):
-                  if low.startswith(prefix) or l.startswith(kind):
-                      return kind + ": " + (l.split(":", 1)[1].strip() if ":" in l else l)
+              if low.startswith("新增"):
+                  return "新增: " + (l.split(":", 1)[1].strip() if ":" in l else l)
+              if low.startswith("修复"):
+                  return "修复: " + (l.split(":", 1)[1].strip() if ":" in l else l)
+              for kind, rx in (("新增", RE_FEAT), ("修复", RE_FIX)):
+                  m = rx.match(l)
+                  if m:
+                      return kind + ": " + m.group("rest").strip()
               return None
-          for h in old_history:
+
+          def tag_notes(tag):
+              # subject + body: git tag -a -m lays multi-line notes out
+              # as first-line subject + later lines in body; read BOTH.
+              try:
+                  return subprocess.run(
+                      ["git", "tag", "-l", "--format=%(contents:subject)%0a%(contents:body)", tag],
+                      capture_output=True, text=True).stdout or ""
+              except Exception:
+                  return ""
+
+          # Retro-fix HISTORY entries: legacy entries shipped EMPTY
+          # changes (the old shallow checkout had no tags on the runner,
+          # so every extraction degraded to 首次发布). Rebuild order:
+          # 1) tag annotation notes (hand-curated when present),
+          # 2) git log feat/fix subjects between this tag and the OLDER
+          #    history neighbor. Only entries still empty fall back.
+          for idx, h in enumerate(old_history):
               if h.get("changes"):
                   h["changes"] = [l for l in h["changes"]
                                   if not l.strip().startswith("其他:")]
-              else:
-                  cl = h.get("changelog", "") or ""
-                  h["changes"] = [m for m in (map_note(l) for l in cl.splitlines()) if m]
+                  continue
+              ver = h.get("version", "")
+              tag = "v" + ver
+              # Lightweight tags mirror the commit message here, so their
+              # "annotation" read yields e.g. "release: v0.1.53" which
+              # maps to NOTHING — an empty extraction must fall through
+              # to the git-log range, not stop.
+              notes = tag_notes(tag)
+              extracted = [m for m in (map_note(l) for l in notes.splitlines()) if m] if notes.strip() else []
+              if not extracted:
+                  prev = old_history[idx + 1].get("version") if idx + 1 < len(old_history) else ""
+                  rng = ("v" + prev + ".." + tag) if prev else tag
+                  try:
+                      notes = subprocess.run(
+                          ["git", "log", "--no-merges", "--pretty=%s", rng],
+                          capture_output=True, text=True).stdout or ""
+                  except Exception:
+                      notes = ""
+                  extracted = [m for m in (map_note(l) for l in notes.splitlines()) if m]
+              h["changes"] = extracted
 
           # Build new history: current version first, then old ones, max 3
           new_history = [current] + old_history
