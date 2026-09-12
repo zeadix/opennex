@@ -25,17 +25,33 @@ pub struct HistoryNav {
     /// Selection index inside the favorites list (only meaningful when
     /// `fav_focused` is true).
     pub fav_selected: usize,
+    /// Auto-match overlays only: the user has engaged list navigation
+    /// (Up/Down moved the selection, or Left/Right were pressed) since
+    /// the overlay opened. While FALSE the overlay is "pristine": Enter
+    /// stays a plain terminal Enter and only Tab takes the suggestion.
+    /// After navigation, Enter confirms the highlighted entry (manual
+    /// menu semantics). Never read when `auto_word` is None.
+    pub navigated: bool,
 }
 
 impl HistoryNav {
+    /// Pristine auto-match overlay: opened by typing, no arrow
+    /// navigation yet — Enter must execute the typed line, Tab inserts
+    /// the highlighted suggestion.
+    pub(crate) fn auto_pristine(&self) -> bool {
+        self.auto_word.is_some() && !self.navigated
+    }
+
     pub(crate) fn move_previous(&mut self) {
         self.selected = self.selected.saturating_sub(1);
+        self.navigated = true;
     }
 
     pub(crate) fn move_next(&mut self) {
         if self.selected + 1 < self.entries.len() {
             self.selected += 1;
         }
+        self.navigated = true;
     }
 }
 
@@ -740,6 +756,130 @@ mod tests {
         assert!(
             word.contains("abcdefghijklmnopqrst"),
             "wrapped command word must survive the cursor-clip, got: {word:?}"
+        );
+    }
+
+    /// Whole visible screen as text (like poll_cwd's scanner, without the
+    /// OSC extraction) — lets tests wait for child output.
+    #[cfg(unix)]
+    fn screen_text(instance: &mut TerminalInstance) -> String {
+        instance.backend.set_dirty();
+        let content = instance.backend.sync();
+        use alacritty_terminal::grid::Dimensions;
+        let grid = &content.grid;
+        let mut out = String::new();
+        for row in 0..grid.screen_lines() {
+            for col in 0..grid.columns() {
+                out.push(
+                    grid[alacritty_terminal::index::Point {
+                        line: alacritty_terminal::index::Line(row as i32),
+                        column: alacritty_terminal::index::Column(col),
+                    }]
+                    .c,
+                );
+            }
+            out.push('\n');
+        }
+        out
+    }
+
+    #[cfg(unix)]
+    fn pump_until_contains(
+        instance: &mut TerminalInstance,
+        needle: &str,
+        deadline_ms: u64,
+    ) -> bool {
+        let start = std::time::Instant::now();
+        while (start.elapsed().as_millis() as u64) < deadline_ms {
+            std::thread::sleep(std::time::Duration::from_millis(25));
+            if screen_text(instance).contains(needle) {
+                return true;
+            }
+        }
+        screen_text(instance).contains(needle)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn raw_mode_yn_prompt_receives_keystrokes() {
+        // Regression: programs that ask a (Y/N) confirmation in RAW mode
+        // (stty raw -echo: no kernel echo, single-char reads) appeared
+        // completely input-dead — no reaction to y/n/yes. Drive the real
+        // PTY with such a child and assert the keystroke byte arrives.
+        let mut instance = TerminalInstance::create(
+            &egui::Context::default(),
+            21,
+            "/bin/sh",
+            "/tmp",
+            100,
+            24,
+            &[],
+            100,
+        )
+        .expect("shell should start");
+        assert!(
+            pump_until_quiet(&mut instance, 8_000),
+            "shell prompt never settled"
+        );
+
+        // Raw-mode confirm: no echo, one byte read, hex-echoed back.
+        instance.write(
+            b"stty raw -echo; printf 'Proceed? (y/n) '; c=$(dd bs=1 count=1 2>/dev/null); stty sane; printf '\\nGOT:%s\\n' \"$(printf '%s' \"$c\" | od -An -tx1 | tr -d ' \\n')\"\r",
+        );
+        assert!(
+            pump_until_contains(&mut instance, "Proceed? (y/n)", 8_000),
+            "raw-mode child prompt never appeared; screen: {}",
+            screen_text(&mut instance)
+        );
+
+        // THE regression: a single 'y' must reach the raw-mode reader.
+        instance.write(b"y");
+        assert!(
+            pump_until_contains(&mut instance, "GOT:79", 8_000),
+            "raw-mode child never received the 'y' keystroke; screen: {}",
+            screen_text(&mut instance)
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn canonical_yn_prompt_receives_line_input() {
+        // apt-style confirm: canonical mode, kernel echo ON, Enter
+        // delivers the line. Typed chars must echo AND the line must
+        // arrive after Enter.
+        let mut instance = TerminalInstance::create(
+            &egui::Context::default(),
+            22,
+            "/bin/sh",
+            "/tmp",
+            100,
+            24,
+            &[],
+            100,
+        )
+        .expect("shell should start");
+        assert!(
+            pump_until_quiet(&mut instance, 8_000),
+            "shell prompt never settled"
+        );
+
+        instance.write(b"printf 'Proceed? (y/n) '; read ans; printf '\\nGOT:%s\\n' \"$ans\"\r");
+        assert!(
+            pump_until_contains(&mut instance, "Proceed? (y/n)", 8_000),
+            "child prompt never appeared; screen: {}",
+            screen_text(&mut instance)
+        );
+        instance.write(b"yes");
+        assert!(
+            pump_until_contains(&mut instance, "yes", 8_000),
+            "typed text never echoed; screen: {}",
+            screen_text(&mut instance)
+        );
+        instance.write(b"\r");
+        assert!(
+            pump_until_contains(&mut instance, "GOT:yes", 8_000),
+            "child never received the answered line; screen: {}",
+            screen_text(&mut instance)
         );
     }
 

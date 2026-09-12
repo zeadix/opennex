@@ -4877,11 +4877,36 @@ impl eframe::App for App {
         if !workspace_renaming && !modal_hijack && history_menu_active {
             let close =
                 ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+            // Pristine auto-match overlay (opened by typing, no arrow
+            // navigation yet): Enter is NOT consumed here — it falls
+            // through to the plain terminal Enter (record + CR) and the
+            // overlay closes. The suggestion is taken with Tab, or with
+            // Enter only AFTER arrows engaged the selection.
+            let auto_pristine = self
+                .focused_terminal
+                .as_ref()
+                .and_then(|tab| self.terminals.get(tab))
+                .and_then(|td| td.instance.history_nav.as_ref())
+                .is_some_and(|nav| nav.auto_pristine());
+            let auto_open = self
+                .focused_terminal
+                .as_ref()
+                .and_then(|tab| self.terminals.get(tab))
+                .and_then(|td| td.instance.history_nav.as_ref())
+                .is_some_and(|nav| nav.auto_word.is_some());
+            // Tab on an auto-match overlay (pristine or navigated)
+            // inserts the highlighted suggestion (replaces the typed
+            // word, no execution). The manual (Alt) menu keeps passing
+            // Tab to the shell.
+            let tab_confirm = !close
+                && auto_open
+                && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Tab));
             // Space is a plain input character: it participates in the
             // prefix match (typed "cd " matches "cd /tmp" but not bare
             // "cd"), so the menu stays open or closes purely per the
             // match — no special handling here.
             let confirm = !close
+                && !auto_pristine
                 && ctx
                     .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
             let previous = !close && !confirm && check_shortcut(ctx, &binds, "history_prev");
@@ -4938,16 +4963,45 @@ impl eframe::App for App {
                     }
                 }
             };
+            // Auto-match overlay: Left/Right are NOT consumed — they keep
+            // reaching the shell (cursor movement / recall). But they DO
+            // engage the selection state: afterwards Enter confirms the
+            // highlighted suggestion instead of executing the line.
+            let auto_lr = !close
+                && auto_open
+                && ctx.input(|i| {
+                    i.events.iter().any(|e| {
+                        matches!(
+                            e,
+                            egui::Event::Key {
+                                key: egui::Key::ArrowLeft | egui::Key::ArrowRight,
+                                pressed: true,
+                                modifiers,
+                                ..
+                            } if modifiers.is_none()
+                        )
+                    })
+                });
 
             if let Some(tab) = self.focused_terminal.clone() {
                 history_menu_handled = previous
                     || next
                     || close
                     || confirm
+                    || tab_confirm
                     || focus_left
                     || focus_right
                     || delete_pressed
                     || favorite_pressed;
+                // Left/Right on an auto-match overlay: the keys pass to
+                // the shell untouched, but selection mode is engaged.
+                if auto_lr {
+                    if let Some(td) = self.terminals.get_mut(&tab) {
+                        if let Some(nav) = td.instance.history_nav.as_mut() {
+                            nav.navigated = true;
+                        }
+                    }
+                }
                 // Focus toggle: Right → favorites (first item), Left → back
                 // to the main list (selection there is preserved).
                 if focus_left || focus_right {
@@ -5255,6 +5309,12 @@ impl eframe::App for App {
                 if close {
                     self.close_history_menu(&tab);
                 }
+                // Tab on the auto-match overlay: insert the highlighted
+                // suggestion (word delete + full command, no execution) —
+                // identical to the manual menu's Enter.
+                if tab_confirm {
+                    self.confirm_history_entry(&tab);
+                }
                 if confirm {
                     // Enter with focus INSIDE the command column sends the
                     // selected command; with focus on folders it assembles
@@ -5343,7 +5403,28 @@ impl eframe::App for App {
                     .and_then(|td| td.host.as_ref())
                     .map(|h| h.addr.clone())
                     .unwrap_or_default();
-                if let Some(td) = self.terminals.get_mut(tab) {
+                // A navigated auto-match overlay reaching this path
+                // (arrow + Enter in one frame) confirms through the
+                // shared route: the typed word is deleted first.
+                let auto_confirm = self
+                    .terminals
+                    .get(tab)
+                    .and_then(|td| td.instance.history_nav.as_ref())
+                    .is_some_and(|nav| nav.auto_word.is_some() && nav.navigated);
+                if auto_confirm {
+                    self.confirm_history_entry(tab);
+                } else if let Some(td) = self.terminals.get_mut(tab) {
+                    // Pristine auto-match overlay: Enter is a PLAIN
+                    // terminal Enter — close the overlay and fall into
+                    // the normal record + CR path below.
+                    if td
+                        .instance
+                        .history_nav
+                        .as_ref()
+                        .is_some_and(|nav| nav.auto_pristine())
+                    {
+                        td.instance.history_nav = None;
+                    }
                     if let Some(ref nav) = td.instance.history_nav {
                         let selected = nav.entries.get(nav.selected).cloned();
                         if let Some(cmd) = selected {
@@ -9211,6 +9292,7 @@ mod tests {
             favorites: Vec::new(),
             fav_focused: false,
             fav_selected: 0,
+            navigated: false,
         };
 
         nav.move_previous();
@@ -9219,6 +9301,45 @@ mod tests {
         assert_eq!(nav.selected, 1);
         nav.move_next();
         assert_eq!(nav.selected, 1);
+    }
+
+    #[test]
+    fn auto_match_enter_semantics_track_navigation() {
+        // Pristine overlay (just opened by typing): Enter must stay a
+        // plain terminal Enter — only Tab takes the suggestion.
+        let mut nav = HistoryNav {
+            entries: vec!["git status".into(), "git stash".into()],
+            selected: 0,
+            auto_word: Some("git".into()),
+            favorites: Vec::new(),
+            fav_focused: false,
+            fav_selected: 0,
+            navigated: false,
+        };
+        assert!(nav.auto_pristine());
+        // Any Up/Down move engages the selection: Enter then confirms
+        // (manual-menu semantics) and Tab keeps confirming too.
+        nav.move_next();
+        assert!(!nav.auto_pristine());
+        assert_eq!(nav.selected, 1);
+        // A fresh edit recreates the overlay pristine again (the matcher
+        // resets the flag), with the selection preserved visually.
+        nav.navigated = false;
+        assert!(nav.auto_pristine());
+        // The manual (Alt) menu never has an auto_word: Enter always
+        // confirms there, navigation or not.
+        let mut manual = HistoryNav {
+            entries: vec!["ls".into()],
+            selected: 0,
+            auto_word: None,
+            favorites: Vec::new(),
+            fav_focused: false,
+            fav_selected: 0,
+            navigated: false,
+        };
+        assert!(!manual.auto_pristine());
+        manual.move_next();
+        assert!(!manual.auto_pristine());
     }
 
     #[test]
@@ -9925,6 +10046,10 @@ impl<'a> egui_dock::TabViewer for TerminalTabViewer<'a> {
                                 favorites: Vec::new(),
                                 fav_focused: false,
                                 fav_selected: 0,
+                                // A fresh edit re-opens pristine mode:
+                                // typing again returns Enter to plain
+                                // execution (navigation must be redone).
+                                navigated: false,
                             });
                             // The auto-match overlay is a SEPARATE
                             // feature from the manual menu: drop the

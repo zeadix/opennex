@@ -56,3 +56,10 @@ assets = [
     ["target/release/opennex", "usr/bin/", "755"],
     ["assets/desktop/opennex.desktop", "usr/share/applications/", "644"],
 ]
+
+# Local fork: resets the modifier state when the window regains focus.
+# Without it, a ctrl/alt/super whose release was missed (Alt+Tab, WM key
+# grabs) stays stuck forever — egui-winit then suppresses every Text
+# event (typing dies) and modifier shortcuts false-fire on plain keys.
+[patch.crates-io]
+egui-winit = { path = "egui_winit_local" }

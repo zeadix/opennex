@@ -906,17 +906,26 @@ fn process_text_event(
     bindings_layout: &BindingsLayout,
 ) -> InputAction {
     if let Some(key) = Key::from_name(text) {
-        if bindings_layout.get_action(
+        match bindings_layout.get_action(
             InputKind::KeyCode(key),
             modifiers,
             backend.last_content().terminal_mode,
-        ) == BindingAction::Ignore
-        {
-            InputAction::BackendCall(BackendCommand::Write(
-                text.as_bytes().to_vec(),
-            ))
-        } else {
-            InputAction::Ignore
+        ) {
+            // A real binding owns this key (its Key event delivers the
+            // bytes) — don't double-send via the Text event.
+            BindingAction::Char(_)
+            | BindingAction::Esc(_)
+            | BindingAction::Copy
+            | BindingAction::Paste
+            | BindingAction::Interrupt
+            | BindingAction::LinkOpen => InputAction::Ignore,
+            // Either the app explicitly ignores this key or NOTHING
+            // matched: the text itself is the payload — write it.
+            BindingAction::Ignore | BindingAction::NotFound => {
+                InputAction::BackendCall(BackendCommand::Write(
+                    text.as_bytes().to_vec(),
+                ))
+            },
         }
     } else {
         InputAction::BackendCall(BackendCommand::Write(
@@ -974,8 +983,103 @@ fn process_keyboard_key(
         BindingAction::Interrupt => {
             InputAction::BackendCall(BackendCommand::Write([0x03].to_vec()))
         },
+        // NOTHING matched this modifier combo (stuck modifiers after a
+        // window switch, or genuinely unbound combos like Ctrl+Enter):
+        // navigation-critical keys STILL reach the PTY with their base
+        // sequence instead of vanishing — a dropped Enter is what made
+        // the terminal look completely input-dead at "(Y/N)" prompts.
+        BindingAction::NotFound => {
+            match unbound_key_sequence(key, terminal_mode) {
+                Some(seq) => InputAction::BackendCall(BackendCommand::Write(
+                    seq.into_bytes(),
+                )),
+                None => InputAction::Ignore,
+            }
+        },
         _ => InputAction::Ignore,
     }
+}
+
+/// Fallback sequence for a key whose binding lookup found NOTHING.
+///
+/// Scope is deliberately narrow: the NON-printable navigation keys that
+/// must always reach the shell. Printable characters are NOT
+/// synthesized here — their carrier is the Text event, and synthesizing
+/// from the Key event too would double-send on every normal frame.
+///
+/// The base (no-modifier) sequence is used regardless of the actual
+/// modifiers: a genuinely-held Alt would conventionally prefix ESC, but
+/// the dominant real-world case for an unmatched combo is a STUCK
+/// modifier (release missed while the window was unfocused) where the
+/// user wants the plain key — plain beats dropped, and beats ESC-prefixed.
+fn unbound_key_sequence(key: Key, terminal_mode: TermMode) -> Option<String> {
+    let app_cursor = terminal_mode.contains(TermMode::APP_CURSOR);
+    let seq: &str = match key {
+        Key::Enter => "\x0d",
+        Key::Tab => "\x09",
+        Key::Backspace => "\x7f",
+        Key::Escape => "\x1b",
+        Key::Insert => "\x1b[2~",
+        Key::Delete => "\x1b[3~",
+        Key::PageUp => "\x1b[5~",
+        Key::PageDown => "\x1b[6~",
+        Key::Home => {
+            if app_cursor {
+                "\x1bOH"
+            } else {
+                "\x1b[H"
+            }
+        },
+        Key::End => {
+            if app_cursor {
+                "\x1bOF"
+            } else {
+                "\x1b[F"
+            }
+        },
+        Key::ArrowUp => {
+            if app_cursor {
+                "\x1bOA"
+            } else {
+                "\x1b[A"
+            }
+        },
+        Key::ArrowDown => {
+            if app_cursor {
+                "\x1bOB"
+            } else {
+                "\x1b[B"
+            }
+        },
+        Key::ArrowLeft => {
+            if app_cursor {
+                "\x1bOD"
+            } else {
+                "\x1b[D"
+            }
+        },
+        Key::ArrowRight => {
+            if app_cursor {
+                "\x1bOC"
+            } else {
+                "\x1b[C"
+            }
+        },
+        Key::F1 => "\x1bOP",
+        Key::F2 => "\x1bOQ",
+        Key::F3 => "\x1bOR",
+        Key::F4 => "\x1bOS",
+        Key::F5 => "\x1b[15~",
+        Key::F6 => "\x1b[17~",
+        Key::F7 => "\x1b[19~",
+        Key::F8 => "\x1b[20~",
+        Key::F9 => "\x1b[21~",
+        Key::F10 => "\x1b[22~",
+        Key::F11 => "\x1b[23~",
+        Key::F12 => "\x1b[24~",
+        _ => return None,
+    };
+    Some(seq.to_string())
 }
 
 fn process_mouse_wheel(
@@ -1257,7 +1361,12 @@ fn process_mouse_move(
 
 #[cfg(test)]
 mod tests {
-    use super::{should_process_pointer_button, terminal_focus_event_filter};
+    use super::{
+        should_process_pointer_button, terminal_focus_event_filter,
+        unbound_key_sequence,
+    };
+    use alacritty_terminal::term::TermMode;
+    use egui::Key;
 
     #[test]
     fn pointer_release_outside_is_processed_when_button_was_pressed_inside() {
@@ -1273,6 +1382,51 @@ mod tests {
         assert!(filter.horizontal_arrows);
         assert!(filter.vertical_arrows);
         assert!(filter.escape);
+    }
+
+    #[test]
+    fn unbound_modifier_combos_still_deliver_navigation_keys() {
+        // Stuck modifiers (or genuinely unbound combos like Ctrl+Enter)
+        // used to DROP these keys entirely — a shell waiting on Enter at
+        // a "(Y/N)" prompt then looked completely input-dead.
+        assert_eq!(
+            unbound_key_sequence(Key::Enter, TermMode::empty()).as_deref(),
+            Some("\x0d")
+        );
+        assert_eq!(
+            unbound_key_sequence(Key::Tab, TermMode::empty()).as_deref(),
+            Some("\x09")
+        );
+        assert_eq!(
+            unbound_key_sequence(Key::Backspace, TermMode::empty()).as_deref(),
+            Some("\x7f")
+        );
+        assert_eq!(
+            unbound_key_sequence(Key::Escape, TermMode::empty()).as_deref(),
+            Some("\x1b")
+        );
+        // Cursor keys are mode-aware exactly like the binding table.
+        assert_eq!(
+            unbound_key_sequence(Key::ArrowUp, TermMode::empty()).as_deref(),
+            Some("\x1b[A")
+        );
+        assert_eq!(
+            unbound_key_sequence(Key::ArrowUp, TermMode::APP_CURSOR).as_deref(),
+            Some("\x1bOA")
+        );
+        assert_eq!(
+            unbound_key_sequence(Key::PageDown, TermMode::empty()).as_deref(),
+            Some("\x1b[6~")
+        );
+    }
+
+    #[test]
+    fn printable_keys_are_never_synthesized_from_key_events() {
+        // Their carrier is the Text event — synthesizing here would
+        // double-send on every normal frame.
+        assert_eq!(unbound_key_sequence(Key::Y, TermMode::empty()), None);
+        assert_eq!(unbound_key_sequence(Key::Space, TermMode::empty()), None);
+        assert_eq!(unbound_key_sequence(Key::Num9, TermMode::empty()), None);
     }
 }
 

@@ -49,6 +49,7 @@ pub(crate) fn toggle_history_menu(
             favorites,
             fav_focused: false,
             fav_selected: 0,
+            navigated: false,
         });
     }
 }

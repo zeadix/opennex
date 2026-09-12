@@ -10,7 +10,16 @@ pub enum BindingAction {
     Char(char),
     Esc(String),
     LinkOpen,
+    /// A binding EXISTS and deliberately ignores this input (e.g. the
+    /// app-level overrides for keys the app itself handles: Enter,
+    /// Escape, PageUp/PageDown).
     Ignore,
+    /// NO binding matched this input at all. Callers apply safe
+    /// fallbacks (e.g. the base byte for navigation-critical keys)
+    /// instead of silently dropping the keystroke — a dropped Enter is
+    /// what made the terminal look completely input-dead at "(Y/N)"
+    /// prompts once a modifier got stuck (see `unbound_key_sequence`).
+    NotFound,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -130,10 +139,10 @@ impl BindingsLayout {
 
             if is_triggered {
                 return action.clone();
-            };
+            }
         }
 
-        BindingAction::Ignore
+        BindingAction::NotFound
     }
 }
 
@@ -467,6 +476,41 @@ mod tests {
             );
             assert_eq!(action, &found_action);
         }
+    }
+
+    #[test]
+    fn unmatched_modifier_combos_return_not_found() {
+        // The tail of get_action must distinguish "a binding said
+        // Ignore" from "nothing matched" — the latter drives the
+        // navigation-key fallback (see view::unbound_key_sequence).
+        let layout = BindingsLayout::default();
+        // Bound: plain Enter.
+        assert_eq!(
+            layout.get_action(
+                InputKind::KeyCode(Key::Enter),
+                Modifiers::NONE,
+                TerminalMode::empty()
+            ),
+            BindingAction::Char('\x0d')
+        );
+        // Unbound combo: Ctrl+Enter has no binding — NotFound, NOT Ignore.
+        assert_eq!(
+            layout.get_action(
+                InputKind::KeyCode(Key::Enter),
+                Modifiers::CTRL,
+                TerminalMode::empty()
+            ),
+            BindingAction::NotFound
+        );
+        // Unbound printable: plain Y has no binding.
+        assert_eq!(
+            layout.get_action(
+                InputKind::KeyCode(Key::Y),
+                Modifiers::NONE,
+                TerminalMode::empty()
+            ),
+            BindingAction::NotFound
+        );
     }
 
     #[test]
