@@ -313,16 +313,20 @@ jobs:
           # Prefer the tag annotation message (first non-blank lines).
           # git stores the annotation as subject + body: git tag -a -m
           # puts the FIRST line in subject and any LATER lines (after a
-          # blank line) in body. Read BOTH so either layout works — the
-          # old body-only read silently fell back to raw commit subjects
-          # for tags whose notes lived in the subject.
+          # blank line) in body. Fetch subject and body as TWO calls and
+          # join in python — a %-escape join inside one format string
+          # proved unreliable across git versions.
           msg = ""
           try:
-              msg = subprocess.run(
-                  ["git", "tag", "-l", "--format=%(contents:subject)%0a%(contents:body)", tag],
-                  capture_output=True, text=True).stdout.strip()
+              subject = subprocess.run(
+                  ["git", "tag", "-l", "--format=%(contents:subject)", tag],
+                  capture_output=True, text=True).stdout or ""
+              body = subprocess.run(
+                  ["git", "tag", "-l", "--format=%(contents:body)", tag],
+                  capture_output=True, text=True).stdout or ""
+              msg = (subject.strip() + "\n" + body).strip()
           except Exception:
-              pass
+              msg = ""
           # Match feat/fix (optionally with a scope), but reject ENGINEERING
           # scopes: feat(ci) / feat(deps) are not user-facing work.
           # feat(ui) / fix(ssh) still count (scope = feature area).
@@ -370,7 +374,7 @@ jobs:
           sys.stderr.write(
               "DIAG tag_count=" + str(tag_count)
               + " msg_len=" + str(len(msg))
-              + " raw_len=" + str(len(raw))
+              + " msg_repr=" + repr(msg[:200])
               + " lines=" + str(len(out)) + "\n")
           PYCHANGES
             echo "EOF"
