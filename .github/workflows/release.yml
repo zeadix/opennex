@@ -454,8 +454,9 @@ jobs:
           LIN_TAR_SHA=$(tr -d '\r\n ' < artifacts/linux/linux-tar.sha256 2>/dev/null || true)
           LIN_DEB_SHA=$(tr -d '\r\n ' < artifacts/linux/linux-deb.sha256 2>/dev/null || true)
 
-          # Build current version entry as JSON
-          CURRENT_ENTRY=$(cat << CURRENTEOF
+          # Build current version entry as JSON — written straight to a
+          # file (no bash variable round-trip)
+          cat > /tmp/current_entry.json << CURRENTEOF
           {
             "version": "${VERSION_NUM}",
             "date": "${DATE}",
@@ -485,34 +486,31 @@ jobs:
             }
           }
           CURRENTEOF
-          )
 
           # Try to download old latest.json
-          OLD_HISTORY="[]"
-          if wrangler r2 object get "${R2_BUCKET}/latest.json" --file=/tmp/old_latest.json --remote 2>/dev/null; then
-            OLD_HISTORY=$(python3 -c "
-          import json, sys
-          try:
-              data = json.load(open('/tmp/old_latest.json'))
-              history = data.get('history', [])
-              # Output as compact JSON
-              print(json.dumps(history))
-          except:
-              print('[]')
-          " 2>/dev/null || echo "[]")
+          if ! wrangler r2 object get "${R2_BUCKET}/latest.json" --file=/tmp/old_latest.json --remote 2>/dev/null; then
+            echo "[]" > /tmp/old_latest.json
           fi
 
-          # Build new latest.json with history using Python
+          # Build new latest.json with history using Python. The data
+          # crosses via FILES, never via bash variable interpolation:
+          # ${VAR} inside an unquoted heredoc mangles JSON (bare control
+          # characters -> "Invalid control character"). strict=False
+          # tolerates any stray control characters in legacy entries.
           python3 << PYEOF
           import json, os, re, subprocess
 
-          current = json.loads('''${CURRENT_ENTRY}''')
+          current = json.load(open("/tmp/current_entry.json"))
           current["changelog"] = os.environ.get("CHANGELOG", "")
           try:
               current["changes"] = json.loads(os.environ.get("CHANGES_JSON", "[]"))
           except Exception:
               current["changes"] = []
-          old_history = json.loads('''${OLD_HISTORY}''')
+          try:
+              old_latest = json.load(open("/tmp/old_latest.json"), strict=False)
+              old_history = old_latest.get("history", []) if isinstance(old_latest, dict) else []
+          except Exception:
+              old_history = []
 
           # Shared extractor: feat/fix (optionally scoped) -> 新增/修复.
           # ENGINEERING scopes (feat(ci)/feat(deps)/fix(release)/...) are
