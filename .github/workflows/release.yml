@@ -285,6 +285,11 @@ jobs:
           # UTF-8 tag annotations / commit subjects.
           PYTHONUTF8: "1"
         run: |
+          # Re-fetch tag OBJECTS: actions/checkout delivers the pushed
+          # tag peeled to its commit (cat-file -t says "commit"), which
+          # destroys the annotation read below. --force overwrites the
+          # refs so the annotated objects are local for real.
+          git fetch --tags --force origin 2>/dev/null || true
           # grep exits 1 when no other tags exist (first release); guard it.
           PREV_TAG=$(git tag --sort=-v:refname | grep -v "${GITHUB_REF_NAME}" | head -1 || true)
           if [ -n "$PREV_TAG" ]; then
@@ -648,6 +653,7 @@ jobs:
               "version": current["version"],
               "date": current["date"],
               "files": current["files"],
+              "changes": current["changes"],
               "history": new_history
           }
 
@@ -748,6 +754,19 @@ jobs:
             artifacts/**/*.deb
           body_path: deploy/release_body.md
           fail_on_unmatched_files: false
+
+      - name: Enforce release body (softprops skips body updates on reused releases)
+        # Re-publishing an existing tag reuses the old release object and
+        # softprops does NOT overwrite its body — the page would keep the
+        # stale first-run notes forever. gh release edit is idempotent
+        # and always lands the curated body.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.VERSION }}
+        run: |
+          gh release edit "$VERSION" --repo zeadix/opennex \
+            --title "OpenNex $VERSION" \
+            --notes-file deploy/release_body.md && echo "release body applied."
 
       - name: Trigger website rebuild
         if: success()
