@@ -589,12 +589,13 @@ jobs:
           # Build new history: current version first, then old ones, max 3
           # Re-tagging a version stacks DUPLICATE entries in old_history
           # (0.1.54 x3 after the re-releases) — dedupe by version, newest
-          # first, before appending.
+          # first, before appending. Entries matching the CURRENT version
+          # are dropped outright: current already carries the fresh notes.
           seen_versions = set()
           deduped = []
           for h in old_history:
               v = h.get("version")
-              if v and v not in seen_versions:
+              if v and v not in seen_versions and v != current.get("version"):
                   seen_versions.add(v)
                   deduped.append(h)
           old_history = deduped
