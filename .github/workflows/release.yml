@@ -280,6 +280,10 @@ jobs:
       - name: Generate changelog from git history
         id: changelog
         shell: bash
+        env:
+          # runner locale must never break python's text decoding of the
+          # UTF-8 tag annotations / commit subjects.
+          PYTHONUTF8: "1"
         run: |
           # grep exits 1 when no other tags exist (first release); guard it.
           PREV_TAG=$(git tag --sort=-v:refname | grep -v "${GITHUB_REF_NAME}" | head -1 || true)
@@ -342,10 +346,11 @@ jobs:
               return None  # ci/chore/docs/refactor/release — never recorded
 
           lines = []
+          raw = ""
           if msg:
               lines = [m for m in (map_line(l) for l in msg.splitlines()
                                    if l.strip() and not l.startswith("-----BEGIN"))
-                       if m]
+                   if m]
           else:
               raw = """$RAW_SUBJECTS"""
               lines = [m for m in (map_line(l) for l in raw.splitlines()) if m]
@@ -357,6 +362,16 @@ jobs:
                   seen.add(l)
                   out.append(l)
           print(json.dumps(out[:30], ensure_ascii=False))
+          # Diagnostics: the extraction shipped [] for many releases and
+          # the runner environment was the only untested variable. These
+          # lines land in the step log (stderr) and make every future
+          # empty-changes mystery a 10-second read.
+          tag_count = subprocess.run(["git", "tag", "-l"], capture_output=True, text=True).stdout.count("\n")
+          sys.stderr.write(
+              "DIAG tag_count=" + str(tag_count)
+              + " msg_len=" + str(len(msg))
+              + " raw_len=" + str(len(raw))
+              + " lines=" + str(len(out)) + "\n")
           PYCHANGES
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
@@ -409,6 +424,7 @@ jobs:
           VERSION: ${{ steps.version.outputs.VERSION }}
           CHANGELOG: ${{ steps.changelog.outputs.changelog }}
           CHANGES_JSON: ${{ steps.changelog.outputs.changes_json }}
+          PYTHONUTF8: "1"
           R2_PUBLIC_URL: ${{ env.R2_PUBLIC_URL }}
           R2_BUCKET: ${{ env.R2_BUCKET }}
         run: |
@@ -548,7 +564,58 @@ jobs:
               h["changes"] = extracted
 
           # Build new history: current version first, then old ones, max 3
+          # Re-tagging a version stacks DUPLICATE entries in old_history
+          # (0.1.54 x3 after the re-releases) — dedupe by version, newest
+          # first, before appending.
+          seen_versions = set()
+          deduped = []
+          for h in old_history:
+              v = h.get("version")
+              if v and v not in seen_versions:
+                  seen_versions.add(v)
+                  deduped.append(h)
+          old_history = deduped
           new_history = [current] + old_history
+          # Top up: history entries that were pushed out by the empty-
+          # changes era are rebuilt from git tags (annotation notes, then
+          # feat/fix log subjects between tag ranges) so the website's
+          # "version update record" always shows the last 3 releases
+          # with real notes. files stay empty for rebuilt entries — the
+          # R2 assets for those versions are gone; the download-list
+          # footer already routes users to GitHub Releases for them.
+          have = set(h["version"] for h in new_history)
+          if len(new_history) < 3:
+              all_tags = [t for t in (subprocess.run(
+                  ["git", "tag", "--sort=-v:refname"],
+                  capture_output=True, text=True).stdout or "").split()
+                  if t.startswith("v")]
+              for t in all_tags:
+                  if len(new_history) >= 3:
+                      break
+                  v = t[1:]
+                  if v in have:
+                      continue
+                  notes = tag_notes(t)
+                  changes = [m for m in (map_note(l) for l in notes.splitlines()) if m]
+                  if not changes:
+                      prev_tag = all_tags[all_tags.index(t) + 1] if all_tags.index(t) + 1 < len(all_tags) else ""
+                      rng = (prev_tag + ".." + t) if prev_tag else t
+                      try:
+                          log_out = subprocess.run(
+                              ["git", "log", "--no-merges", "--pretty=%s", rng],
+                              capture_output=True, text=True).stdout or ""
+                      except Exception:
+                          log_out = ""
+                      changes = [m for m in (map_note(l) for l in log_out.splitlines()) if m]
+                  try:
+                      date = subprocess.run(
+                          ["git", "log", "-1", "--pretty=%cI", t],
+                          capture_output=True, text=True).stdout.strip()[:10]
+                  except Exception:
+                      date = ""
+                  new_history.append({"version": v, "date": date, "files": {},
+                                      "changelog": "", "changes": changes})
+                  have.add(v)
           new_history = new_history[:3]
 
           # Find versions to delete (beyond the 3 kept)
