@@ -2448,8 +2448,10 @@ fn spawn_startup_update_check(ctx: &egui::Context) {
     std::thread::spawn(move || {
         let result = crate::updater::check_for_update();
         let stored = match &result {
-            Ok(Some(info)) => StartCheckResult::Available(info.clone()),
-            Ok(None) => StartCheckResult::UpToDate,
+            Ok(crate::updater::CheckOutcome::Update(info)) => {
+                StartCheckResult::Available(info.clone())
+            }
+            Ok(crate::updater::CheckOutcome::Current { .. }) => StartCheckResult::UpToDate,
             Err(e) => StartCheckResult::Error(e.clone()),
         };
         ctx_clone.memory_mut(|mem| {
@@ -4189,9 +4191,12 @@ impl App {
         std::thread::spawn(move || {
             let result = crate::updater::check_for_update();
             ctx_clone.memory_mut(|mem| {
+                use crate::updater::CheckOutcome;
                 let state = match result {
-                    Ok(Some(info)) => crate::updater::UpdateState::Available(info),
-                    Ok(None) => crate::updater::UpdateState::UpToDate,
+                    Ok(CheckOutcome::Update(info)) => crate::updater::UpdateState::Available(info),
+                    Ok(CheckOutcome::Current { changes, changelog }) => {
+                        crate::updater::UpdateState::UpToDate { changes, changelog }
+                    }
                     Err(e) => crate::updater::UpdateState::Error(e),
                 };
                 mem.data
@@ -5772,6 +5777,68 @@ impl eframe::App for App {
                 egui::menu::bar(ui, |ui| {
                     let fg_menu = self.active_theme.app.menu_fg.to_egui();
 
+                    // EVERY dropdown shares ONE width: the widest entry
+                    // across all menus (static i18n labels + the dynamic
+                    // theme/language name lists), measured with the very
+                    // font a menu item renders in. The popup width is
+                    // driven by style.spacing.menu_width (egui's default
+                    // is a fixed 400pt — far wider than any entry, which
+                    // made every menu read as a wide, mostly-empty bar),
+                    // so that style value is what we set below.
+                    let entry_font = egui::TextStyle::Button.resolve(ui.style());
+                    let texts = &self.texts;
+                    let static_entries: Vec<&str> = vec![
+                        &texts.file_menu.save,
+                        &texts.file_menu.load,
+                        &texts.file_menu.save_as,
+                        &texts.file_menu.exit,
+                        &texts.view_menu.split_right,
+                        &texts.view_menu.split_down,
+                        &texts.view_menu.workspace_toggle,
+                        &texts.view_menu.monitor,
+                        &texts.remote.menu_lan,
+                        &texts.remote.menu_wan,
+                        &texts.help.title,
+                        &texts.about.menu_label,
+                    ];
+                    let lang_names: Vec<String> = self
+                        .available_languages
+                        .iter()
+                        .map(|(_, n)| n.clone())
+                        .collect();
+                    let theme_names: Vec<String> = self
+                        .available_themes
+                        .iter()
+                        .map(|t| t.name.clone())
+                        .collect();
+                    let mut widest = 0.0f32;
+                    for t in static_entries
+                        .iter()
+                        .copied()
+                        .chain(lang_names.iter().map(|s| s.as_str()))
+                        .chain(theme_names.iter().map(|s| s.as_str()))
+                    {
+                        let w = ui.fonts(|f| {
+                            f.layout_no_wrap(
+                                t.to_string(),
+                                entry_font.clone(),
+                                egui::Color32::PLACEHOLDER,
+                            )
+                            .size()
+                            .x
+                        });
+                        widest = widest.max(w);
+                    }
+                    // Popup frame margins + button padding on top of the
+                    // text width. Applied via the GLOBAL menu_width style
+                    // value: egui's menu popup sizes itself from
+                    // ctx.style().spacing.menu_width during its sizing
+                    // pass, and its justified layout then stretches every
+                    // entry row to exactly that width — all menus end up
+                    // the same, content-fitting width, nothing wraps.
+                    let menu_min_w = widest + 40.0;
+                    ctx.all_styles_mut(|s| s.spacing.menu_width = menu_min_w);
+
                     // Unified menu-bar button for ALL entries (dropdown
                     // menus and plain buttons): same text size, padding,
                     // square corners, transparent fill with hover highlight.
@@ -5954,8 +6021,6 @@ impl eframe::App for App {
                     }
                     let label = self.texts.menu.theme.clone();
                     dropdown(ui, &label, "menu_theme", &mut |ui| {
-                        ui.set_min_width(120.0);
-                        ui.set_max_width(180.0);
                         let current = self.settings.theme_id.clone();
                         let themes = self.available_themes.clone();
                         egui::ScrollArea::vertical()
@@ -5975,13 +6040,6 @@ impl eframe::App for App {
                     dropdown(ui, &label, "menu_language", &mut |ui| {
                         let current_code = self.settings.language.clone();
                         let languages = self.available_languages.clone();
-                        let longest = languages
-                            .iter()
-                            .map(|(_, n)| n.chars().count())
-                            .max()
-                            .unwrap_or(8);
-                        let char_w = ui.fonts(|f| f.row_height(&egui::FontId::proportional(13.0)));
-                        ui.set_min_width((longest as f32) * char_w * 0.55 + 32.0);
                         for (code, display_name) in &languages {
                             let selected = *code == current_code;
                             if ui.selectable_label(selected, display_name).clicked() {
@@ -6003,28 +6061,8 @@ impl eframe::App for App {
                     // The update entry is a STANDALONE right-corner button.
                     let help_label = self.texts.menu.help.clone();
                     dropdown(ui, &help_label, "menu_help", &mut |ui| {
-                        // The default popup width hugs the narrow trigger
-                        // button and wraps the labels — size it to the
-                        // longest entry so buttons stay on one line.
-                        let help_w = ui.fonts(|f| {
-                            f.layout_no_wrap(
-                                self.texts.help.title.clone(),
-                                egui::FontId::proportional(14.0),
-                                egui::Color32::PLACEHOLDER,
-                            )
-                            .size()
-                            .x
-                        });
-                        let about_w = ui.fonts(|f| {
-                            f.layout_no_wrap(
-                                self.texts.about.menu_label.clone(),
-                                egui::FontId::proportional(14.0),
-                                egui::Color32::PLACEHOLDER,
-                            )
-                            .size()
-                            .x
-                        });
-                        ui.set_min_width(help_w.max(about_w) + 40.0);
+                        // Same unified width as every other menu (the
+                        // widest entry across all menus).
                         if ui.button(&self.texts.help.title).clicked() {
                             self.show_help_window = true;
                             ui.close_menu();
@@ -6688,7 +6726,7 @@ impl eframe::App for App {
                                 ui.label(&ut.checking);
                             });
                         }
-                        UpdateState::UpToDate => {
+                        UpdateState::UpToDate { .. } => {
                             ui.label(
                                 egui::RichText::new(&ut.up_to_date)
                                     .size(12.0)
@@ -6731,9 +6769,13 @@ impl eframe::App for App {
 
                     // Release notes: visible for EVERY post-check state so
                     // the changelog and the progress bar coexist on screen.
+                    // UpToDate shows the CURRENT version's own notes (what
+                    // this version changed); Available..Ready show the new
+                    // version's notes.
                     let show_logs = matches!(
                         self.update_state,
-                        UpdateState::Available(_)
+                        UpdateState::UpToDate { .. }
+                            | UpdateState::Available(_)
                             | UpdateState::Downloading(_)
                             | UpdateState::Verifying
                             | UpdateState::Ready(_)
@@ -6747,6 +6789,9 @@ impl eframe::App for App {
                                 let c = (info.changes.clone(), info.changelog.clone());
                                 self.update_notes_cache = c.clone();
                                 c
+                            }
+                            UpdateState::UpToDate { changes, changelog } => {
+                                (changes.clone(), changelog.clone())
                             }
                             _ => self.update_notes_cache.clone(),
                         };

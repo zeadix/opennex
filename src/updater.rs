@@ -162,13 +162,22 @@ pub struct ReleaseInfo {
     /// ..." / "修复: ..."). Preferred over `changelog` when present.
     #[serde(default)]
     pub changes: Vec<String>,
+    #[serde(default)]
     pub files: ReleaseFiles,
+    /// The last releases with their own notes. When the running build IS
+    /// the newest version, the entry matching CARGO_PKG_VERSION carries
+    /// "what this version changed" for the update window.
+    #[serde(default)]
+    pub history: Vec<ReleaseInfo>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct ReleaseFiles {
+    #[serde(default)]
     pub windows: Option<PlatformFile>,
+    #[serde(default)]
     pub macos: Option<PlatformFile>,
+    #[serde(default)]
     pub linux: Option<PlatformFile>,
 }
 
@@ -239,7 +248,24 @@ pub enum UpdateState {
     Verifying,
     Ready(PathBuf),
     Error(String),
-    UpToDate,
+    /// The running build IS the newest release. Carries the CURRENT
+    /// version's own notes (from the manifest's history) so the update
+    /// window can show "what this version changed" instead of nothing.
+    UpToDate {
+        changes: Vec<String>,
+        changelog: String,
+    },
+}
+
+/// Outcome of a manifest check: either an installable update or the
+/// running version is the tip (with its own release notes attached).
+#[derive(Debug, Clone)]
+pub enum CheckOutcome {
+    Update(UpdateInfo),
+    Current {
+        changes: Vec<String>,
+        changelog: String,
+    },
 }
 
 fn current_platform() -> &'static str {
@@ -284,7 +310,25 @@ pub fn version_is_newer(remote: &str, current: &str) -> bool {
     false
 }
 
-pub fn check_for_update() -> Result<Option<UpdateInfo>, String> {
+/// Notes of the entry matching `version` inside the manifest's history
+/// (the running build being the tip, this is "what the current version
+/// changed"). Falls back to empty when the version is not in history.
+fn current_version_notes(resp: &ReleaseInfo, version: &str) -> (Vec<String>, String) {
+    for h in &resp.history {
+        if h.version == version {
+            let changelog = h.changelog.clone().unwrap_or_default();
+            let changes = if h.changes.is_empty() && !changelog.is_empty() {
+                changelog.lines().map(|l| l.trim().to_string()).collect()
+            } else {
+                h.changes.clone()
+            };
+            return (changes, changelog);
+        }
+    }
+    (Vec::new(), String::new())
+}
+
+pub fn check_for_update() -> Result<CheckOutcome, String> {
     let raw = ureq::get(UPDATE_URL)
         .timeout(std::time::Duration::from_secs(10))
         .call()
@@ -317,7 +361,7 @@ pub fn check_for_update() -> Result<Option<UpdateInfo>, String> {
         } else {
             resp.changes.clone()
         };
-        Ok(Some(UpdateInfo {
+        Ok(CheckOutcome::Update(UpdateInfo {
             version: resp.version,
             download_url: download_url.to_string(),
             sha256: sha256.to_string(),
@@ -325,7 +369,11 @@ pub fn check_for_update() -> Result<Option<UpdateInfo>, String> {
             changes,
         }))
     } else {
-        Ok(None)
+        // Running the tip: surface the CURRENT version's own notes (from
+        // the manifest history) so the update window shows "what this
+        // version changed" instead of an empty pane.
+        let (changes, changelog) = current_version_notes(&resp, env!("CARGO_PKG_VERSION"));
+        Ok(CheckOutcome::Current { changes, changelog })
     }
 }
 
@@ -849,6 +897,35 @@ mod tests {
             .filter(|l| !l.is_empty())
             .collect();
         assert_eq!(changes, vec!["新增: A", "修复: B"]);
+    }
+
+    /// UpToDate builds surface the CURRENT version's own notes: the
+    /// manifest history must yield the entry matching the running
+    /// version (changes array preferred, changelog fallback), and an
+    /// unknown version yields empty.
+    #[test]
+    fn current_version_notes_come_from_manifest_history() {
+        let manifest: ReleaseInfo = serde_json::from_str(
+            r#"{"version":"0.2.0","files":{},
+                "history":[
+                  {"version":"0.2.0","changes":["新增: New"],"changelog":"legacy"},
+                  {"version":"0.1.9","changelog":"新增: Old1\n修复: Old2"}
+                ]}"#,
+        )
+        .unwrap();
+
+        let (changes, changelog) = current_version_notes(&manifest, "0.2.0");
+        assert_eq!(changes, vec!["新增: New"]);
+        assert_eq!(changelog, "legacy");
+
+        // changelog-only entry falls back to line-splitting.
+        let (changes, changelog) = current_version_notes(&manifest, "0.1.9");
+        assert_eq!(changes, vec!["新增: Old1", "修复: Old2"]);
+        assert_eq!(changelog, "新增: Old1\n修复: Old2");
+
+        let (changes, changelog) = current_version_notes(&manifest, "0.0.1");
+        assert!(changes.is_empty());
+        assert!(changelog.is_empty());
     }
 }
 
