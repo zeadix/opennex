@@ -310,10 +310,8 @@ jobs:
           # A tag ANNOTATION message overrides the commit-derived list
           # (write the release notes by hand into the tag when precision
           # matters; non-feature/fix lines in it are dropped too).
-          {
-            echo "changes_json<<EOF"
-            python3 - "$GITHUB_REF_NAME" << PYCHANGES
-          import json, subprocess, sys, re
+          python3 - "$GITHUB_REF_NAME" << PYCHANGES
+          import json, os, subprocess, sys, re
           tag = sys.argv[1]
           # Prefer the tag annotation message (first non-blank lines).
           # Read the RAW tag object via cat-file and parse the message
@@ -342,39 +340,82 @@ jobs:
           ENGINEERING_SCOPES = r"(?:ci|deps|build|chore|docs|refactor|style|test|perf|release)"
           RE_FEAT = re.compile(r"^feat(?:\((?!ENG)(?P<scope>[^)]*)\))?:(?P<rest>.*)$".replace("ENG", ENGINEERING_SCOPES), re.I)
           RE_FIX = re.compile(r"^fix(?:\((?!ENG)(?P<scope>[^)]*)\))?:(?P<rest>.*)$".replace("ENG", ENGINEERING_SCOPES), re.I)
+          def split_bilingual(line):
+              # Annotation lines carry BOTH languages: "修复: xxx | Fix: xxx".
+              # Returns (zh, en) with either side optional; lines without
+              # a separator are treated as zh-only (en falls back to the
+              # zh text on the website side).
+              if " | " in line:
+                  zh, en = line.split(" | ", 1)
+                  return zh.strip(), en.strip()
+              return line, ""
           def map_line(l):
               l = l.strip()
               if not l:
-                  return None
-              low = l.lower()
-              if low.startswith("新增"):
-                  return "新增: " + (l.split(":", 1)[1].strip() if ":" in l else l)
-              if low.startswith("修复"):
-                  return "修复: " + (l.split(":", 1)[1].strip() if ":" in l else l)
+                  return None, None
+              zh_part, en_part = split_bilingual(l)
+              low = zh_part.lower()
+              zh = None
+              if low.startswith("新增") or low.startswith("修复"):
+                  zh = zh_part
               for kind, rx in (("新增", RE_FEAT), ("修复", RE_FIX)):
-                  m = rx.match(l)
+                  m = rx.match(zh_part)
                   if m:
-                      rest = m.group("rest").strip()
-                      return kind + ": " + rest
-              return None  # ci/chore/docs/refactor/release — never recorded
+                      zh = kind + ": " + m.group("rest").strip()
+                      break
+              if zh is None:
+                  return None, None  # ci/chore/docs/refactor/release — never recorded
+              # English side: prefer the annotation's en half (already
+              # carries "Fix:"/"Add:" or plain text); on commit-subject
+              # fallback the raw subject IS English — strip any scope.
+              en = en_part if en_part else None
+              if not en and not msg:
+                  # commit subject: re-run the fix/feat regex for the EN half
+                  for kind, rx in (("Fix", RE_FIX), ("Add", RE_FEAT)):
+                      m = rx.match(zh_part)
+                      if m:
+                          en = kind + ": " + m.group("rest").strip()
+                          break
+              return zh, en
 
-          lines = []
+          zh_lines = []
+          en_lines = []
           raw = ""
           if msg:
-              lines = [m for m in (map_line(l) for l in msg.splitlines()
-                                   if l.strip() and not l.startswith("-----BEGIN"))
-                   if m]
+              for l in msg.splitlines():
+                  if not l.strip() or l.startswith("-----BEGIN"):
+                      continue
+                  zh, en = map_line(l)
+                  if zh:
+                      zh_lines.append(zh)
+                      en_lines.append(en)
           else:
               raw = """$RAW_SUBJECTS"""
-              lines = [m for m in (map_line(l) for l in raw.splitlines()) if m]
-          # Deduplicate, keep order, cap at 30.
+              for l in raw.splitlines():
+                  zh, en = map_line(l)
+                  if zh:
+                      zh_lines.append(zh)
+                      en_lines.append(en)
+          # Deduplicate (both languages in lockstep), keep order, cap 30.
           seen = set()
           out = []
-          for l in lines:
-              if l not in seen:
-                  seen.add(l)
-                  out.append(l)
+          out_en = []
+          for zh, en in zip(zh_lines, en_lines):
+              if zh not in seen:
+                  seen.add(zh)
+                  out.append(zh)
+                  out_en.append(en if en else "")
+          # Write BOTH arrays straight to $GITHUB_OUTPUT (a multi-line
+          # heredoc can only carry one value per GITHUB_OUTPUT entry).
+          gh_out = os.environ.get("GITHUB_OUTPUT", "")
+          if gh_out:
+              with open(gh_out, "a") as f:
+                  f.write("changes_json<<EOF\n")
+                  f.write(json.dumps(out[:30], ensure_ascii=False) + "\nEOF\n")
+                  f.write("changes_en_json<<EOF\n")
+                  f.write(json.dumps(out_en[:30], ensure_ascii=False) + "\nEOF\n")
           print(json.dumps(out[:30], ensure_ascii=False))
+          print(json.dumps(out_en[:30], ensure_ascii=False))
           # Diagnostics: the extraction shipped [] for many releases and
           # the runner environment was the only untested variable. These
           # lines land in the step log (stderr) and make every future
@@ -388,8 +429,6 @@ jobs:
               + " msg_repr=" + repr(msg[:200])
               + " lines=" + str(len(out)) + "\n")
           PYCHANGES
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
 
       - name: Generate GitHub Release body
         id: release_body
@@ -439,6 +478,7 @@ jobs:
           VERSION: ${{ steps.version.outputs.VERSION }}
           CHANGELOG: ${{ steps.changelog.outputs.changelog }}
           CHANGES_JSON: ${{ steps.changelog.outputs.changes_json }}
+          CHANGES_EN_JSON: ${{ steps.changelog.outputs.changes_en_json }}
           PYTHONUTF8: "1"
           R2_PUBLIC_URL: ${{ env.R2_PUBLIC_URL }}
           R2_BUCKET: ${{ env.R2_BUCKET }}
@@ -512,6 +552,10 @@ jobs:
           except Exception:
               current["changes"] = []
           try:
+              current["changes_en"] = json.loads(os.environ.get("CHANGES_EN_JSON", "[]"))
+          except Exception:
+              current["changes_en"] = []
+          try:
               old_latest = json.load(open("/tmp/old_latest.json"), strict=False)
               old_history = old_latest.get("history", []) if isinstance(old_latest, dict) else []
           except Exception:
@@ -524,20 +568,39 @@ jobs:
           RE_FEAT = re.compile(r"^feat(?:\((?!(?:" + ENGINEERING_SCOPES + r")\))(?P<scope>[^)]*)\))?:(?P<rest>.*)$", re.I)
           RE_FIX = re.compile(r"^fix(?:\((?!(?:" + ENGINEERING_SCOPES + r")\))(?P<scope>[^)]*)\))?:(?P<rest>.*)$", re.I)
 
+          def split_bilingual(line):
+              # Annotation lines carry BOTH languages: "修复: xxx | Fix: xxx".
+              # Returns (zh, en); without a separator the line is zh-only.
+              if " | " in line:
+                  zh, en = line.split(" | ", 1)
+                  return zh.strip(), en.strip()
+              return line, ""
           def map_note(l):
               l = l.strip()
               if not l:
-                  return None
-              low = l.lower()
-              if low.startswith("新增"):
-                  return "新增: " + (l.split(":", 1)[1].strip() if ":" in l else l)
-              if low.startswith("修复"):
-                  return "修复: " + (l.split(":", 1)[1].strip() if ":" in l else l)
+                  return None, None
+              zh_part, en_part = split_bilingual(l)
+              low = zh_part.lower()
+              zh = None
+              if low.startswith("新增") or low.startswith("修复"):
+                  zh = zh_part
               for kind, rx in (("新增", RE_FEAT), ("修复", RE_FIX)):
-                  m = rx.match(l)
+                  m = rx.match(zh_part)
                   if m:
-                      return kind + ": " + m.group("rest").strip()
-              return None
+                      zh = kind + ": " + m.group("rest").strip()
+                      break
+              if zh is None:
+                  return None, None
+              en = en_part or ""
+              return zh, en
+          def extract_both(notes):
+              zh, en = [], []
+              for l in notes.splitlines():
+                  z, e = map_note(l)
+                  if z:
+                      zh.append(z)
+                      en.append(e)
+              return zh, en
 
           def tag_notes(tag):
               # Raw object parse (see the changelog step): the
@@ -557,14 +620,28 @@ jobs:
 
           # Retro-fix HISTORY entries: legacy entries shipped EMPTY
           # changes (the old shallow checkout had no tags on the runner,
-          # so every extraction degraded to 首次发布). Rebuild order:
-          # 1) tag annotation notes (hand-curated when present),
-          # 2) git log feat/fix subjects between this tag and the OLDER
-          #    history neighbor. Only entries still empty fall back.
+          # so every extraction degraded to 首次发布). The tag
+          # ANNOTATION is the authoritative source and overrides even
+          # non-empty entries (a re-annotated tag upgrades legacy notes
+          # to curated bilingual ones); when a tag has no usable notes,
+          # fall back to git-log feat/fix subjects between this tag and
+          # the OLDER history neighbor.
           for idx, h in enumerate(old_history):
               if h.get("changes"):
-                  h["changes"] = [l for l in h["changes"]
-                                  if not l.strip().startswith("其他:")]
+                  # No annotation for this tag (lightweight, or the
+                  # curated notes map to nothing) — keep existing notes,
+                  # just strip legacy noise; en side stays as-is if it
+                  # ever gained one.
+                  ver = h.get("version", "")
+                  tag = "v" + ver
+                  notes = tag_notes(tag)
+                  extracted, extracted_en = extract_both(notes) if notes.strip() else ([], [])
+                  if extracted:
+                      h["changes"] = extracted
+                      h["changes_en"] = extracted_en
+                  else:
+                      h["changes"] = [l for l in h["changes"]
+                                      if not l.strip().startswith("其他:")]
                   continue
               ver = h.get("version", "")
               tag = "v" + ver
@@ -573,7 +650,7 @@ jobs:
               # maps to NOTHING — an empty extraction must fall through
               # to the git-log range, not stop.
               notes = tag_notes(tag)
-              extracted = [m for m in (map_note(l) for l in notes.splitlines()) if m] if notes.strip() else []
+              extracted, extracted_en = extract_both(notes) if notes.strip() else ([], [])
               if not extracted:
                   prev = old_history[idx + 1].get("version") if idx + 1 < len(old_history) else ""
                   rng = ("v" + prev + ".." + tag) if prev else tag
@@ -583,8 +660,9 @@ jobs:
                           capture_output=True, text=True).stdout or ""
                   except Exception:
                       notes = ""
-                  extracted = [m for m in (map_note(l) for l in notes.splitlines()) if m]
+                  extracted, extracted_en = extract_both(notes)
               h["changes"] = extracted
+              h["changes_en"] = extracted_en
 
           # Build new history: current version first, then old ones, max 3
           # Re-tagging a version stacks DUPLICATE entries in old_history
@@ -620,7 +698,7 @@ jobs:
                   if v in have:
                       continue
                   notes = tag_notes(t)
-                  changes = [m for m in (map_note(l) for l in notes.splitlines()) if m]
+                  changes, changes_en = extract_both(notes)
                   if not changes:
                       prev_tag = all_tags[all_tags.index(t) + 1] if all_tags.index(t) + 1 < len(all_tags) else ""
                       rng = (prev_tag + ".." + t) if prev_tag else t
@@ -630,7 +708,7 @@ jobs:
                               capture_output=True, text=True).stdout or ""
                       except Exception:
                           log_out = ""
-                      changes = [m for m in (map_note(l) for l in log_out.splitlines()) if m]
+                      changes, changes_en = extract_both(log_out)
                   try:
                       date = subprocess.run(
                           ["git", "log", "-1", "--pretty=%cI", t],
@@ -638,7 +716,8 @@ jobs:
                   except Exception:
                       date = ""
                   new_history.append({"version": v, "date": date, "files": {},
-                                      "changelog": "", "changes": changes})
+                                      "changelog": "", "changes": changes,
+                                      "changes_en": changes_en})
                   have.add(v)
           new_history = new_history[:3]
 
@@ -655,6 +734,7 @@ jobs:
               "date": current["date"],
               "files": current["files"],
               "changes": current["changes"],
+              "changes_en": current["changes_en"],
               "history": new_history
           }
 
