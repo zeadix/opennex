@@ -15,6 +15,9 @@ import {
 } from "./panes/tree";
 import { FiTool } from "react-icons/fi";
 import { useTheme } from "./theme/useTheme";
+import SettingsPage from "./pages/SettingsPage";
+import SshPage, { SshHost, loadHosts, saveHosts } from "./pages/SshPage";
+import { useSettings } from "./settings";
 
 let nextPaneId = 1;
 
@@ -22,6 +25,7 @@ let nextPaneId = 1;
 interface TermTab extends Tab {
   tree: PaneTree;
   activePane: number;
+  command?: string[];
 }
 
 function newTab(): TermTab {
@@ -45,6 +49,8 @@ function makeTab(): TermTab {
 
 export default function App() {
   const [themeId, setThemeId] = useTheme();
+  const [settings, updateSettings] = useSettings();
+  const [sshHosts, setSshHosts] = useState<SshHost[]>(loadHosts);
   const [page, setPage] = useState<Page>("terminal");
   const [tabs, setTabs] = useState<TermTab[]>([makeTab()]);
   const [activeTab, setActiveTab] = useState(tabs[0].id);
@@ -52,11 +58,16 @@ export default function App() {
   const patchTab = (id: number, patch: (t: TermTab) => TermTab) =>
     setTabs((prev) => prev.map((t) => (t.id === id ? patch(t) : t)));
 
-  const newTab = () => {
+  const newTab = (command?: string[]) => {
     const t = makeTab();
+    t.command = command;
     setTabs((prev) => [...prev, t]);
     setActiveTab(t.id);
     setPage("terminal");
+  };
+  const connectSsh = (h: SshHost) => {
+    saveHosts(sshHosts);
+    newTab(["ssh", "-p", String(h.port), `${h.user}@${h.host}`]);
   };
   const closeTab = (id: number) => {
     setTabs((prev) => {
@@ -137,13 +148,16 @@ export default function App() {
                       path={[]}
                       activePane={t.activePane}
                       themeId={themeId}
+                      fontSize={settings.fontSize}
+                      shell={settings.shell}
+                      command={t.command}
                       onActivate={(p) => activatePane(t.id, p)}
                       onClose={(p) => closePane(t.id, p)}
                       onSplit={(p, d) => splitPane(t.id, p, d)}
                       onRatio={(path, ratio) => setRatio(t.id, path, ratio)}
                     />
                   ) : (
-                    <TerminalPane sessionId={t.activePane} themeId={themeId} />
+                    <TerminalPane sessionId={t.activePane} themeId={themeId} fontSize={settings.fontSize} shell={settings.shell} />
                   )}
                 </div>
               ))}
@@ -151,13 +165,25 @@ export default function App() {
             <StatusBar sessionCount={tabs.length} shell="bash" />
           </>
         ) : page === "ssh" ? (
-          <Placeholder label="SSH 主机管理" />
+          <SshPage
+            hosts={sshHosts}
+            onHosts={(h) => {
+              setSshHosts(h);
+              saveHosts(h);
+            }}
+            onConnect={connectSsh}
+          />
         ) : page === "history" ? (
           <Placeholder label="指令历史" />
         ) : page === "ai" ? (
           <Placeholder label="AI 助手" />
         ) : (
-          <Placeholder label="设置" />
+          <SettingsPage
+            settings={settings}
+            onSettings={updateSettings}
+            themeId={themeId}
+            onTheme={setThemeId}
+          />
         )}
       </div>
     </div>

@@ -31,15 +31,21 @@ interface StartResult {
 export default function TerminalPane({
   sessionId,
   themeId,
+  fontSize,
+  command,
+  shell,
 }: {
   sessionId: number;
   themeId: string;
+  fontSize: number;
+  command?: string[];
+  shell?: string;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const term = new Terminal({
-      fontSize: 14,
+      fontSize: fontSize ?? 14,
       fontFamily: getComputedStyle(document.documentElement).getPropertyValue("--mono") || "monospace",
       cursorBlink: true,
       allowProposedApi: true,
@@ -65,6 +71,8 @@ export default function TerminalPane({
       const start: StartResult = await invoke("start_terminal", {
         cols: term.cols,
         rows: term.rows,
+        command: command ?? null,
+        shell: shell ?? null,
       });
       if (disposed) return;
       ws = new WebSocket(`ws://127.0.0.1:${start.wsPort}/ws?session=${start.session}`);

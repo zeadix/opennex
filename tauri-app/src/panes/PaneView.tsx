@@ -11,6 +11,9 @@ export default function PaneView({
   path,
   activePane,
   themeId,
+  fontSize,
+  shell,
+  command,
   onActivate,
   onClose,
   onSplit,
@@ -20,6 +23,9 @@ export default function PaneView({
   path: number[];
   activePane: number;
   themeId: string;
+  fontSize: number;
+  shell?: string;
+  command?: string[];
   onActivate: (pane: number) => void;
   onClose: (pane: number) => void;
   onSplit: (pane: number, dir: "h" | "v") => void;
@@ -79,7 +85,7 @@ export default function PaneView({
             </svg>
           </button>
         </div>
-        <TerminalPane sessionId={tree.pane} themeId={themeId} />
+        <TerminalPane sessionId={tree.pane} themeId={themeId} fontSize={fontSize} command={command} shell={shell} />
       </div>
     );
   }
@@ -90,6 +96,9 @@ export default function PaneView({
       path={path}
       activePane={activePane}
       themeId={themeId}
+      fontSize={fontSize}
+      shell={shell}
+      command={command}
       onActivate={onActivate}
       onClose={onClose}
       onSplit={onSplit}
@@ -103,6 +112,9 @@ function SplitNode({
   path,
   activePane,
   themeId,
+  fontSize,
+  shell,
+  command,
   onActivate,
   onClose,
   onSplit,
@@ -112,6 +124,9 @@ function SplitNode({
   path: number[];
   activePane: number;
   themeId: string;
+  fontSize: number;
+  shell?: string;
+  command?: string[];
   onActivate: (pane: number) => void;
   onClose: (pane: number) => void;
   onSplit: (pane: number, dir: "h" | "v") => void;
@@ -181,6 +196,9 @@ function SplitNode({
           path={[...path, i]}
           activePane={activePane}
           themeId={themeId}
+          fontSize={fontSize}
+          shell={shell}
+          command={command}
           onActivate={onActivate}
           onClose={onClose}
           onSplit={onSplit}

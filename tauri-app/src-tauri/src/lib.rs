@@ -56,6 +56,8 @@ fn spawn_pty(
     sessions: Arc<SessionMap>,
     cols: u16,
     rows: u16,
+    command: Option<Vec<String>>,
+    shell: Option<String>,
 ) -> Result<(), String> {
     let pty_system = native_pty_system();
     let pair = pty_system
@@ -66,9 +68,21 @@ fn spawn_pty(
             pixel_height: 0,
         })
         .map_err(|e| format!("openpty: {e}"))?;
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".into());
-    let mut cmd = CommandBuilder::new(&shell);
-    cmd.arg("-l");
+    let mut cmd = match &command {
+        Some(args) if !args.is_empty() => CommandBuilder::new(&args[0]),
+        _ => CommandBuilder::new(
+            shell.clone().unwrap_or_else(|| {
+                std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".into())
+            }),
+        ),
+    };
+    if let Some(args) = &command {
+        for a in args.iter().skip(1) {
+            cmd.arg(a);
+        }
+    } else {
+        cmd.arg("-l");
+    }
     cmd.cwd(std::env::var("HOME").unwrap_or_else(|_| "/".into()));
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
@@ -218,11 +232,38 @@ fn start_terminal(
     state: tauri::State<AppState>,
     cols: u16,
     rows: u16,
+    command: Option<Vec<String>>,
+    shell: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let session_id = uuid::Uuid::new_v4().simple().to_string();
-    spawn_pty(session_id.clone(), state.sessions.clone(), cols, rows)?;
+    spawn_pty(
+        session_id.clone(),
+        state.sessions.clone(),
+        cols,
+        rows,
+        command,
+        shell,
+    )?;
     let ws_port = WS_PORT.get().copied().unwrap_or(0);
     Ok(json!({ "session": session_id, "wsPort": ws_port }))
+}
+
+/// Shells available on this machine (from /etc/shells, deduped).
+#[tauri::command]
+fn list_shells() -> Vec<String> {
+    let mut out: Vec<String> = std::fs::read_to_string("/etc/shells")
+        .unwrap_or_default()
+        .lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .map(|l| l.to_string())
+        .collect();
+    out.sort();
+    out.dedup();
+    if out.is_empty() {
+        out.push("/bin/bash".into());
+    }
+    out
 }
 
 #[tauri::command]
@@ -246,7 +287,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .manage(state)
-        .invoke_handler(tauri::generate_handler![start_terminal, ws_port])
+        .invoke_handler(tauri::generate_handler![start_terminal, ws_port, list_shells])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
