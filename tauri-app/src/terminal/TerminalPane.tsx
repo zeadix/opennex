@@ -5,6 +5,18 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { invoke } from "./tauri";
 import "@xterm/xterm/css/xterm.css";
 
+function readTerminalTheme() {
+  const cs = getComputedStyle(document.documentElement);
+  const v = (name: string) => cs.getPropertyValue(name).trim();
+  return {
+    background: v("--bg"),
+    foreground: v("--text"),
+    cursor: v("--accent"),
+    cursorAccent: v("--bg"),
+    selectionBackground: v("--accent-dim"),
+  };
+}
+
 interface StartResult {
   session: string;
   wsPort: number;
@@ -16,7 +28,13 @@ interface StartResult {
  * Resize: ResizeObserver -> fit -> resize message -> Rust resizes the
  * PTY winsize.
  */
-export default function TerminalPane({ sessionId }: { sessionId: number }) {
+export default function TerminalPane({
+  sessionId,
+  themeId,
+}: {
+  sessionId: number;
+  themeId: string;
+}) {
   const hostRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -25,12 +43,7 @@ export default function TerminalPane({ sessionId }: { sessionId: number }) {
       fontFamily: getComputedStyle(document.documentElement).getPropertyValue("--mono") || "monospace",
       cursorBlink: true,
       allowProposedApi: true,
-      theme: {
-        background: "#0b0e14",
-        foreground: "#d6dbe6",
-        cursor: "#4fc3f7",
-        selectionBackground: "#2b7ba355",
-      },
+      theme: readTerminalTheme(),
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
@@ -86,6 +99,9 @@ export default function TerminalPane({ sessionId }: { sessionId: number }) {
       (hostRef.current as any)._cleanup = () => ro.disconnect();
     })();
 
+    // Live theme switch: re-read tokens when themeId changes.
+    term.options.theme = readTerminalTheme();
+
     return () => {
       disposed = true;
       const cleanup = (hostRef.current as any)?._cleanup;
@@ -93,7 +109,7 @@ export default function TerminalPane({ sessionId }: { sessionId: number }) {
       ws?.close();
       term.dispose();
     };
-  }, [sessionId]);
+  }, [sessionId, themeId]);
 
   return (
     <div

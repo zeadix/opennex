@@ -14,6 +14,7 @@ import {
   splitPane as treeSplitPane,
 } from "./panes/tree";
 import { FiTool } from "react-icons/fi";
+import { useTheme } from "./theme/useTheme";
 
 let nextPaneId = 1;
 
@@ -43,6 +44,7 @@ function makeTab(): TermTab {
 }
 
 export default function App() {
+  const [themeId, setThemeId] = useTheme();
   const [page, setPage] = useState<Page>("terminal");
   const [tabs, setTabs] = useState<TermTab[]>([makeTab()]);
   const [activeTab, setActiveTab] = useState(tabs[0].id);
@@ -106,7 +108,12 @@ export default function App() {
 
   return (
     <div className="flex h-full">
-      <Sidebar page={page} onNavigate={setPage} />
+      <Sidebar
+        page={page}
+        onNavigate={setPage}
+        themeId={themeId}
+        onTheme={setThemeId}
+      />
       <div className="flex min-w-0 flex-1 flex-col">
         {page === "terminal" && activeTermTab ? (
           <>
@@ -129,13 +136,14 @@ export default function App() {
                       tree={t.tree}
                       path={[]}
                       activePane={t.activePane}
+                      themeId={themeId}
                       onActivate={(p) => activatePane(t.id, p)}
                       onClose={(p) => closePane(t.id, p)}
                       onSplit={(p, d) => splitPane(t.id, p, d)}
                       onRatio={(path, ratio) => setRatio(t.id, path, ratio)}
                     />
                   ) : (
-                    <TerminalPane sessionId={t.activePane} />
+                    <TerminalPane sessionId={t.activePane} themeId={themeId} />
                   )}
                 </div>
               ))}

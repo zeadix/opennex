@@ -10,6 +10,7 @@ export default function PaneView({
   tree,
   path,
   activePane,
+  themeId,
   onActivate,
   onClose,
   onSplit,
@@ -18,6 +19,7 @@ export default function PaneView({
   tree: PaneTree;
   path: number[];
   activePane: number;
+  themeId: string;
   onActivate: (pane: number) => void;
   onClose: (pane: number) => void;
   onSplit: (pane: number, dir: "h" | "v") => void;
@@ -77,18 +79,30 @@ export default function PaneView({
             </svg>
           </button>
         </div>
-        <TerminalPane sessionId={tree.pane} />
+        <TerminalPane sessionId={tree.pane} themeId={themeId} />
       </div>
     );
   }
 
-  return <SplitNode tree={tree} path={path} activePane={activePane} onActivate={onActivate} onClose={onClose} onSplit={onSplit} onRatio={onRatio} />;
+  return (
+    <SplitNode
+      tree={tree}
+      path={path}
+      activePane={activePane}
+      themeId={themeId}
+      onActivate={onActivate}
+      onClose={onClose}
+      onSplit={onSplit}
+      onRatio={onRatio}
+    />
+  );
 }
 
 function SplitNode({
   tree,
   path,
   activePane,
+  themeId,
   onActivate,
   onClose,
   onSplit,
@@ -97,6 +111,7 @@ function SplitNode({
   tree: Extract<PaneTree, { kind: "split" }>;
   path: number[];
   activePane: number;
+  themeId: string;
   onActivate: (pane: number) => void;
   onClose: (pane: number) => void;
   onSplit: (pane: number, dir: "h" | "v") => void;
@@ -165,6 +180,7 @@ function SplitNode({
           tree={c}
           path={[...path, i]}
           activePane={activePane}
+          themeId={themeId}
           onActivate={onActivate}
           onClose={onClose}
           onSplit={onSplit}
