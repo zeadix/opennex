@@ -1,17 +1,32 @@
 import { useState } from "react";
-import { FiPlus, FiX } from "react-icons/fi";
+import Sidebar, { Page } from "./components/Sidebar";
+import StatusBar from "./components/StatusBar";
+import TabStrip, { Tab } from "./components/TabStrip";
 import TerminalPane from "./terminal/TerminalPane";
-
-interface Tab {
-  id: number;
-  title: string;
-}
+import { FiTool } from "react-icons/fi";
 
 let nextId = 1;
 
+function Placeholder({ label }: { label: string }) {
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-2 text-[var(--text-faint)]">
+      <FiTool size={28} />
+      <div className="text-sm">{label} · 开发中</div>
+    </div>
+  );
+}
+
 export default function App() {
+  const [page, setPage] = useState<Page>("terminal");
   const [tabs, setTabs] = useState<Tab[]>([{ id: nextId, title: "bash 1" }]);
   const [active, setActive] = useState(nextId);
+  const shell = (() => {
+    try {
+      return (window as any).__OPENNEX_SHELL__ ?? "bash";
+    } catch {
+      return "bash";
+    }
+  })();
 
   const newTab = () => {
     nextId += 1;
@@ -34,50 +49,40 @@ export default function App() {
   };
 
   return (
-    <div className="flex h-full flex-col overflow-hidden">
-      {/* Tab strip */}
-      <div className="flex h-9 shrink-0 items-end gap-1 border-b border-[var(--border)] bg-[var(--bg-panel)] px-2 pt-1.5">
-        {tabs.map((t) => (
-          <div
-            key={t.id}
-            onClick={() => setActive(t.id)}
-            className={`group flex h-8 cursor-pointer items-center gap-2 rounded-t-md border-x border-t px-3 text-[13px] ${
-              active === t.id
-                ? "border-[var(--border)] bg-[var(--bg)] text-[var(--text)]"
-                : "border-transparent bg-transparent text-[var(--text-dim)] hover:text-[var(--text)]"
-            }`}
-          >
-            <span className="font-mono">{t.title}</span>
-            <button
-              className="rounded p-0.5 opacity-0 hover:bg-[var(--bg-hover)] group-hover:opacity-100"
-              onClick={(e) => {
-                e.stopPropagation();
-                closeTab(t.id);
-              }}
-            >
-              <FiX size={13} />
-            </button>
-          </div>
-        ))}
-        <button
-          onClick={newTab}
-          className="mb-1 rounded p-1.5 text-[var(--text-dim)] hover:bg-[var(--bg-hover)] hover:text-[var(--text)]"
-          title="新建终端"
-        >
-          <FiPlus size={15} />
-        </button>
-      </div>
-      {/* Terminal area */}
-      <div className="relative min-h-0 flex-1">
-        {tabs.map((t) => (
-          <div
-            key={t.id}
-            className="absolute inset-0"
-            style={{ display: active === t.id ? "block" : "none" }}
-          >
-            <TerminalPane sessionId={t.id} />
-          </div>
-        ))}
+    <div className="flex h-full">
+      <Sidebar page={page} onNavigate={setPage} />
+      <div className="flex min-w-0 flex-1 flex-col">
+        {page === "terminal" ? (
+          <>
+            <TabStrip
+              tabs={tabs}
+              active={active}
+              onSelect={setActive}
+              onClose={closeTab}
+              onNew={newTab}
+            />
+            <div className="relative min-h-0 flex-1">
+              {tabs.map((t) => (
+                <div
+                  key={t.id}
+                  className="absolute inset-0"
+                  style={{ display: active === t.id ? "block" : "none" }}
+                >
+                  <TerminalPane sessionId={t.id} />
+                </div>
+              ))}
+            </div>
+            <StatusBar sessionCount={tabs.length} shell={shell} />
+          </>
+        ) : page === "ssh" ? (
+          <Placeholder label="SSH 主机管理" />
+        ) : page === "history" ? (
+          <Placeholder label="指令历史" />
+        ) : page === "ai" ? (
+          <Placeholder label="AI 助手" />
+        ) : (
+          <Placeholder label="设置" />
+        )}
       </div>
     </div>
   );
