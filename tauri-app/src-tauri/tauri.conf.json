@@ -1,0 +1,27 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "OpenNex",
+  "version": "0.1.0",
+  "identifier": "com.zeadix.opennex.tauri",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:5183",
+    "beforeDevCommand": "",
+    "beforeBuildCommand": ""
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "OpenNex",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 800,
+        "minHeight": 560,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  }
+}
