@@ -3,9 +3,30 @@ import Sidebar, { Page } from "./components/Sidebar";
 import StatusBar from "./components/StatusBar";
 import TabStrip, { Tab } from "./components/TabStrip";
 import TerminalPane from "./terminal/TerminalPane";
+import PaneView from "./panes/PaneView";
+import {
+  PaneTree,
+  closePane as treeClosePane,
+  collectPanes,
+  hasPane,
+  leaf,
+  setRatio as treeSetRatio,
+  splitPane as treeSplitPane,
+} from "./panes/tree";
 import { FiTool } from "react-icons/fi";
 
-let nextId = 1;
+let nextPaneId = 1;
+
+/** A terminal tab owns one pane tree; every leaf is a live PTY session. */
+interface TermTab extends Tab {
+  tree: PaneTree;
+  activePane: number;
+}
+
+function newTab(): TermTab {
+  const pane = nextPaneId++;
+  return { id: nextPaneId++, title: `bash ${pane}`, tree: leaf(pane), activePane: pane };
+}
 
 function Placeholder({ label }: { label: string }) {
   return (
@@ -16,48 +37,83 @@ function Placeholder({ label }: { label: string }) {
   );
 }
 
+function makeTab(): TermTab {
+  const pane = nextPaneId++;
+  return { id: nextPaneId++, title: `bash ${pane}`, tree: leaf(pane), activePane: pane };
+}
+
 export default function App() {
   const [page, setPage] = useState<Page>("terminal");
-  const [tabs, setTabs] = useState<Tab[]>([{ id: nextId, title: "bash 1" }]);
-  const [active, setActive] = useState(nextId);
-  const shell = (() => {
-    try {
-      return (window as any).__OPENNEX_SHELL__ ?? "bash";
-    } catch {
-      return "bash";
-    }
-  })();
+  const [tabs, setTabs] = useState<TermTab[]>([makeTab()]);
+  const [activeTab, setActiveTab] = useState(tabs[0].id);
+
+  const patchTab = (id: number, patch: (t: TermTab) => TermTab) =>
+    setTabs((prev) => prev.map((t) => (t.id === id ? patch(t) : t)));
 
   const newTab = () => {
-    nextId += 1;
-    const t = { id: nextId, title: `bash ${nextId}` };
+    const t = makeTab();
     setTabs((prev) => [...prev, t]);
-    setActive(t.id);
+    setActiveTab(t.id);
+    setPage("terminal");
   };
   const closeTab = (id: number) => {
     setTabs((prev) => {
-      const next = prev.filter((t) => t.id !== id);
-      if (next.length === 0) {
-        nextId += 1;
-        const t = { id: nextId, title: `bash ${nextId}` };
-        setActive(t.id);
+      const victim = prev.find((t) => t.id === id);
+      if (victim) {
+        // Closing the tab kills every session in its pane tree.
+        collectPanes(victim.tree).forEach(() => {
+          /* WS close in TerminalPane unmount triggers backend cleanup */
+        });
+      }
+      const rest = prev.filter((t) => t.id !== id);
+      if (rest.length === 0) {
+        const t = makeTab();
+        setActiveTab(t.id);
         return [t];
       }
-      if (active === id) setActive(next[next.length - 1].id);
-      return next;
+      if (activeTab === id) setActiveTab(rest[rest.length - 1].id);
+      return rest;
     });
   };
+
+  const splitPane = (tabId: number, pane: number, dir: "h" | "v") => {
+    const newPane = nextPaneId++;
+    patchTab(tabId, (t) => ({
+      ...t,
+      tree: treeSplitPane(t.tree, pane, dir, newPane),
+      activePane: newPane,
+      title: t.title,
+    }));
+  };
+  const closePane = (tabId: number, pane: number) => {
+    patchTab(tabId, (t) => {
+      const next = treeClosePane(t.tree, pane);
+      const alivePanes = collectPanes(next).filter((p) => p > 0);
+      const activePane = hasPane(next, t.activePane)
+        ? t.activePane
+        : alivePanes[alivePanes.length - 1] ?? 0;
+      return { ...t, tree: next, activePane };
+    });
+  };
+  const setRatio = (tabId: number, path: number[], ratio: number[]) => {
+    patchTab(tabId, (t) => ({ ...t, tree: treeSetRatio(t.tree, path, ratio) }));
+  };
+  const activatePane = (tabId: number, pane: number) => {
+    patchTab(tabId, (t) => (t.activePane === pane ? t : { ...t, activePane: pane }));
+  };
+
+  const activeTermTab = tabs.find((t) => t.id === activeTab);
 
   return (
     <div className="flex h-full">
       <Sidebar page={page} onNavigate={setPage} />
       <div className="flex min-w-0 flex-1 flex-col">
-        {page === "terminal" ? (
+        {page === "terminal" && activeTermTab ? (
           <>
             <TabStrip
               tabs={tabs}
-              active={active}
-              onSelect={setActive}
+              active={activeTab}
+              onSelect={setActiveTab}
               onClose={closeTab}
               onNew={newTab}
             />
@@ -65,14 +121,26 @@ export default function App() {
               {tabs.map((t) => (
                 <div
                   key={t.id}
-                  className="absolute inset-0"
-                  style={{ display: active === t.id ? "block" : "none" }}
+                  className="absolute inset-0 flex"
+                  style={{ display: activeTab === t.id ? "flex" : "none" }}
                 >
-                  <TerminalPane sessionId={t.id} />
+                  {hasPane(t.tree, t.activePane) || t.tree.kind === "split" ? (
+                    <PaneView
+                      tree={t.tree}
+                      path={[]}
+                      activePane={t.activePane}
+                      onActivate={(p) => activatePane(t.id, p)}
+                      onClose={(p) => closePane(t.id, p)}
+                      onSplit={(p, d) => splitPane(t.id, p, d)}
+                      onRatio={(path, ratio) => setRatio(t.id, path, ratio)}
+                    />
+                  ) : (
+                    <TerminalPane sessionId={t.activePane} />
+                  )}
                 </div>
               ))}
             </div>
-            <StatusBar sessionCount={tabs.length} shell={shell} />
+            <StatusBar sessionCount={tabs.length} shell="bash" />
           </>
         ) : page === "ssh" ? (
           <Placeholder label="SSH 主机管理" />
