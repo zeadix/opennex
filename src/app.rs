@@ -942,7 +942,7 @@ fn dialog_keys(ctx: &egui::Context, kb_confirm: &mut bool, toggle: bool) -> Dial
 /// input-style dialogs (name/command) where Enter means "confirm"
 /// regardless of the button cursor.
 #[derive(Debug, Default, Clone, Copy)]
-struct DialogKeysOutcome {
+pub(crate) struct DialogKeysOutcome {
     close: bool,
     confirm: bool,
     cancel: bool,
@@ -3479,73 +3479,101 @@ impl App {
         let mut close_after = false;
         let mut do_action = false;
 
-        // Unified key protocol, BEFORE the Modal: Enter in an input
-        // dialog means CONFIRM (consumed - the old `key_pressed` read
-        // let the same Enter also fall through to the terminal).
-        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter)) {
+        // Unified key protocol (dialog_keys, toggle=false): input kinds
+        // treat Enter as CONFIRM; delete/switch require the button-cursor
+        // confirm (safe side). Esc closes. Same protocol as every other
+        // dialog in the app.
+        let keys = dialog_keys(ctx, &mut self.dialog_kb_confirm, false);
+        let is_input_kind = matches!(
+            kind,
+            DialogKind::New | DialogKind::Copy | DialogKind::Rename
+        );
+        if is_input_kind {
+            if keys.enter || keys.confirm {
+                do_action = true;
+            }
+        } else if keys.confirm {
             do_action = true;
         }
-        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+        if keys.close {
             close_after = true;
         }
 
-        // Render the dialog as a Modal. The Modal sets the topmost
-        // modal layer so the TextEdit can reliably capture focus.
-        let modal = egui::Modal::new(egui::Id::new(modal_id))
-            .backdrop_color(egui::Color32::from_black_alpha(160))
-            .frame(egui::Frame::window(&ctx.style()));
+        // Render the dialog as a Modal (same shell as every other
+        // dialog: popup frame, heading title, dialog_button_row).
+        let danger = matches!(kind, DialogKind::Delete);
+        let danger_color = self.active_theme.app.danger.to_egui();
+        let text_col = self.active_theme.app.text.to_egui();
+        let heading_color = if danger { danger_color } else { text_col };
 
         // Force focus on the text input BEFORE showing the modal,
         // matching the lock-overlay pattern of calling request_focus
         // on a stable id at the top of the update path.
-        if matches!(
-            kind,
-            DialogKind::New | DialogKind::Copy | DialogKind::Rename
-        ) {
+        if is_input_kind {
             ctx.memory_mut(|m| m.request_focus(input_id));
         }
 
-        modal.show(ctx, |ui| {
-            ui.set_min_size(egui::vec2(360.0, 120.0));
+        let modal = egui::Modal::new(egui::Id::new(modal_id))
+            .frame(crate::theme::ui::kit::dialog_frame(ctx))
+            .show(ctx, |ui| {
+                ui.set_min_size(egui::vec2(
+                    crate::theme::ui::kit::DIALOG_WIDTH,
+                    crate::theme::ui::kit::DIALOG_MIN_HEIGHT,
+                ));
 
-            // Title
-            ui.strong(title.clone());
-            ui.add_space(4.0);
+                // Title
+                ui.heading(egui::RichText::new(title.clone()).color(heading_color));
+                ui.add_space(4.0);
+                crate::theme::ui::kit::apply_dialog_spacing(ui);
 
-            // Body
-            match kind {
-                DialogKind::New | DialogKind::Copy | DialogKind::Rename => {
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.theme_dialog.name_input)
-                            .id(input_id)
-                            .desired_width(340.0),
-                    );
-                }
-                DialogKind::Delete => {
-                    ui.label(format!(
-                        "{}: {}",
-                        self.texts.theme_editor.delete_confirm.clone(),
-                        self.theme_edit.name
-                    ));
-                }
-                DialogKind::Switch => {
-                    ui.label(self.texts.theme_editor.switch_confirm.clone());
-                }
-            }
-
-            // Buttons
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button(&self.texts.theme_editor.confirm).clicked() {
-                        do_action = true;
+                // Body
+                match kind {
+                    DialogKind::New | DialogKind::Copy | DialogKind::Rename => {
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.theme_dialog.name_input)
+                                .id(input_id)
+                                .desired_width(340.0),
+                        );
                     }
-                    if ui.button(&self.texts.theme_editor.cancel).clicked() {
-                        close_after = true;
+                    DialogKind::Delete => {
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "{}: {}",
+                                self.texts.theme_editor.delete_confirm.clone(),
+                                self.theme_edit.name
+                            ))
+                            .color(danger_color),
+                        );
                     }
-                });
+                    DialogKind::Switch => {
+                        ui.label(self.texts.theme_editor.switch_confirm.clone());
+                    }
+                }
+
+                // Buttons — unified row (Enter/cursor protocol above drives it).
+                ui.add_space(8.0);
+                let cancel_label = self.texts.theme_editor.cancel.clone();
+                let mut kb = self.dialog_kb_confirm;
+                let (confirm_click, cancel_click) = Self::dialog_button_row(
+                    ui,
+                    &mut kb,
+                    egui::Id::new((modal_id, "confirm")),
+                    egui::Id::new((modal_id, "cancel")),
+                    &self.texts.theme_editor.confirm.clone(),
+                    &cancel_label,
+                );
+                self.dialog_kb_confirm = kb;
+                if confirm_click {
+                    do_action = true;
+                }
+                if cancel_click {
+                    close_after = true;
+                }
             });
-        });
+
+        if modal.backdrop_response.clicked() {
+            close_after = true;
+        }
 
         if do_action {
             match kind {
@@ -4585,44 +4613,45 @@ impl App {
 /// the about window has been closed. The button click is recorded in egui
 /// memory under the "restart_popup_choice" id so the App update loop can
 /// read and clear it without borrowing self.
-fn render_restart_popup(ctx: &egui::Context, texts: &crate::i18n::Texts) {
-    // Unified protocol, BEFORE the Window. Default cursor = CANCEL
+fn render_restart_popup(ctx: &egui::Context, texts: &crate::i18n::Texts, kb_confirm: &mut bool) {
+    // Unified protocol, BEFORE the Modal. Default cursor = CANCEL
     // (restarting is disruptive; a stray Enter must not restart).
-    let mut kb = false;
-    let keys = dialog_keys(ctx, &mut kb, true);
+    let keys = dialog_keys(ctx, kb_confirm, true);
     let mut restart = keys.confirm;
     let mut cancel = keys.cancel || keys.close;
-    let mut open = true;
-    let inner = egui::Window::new(&texts.update.restart_title)
-        .open(&mut open)
-        .resizable(false)
-        .collapsible(false)
-        .default_pos(crate::app::screen_center(ctx))
-        .pivot(egui::Align2::CENTER_CENTER)
+    // NOTE: rendered from a free function (no App borrow available), so
+    // the dialog shell is inlined here with the SAME metrics as
+    // confirm_dialog_shell (kit constants) — keep them in sync.
+    use crate::theme::ui::kit;
+    let mut kb = *kb_confirm;
+    let modal = egui::Modal::new(egui::Id::new("restart_popup"))
+        .frame(
+            egui::Frame::window(&ctx.style()).inner_margin(egui::Margin::same(kit::DIALOG_MARGIN)),
+        )
         .show(ctx, |ui| {
-            ui.vertical_centered(|ui| {
-                ui.label(&texts.update.restart_body);
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    App::dialog_button_row(
+            ui.set_min_size(egui::vec2(kit::DIALOG_WIDTH, kit::DIALOG_MIN_HEIGHT));
+            ui.heading(&texts.update.restart_title);
+            kit::apply_dialog_spacing(ui);
+            egui::TopBottomPanel::bottom("restart_popup_footer")
+                .frame(egui::Frame::new())
+                .exact_height(kit::DIALOG_FOOTER_HEIGHT)
+                .show_inside(ui, |ui| {
+                    ui.add_space(20.0);
+                    let (c, x) = App::dialog_button_row(
                         ui,
                         &mut kb,
                         egui::Id::new("restart_confirm_btn"),
                         egui::Id::new("restart_cancel_btn"),
                         &texts.update.restart_confirm,
                         &texts.theme_editor.cancel,
-                    )
-                })
-                .inner
-            })
-            .inner
-        })
-        .and_then(|r| r.inner);
-    if let Some((c, x)) = inner {
-        restart |= c;
-        cancel |= x;
-    }
-    if !open {
+                    );
+                    restart |= c;
+                    cancel |= x;
+                });
+            ui.label(egui::RichText::new(&texts.update.restart_body).size(kit::FONT_STRONG));
+        });
+    *kb_confirm = kb;
+    if modal.backdrop_response.clicked() {
         cancel = true;
     }
     if restart || cancel {
@@ -6471,76 +6500,43 @@ impl eframe::App for App {
         self.show_theme_editor_popup(ctx);
 
         // Confirm-dialog for deleting ALL terminal command history.
-        // Styled like the password popups: compact metrics, danger confirm.
+        // Unified danger dialog shell (Modal + footer strip).
         if self.show_clear_history_confirm {
             // Rising edge: start on the safe side (CANCEL).
             if std::mem::take(&mut self.settings_clear_just_opened) {
                 self.dialog_kb_confirm = false;
             }
-            // Unified protocol, BEFORE the Window.
+            // Unified protocol, BEFORE the Modal.
             let keys = dialog_keys(ctx, &mut self.dialog_kb_confirm, true);
-            let mut confirmed = keys.confirm;
-            let mut cancelled = keys.cancel;
             if keys.close {
                 self.show_clear_history_confirm = false;
                 return;
             }
-            let mut kb = self.dialog_kb_confirm;
-            let mut open = self.show_clear_history_confirm;
             let title = self.texts.stats.clear_history_title.clone();
             let body = self.texts.stats.clear_history_body.clone();
-            let confirm_txt = self.texts.theme_editor.dialog_confirm.clone();
-            let cancel_txt = self.texts.theme_editor.cancel.clone();
-            let text_col = self.active_theme.app.text.to_egui();
-            // Same fixed 360x300 dialog: bottom panel pins the centered
-            // button row 20px above the bottom edge; finite height kills
-            // the auto-size growth loop.
-            let dlg_w = 360.0f32;
-            let dlg_h = 96.0f32;
-            let center = ctx.screen_rect().center();
-            let pos = egui::pos2(center.x - dlg_w / 2.0, center.y - dlg_h / 2.0);
-            egui::Window::new(title)
-                .id(egui::Id::new("settings_clear_confirm"))
-                .open(&mut open)
-                .resizable(false)
-                .collapsible(false)
-                .fixed_pos(pos)
-                .fixed_size([dlg_w, dlg_h])
-                .frame(egui::Frame::window(&ctx.style()).inner_margin(egui::Margin::same(12)))
-                .show(ctx, |ui| {
-                    ui.style_mut().spacing.item_spacing = egui::vec2(6.0, 4.0);
-                    ui.style_mut().spacing.interact_size.y = 24.0;
-                    ui.style_mut().spacing.button_padding = egui::vec2(10.0, 3.0);
-                    egui::TopBottomPanel::bottom("settings_clear_confirm_footer")
-                        .frame(egui::Frame::new())
-                        .exact_height(44.0)
-                        .show_inside(ui, |ui| {
-                            ui.add_space(20.0);
-                            let (c, x) = Self::dialog_button_row(
-                                ui,
-                                &mut kb,
-                                egui::Id::new("settings_clear_confirm_btn"),
-                                egui::Id::new("settings_clear_cancel_btn"),
-                                &confirm_txt,
-                                &cancel_txt,
-                            );
-                            confirmed |= c;
-                            cancelled |= x;
-                        });
-                    ui.label(egui::RichText::new(body).size(13.0).color(text_col));
-                });
-            if cancelled {
-                self.show_clear_history_confirm = false;
-            } else if confirmed {
-                self.history_db.clear_all();
-                self.show_clear_history_confirm = false;
-            } else if !open {
-                self.show_clear_history_confirm = false;
+            match self.confirm_dialog_shell(
+                ctx,
+                "settings_clear_confirm",
+                &title,
+                &body,
+                true,
+                &self.texts.theme_editor.dialog_confirm.clone(),
+                &self.texts.theme_editor.cancel.clone(),
+                keys,
+            ) {
+                crate::app::dialogs::DialogVerdict::Confirmed => {
+                    self.history_db.clear_all();
+                    self.show_clear_history_confirm = false;
+                }
+                crate::app::dialogs::DialogVerdict::Cancelled => {
+                    self.show_clear_history_confirm = false;
+                }
+                crate::app::dialogs::DialogVerdict::Open => {}
             }
         }
 
         // Confirm-dialog for clearing ALL global favorite commands.
-        // Same fixed-size danger dialog as the history clear above.
+        // Same unified danger dialog shell.
         if self.show_clear_favorites_confirm {
             // Rising edge: start on the safe side (CANCEL).
             if std::mem::take(&mut self.fav_clear_just_opened) {
@@ -6548,68 +6544,39 @@ impl eframe::App for App {
             }
             // Unified protocol, BEFORE the Modal.
             let keys = dialog_keys(ctx, &mut self.dialog_kb_confirm, true);
-            let mut confirmed = keys.confirm;
-            let mut cancelled = keys.cancel;
             if keys.close {
                 self.show_clear_favorites_confirm = false;
                 return;
             }
-            let mut kb = self.dialog_kb_confirm;
             let title = self.texts.terminal.clear_favorites_title.clone();
             let body = self.texts.terminal.clear_favorites_body.clone();
-            let confirm_txt = self.texts.theme_editor.dialog_confirm.clone();
-            let cancel_txt = self.texts.theme_editor.cancel.clone();
-            let danger = self.active_theme.app.danger.to_egui();
-            let text_col = self.active_theme.app.text.to_egui();
-            let dlg_w = 360.0f32;
-            let dlg_h = 96.0f32;
-            let center = ctx.screen_rect().center();
-            let pos = egui::pos2(center.x - dlg_w / 2.0, center.y - dlg_h / 2.0);
-            let _ = pos;
-            let modal = egui::Modal::new(egui::Id::new("fav_clear_confirm"))
-                .frame(egui::Frame::window(&ctx.style()).inner_margin(egui::Margin::same(12)))
-                .show(ctx, |ui| {
-                    ui.set_min_size(egui::vec2(dlg_w, dlg_h));
-                    ui.heading(title);
-                    ui.style_mut().spacing.item_spacing = egui::vec2(6.0, 4.0);
-                    ui.style_mut().spacing.interact_size.y = 24.0;
-                    ui.style_mut().spacing.button_padding = egui::vec2(10.0, 3.0);
-                    egui::TopBottomPanel::bottom("fav_clear_confirm_footer")
-                        .frame(egui::Frame::new())
-                        .exact_height(44.0)
-                        .show_inside(ui, |ui| {
-                            ui.add_space(20.0);
-                            let (c, x) = Self::dialog_button_row(
-                                ui,
-                                &mut kb,
-                                egui::Id::new("fav_clear_confirm_btn"),
-                                egui::Id::new("fav_clear_cancel_btn"),
-                                &confirm_txt,
-                                &cancel_txt,
-                            );
-                            confirmed |= c;
-                            cancelled |= x;
-                        });
-                    ui.label(egui::RichText::new(body).size(13.0).color(text_col));
-                });
-            let _ = danger;
-            if cancelled {
-                self.show_clear_favorites_confirm = false;
-            } else if confirmed {
-                self.history_db.fav_clear();
-                // Drop the favorites snapshot from any open menus so the
-                // side lists disappear immediately.
-                for td in self.terminals.values_mut() {
-                    if let Some(nav) = td.instance.history_nav.as_mut() {
-                        nav.favorites.clear();
-                        nav.fav_focused = false;
+            let confirm_label = self.texts.theme_editor.dialog_confirm.clone();
+            match self.confirm_dialog_shell(
+                ctx,
+                "fav_clear_confirm",
+                &title,
+                &body,
+                true,
+                &confirm_label,
+                &self.texts.theme_editor.cancel.clone(),
+                keys,
+            ) {
+                crate::app::dialogs::DialogVerdict::Confirmed => {
+                    self.history_db.fav_clear();
+                    // Drop the favorites snapshot from any open menus so the
+                    // side lists disappear immediately.
+                    for td in self.terminals.values_mut() {
+                        if let Some(nav) = td.instance.history_nav.as_mut() {
+                            nav.favorites.clear();
+                            nav.fav_focused = false;
+                        }
                     }
+                    self.show_clear_favorites_confirm = false;
                 }
-                self.show_clear_favorites_confirm = false;
-            }
-            // Backdrop click cancels.
-            if modal.backdrop_response.clicked() {
-                self.show_clear_favorites_confirm = false;
+                crate::app::dialogs::DialogVerdict::Cancelled => {
+                    self.show_clear_favorites_confirm = false;
+                }
+                crate::app::dialogs::DialogVerdict::Open => {}
             }
         }
 
@@ -6970,7 +6937,7 @@ impl eframe::App for App {
         // Restart confirmation popup (shown when the about window is
         // closed and the update is ready; user can pick "重启" or "取消").
         if let crate::updater::UpdateState::Ready(path) = &self.update_state.clone() {
-            render_restart_popup(ctx, &self.texts.clone());
+            render_restart_popup(ctx, &self.texts.clone(), &mut self.dialog_kb_confirm);
             // Read the user's choice from egui memory.
             let choice: Option<bool> = ctx.memory_mut(|mem| {
                 mem.data
@@ -6992,60 +6959,48 @@ impl eframe::App for App {
             }
         }
 
-        // Close workspace confirmation
+        // Close workspace confirmation — unified danger dialog shell.
         if let Some(panel_idx) = self.close_confirm_panel {
             // Rising edge: start on the safe side (CANCEL).
             if std::mem::take(&mut self.ws_close_just_opened) {
                 self.dialog_kb_confirm = false;
             }
-            // Unified protocol, BEFORE the Window.
+            // Unified protocol, BEFORE the Modal.
             let keys = dialog_keys(ctx, &mut self.dialog_kb_confirm, true);
-            let mut confirmed = keys.confirm;
-            let mut cancelled = keys.cancel || keys.close;
-            let mut open = true;
-            let mut kb = self.dialog_kb_confirm;
+            if keys.close {
+                self.close_confirm_panel = None;
+                return;
+            }
             let panel_name = self
                 .panels
                 .get(panel_idx)
                 .map(|p| p.name.clone())
                 .unwrap_or_default();
-            let inner = egui::Window::new(&self.texts.close_confirm.confirm)
-                .open(&mut open)
-                .resizable(false)
-                .collapsible(false)
-                .default_pos(screen_center(ctx))
-                .pivot(egui::Align2::CENTER_CENTER)
-                .show(ctx, |ui| {
-                    ui.label(format!(
-                        "{}{}{}",
-                        self.texts.close_confirm.message_prefix,
-                        panel_name,
-                        self.texts.close_confirm.message_suffix
-                    ));
-                    ui.add_space(10.0);
-                    ui.horizontal(|ui| {
-                        Self::dialog_button_row(
-                            ui,
-                            &mut kb,
-                            egui::Id::new("ws_close_confirm_btn"),
-                            egui::Id::new("ws_close_cancel_btn"),
-                            &self.texts.close_confirm.confirm,
-                            &self.texts.close_confirm.cancel,
-                        )
-                    })
-                    .inner
-                })
-                .and_then(|r| r.inner);
-            if let Some((c, x)) = inner {
-                confirmed |= c;
-                cancelled |= x;
-            }
-            if confirmed {
-                self.close_workspace(panel_idx);
-                self.close_confirm_panel = None;
-            }
-            if cancelled || !open {
-                self.close_confirm_panel = None;
+            let message = format!(
+                "{}{}{}",
+                self.texts.close_confirm.message_prefix,
+                panel_name,
+                self.texts.close_confirm.message_suffix
+            );
+            let confirm_label = self.texts.close_confirm.confirm.clone();
+            match self.confirm_dialog_shell(
+                ctx,
+                "ws_close_confirm",
+                &self.texts.close_confirm.confirm.clone(),
+                &message,
+                true,
+                &confirm_label,
+                &self.texts.close_confirm.cancel.clone(),
+                keys,
+            ) {
+                crate::app::dialogs::DialogVerdict::Confirmed => {
+                    self.close_workspace(panel_idx);
+                    self.close_confirm_panel = None;
+                }
+                crate::app::dialogs::DialogVerdict::Cancelled => {
+                    self.close_confirm_panel = None;
+                }
+                crate::app::dialogs::DialogVerdict::Open => {}
             }
         }
 
@@ -7109,66 +7064,50 @@ impl eframe::App for App {
         self.render_snippet_fill_dialog(ctx);
         self.render_startup_cmd_dialog(ctx);
 
-        // Terminal close confirmation
+        // Terminal close confirmation — unified danger dialog shell.
         if let Some(ref tab_id) = self.pending_close_confirm.clone() {
             // Rising edge: start on the safe side (CANCEL - a stray
             // Enter must not kill the terminal).
             if std::mem::take(&mut self.close_confirm_just_opened) {
                 self.dialog_kb_confirm = false;
             }
-            // Unified protocol, BEFORE the Window. Esc now closes too.
+            // Unified protocol, BEFORE the Modal. Esc now closes too.
             let keys = dialog_keys(ctx, &mut self.dialog_kb_confirm, true);
-            let mut confirmed = keys.confirm;
-            let mut cancelled = keys.cancel;
-            let mut open = true;
-            let tab_id = tab_id.clone();
-            let mut kb = self.dialog_kb_confirm;
-            let inner = egui::Window::new(&self.texts.close_confirm.terminal_title)
-                .id(egui::Id::new("close_confirm_window"))
-                .open(&mut open)
-                .resizable(false)
-                .collapsible(false)
-                .default_pos(screen_center(ctx))
-                .pivot(egui::Align2::CENTER_CENTER)
-                .show(ctx, |ui| {
-                    let is_remote = self
-                        .terminals
-                        .get(&tab_id)
-                        .and_then(|d| d.host.as_ref())
-                        .is_some();
-                    let message = if is_remote {
-                        &self.texts.ssh.close_remote_message
-                    } else {
-                        &self.texts.close_confirm.terminal_message
-                    };
-                    ui.label(message);
-                    ui.add_space(10.0);
-                    ui.horizontal(|ui| {
-                        Self::dialog_button_row(
-                            ui,
-                            &mut kb,
-                            egui::Id::new("close_confirm_confirm"),
-                            egui::Id::new("close_confirm_cancel"),
-                            &self.texts.close_confirm.confirm,
-                            &self.texts.close_confirm.cancel,
-                        )
-                    })
-                    .inner
-                })
-                .and_then(|r| r.inner);
-            if let Some((c, x)) = inner {
-                confirmed |= c;
-                cancelled |= x;
-            }
             if keys.close {
-                cancelled = true;
-            }
-            if confirmed {
                 self.pending_close_confirm = None;
-                self.pending_close = Some(tab_id);
+                return;
             }
-            if cancelled || !open {
-                self.pending_close_confirm = None;
+            let tab_id = tab_id.clone();
+            let is_remote = self
+                .terminals
+                .get(&tab_id)
+                .and_then(|d| d.host.as_ref())
+                .is_some();
+            let message = if is_remote {
+                self.texts.ssh.close_remote_message.clone()
+            } else {
+                self.texts.close_confirm.terminal_message.clone()
+            };
+            let confirm_label = self.texts.close_confirm.confirm.clone();
+            let title = self.texts.close_confirm.terminal_title.clone();
+            match self.confirm_dialog_shell(
+                ctx,
+                "close_confirm_window",
+                &title,
+                &message,
+                true,
+                &confirm_label,
+                &self.texts.close_confirm.cancel.clone(),
+                keys,
+            ) {
+                crate::app::dialogs::DialogVerdict::Confirmed => {
+                    self.pending_close_confirm = None;
+                    self.pending_close = Some(tab_id);
+                }
+                crate::app::dialogs::DialogVerdict::Cancelled => {
+                    self.pending_close_confirm = None;
+                }
+                crate::app::dialogs::DialogVerdict::Open => {}
             }
         }
 
@@ -7245,13 +7184,13 @@ impl eframe::App for App {
                                 if !self.pw_set2.is_empty() && self.pw_set1 != self.pw_set2 {
                                     ui.label(
                                         egui::RichText::new(&self.texts.password.mismatch)
-                                            .color(egui::Color32::RED)
+                                            .color(self.active_theme.app.danger.to_egui())
                                             .size(11.0),
                                     );
                                 } else if !self.pw_set2.is_empty() {
                                     ui.label(
                                         egui::RichText::new(&self.texts.password.r#match)
-                                            .color(egui::Color32::GREEN)
+                                            .color(self.active_theme.app.success.to_egui())
                                             .size(11.0),
                                     );
                                 }
@@ -7259,7 +7198,7 @@ impl eframe::App for App {
                             if !self.pw_message.is_empty() {
                                 ui.label(
                                     egui::RichText::new(&self.pw_message)
-                                        .color(egui::Color32::RED)
+                                        .color(self.active_theme.app.danger.to_egui())
                                         .size(11.0),
                                 );
                             }
@@ -7327,13 +7266,13 @@ impl eframe::App for App {
                                 if !self.pw_new2.is_empty() && self.pw_new1 != self.pw_new2 {
                                     ui.label(
                                         egui::RichText::new(&self.texts.password.mismatch)
-                                            .color(egui::Color32::RED)
+                                            .color(self.active_theme.app.danger.to_egui())
                                             .size(11.0),
                                     );
                                 } else if !self.pw_new2.is_empty() {
                                     ui.label(
                                         egui::RichText::new(&self.texts.password.r#match)
-                                            .color(egui::Color32::GREEN)
+                                            .color(self.active_theme.app.success.to_egui())
                                             .size(11.0),
                                     );
                                 }
@@ -7341,7 +7280,7 @@ impl eframe::App for App {
                             if !self.pw_message.is_empty() {
                                 ui.label(
                                     egui::RichText::new(&self.pw_message)
-                                        .color(egui::Color32::RED)
+                                        .color(self.active_theme.app.danger.to_egui())
                                         .size(11.0),
                                 );
                             }
@@ -7399,7 +7338,7 @@ impl eframe::App for App {
                             if !self.pw_message.is_empty() {
                                 ui.label(
                                     egui::RichText::new(&self.pw_message)
-                                        .color(egui::Color32::RED)
+                                        .color(self.active_theme.app.danger.to_egui())
                                         .size(11.0),
                                 );
                             }

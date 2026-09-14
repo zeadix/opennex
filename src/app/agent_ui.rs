@@ -545,38 +545,30 @@ ask before anything destructive."
             self.dialog_kb_confirm = false;
         }
         let keys = dialog_keys(ctx, &mut self.dialog_kb_confirm, true);
-        let mut confirmed = keys.confirm;
-        let mut cancelled = keys.cancel;
-        let mut open = true;
+        let mut confirmed = false;
+        let mut cancelled = false;
         let preview: String = command.chars().take(300).collect();
         let body = self.texts.ai.agent_confirm_body.replace("{}", &preview);
-        let mut kb = self.dialog_kb_confirm;
-        let inner = egui::Window::new(&self.texts.ai.agent_confirm_title)
-            .id(egui::Id::new("agent_confirm_window"))
-            .open(&mut open)
-            .resizable(false)
-            .collapsible(false)
-            .default_pos(screen_center(ctx))
-            .pivot(egui::Align2::CENTER_CENTER)
-            .show(ctx, |ui| {
-                ui.label(egui::RichText::new(&body).color(self.active_theme.app.warning.to_egui()));
-                ui.add_space(10.0);
-                ui.horizontal(|ui| {
-                    Self::dialog_button_row(
-                        ui,
-                        &mut kb,
-                        egui::Id::new("agent_confirm_yes"),
-                        egui::Id::new("agent_confirm_no"),
-                        &self.texts.ai.agent_confirm_run,
-                        &self.texts.ai.agent_confirm_cancel,
-                    )
-                })
-                .inner
-            })
-            .and_then(|r| r.inner);
-        if let Some((c, x)) = inner {
-            confirmed |= c;
-            cancelled |= x;
+        let confirm_label = self.texts.ai.agent_confirm_run.clone();
+        let cancel_label = self.texts.ai.agent_confirm_cancel.clone();
+        let title = self.texts.ai.agent_confirm_title.clone();
+        match self.confirm_dialog_shell(
+            ctx,
+            "agent_confirm_window",
+            &title,
+            &body,
+            true,
+            &confirm_label,
+            &cancel_label,
+            keys,
+        ) {
+            super::dialogs::DialogVerdict::Confirmed => {
+                confirmed = true;
+            }
+            super::dialogs::DialogVerdict::Cancelled => {
+                cancelled = true;
+            }
+            super::dialogs::DialogVerdict::Open => {}
         }
         if keys.close {
             cancelled = true;
@@ -589,7 +581,7 @@ ask before anything destructive."
             agent.phase = AgentPhase::Executing;
             self.agent_write_and_execute();
         }
-        if cancelled || !open {
+        if cancelled {
             // Cancelled: tell the model the user declined this step.
             let Some(agent) = self.agent.as_mut() else {
                 return;

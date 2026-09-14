@@ -78,7 +78,91 @@ pub(crate) fn snippet_expand(template: &str, values: &[(String, String)]) -> Str
     out
 }
 
+/// Verdict of a rendered dialog frame.
+pub(crate) enum DialogVerdict {
+    Confirmed,
+    Cancelled,
+    Open,
+}
+
 impl App {
+    /// UNIFIED confirm-dialog shell (UI style sheet, v0.1.56): a centered
+    /// Modal (360x96 min, margin 12) with a heading (danger-tinted when
+    /// `danger`), body text and a bottom button strip driven by
+    /// `dialog_button_row` + the `dialog_keys` cursor protocol.
+    ///
+    /// `keys` MUST come from `dialog_keys(ctx, ..)` called by the caller
+    /// BEFORE this (so Esc/Enter never leak to the terminal). A backdrop
+    /// click counts as cancel. Callers keep ownership of their open-flag
+    /// and act on the returned verdict.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn confirm_dialog_shell(
+        &mut self,
+        ctx: &egui::Context,
+        modal_id: &str,
+        title: &str,
+        body: &str,
+        danger: bool,
+        confirm_label: &str,
+        cancel_label: &str,
+        keys: DialogKeysOutcome,
+    ) -> DialogVerdict {
+        use crate::theme::ui::kit;
+        let mut confirmed = keys.confirm;
+        let mut cancelled = keys.cancel;
+        let mut kb = self.dialog_kb_confirm;
+        let title = title.to_string();
+        let body = body.to_string();
+        let confirm_txt = confirm_label.to_string();
+        let cancel_txt = cancel_label.to_string();
+        let danger_color = self.active_theme.app.danger.to_egui();
+        let text_col = self.active_theme.app.text.to_egui();
+        let heading_color = if danger { danger_color } else { text_col };
+        let body_color = if danger { danger_color } else { text_col };
+        let modal = egui::Modal::new(egui::Id::new(modal_id))
+            .frame(
+                egui::Frame::window(&ctx.style())
+                    .inner_margin(egui::Margin::same(kit::DIALOG_MARGIN)),
+            )
+            .show(ctx, |ui| {
+                ui.set_min_size(egui::vec2(kit::DIALOG_WIDTH, kit::DIALOG_MIN_HEIGHT));
+                ui.heading(egui::RichText::new(&title).color(heading_color));
+                kit::apply_dialog_spacing(ui);
+                egui::TopBottomPanel::bottom(egui::Id::new((modal_id, "footer")))
+                    .frame(egui::Frame::new())
+                    .exact_height(kit::DIALOG_FOOTER_HEIGHT)
+                    .show_inside(ui, |ui| {
+                        ui.add_space(20.0);
+                        let (c, x) = Self::dialog_button_row(
+                            ui,
+                            &mut kb,
+                            egui::Id::new((modal_id, "confirm")),
+                            egui::Id::new((modal_id, "cancel")),
+                            &confirm_txt,
+                            &cancel_txt,
+                        );
+                        confirmed |= c;
+                        cancelled |= x;
+                    });
+                ui.label(
+                    egui::RichText::new(body)
+                        .size(kit::FONT_STRONG)
+                        .color(body_color),
+                );
+            });
+        self.dialog_kb_confirm = kb;
+        if modal.backdrop_response.clicked() {
+            cancelled = true;
+        }
+        if confirmed {
+            DialogVerdict::Confirmed
+        } else if cancelled {
+            DialogVerdict::Cancelled
+        } else {
+            DialogVerdict::Open
+        }
+    }
+
     /// If `template` contains `{placeholder}` tokens, open the fill dialog
     /// (closing the history menu first) and return true; otherwise return
     /// false so the caller inserts the command directly.

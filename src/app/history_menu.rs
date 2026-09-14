@@ -1629,8 +1629,8 @@ impl App {
         }
     }
     /// Confirmation dialog for clearing a terminal's command history
-    /// (from the history-menu footer "clear" button). Styled like the
-    /// password popups: compact metrics, fixed sizes, danger confirm.
+    /// (from the history-menu footer "clear" button). Built on the
+    /// unified confirm-dialog shell (see [`App::confirm_dialog_shell`]).
     pub(crate) fn render_history_clear_confirm(&mut self, ctx: &egui::Context) {
         let Some(tab) = self.history_clear_confirm.clone() else {
             return;
@@ -1641,71 +1641,34 @@ impl App {
         }
         // Unified protocol, BEFORE the Modal.
         let keys = dialog_keys(ctx, &mut self.dialog_kb_confirm, true);
-        let mut confirmed = keys.confirm;
-        let mut cancelled = keys.cancel;
         if keys.close {
             self.history_clear_confirm = None;
             return;
         }
-        let mut kb = self.dialog_kb_confirm;
         let title = self.texts.stats.clear_history_title.clone();
         let body = self.texts.stats.clear_history_body.clone();
-        let confirm_txt = self.texts.theme_editor.dialog_confirm.clone();
-        let cancel_txt = self.texts.theme_editor.cancel.clone();
-        let danger = self.active_theme.app.danger.to_egui();
-        let text_col = self.active_theme.app.text.to_egui();
-        // Fixed-size dialog: the window is pinned to 360x300 so its
-        // available_height is a finite constant (auto-sized windows feed
-        // infinite height into the bottom-fill math, which both started
-        // the dialog huge and made it grow every frame). The button row
-        // lives in a bottom panel: 20px bottom margin + 24px row,
-        // horizontally centered.
-        let dlg_w = 360.0f32;
-        let dlg_h = 96.0f32;
-        let center = ctx.screen_rect().center();
-        let pos = egui::pos2(center.x - dlg_w / 2.0, center.y - dlg_h / 2.0);
-        let _ = pos;
-        let modal = egui::Modal::new(egui::Id::new("hist_clear_confirm"))
-            .frame(egui::Frame::window(&ctx.style()).inner_margin(egui::Margin::same(12)))
-            .show(ctx, |ui| {
-                ui.set_min_size(egui::vec2(dlg_w, dlg_h));
-                ui.heading(title);
-                ui.style_mut().spacing.item_spacing = egui::vec2(6.0, 4.0);
-                ui.style_mut().spacing.interact_size.y = 24.0;
-                ui.style_mut().spacing.button_padding = egui::vec2(10.0, 3.0);
-                // Button row pinned to the bottom: 20px margin + 24px row.
-                egui::TopBottomPanel::bottom("hist_clear_confirm_footer")
-                    .frame(egui::Frame::new())
-                    .exact_height(44.0)
-                    .show_inside(ui, |ui| {
-                        ui.add_space(20.0);
-                        let (c, x) = Self::dialog_button_row(
-                            ui,
-                            &mut kb,
-                            egui::Id::new("hist_clear_confirm_btn"),
-                            egui::Id::new("hist_clear_cancel_btn"),
-                            &confirm_txt,
-                            &cancel_txt,
-                        );
-                        confirmed |= c;
-                        cancelled |= x;
-                    });
-                // Body fills the remaining central area (top-aligned).
-                ui.label(egui::RichText::new(body).size(13.0).color(text_col));
-                let _ = danger;
-            });
-        // Backdrop click cancels.
-        if modal.backdrop_response.clicked() {
-            cancelled = true;
-        }
-        if confirmed {
-            self.history_db.clear(&tab);
-            if let Some(td) = self.terminals.get_mut(&tab) {
-                td.instance.history_nav = None;
+        let confirm_label = self.texts.theme_editor.dialog_confirm.clone();
+        match self.confirm_dialog_shell(
+            ctx,
+            "hist_clear_confirm",
+            &title,
+            &body,
+            true,
+            &confirm_label,
+            &self.texts.theme_editor.cancel.clone(),
+            keys,
+        ) {
+            super::dialogs::DialogVerdict::Confirmed => {
+                self.history_db.clear(&tab);
+                if let Some(td) = self.terminals.get_mut(&tab) {
+                    td.instance.history_nav = None;
+                }
+                self.history_clear_confirm = None;
             }
-            self.history_clear_confirm = None;
-        } else if cancelled {
-            self.history_clear_confirm = None;
+            super::dialogs::DialogVerdict::Cancelled => {
+                self.history_clear_confirm = None;
+            }
+            super::dialogs::DialogVerdict::Open => {}
         }
     }
     /// Draw the two-button row for any [`dialog_keys`]-driven dialog.

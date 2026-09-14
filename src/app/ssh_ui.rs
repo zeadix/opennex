@@ -503,49 +503,33 @@ impl App {
             self.dialog_kb_confirm = false;
         }
         let keys = dialog_keys(ctx, &mut self.dialog_kb_confirm, true);
-        let mut confirmed = keys.confirm;
-        let mut cancelled = keys.cancel;
-        let mut open = true;
+        if keys.close {
+            self.ssh_delete_confirm = None;
+            return;
+        }
         let title = self.texts.ssh.delete_title.clone();
         let body = self.texts.ssh.delete_body.replace("{}", &host_name);
-        let mut kb = self.dialog_kb_confirm;
-        let inner = egui::Window::new(title)
-            .id(egui::Id::new("ssh_delete_confirm_window"))
-            .open(&mut open)
-            .resizable(false)
-            .collapsible(false)
-            .default_pos(screen_center(ctx))
-            .pivot(egui::Align2::CENTER_CENTER)
-            .show(ctx, |ui| {
-                ui.label(body);
-                ui.add_space(10.0);
-                ui.horizontal(|ui| {
-                    Self::dialog_button_row(
-                        ui,
-                        &mut kb,
-                        egui::Id::new("ssh_del_confirm"),
-                        egui::Id::new("ssh_del_cancel"),
-                        &self.texts.close_confirm.confirm,
-                        &self.texts.close_confirm.cancel,
-                    )
-                })
-                .inner
-            })
-            .and_then(|r| r.inner);
-        if let Some((c, x)) = inner {
-            confirmed |= c;
-            cancelled |= x;
-        }
-        if keys.close {
-            cancelled = true;
-        }
-        if confirmed {
-            self.history_db.ssh_host_delete(host_id);
-            self.refresh_ssh_hosts();
-            self.ssh_delete_confirm = None;
-        }
-        if cancelled || !open {
-            self.ssh_delete_confirm = None;
+        let confirm_label = self.texts.close_confirm.confirm.clone();
+        let cancel_label = self.texts.close_confirm.cancel.clone();
+        match self.confirm_dialog_shell(
+            ctx,
+            "ssh_delete_confirm_window",
+            &title,
+            &body,
+            true,
+            &confirm_label,
+            &cancel_label,
+            keys,
+        ) {
+            super::dialogs::DialogVerdict::Confirmed => {
+                self.history_db.ssh_host_delete(host_id);
+                self.refresh_ssh_hosts();
+                self.ssh_delete_confirm = None;
+            }
+            super::dialogs::DialogVerdict::Cancelled => {
+                self.ssh_delete_confirm = None;
+            }
+            super::dialogs::DialogVerdict::Open => {}
         }
     }
 }

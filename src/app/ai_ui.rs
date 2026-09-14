@@ -384,9 +384,10 @@ preserve technical terms, identifiers and formatting."
             self.dialog_kb_confirm = false;
         }
         let keys = dialog_keys(ctx, &mut self.dialog_kb_confirm, true);
-        let mut confirmed = keys.confirm;
-        let mut cancelled = keys.cancel;
-        let mut open = true;
+        if keys.close {
+            self.ai_exec_confirm = None;
+            return;
+        }
         let title = self.texts.ai.exec_confirm_title.clone();
         let host = self
             .terminals
@@ -401,43 +402,26 @@ preserve technical terms, identifiers and formatting."
             .exec_confirm_body
             .replace("{}", &host)
             .replace("{}", &preview);
-        let mut kb = self.dialog_kb_confirm;
-        let inner = egui::Window::new(title)
-            .id(egui::Id::new("ai_exec_confirm_window"))
-            .open(&mut open)
-            .resizable(false)
-            .collapsible(false)
-            .default_pos(screen_center(ctx))
-            .pivot(egui::Align2::CENTER_CENTER)
-            .show(ctx, |ui| {
-                ui.label(egui::RichText::new(&body).color(self.active_theme.app.danger.to_egui()));
-                ui.add_space(10.0);
-                ui.horizontal(|ui| {
-                    Self::dialog_button_row(
-                        ui,
-                        &mut kb,
-                        egui::Id::new("ai_exec_confirm"),
-                        egui::Id::new("ai_exec_cancel"),
-                        &self.texts.close_confirm.confirm,
-                        &self.texts.close_confirm.cancel,
-                    )
-                })
-                .inner
-            })
-            .and_then(|r| r.inner);
-        if let Some((c, x)) = inner {
-            confirmed |= c;
-            cancelled |= x;
-        }
-        if keys.close {
-            cancelled = true;
-        }
-        if confirmed {
-            self.ai_exec_confirm = None;
-            self.ai_write_and_run(&tab, &command);
-        }
-        if cancelled || !open {
-            self.ai_exec_confirm = None;
+        let confirm_label = self.texts.close_confirm.confirm.clone();
+        let cancel_label = self.texts.close_confirm.cancel.clone();
+        match self.confirm_dialog_shell(
+            ctx,
+            "ai_exec_confirm_window",
+            &title,
+            &body,
+            true,
+            &confirm_label,
+            &cancel_label,
+            keys,
+        ) {
+            super::dialogs::DialogVerdict::Confirmed => {
+                self.ai_exec_confirm = None;
+                self.ai_write_and_run(&tab, &command);
+            }
+            super::dialogs::DialogVerdict::Cancelled => {
+                self.ai_exec_confirm = None;
+            }
+            super::dialogs::DialogVerdict::Open => {}
         }
     }
 

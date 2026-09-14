@@ -727,3 +727,48 @@ fn color_dragvalue_row(
         }
     });
 }
+
+/// UI style sheet — the single source of truth for dialog metrics and
+/// the app-wide type scale (v0.1.56 UI unification round). Every new
+/// dialog MUST be built from these values instead of local literals;
+/// the legacy per-dialog numbers (320/340/360 widths, 44px footers,
+/// 10/11/12/13 font sizes) were consolidated onto this scale.
+pub mod kit {
+    /// Standard confirm/input dialog width.
+    pub const DIALOG_WIDTH: f32 = 360.0;
+    /// Standard confirm dialog min height (title + body + footer).
+    pub const DIALOG_MIN_HEIGHT: f32 = 96.0;
+    /// Bottom button-strip height inside a dialog.
+    pub const DIALOG_FOOTER_HEIGHT: f32 = 44.0;
+    /// Inner margin of the dialog popup frame.
+    pub const DIALOG_MARGIN: i8 = 12;
+
+    /// Vertical spacing between dialog elements.
+    pub const DIALOG_ITEM_SPACING: egui::Vec2 = egui::vec2(6.0, 4.0);
+    /// Height of a dialog input row / button row.
+    pub const DIALOG_INTERACT_HEIGHT: f32 = 24.0;
+    /// Padding inside dialog buttons.
+    pub const DIALOG_BUTTON_PADDING: egui::Vec2 = egui::vec2(10.0, 3.0);
+
+    /// Type scale. Body = general dialog/panel text (13 in dialogs, 12
+    /// in dense panels — dialogs use BODY since they are read, not
+    /// scanned). Caption = secondary labels/toasts/errors. Strong =
+    /// status emphasis and key states.
+    pub const FONT_CAPTION: f32 = 11.0;
+    pub const FONT_BODY: f32 = 12.0;
+    pub const FONT_STRONG: f32 = 13.0;
+
+    /// Standard popup frame for dialogs: window visuals + uniform
+    /// margin.
+    pub fn dialog_frame(ctx: &egui::Context) -> egui::Frame {
+        egui::Frame::window(&ctx.style()).inner_margin(egui::Margin::same(DIALOG_MARGIN))
+    }
+
+    /// Compact metrics every dialog body starts with (spacing triple
+    /// that used to be copy-pasted per dialog with drifting values).
+    pub fn apply_dialog_spacing(ui: &mut egui::Ui) {
+        ui.style_mut().spacing.item_spacing = DIALOG_ITEM_SPACING;
+        ui.style_mut().spacing.interact_size.y = DIALOG_INTERACT_HEIGHT;
+        ui.style_mut().spacing.button_padding = DIALOG_BUTTON_PADDING;
+    }
+}
