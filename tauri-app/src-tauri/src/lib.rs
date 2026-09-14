@@ -51,6 +51,62 @@ struct AppState {
 
 static WS_PORT: OnceLock<u16> = OnceLock::new();
 
+/// Global command history, captured from the INPUT path (bytes the user
+/// sends are line-buffered; a carriage return commits the line). Newest
+/// first, adjacent-dedup, capped.
+const HISTORY_CAP: usize = 500;
+static HISTORY: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+struct LineBuf {
+    bytes: Vec<u8>,
+}
+impl LineBuf {
+    fn new() -> Self {
+        Self { bytes: Vec::new() }
+    }
+    /// Feed raw input bytes; returns completed lines (utf8-lossy, trimmed).
+    fn feed(&mut self, input: &[u8]) -> Vec<String> {
+        let mut lines = Vec::new();
+        for &b in input {
+            match b {
+                b'\r' | b'\n' => {
+                    if !self.bytes.is_empty() {
+                        let line = String::from_utf8_lossy(&self.bytes).trim().to_string();
+                        self.bytes.clear();
+                        if !line.is_empty() {
+                            lines.push(line);
+                        }
+                    }
+                }
+                0x7f | 0x08 => {
+                    self.bytes.pop();
+                }
+                0x03 | 0x04 => {
+                    self.bytes.clear();
+                }
+                0x1b => self.bytes.clear(),
+                b if b < 0x20 => {}
+                _ => self.bytes.push(b),
+            }
+        }
+        lines
+    }
+}
+
+fn record_line(line: String) {
+    let mut hist = HISTORY.lock().unwrap();
+    if hist.first().map(|h| h == &line).unwrap_or(false) {
+        return;
+    }
+    if let Some(pos) = hist.iter().position(|h| h == &line) {
+        hist.remove(pos);
+    }
+    hist.insert(0, line);
+    if hist.len() > HISTORY_CAP {
+        hist.truncate(HISTORY_CAP);
+    }
+}
+
 fn spawn_pty(
     session_id: String,
     sessions: Arc<SessionMap>,
@@ -148,6 +204,7 @@ async fn session_ws(mut socket: WebSocket, sessions: Arc<SessionMap>, sid: Strin
         return;
     };
     let (out_tx, mut out_rx) = mpsc::unbounded_channel::<Vec<u8>>();
+    let line_buf = Arc::new(Mutex::new(LineBuf::new()));
 
     // PTY -> WS pump.
     if let Some(reader) = session.reader.lock().unwrap().take() {
@@ -184,6 +241,9 @@ async fn session_ws(mut socket: WebSocket, sessions: Arc<SessionMap>, sid: Strin
                         }
                     }
                     Some(Ok(Message::Binary(bytes))) => {
+                        for line in line_buf.lock().unwrap().feed(&bytes) {
+                            record_line(line);
+                        }
                         if session.writer.lock().unwrap().write_all(&bytes).is_err() {
                             break;
                         }
@@ -271,6 +331,50 @@ fn ws_port() -> u16 {
     WS_PORT.get().copied().unwrap_or(0)
 }
 
+#[tauri::command]
+fn get_history() -> Vec<String> {
+    HISTORY.lock().unwrap().clone()
+}
+
+#[derive(serde::Deserialize)]
+struct ChatMsg {
+    role: String,
+    content: String,
+}
+
+#[tauri::command]
+async fn ai_chat(
+    base_url: String,
+    api_key: String,
+    model: String,
+    messages: Vec<ChatMsg>,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+        let body = json!({
+            "model": model,
+            "messages": messages
+                .iter()
+                .map(|m| json!({"role": m.role, "content": m.content}))
+                .collect::<Vec<_>>(),
+        });
+        let mut req = ureq::post(&url)
+            .set("Content-Type", "application/json")
+            .timeout(std::time::Duration::from_secs(120));
+        if !api_key.is_empty() {
+            req = req.set("Authorization", &format!("Bearer {api_key}"));
+        }
+        let resp = req.send_json(body).map_err(|e| format!("request failed: {e}"))?;
+        let v: serde_json::Value = resp.into_json().map_err(|e| format!("parse failed: {e}"))?;
+        v["choices"][0]["message"]["content"]
+            .as_str()
+            .map(|s| s.to_string())
+            .ok_or_else(|| "empty response".into())
+    })
+    .await
+    .map_err(|e| format!("task failed: {e}"))?
+}
+
 pub fn run() {
     let sessions: Arc<SessionMap> = Arc::default();
     let state = AppState {
@@ -287,7 +391,13 @@ pub fn run() {
 
     tauri::Builder::default()
         .manage(state)
-        .invoke_handler(tauri::generate_handler![start_terminal, ws_port, list_shells])
+        .invoke_handler(tauri::generate_handler![
+            start_terminal,
+            ws_port,
+            list_shells,
+            get_history,
+            ai_chat
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

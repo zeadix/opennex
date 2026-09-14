@@ -12,10 +12,11 @@ import {
   leaf,
   setRatio as treeSetRatio,
   splitPane as treeSplitPane,
-} from "./panes/tree";
-import { FiTool } from "react-icons/fi";
+} from "./panes/tree";import { FiTool } from "react-icons/fi";
 import { useTheme } from "./theme/useTheme";
 import SettingsPage from "./pages/SettingsPage";
+import HistoryPage from "./pages/HistoryPage";
+import AiPage from "./pages/AiPage";
 import SshPage, { SshHost, loadHosts, saveHosts } from "./pages/SshPage";
 import { useSettings } from "./settings";
 
@@ -174,9 +175,9 @@ export default function App() {
             onConnect={connectSsh}
           />
         ) : page === "history" ? (
-          <Placeholder label="指令历史" />
+          <HistoryPage />
         ) : page === "ai" ? (
-          <Placeholder label="AI 助手" />
+          <AiPage />
         ) : (
           <SettingsPage
             settings={settings}
