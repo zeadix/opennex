@@ -1,0 +1,45 @@
+@import "tailwindcss";
+
+/* OpenNex Tauri design tokens (dark-first; light theme via [data-theme=light]) */
+:root {
+  --bg: #0b0e14;
+  --bg-panel: #11151c;
+  --bg-elevated: #171b24;
+  --bg-hover: #1d2330;
+  --border: #232a37;
+  --text: #d6dbe6;
+  --text-dim: #8b93a5;
+  --text-faint: #5c6475;
+  --accent: #4fc3f7;
+  --accent-dim: #2b7ba3;
+  --danger: #f07178;
+  --success: #7dcfff;
+  --mono: "JetBrains Mono", "Cascadia Code", "Fira Code", ui-monospace, monospace;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    "Noto Sans CJK SC",
+    sans-serif;
+  overflow: hidden;
+  user-select: none;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
