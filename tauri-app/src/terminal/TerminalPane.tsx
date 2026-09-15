@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { invoke } from "./tauri";
@@ -42,6 +42,11 @@ export default function TerminalPane({
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
+  // HTML-level status badge: always visible even when the xterm canvas
+  // itself fails to draw (webview rendering bugs).
+  const [status, setStatus] = useState<{ state: string; detail?: string }>({
+    state: "connecting",
+  });
 
   // Live theme/font updates without recreating the PTY.
   useEffect(() => {
@@ -93,15 +98,20 @@ export default function TerminalPane({
         });
       } catch (e) {
         if (!disposed) {
+          setStatus({ state: "failed", detail: String(e) });
           term.writeln(`\x1b[31m[启动 PTY 失败: ${e}]\x1b[0m`);
         }
         return;
       }
       if (disposed) return;
+      setStatus({ state: "attaching" });
       ws = new WebSocket(`ws://127.0.0.1:${start.wsPort}/ws?session=${start.session}`);
       ws.binaryType = "arraybuffer";
       ws.onerror = () => {
-        if (!disposed) term.writeln("\x1b[31m[WS 错误]\x1b[0m");
+        if (!disposed) {
+          setStatus({ state: "ws-error" });
+          term.writeln("\x1b[31m[WS 错误]\x1b[0m");
+        }
       };
       ws.onmessage = (ev) => {
         const data = ev.data as ArrayBuffer;
@@ -142,8 +152,14 @@ export default function TerminalPane({
       });
       ro.observe(hostRef.current!);
       ws.onopen = () => {
-        if (!disposed) term.writeln("\x1b[90m[已连接]\x1b[0m");
+        if (!disposed) {
+          setStatus({ state: "connected" });
+          term.writeln("\x1b[90m[已连接]\x1b[0m");
+        }
         sendResize();
+      };
+      ws.onclose = () => {
+        if (!disposed) setStatus({ state: "closed" });
       };
       (hostRef.current as any)._cleanup = () => ro.disconnect();
     })();
@@ -161,8 +177,16 @@ export default function TerminalPane({
   return (
     <div
       ref={hostRef}
-      className="h-full w-full px-2 py-1"
+      className="relative h-full w-full px-2 py-1"
       style={{ background: "var(--bg)" }}
-    />
+    >
+      <div
+        className="pointer-events-none absolute right-2 top-1 z-20 rounded bg-[var(--bg-elevated)] px-1.5 py-0.5 font-mono text-[10px]"
+        style={{ color: status.state === "connected" ? "var(--success)" : "var(--danger)" }}
+      >
+        pty:{status.state}
+        {status.detail ? ` ${status.detail}` : ""}
+      </div>
+    </div>
   );
 }
