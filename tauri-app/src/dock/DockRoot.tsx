@@ -214,7 +214,7 @@ export default function DockRoot({
         if (tcomp === "ssh") return <SshPage hosts={sshHosts} onHosts={onSshHosts} onConnect={onConnectSsh} />;
         if (tcomp === "history") return <HistoryPage />;
         if (tcomp === "ai") return <AiPage />;
-        if (tcomp === "settings") return <SettingsPage settings={settings} onSettings={onSettings} themeId={themeId} onTheme={onTheme} />;
+        if (tcomp === "settings") return <SettingsPage settings={settings} onSettings={onSettings} themeId={themeId} onTheme={onTheme} lang={lang} />;
         if (tcomp === "remote") return <RemotePage />;
         if (tcomp === "update") return <UpdatePage lang={lang} />;
         return null;

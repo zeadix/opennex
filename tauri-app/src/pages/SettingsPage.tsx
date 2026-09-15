@@ -1,5 +1,12 @@
 import { useEffect, useState } from "react";
 import { FiLock, FiInfo } from "react-icons/fi";
+import ShortcutRecorder from "../shortcuts/ShortcutRecorder";
+import {
+  SHORTCUT_ACTIONS,
+  loadShortcuts,
+  saveShortcuts,
+  ShortcutAction,
+} from "../shortcuts/shortcuts";
 import { THEMES } from "../theme/themes";
 import { Settings } from "../settings";
 import { loadWorkspaces, persistWorkspaces, sha256, LOCK_SALT } from "../workspaces";
@@ -9,16 +16,26 @@ export default function SettingsPage({
   onSettings,
   themeId,
   onTheme,
+  lang,
 }: {
   settings: Settings;
   onSettings: (patch: Partial<Settings>) => void;
   themeId: string;
   onTheme: (id: string) => void;
+  lang: "zh" | "en";
 }) {
   const [shells, setShells] = useState<string[]>([]);
   useEffect(() => {
     import("@tauri-apps/api/core").then((m) => m.invoke<string[]>("list_shells")).then(setShells).catch(() => {});
   }, []);
+
+  // ---- shortcuts --------------------------------------------------------
+  const [shortcuts, setShortcuts] = useState(loadShortcuts);
+  const updateShortcut = (action: ShortcutAction, binding: string) => {
+    const next = { ...shortcuts, [action]: binding };
+    setShortcuts(next);
+    saveShortcuts(next);
+  };
 
   // ---- lock management -------------------------------------------------
   const workspaces = loadWorkspaces();
@@ -50,6 +67,31 @@ export default function SettingsPage({
             <div className="mt-2 flex items-center gap-1.5 text-[11px] text-[var(--text-faint)]">
               <FiInfo size={12} /> Rust 后端 + xterm.js WebGL/Canvas 终端
             </div>
+          </div>
+        </section>
+
+        <section>
+          <h2 className="mb-3 text-[15px] font-semibold">快捷键</h2>
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-panel)] p-4">
+            <div className="space-y-2">
+              {SHORTCUT_ACTIONS.map((a) => (
+                <div key={a.id} className="flex items-center justify-between gap-3">
+                  <span className="text-[12px] text-[var(--text-dim)]">
+                    {lang === "zh" ? a.labelZh : a.labelEn}
+                  </span>
+                  <ShortcutRecorder
+                    binding={shortcuts[a.id]}
+                    onChange={(b) => updateShortcut(a.id, b)}
+                  />
+                </div>
+              ))}
+            </div>
+            <button
+              className="mt-3 rounded-md border border-[var(--border)] px-2.5 py-1 text-[11px] text-[var(--text-dim)] hover:text-[var(--text)]"
+              onClick={() => setShortcuts(loadShortcuts())}
+            >
+              恢复默认
+            </button>
           </div>
         </section>
 
