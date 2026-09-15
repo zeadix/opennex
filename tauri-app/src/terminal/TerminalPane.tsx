@@ -1,7 +1,6 @@
 import { useEffect, useRef } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
-import { WebglAddon } from "@xterm/addon-webgl";
 import { invoke } from "./tauri";
 import "@xterm/xterm/css/xterm.css";
 
@@ -42,6 +41,17 @@ export default function TerminalPane({
   shell?: string;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
+  const termRef = useRef<Terminal | null>(null);
+
+  // Live theme/font updates without recreating the PTY.
+  useEffect(() => {
+    const t = termRef.current;
+    if (!t) return;
+    t.options.theme = readTerminalTheme();
+    t.options.fontSize = fontSize;
+    t.options.fontFamily =
+      getComputedStyle(document.documentElement).getPropertyValue("--mono") || "monospace";
+  }, [themeId, fontSize]);
 
   useEffect(() => {
     const term = new Terminal({
@@ -51,11 +61,16 @@ export default function TerminalPane({
       allowProposedApi: true,
       theme: readTerminalTheme(),
     });
+    termRef.current = term;
     const fit = new FitAddon();
     term.loadAddon(fit);
-    const webgl = new WebglAddon();
-    term.loadAddon(webgl);
+    // NOTE: no WebGL addon by default — WebKitGTK's WebGL regularly
+    // renders a fully BLACK viewport on Linux GPU stacks, which read as
+    // "the terminal is empty and inputs go nowhere". The 2D canvas
+    // renderer is the stable path here; add WebGL behind a setting once
+    // verified per-machine.
     term.open(hostRef.current!);
+    term.writeln("\x1b[90m[连接 PTY 中…]\x1b[0m");
     try {
       fit.fit();
     } catch {
@@ -68,15 +83,26 @@ export default function TerminalPane({
     let cols = term.cols;
 
     (async () => {
-      const start: StartResult = await invoke("start_terminal", {
-        cols: term.cols,
-        rows: term.rows,
-        command: command ?? null,
-        shell: shell ?? null,
-      });
+      let start: StartResult;
+      try {
+        start = await invoke("start_terminal", {
+          cols: term.cols,
+          rows: term.rows,
+          command: command ?? null,
+          shell: shell ?? null,
+        });
+      } catch (e) {
+        if (!disposed) {
+          term.writeln(`\x1b[31m[启动 PTY 失败: ${e}]\x1b[0m`);
+        }
+        return;
+      }
       if (disposed) return;
       ws = new WebSocket(`ws://127.0.0.1:${start.wsPort}/ws?session=${start.session}`);
       ws.binaryType = "arraybuffer";
+      ws.onerror = () => {
+        if (!disposed) term.writeln("\x1b[31m[WS 错误]\x1b[0m");
+      };
       ws.onmessage = (ev) => {
         const data = ev.data as ArrayBuffer;
         // Session-exit sentinel (OSC 777) is shown as plain text.
@@ -115,12 +141,12 @@ export default function TerminalPane({
         }
       });
       ro.observe(hostRef.current!);
-      ws.onopen = sendResize;
+      ws.onopen = () => {
+        if (!disposed) term.writeln("\x1b[90m[已连接]\x1b[0m");
+        sendResize();
+      };
       (hostRef.current as any)._cleanup = () => ro.disconnect();
     })();
-
-    // Live theme switch: re-read tokens when themeId changes.
-    term.options.theme = readTerminalTheme();
 
     return () => {
       disposed = true;
@@ -128,8 +154,9 @@ export default function TerminalPane({
       if (cleanup) cleanup();
       ws?.close();
       term.dispose();
+      termRef.current = null;
     };
-  }, [sessionId, themeId]);
+  }, [sessionId, command, shell]);
 
   return (
     <div
