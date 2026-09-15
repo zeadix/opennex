@@ -435,6 +435,50 @@ struct ChatMsg {
     content: String,
 }
 
+#[derive(serde::Deserialize)]
+struct LatestManifest {
+    version: String,
+    #[serde(default)]
+    changes: Vec<String>,
+    #[serde(default)]
+    changes_en: Vec<String>,
+}
+
+/// Update check: fetch the public manifest, compare versions, return the
+/// newer release's bilingual notes (no download/install in v1).
+#[tauri::command]
+async fn check_update() -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let resp = ureq::get("https://opennex.download.zeadix.com/latest.json")
+            .timeout(std::time::Duration::from_secs(15))
+            .call()
+            .map_err(|e| format!("request failed: {e}"))?;
+        let m: LatestManifest = resp.into_json().map_err(|e| format!("parse failed: {e}"))?;
+        let current = env!("CARGO_PKG_VERSION");
+        let newer = version_newer(&m.version, current);
+        Ok(json!({
+            "updateAvailable": newer,
+            "latest": m.version,
+            "current": current,
+            "changes": m.changes,
+            "changesEn": m.changes_en,
+        }))
+    })
+    .await
+    .map_err(|e| format!("task failed: {e}"))?
+}
+
+fn version_newer(remote: &str, current: &str) -> bool {
+    let parse = |s: &str| -> Vec<u64> {
+        s.trim_start_matches('v')
+            .split('.')
+            .filter_map(|n| n.parse::<u64>().ok())
+            .collect()
+    };
+    let (r, c) = (parse(remote), parse(current));
+    r > c
+}
+
 #[tauri::command]
 async fn ai_chat(
     base_url: String,
@@ -490,7 +534,8 @@ pub fn run() {
             list_shells,
             remote_info,
             get_history,
-            ai_chat
+            ai_chat,
+            check_update
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

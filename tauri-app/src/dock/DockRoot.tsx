@@ -14,12 +14,13 @@ import HistoryPage from "../pages/HistoryPage";
 import AiPage from "../pages/AiPage";
 import SettingsPage from "../pages/SettingsPage";
 import RemotePage from "../pages/RemotePage";
+import UpdatePage from "../pages/UpdatePage";
 import { NAV_TAB_ID, NAV_TABSET_ID, TERM_TAB_ID, MAIN_TABSET_ID, TERM_TABSET_ID } from "./model";
 import { LANGS, t } from "../i18n";
 import type { Lang } from "../i18n";
 import { broadcastEnabled, broadcastGroup } from "../terminal/registry";
 
-export type Page = "terminal" | "ssh" | "history" | "ai" | "settings" | "remote";
+export type Page = "terminal" | "ssh" | "history" | "ai" | "settings" | "remote" | "update";
 
 export const PAGE_TAB_ID: Record<Page, string> = {
   terminal: TERM_TAB_ID,
@@ -28,6 +29,7 @@ export const PAGE_TAB_ID: Record<Page, string> = {
   ai: "tab-ai",
   settings: "tab-settings",
   remote: "tab-remote",
+  update: "tab-update",
 };
 
 export const PAGE_NAME: Record<Page, string> = {
@@ -37,6 +39,7 @@ export const PAGE_NAME: Record<Page, string> = {
   ai: "AI",
   settings: "设置",
   remote: "远程",
+  update: "更新",
 };
 
 export default function DockRoot({
@@ -151,7 +154,7 @@ export default function DockRoot({
 
           <div className="my-3 h-px bg-[var(--border)]" />
           <div className="flex flex-col gap-0.5">
-            {(["terminal", "ssh", "history", "ai", "settings", "remote"] as Page[]).map((p) => (
+            {(["terminal", "ssh", "history", "ai", "settings", "remote", "update"] as Page[]).map((p) => (
               <div
                 key={p}
                 className={`nav-item ${page === p ? "active" : ""}`}
@@ -213,6 +216,7 @@ export default function DockRoot({
         if (tcomp === "ai") return <AiPage />;
         if (tcomp === "settings") return <SettingsPage settings={settings} onSettings={onSettings} themeId={themeId} onTheme={onTheme} />;
         if (tcomp === "remote") return <RemotePage />;
+        if (tcomp === "update") return <UpdatePage lang={lang} />;
         return null;
       };
       return (
