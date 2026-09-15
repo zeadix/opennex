@@ -66,6 +66,22 @@ export default function App() {
     setActiveWsId(w.id);
     openPage("terminal");
   };
+  const renameWorkspace = (id: number, name: string) =>
+    setWorkspaces((prev) => prev.map((w) => (w.id === id ? { ...w, name } : w)));
+  const setLockPassword = (id: number, hash: string) =>
+    setWorkspaces((prev) => prev.map((w) => (w.id === id ? { ...w, lockHash: hash } : w)));
+  const unlockWorkspace = (id: number) =>
+    setWorkspaces((prev) => prev.map((w) => (w.id === id ? { ...w, locked: false } : w)));
+  /** Sidebar lock toggle: unlock directly; locking an unlocked ws needs a
+   * password — the overlay collects it (locked = true, no hash yet → the
+   * overlay runs in "set" mode). */
+  const toggleLock = (id: number) =>
+    setWorkspaces((prev) =>
+      prev.map((w) =>
+        w.id === id ? { ...w, locked: w.lockHash ? !w.locked : true } : w,
+      ),
+    );
+
   const deleteWorkspace = (id: number) => {
     setWorkspaces((prev) => {
       const rest = prev.filter((w) => w.id !== id);
@@ -102,6 +118,29 @@ export default function App() {
         ),
       );
     }
+  };
+
+  const addTerminal = () => {
+    const slot = maxTermSlot(termModel) + 1;
+    seedTermSlots(slot);
+    termModel.doAction(
+      Actions.addNode(
+        {
+          type: "tab",
+          id: `term-${slot}`,
+          name: `bash ${slot}`,
+          component: "termpane",
+          enableClose: true,
+          enableRenderOnDemand: false,
+          config: { slot, shell: settings.shell || null },
+        },
+        termTabsetId(termModel),
+        DockLocation.CENTER,
+        -1,
+      ),
+    );
+    setPage("terminal");
+    openPage("terminal");
   };
 
   const connectSsh = (h: SshHost) => {
@@ -146,11 +185,16 @@ export default function App() {
       shell={settings.shell}
       page={page}
       onOpenPage={openPage}
+      onAddTerminal={addTerminal}
       workspaces={workspaces}
       activeWsId={activeWsId}
       onSwitchWorkspace={setActiveWsId}
       onCreateWorkspace={createWorkspace}
       onDeleteWorkspace={deleteWorkspace}
+      onRenameWorkspace={renameWorkspace}
+      onSetLockPassword={setLockPassword}
+      onUnlock={unlockWorkspace}
+      onToggleLock={toggleLock}
       sshHosts={sshHosts}
       onSshHosts={(h) => {
         setSshHosts(h);

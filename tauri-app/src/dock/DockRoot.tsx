@@ -1,9 +1,12 @@
+import { useState } from "react";
 import { Layout, Model, Actions, DockLocation, Action } from "flexlayout-react";
 // REQUIRED: flexlayout's structural classes (tabsets, tabs, dividers)
 // carry the entire layout geometry — without this sheet the dock
 // collapses into stacked blocks.
 import "flexlayout-react/style/dark.css";
-import { FiPlus } from "react-icons/fi";
+import { FiPlus, FiTrash2, FiUnlock, FiEdit2 } from "react-icons/fi";
+import LockOverlay from "./LockOverlay";
+import { sha256, LOCK_SALT } from "../workspaces";
 import TerminalPane from "../terminal/TerminalPane";
 import { getTheme, THEMES } from "../theme/themes";
 import SshPage, { SshHost } from "../pages/SshPage";
@@ -40,11 +43,16 @@ export default function DockRoot({
   shell,
   page,
   onOpenPage,
+  onAddTerminal,
   workspaces,
   activeWsId,
   onSwitchWorkspace,
   onCreateWorkspace,
   onDeleteWorkspace,
+  onToggleLock,
+  onRenameWorkspace,
+  onSetLockPassword,
+  onUnlock,
   sshHosts,
   onSshHosts,
   onConnectSsh,
@@ -60,11 +68,16 @@ export default function DockRoot({
   shell: string;
   page: Page;
   onOpenPage: (p: Page) => void;
-  workspaces: { id: number; name: string; locked: boolean }[];
+  onAddTerminal: () => void;
+  workspaces: { id: number; name: string; locked: boolean; lockHash?: string }[];
   activeWsId: number;
   onSwitchWorkspace: (id: number) => void;
   onCreateWorkspace: () => void;
   onDeleteWorkspace: (id: number) => void;
+  onToggleLock: (id: number) => void;
+  onRenameWorkspace: (id: number, name: string) => void;
+  onSetLockPassword: (id: number, hash: string) => void;
+  onUnlock: (id: number) => void;
   sshHosts: SshHost[];
   onSshHosts: (h: SshHost[]) => void;
   onConnectSsh: (h: SshHost) => void;
@@ -72,6 +85,9 @@ export default function DockRoot({
   onSettings: (patch: { fontSize?: number; shell?: string }) => void;
 }) {
   // Main dock: the two unique panels (nav + workspace area).
+  const [renamingId, setRenamingId] = useState<number | null>(null);
+  const [renameBuf, setRenameBuf] = useState("");
+
   const mainFactory = (node: any) => {
     const comp = node.getComponent();
     if (comp === "nav") {
@@ -144,6 +160,8 @@ export default function DockRoot({
     }
     if (comp === "term") {
       // Workspace area: its own dock model for terminals (and opened pages).
+      const activeWs = workspaces.find((w: any) => w.id === activeWsId);
+      const locked = !!activeWs?.locked;
       const termFactory = (tn: any) => {
         const tcomp = tn.getComponent();
         if (tcomp === "termpane") {
@@ -165,28 +183,55 @@ export default function DockRoot({
         return null;
       };
       return (
-        <Layout
-          model={termModel}
-          factory={termFactory}
-          onModelChange={onModelChange}
-          onAction={(a: Action) => a}
-          onRenderTabSet={(node, renderValues) => {
-            // "+" button on every tabset in the workspace area.
-            renderValues.buttons.push(
-              <button
-                key="new-term"
-                className="icon-btn !p-1"
-                title="新建终端"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onAddTerminalIn(node.getId());
-                }}
-              >
-                <FiPlus size={13} />
-              </button>,
-            );
-          }}
-        />
+        <div className="relative flex h-full flex-col overflow-hidden">
+          <div className="flex h-8 shrink-0 items-center justify-end gap-1 border-b border-[var(--border)] bg-[var(--bg-panel)] px-2">
+            <button className="icon-btn" title="新建终端" onClick={onAddTerminal}>
+              <FiPlus size={14} />
+            </button>
+          </div>
+          <div className="relative min-h-0 flex-1">
+            <Layout
+              model={termModel}
+              factory={termFactory}
+              onModelChange={onModelChange}
+              onAction={(a: Action) => a}
+              onRenderTabSet={(node, renderValues) => {
+                // "+" button on every tabset in the workspace area.
+                renderValues.buttons.push(
+                  <button
+                    key="new-term"
+                    className="icon-btn !p-1"
+                    title="新建终端"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onAddTerminalIn(node.getId());
+                    }}
+                  >
+                    <FiPlus size={13} />
+                  </button>,
+                );
+              }}
+            />
+          </div>
+          {locked && (
+            <LockOverlay
+              mode={activeWs?.lockHash ? "unlock" : "set"}
+              onSubmit={async (pwd) => {
+                if (!activeWs) return false;
+                if (activeWs.lockHash) {
+                  const hash = await sha256(LOCK_SALT + pwd);
+                  if (hash === activeWs.lockHash) {
+                    onUnlock(activeWs.id);
+                    return true;
+                  }
+                  return false;
+                }
+                onSetLockPassword(activeWs.id, await sha256(LOCK_SALT + pwd));
+                return true;
+              }}
+            />
+          )}
+        </div>
       );
     }
     return null;

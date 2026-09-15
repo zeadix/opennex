@@ -6,6 +6,7 @@ export interface Workspace {
   id: number;
   name: string;
   locked: boolean;
+  lockHash?: string;
 }
 
 const KEY = "opennex-workspaces";
@@ -23,6 +24,7 @@ export function loadWorkspaces(): Workspace[] {
         id: nextId(),
         name: String(w.name ?? "工作空间"),
         locked: !!w.locked,
+        lockHash: w.lockHash,
       }));
       // Keep the seed clear of restored ids.
       seed = Math.max(seed, ...list.map((w) => w.id + 1));
@@ -40,4 +42,13 @@ export function persistWorkspaces(list: Workspace[]) {
 
 export function makeWorkspace(name: string): Workspace {
   return { id: nextId(), name, locked: false };
+}
+
+
+export const LOCK_SALT = "opennex-ws-lock-v1";
+
+export async function sha256(text: string): Promise<string> {
+  const data = new TextEncoder().encode(text);
+  const buf = await crypto.subtle.digest("SHA-256", data);
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
