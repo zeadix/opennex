@@ -94,7 +94,17 @@ function termDefault() {
           id: TERM_TABSET_ID,
           weight: 100,
           selected: 0,
-          children: [],
+          children: [
+            {
+              type: "tab",
+              id: "term-1",
+              name: "bash 1",
+              component: "termpane",
+              enableClose: true,
+              enableRenderOnDemand: false,
+              config: { slot: 1 },
+            },
+          ],
         },
       ],
     },

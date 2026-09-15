@@ -298,6 +298,19 @@ async fn spawn_ws_server(sessions: Arc<SessionMap>) {
     axum::serve(listener, app).await.expect("ws server");
 }
 
+/// Block briefly until the WS server thread has bound its port (a
+/// terminal created in the first milliseconds of app startup would
+/// otherwise receive wsPort=0 and connect to nothing).
+fn wait_ws_port() -> u16 {
+    for _ in 0..100 {
+        if let Some(p) = WS_PORT.get() {
+            return *p;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    WS_PORT.get().copied().unwrap_or(0)
+}
+
 #[tauri::command]
 fn start_terminal(
     state: tauri::State<AppState>,
@@ -315,7 +328,7 @@ fn start_terminal(
         command,
         shell,
     )?;
-    let ws_port = WS_PORT.get().copied().unwrap_or(0);
+    let ws_port = wait_ws_port();
     Ok(json!({ "session": session_id, "wsPort": ws_port }))
 }
 
