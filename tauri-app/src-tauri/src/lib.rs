@@ -72,6 +72,7 @@ static WS_PORT: OnceLock<u16> = OnceLock::new();
 const REMOTE_HTML: &[u8] = include_bytes!("../remote/remote.html");
 const REMOTE_XTERM_JS: &[u8] = include_bytes!("../remote/xterm.js");
 const REMOTE_XTERM_CSS: &[u8] = include_bytes!("../remote/xterm.css");
+const REMOTE_FIT_JS: &[u8] = include_bytes!("../remote/fit.js");
 
 /// Best-effort LAN IPv4 (UDP connect trick — no packets actually sent).
 fn lan_ipv4() -> Option<String> {
@@ -346,6 +347,9 @@ async fn spawn_ws_server(sessions: Arc<SessionMap>) {
         }))
         .route("/remote/xterm.css", get(|| async {
             serve_bytes(REMOTE_XTERM_CSS, "text/css")
+        }))
+        .route("/remote/fit.js", get(|| async {
+            serve_bytes(REMOTE_FIT_JS, "application/javascript")
         }))
         .route("/remote/sessions", get(remote_sessions))
         .with_state(sessions);

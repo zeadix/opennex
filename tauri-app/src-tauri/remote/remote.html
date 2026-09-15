@@ -15,6 +15,10 @@
   #cmd{flex:1;background:#0b0e14;border:1px solid #222a38;border-radius:8px;color:#d6dbe6;padding:8px 12px;font-family:monospace;font-size:14px;outline:none}
   #send{background:#23465c;color:#4fc3f7;border:none;border-radius:8px;padding:0 18px;font-size:14px}
   #send:active{filter:brightness(1.4)}
+  #keys{position:absolute;bottom:52px;left:0;right:0;display:flex;gap:6px;overflow-x:auto;padding:6px 10px;background:#0d1119;border-top:1px solid #1a2130}
+  #keys button{flex-shrink:0;background:#171c26;color:#d6dbe6;border:1px solid #222a38;border-radius:6px;padding:7px 12px;font-family:monospace;font-size:12px}
+  #keys button:active{background:#23465c}
+  #term{inset:44px 0 104px 0}
 </style>
 </head>
 <body>
@@ -23,18 +27,39 @@
   <select id="sessionSel"></select>
 </div>
 <div id="term"></div>
+<div id="keys">
+  <button data-k="\u001b">Esc</button>
+  <button data-k="\t">Tab</button>
+  <button data-k="\u0003">^C</button>
+  <button data-k="\u0004">^D</button>
+  <button data-k="\u001b[A">↑</button>
+  <button data-k="\u001b[B">↓</button>
+  <button data-k="\u001b[D">←</button>
+  <button data-k="\u001b[C">→</button>
+  <button data-k="\u001b[3~">Del</button>
+  <button data-k="\u001b[H">Home</button>
+  <button data-k="\u001b[F">End</button>
+</div>
 <div id="inputrow">
   <input id="cmd" placeholder="输入命令（回车执行）" autocomplete="off">
   <button id="send">执行</button>
 </div>
 <script src="/remote/xterm.js"></script>
+<script src="/remote/fit.js"></script>
 <script>
 (function(){
   const params = new URLSearchParams(location.search);
   const myToken = params.get("k") || "";
   const term = new window.Terminal({ fontSize: 13, theme: { background: "#0b0e14", foreground: "#d6dbe6", cursor: "#4fc3f7" } });
+  const fit = new window.FitAddon.FitAddon();
+  term.loadAddon(fit);
   term.open(document.getElementById("term"));
   term.writeln("\x1b[90m连接中…\x1b[0m");
+  function doFit() {
+    try { fit.fit(); if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows })); } catch (e) {}
+  }
+  window.addEventListener("resize", doFit);
+  new ResizeObserver(doFit).observe(document.getElementById("term"));
   let ws = null, cur = "";
   async function loadSessions() {
     const r = await fetch("/remote/sessions");
@@ -55,7 +80,7 @@
     ws = new WebSocket(((location.protocol === "https:") ? "wss://" : "ws://") + location.host + "/ws?session=" + sessionId);
     ws.binaryType = "arraybuffer";
     ws.onmessage = (e) => term.write(new Uint8Array(e.data));
-    ws.onopen = () => term.scrollToBottom();
+    ws.onopen = () => { doFit(); term.scrollToBottom(); };
     term.onData((d) => { if (ws && ws.readyState === 1) ws.send(new TextEncoder().encode(d)); });
   }
   document.getElementById("sessionSel").addEventListener("change", (e) => attach(e.target.value));
@@ -66,6 +91,13 @@
     document.getElementById("cmd").value = "";
   }
   document.getElementById("send").addEventListener("click", runCmd);
+  document.querySelectorAll("#keys button").forEach((b) => {
+    b.addEventListener("click", () => {
+      const k = b.getAttribute("data-k").replace(/\\u([0-9a-fA-F]{4})/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
+      if (ws && ws.readyState === 1) ws.send(new TextEncoder().encode(k));
+      term.focus();
+    });
+  });
   document.getElementById("cmd").addEventListener("keydown", (e) => { if (e.key === "Enter") runCmd(); });
   loadSessions().then((list) => { if (list.length) attach(list[0].id); });
 })();
