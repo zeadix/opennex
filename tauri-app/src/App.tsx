@@ -1,8 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { Actions, DockLocation } from "flexlayout-react";
 import DockRoot, { Page, PAGE_TAB_ID, seedTermSlots } from "./dock/DockRoot";
-import { MAIN_TABSET_ID, loadMainModel, loadTermModel, maxTermSlot, saveModels } from "./dock/model";
-import { hasTermPane } from "./dock/model";
+import {
+  hasTermPane,
+  loadMainModel,
+  loadTermModel,
+  mainTabsetId,
+  maxTermSlot,
+  saveModels,
+  termTabsetId,
+} from "./dock/model";
 import { useTheme } from "./theme/useTheme";
 import { useSettings } from "./settings";
 import SshPage, { SshHost, loadHosts, saveHosts } from "./pages/SshPage";
@@ -35,7 +42,7 @@ export default function App() {
               enableRenderOnDemand: false,
               config: { slot },
             },
-            "termset",
+            termTabsetId(termModel),
             DockLocation.CENTER,
             -1,
           ),
@@ -88,7 +95,7 @@ export default function App() {
             enableClose: true,
             enableRenderOnDemand: false,
           },
-          MAIN_TABSET_ID,
+          mainTabsetId(mainModel),
           DockLocation.CENTER,
           -1,
         ),
@@ -115,7 +122,7 @@ export default function App() {
             shell: settings.shell || null,
           },
         },
-        "termset",
+        termTabsetId(termModel),
         DockLocation.CENTER,
         -1,
       ),

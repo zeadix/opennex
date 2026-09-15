@@ -153,6 +153,20 @@ export function hasTermPane(model: Model): boolean {
 }
 
 /** Highest slot number referenced by terminal tabs (bash <n> naming). */
+/** Id of the main tabset (the second child of the root row). 0.11
+ * regenerates ids for EMPTY tabsets, so callers must resolve this at
+ * runtime instead of trusting a stored constant. */
+export function mainTabsetId(model: Model): string {
+  const children = (model as any).getRootRow().getChildren();
+  return children[1]?.getId() ?? children[0]?.getId() ?? "";
+}
+
+/** Id of the terminal dock's tabset. */
+export function termTabsetId(model: Model): string {
+  const children = (model as any).getRootRow().getChildren();
+  return children[0]?.getId() ?? "";
+}
+
 export function maxTermSlot(term: Model): number {
   let max = 0;
   const walk = (n: any) => {
