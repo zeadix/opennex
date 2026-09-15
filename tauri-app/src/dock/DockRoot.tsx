@@ -14,6 +14,8 @@ import HistoryPage from "../pages/HistoryPage";
 import AiPage from "../pages/AiPage";
 import SettingsPage from "../pages/SettingsPage";
 import { NAV_TAB_ID, NAV_TABSET_ID, TERM_TAB_ID, MAIN_TABSET_ID, TERM_TABSET_ID } from "./model";
+import { LANGS, t } from "../i18n";
+import type { Lang } from "../i18n";
 import { broadcastEnabled, broadcastGroup } from "../terminal/registry";
 
 export type Page = "terminal" | "ssh" | "history" | "ai" | "settings";
@@ -40,6 +42,8 @@ export default function DockRoot({
   onModelChange,
   themeId,
   onTheme,
+  lang,
+  onLang,
   fontSize,
   shell,
   onFontSize,
@@ -69,6 +73,8 @@ export default function DockRoot({
   onModelChange: () => void;
   themeId: string;
   onTheme: (id: string) => void;
+  lang: Lang;
+  onLang: (l: Lang) => void;
   fontSize: number;
   shell: string;
   onFontSize?: (size: number) => void;
@@ -110,7 +116,7 @@ export default function DockRoot({
           </div>
 
           <div className="flex items-center justify-between px-2 pb-1">
-            <span className="text-[11px] font-semibold tracking-wider text-[var(--text-faint)]">工作空间</span>
+            <span className="text-[11px] font-semibold tracking-wider text-[var(--text-faint)]">{t(lang).nav}</span>
             <button className="icon-btn !p-1" title="新建工作空间" onClick={onCreateWorkspace}>
               <FiPlus size={13} />
             </button>
@@ -154,6 +160,16 @@ export default function DockRoot({
           </div>
 
           <div className="mt-auto">
+            <div
+              className="nav-item"
+              title="Switch language"
+              onClick={() => onLang(lang === "zh" ? "en" : "zh")}
+            >
+              <span className="font-mono text-[11px] font-bold text-[var(--accent)]">
+                {lang === "zh" ? "中" : "EN"}
+              </span>
+              <span>{lang === "zh" ? "中文" : "English"}</span>
+            </div>
             <div
               className="nav-item"
               title="切换主题"

@@ -13,11 +13,14 @@ import {
 } from "./dock/model";
 import { useTheme } from "./theme/useTheme";
 import { useSettings } from "./settings";
+import { loadLang, saveLang, Lang } from "./i18n";
 import SshPage, { SshHost, loadHosts, saveHosts } from "./pages/SshPage";
 import { loadWorkspaces, makeWorkspace, persistWorkspaces, Workspace } from "./workspaces";
 
 export default function App() {
   const [themeId, setThemeId] = useTheme();
+  const [lang, setLang] = useState<Lang>(loadLang);
+  useEffect(() => saveLang(lang), [lang]);
   const [settings, updateSettings] = useSettings();
   const [sshHosts, setSshHosts] = useState<SshHost[]>(loadHosts);
   const [shells, setShells] = useState<string[]>([]);
@@ -188,6 +191,8 @@ export default function App() {
       }}
       themeId={themeId}
       onTheme={setThemeId}
+      lang={lang}
+      onLang={(l: Lang) => { setLang(l); }}
       fontSize={settings.fontSize}
       onFontSize={(size) => updateSettings({ fontSize: size })}
       shell={settings.shell}
