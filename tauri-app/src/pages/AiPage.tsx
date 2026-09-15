@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { FiSend } from "react-icons/fi";
 import { invoke } from "../terminal/tauri";
+import { focusedSlot, sendTo } from "../terminal/registry";
 
 interface Msg {
   role: "user" | "assistant";
@@ -37,6 +38,7 @@ export default function AiPage() {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [inserted, setInserted] = useState(-1);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const send = async () => {
@@ -102,7 +104,7 @@ export default function AiPage() {
         )}
         <div className="space-y-3">
           {messages.map((m, i) => (
-            <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+            <div key={i} className={`flex flex-col ${m.role === "user" ? "items-end" : "items-start"}`}>
               <div
                 className={`max-w-[80%] whitespace-pre-wrap rounded-lg px-3.5 py-2.5 text-[13px] leading-relaxed ${
                   m.role === "user"
@@ -113,6 +115,18 @@ export default function AiPage() {
               >
                 {m.content}
               </div>
+              {m.role === "assistant" && !m.content.startsWith("⚠") && (
+                <button
+                  className="mt-1 rounded-md border border-[var(--border)] px-2 py-1 text-[11px] text-[var(--text-dim)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                  onClick={() => {
+                    const firstLine = m.content.split("\n").find((l) => l.trim()) ?? "";
+                    const ok = sendTo(focusedSlot.value, new TextEncoder().encode(firstLine));
+                    setInserted(ok ? i : -1);
+                  }}
+                >
+                  ⤓ 插入终端{inserted === i ? " ✓" : ""}
+                </button>
+              )}
             </div>
           ))}
           {busy && (
