@@ -7,8 +7,9 @@
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Query, State};
-use axum::response::IntoResponse;
+use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
+use axum::Json;
 use axum::Router;
 use tokio::sync::mpsc;
 use portable_pty::native_pty_system;
@@ -31,9 +32,24 @@ struct PtySession {
 #[derive(Default)]
 struct SessionMap {
     inner: Mutex<HashMap<String, Arc<PtySession>>>,
+    order: Mutex<Vec<(String, String)>>, // (id, display name), insertion order
 }
 
 impl SessionMap {
+    fn insert_named(&self, id: String, name: String, s: PtySession) {
+        self.order.lock().unwrap().push((id.clone(), name));
+        self.inner.lock().unwrap().insert(id, Arc::new(s));
+    }
+    /// Live sessions (id + display name) in insertion order — feeds the
+    /// remote page's session picker.
+    fn names(&self) -> Vec<serde_json::Value> {
+        self.order
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(id, name)| json!({ "id": id, "name": name }))
+            .collect()
+    }
     fn insert(&self, id: String, s: PtySession) {
         self.inner.lock().unwrap().insert(id, Arc::new(s));
     }
@@ -50,6 +66,19 @@ struct AppState {
 }
 
 static WS_PORT: OnceLock<u16> = OnceLock::new();
+
+/// Remote-control page assets, embedded at compile time (zero network
+/// dependencies at runtime — mirrors the egui build's approach).
+const REMOTE_HTML: &[u8] = include_bytes!("../remote/remote.html");
+const REMOTE_XTERM_JS: &[u8] = include_bytes!("../remote/xterm.js");
+const REMOTE_XTERM_CSS: &[u8] = include_bytes!("../remote/xterm.css");
+
+/// Best-effort LAN IPv4 (UDP connect trick — no packets actually sent).
+fn lan_ipv4() -> Option<String> {
+    let s = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+    s.connect("8.8.8.8:80").ok()?;
+    Some(s.local_addr().ok()?.ip().to_string())
+}
 
 /// Global command history, captured from the INPUT path (bytes the user
 /// sends are line-buffered; a carriage return commits the line). Newest
@@ -109,6 +138,7 @@ fn record_line(line: String) {
 
 fn spawn_pty(
     session_id: String,
+    display_name: String,
     sessions: Arc<SessionMap>,
     cols: u16,
     rows: u16,
@@ -154,8 +184,9 @@ fn spawn_pty(
         .try_clone_reader()
         .map_err(|e| format!("clone reader: {e}"))?;
 
-    sessions.insert(
+    sessions.insert_named(
         session_id,
+        display_name,
         PtySession {
             writer: Mutex::new(pair.master.take_writer().map_err(|e| format!("writer: {e}"))?),
             master: Mutex::new(pair.master),
@@ -286,6 +317,19 @@ async fn ws_handler(
     }
 }
 
+fn serve_bytes(bytes: &'static [u8], content_type: &'static str) -> Response {
+    (
+        [(axum::http::header::CONTENT_TYPE, content_type)],
+        bytes.to_vec(),
+    )
+        .into_response()
+}
+
+async fn remote_sessions(State(sessions): State<Arc<SessionMap>>) -> Response {
+    let names = sessions.names();
+    Json(json!({ "sessions": names })).into_response()
+}
+
 async fn spawn_ws_server(sessions: Arc<SessionMap>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
@@ -294,6 +338,16 @@ async fn spawn_ws_server(sessions: Arc<SessionMap>) {
     let _ = WS_PORT.set(port);
     let app = Router::new()
         .route("/ws", get(ws_handler))
+        .route("/remote", get(|| async {
+            Html(String::from_utf8_lossy(REMOTE_HTML).into_owned()).into_response()
+        }))
+        .route("/remote/xterm.js", get(|| async {
+            serve_bytes(REMOTE_XTERM_JS, "application/javascript")
+        }))
+        .route("/remote/xterm.css", get(|| async {
+            serve_bytes(REMOTE_XTERM_CSS, "text/css")
+        }))
+        .route("/remote/sessions", get(remote_sessions))
         .with_state(sessions);
     axum::serve(listener, app).await.expect("ws server");
 }
@@ -318,10 +372,13 @@ fn start_terminal(
     rows: u16,
     command: Option<Vec<String>>,
     shell: Option<String>,
+    name: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let session_id = uuid::Uuid::new_v4().simple().to_string();
+    let display_name = name.unwrap_or_else(|| "bash".into());
     spawn_pty(
         session_id.clone(),
+        display_name.clone(),
         state.sessions.clone(),
         cols,
         rows,
@@ -329,10 +386,18 @@ fn start_terminal(
         shell,
     )?;
     let ws_port = wait_ws_port();
-    Ok(json!({ "session": session_id, "wsPort": ws_port }))
+    Ok(json!({ "session": session_id, "wsPort": ws_port, "name": display_name }))
 }
 
 /// Shells available on this machine (from /etc/shells, deduped).
+/// Remote-control endpoint info for the in-app QR view.
+#[tauri::command]
+fn remote_info() -> serde_json::Value {
+    let port = WS_PORT.get().copied().unwrap_or(0);
+    let ip = lan_ipv4().unwrap_or_else(|| "127.0.0.1".into());
+    json!({ "url": format!("http://{ip}:{port}/remote"), "lanIp": ip, "port": port })
+}
+
 #[tauri::command]
 fn list_shells() -> Vec<String> {
     let mut out: Vec<String> = std::fs::read_to_string("/etc/shells")
@@ -419,6 +484,7 @@ pub fn run() {
             start_terminal,
             ws_port,
             list_shells,
+            remote_info,
             get_history,
             ai_chat
         ])

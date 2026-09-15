@@ -13,12 +13,13 @@ import SshPage, { SshHost } from "../pages/SshPage";
 import HistoryPage from "../pages/HistoryPage";
 import AiPage from "../pages/AiPage";
 import SettingsPage from "../pages/SettingsPage";
+import RemotePage from "../pages/RemotePage";
 import { NAV_TAB_ID, NAV_TABSET_ID, TERM_TAB_ID, MAIN_TABSET_ID, TERM_TABSET_ID } from "./model";
 import { LANGS, t } from "../i18n";
 import type { Lang } from "../i18n";
 import { broadcastEnabled, broadcastGroup } from "../terminal/registry";
 
-export type Page = "terminal" | "ssh" | "history" | "ai" | "settings";
+export type Page = "terminal" | "ssh" | "history" | "ai" | "settings" | "remote";
 
 export const PAGE_TAB_ID: Record<Page, string> = {
   terminal: TERM_TAB_ID,
@@ -26,6 +27,7 @@ export const PAGE_TAB_ID: Record<Page, string> = {
   history: "tab-history",
   ai: "tab-ai",
   settings: "tab-settings",
+  remote: "tab-remote",
 };
 
 export const PAGE_NAME: Record<Page, string> = {
@@ -34,6 +36,7 @@ export const PAGE_NAME: Record<Page, string> = {
   history: "历史",
   ai: "AI",
   settings: "设置",
+  remote: "远程",
 };
 
 export default function DockRoot({
@@ -148,7 +151,7 @@ export default function DockRoot({
 
           <div className="my-3 h-px bg-[var(--border)]" />
           <div className="flex flex-col gap-0.5">
-            {(["terminal", "ssh", "history", "ai", "settings"] as Page[]).map((p) => (
+            {(["terminal", "ssh", "history", "ai", "settings", "remote"] as Page[]).map((p) => (
               <div
                 key={p}
                 className={`nav-item ${page === p ? "active" : ""}`}
@@ -200,6 +203,7 @@ export default function DockRoot({
               fontSize={fontSize}
               shell={cfg.shell}
               command={cfg.command}
+              name={tn.getName?.()}
               onFontSize={onFontSize}
             />
           );
@@ -208,6 +212,7 @@ export default function DockRoot({
         if (tcomp === "history") return <HistoryPage />;
         if (tcomp === "ai") return <AiPage />;
         if (tcomp === "settings") return <SettingsPage settings={settings} onSettings={onSettings} themeId={themeId} onTheme={onTheme} />;
+        if (tcomp === "remote") return <RemotePage />;
         return null;
       };
       return (

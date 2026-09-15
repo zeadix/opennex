@@ -51,6 +51,7 @@ export default function TerminalPane({
   command?: string[];
   shell?: string;
   onFontSize?: (size: number) => void;
+  name?: string;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);

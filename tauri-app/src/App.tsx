@@ -117,7 +117,7 @@ export default function App() {
           {
             type: "tab",
             id: tabId,
-            name: p === "terminal" ? "终端" : p.toUpperCase(),
+            name: p === "remote" ? "远程" : p === "terminal" ? "终端" : p.toUpperCase(),
             component: p,
             enableClose: true,
             enableRenderOnDemand: false,
