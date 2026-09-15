@@ -103,5 +103,28 @@ export function applyTheme(id: string) {
   for (const [k, v] of Object.entries(theme.colors)) {
     root.style.setProperty(`--${k.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase())}`, v);
   }
+  // flexlayout-react's stylesheet reads --fl-color-* — map our tokens so
+  // the dock chrome (tabsets/tabs/dividers) follows the app theme.
+  const fl = {
+    "--fl-color-background": theme.colors.bg,
+    "--fl-color-tabset-background": theme.colors.bgPanel,
+    "--fl-color-tab-content": theme.colors.bg,
+    "--fl-color-tabset-background-selected": theme.colors.bgActive,
+    "--fl-color-tabset-background-hover": theme.colors.bgHover,
+    "--fl-color-border": theme.colors.border,
+    "--fl-color-divider": theme.colors.border,
+    "--fl-color-text": theme.colors.text,
+    "--fl-color-text-unselected": theme.colors.textDim,
+    "--fl-color-text-disabled": theme.colors.textFaint,
+    "--fl-color-selected-active": theme.colors.accent,
+    "--fl-color-selected-background": theme.colors.bgActive,
+    "--fl-color-hover": theme.colors.bgHover,
+    "--fl-color-button": theme.colors.bgHover,
+    "--fl-color-button-hover": theme.colors.bgActive,
+    "--fl-color-button-active": theme.colors.accentDim,
+  };
+  for (const [k, v] of Object.entries(fl)) {
+    root.style.setProperty(k, v);
+  }
   localStorage.setItem(KEY, theme.id);
 }
