@@ -91,7 +91,19 @@ export default function TerminalPane({
         if (ws && ws.readyState === WebSocket.OPEN && (term.cols !== cols || term.rows !== rows)) {
           cols = term.cols;
           rows = term.rows;
-          ws.send(new TextEncoder().encode(JSON.stringify({ type: "resize", cols, rows })));
+          // MUST be a TEXT frame: the backend routes Text frames to the
+          // control channel and Binary frames to the PTY input. Encoding
+          // this JSON as binary wrote the literal `{"type":"resize"...}`
+          // into the shell — polluting the input line (terminals showed
+          // the JSON and Enter stopped working).
+          ws.send(JSON.stringify({ type: "resize", cols, rows }));
+        }
+      };
+      // A dead socket must never look like a live terminal: show the
+      // session end so keystrokes are visibly going nowhere.
+      ws.onclose = () => {
+        if (!disposed) {
+          term.write("\r\n\x1b[90m[会话已结束]\x1b[0m\r\n");
         }
       };
       const ro = new ResizeObserver(() => {
