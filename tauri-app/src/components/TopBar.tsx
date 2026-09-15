@@ -92,7 +92,7 @@ export default function TopBar({
   return (
     <div
       ref={barRef}
-      className="flex h-8 shrink-0 items-center gap-0.5 border-b border-[var(--border)] bg-[var(--bg-panel)] px-2 text-[12px]"
+      className="flex h-8 shrink-0 items-center gap-0.5 border-b border-[var(--border)] bg-[var(--bg-panel)] px-2 text-[12px] outline outline-1 outline-[var(--accent)]"
     >
       <span className="glow-text mr-2 font-mono text-[12px] font-bold">OpenNex</span>
       {menus.map((m) => (
