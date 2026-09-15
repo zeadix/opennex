@@ -4,7 +4,7 @@ import { Layout, Model, Actions, DockLocation, Action } from "flexlayout-react";
 // carry the entire layout geometry — without this sheet the dock
 // collapses into stacked blocks.
 import "flexlayout-react/style/dark.css";
-import { FiPlus, FiTrash2, FiUnlock, FiEdit2 } from "react-icons/fi";
+import { FiPlus, FiRadio, FiTrash2, FiUnlock, FiEdit2 } from "react-icons/fi";
 import LockOverlay from "./LockOverlay";
 import { sha256, LOCK_SALT } from "../workspaces";
 import TerminalPane from "../terminal/TerminalPane";
@@ -14,6 +14,7 @@ import HistoryPage from "../pages/HistoryPage";
 import AiPage from "../pages/AiPage";
 import SettingsPage from "../pages/SettingsPage";
 import { NAV_TAB_ID, NAV_TABSET_ID, TERM_TAB_ID, MAIN_TABSET_ID, TERM_TABSET_ID } from "./model";
+import { broadcastEnabled, broadcastGroup } from "../terminal/registry";
 
 export type Page = "terminal" | "ssh" | "history" | "ai" | "settings";
 
@@ -96,6 +97,7 @@ export default function DockRoot({
   const [renamingId, setRenamingId] = useState<number | null>(null);
   const [renameBuf, setRenameBuf] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
+  const [broadcast, setBroadcast] = useState(false);
 
   const mainFactory = (node: any) => {
     const comp = node.getComponent();
@@ -195,6 +197,36 @@ export default function DockRoot({
       return (
         <div className="relative flex h-full flex-col overflow-hidden">
           <div className="flex h-8 shrink-0 items-center justify-end gap-1 border-b border-[var(--border)] bg-[var(--bg-panel)] px-2">
+            <button
+              className={`icon-btn ${broadcast ? "!text-[var(--danger)]" : ""}`}
+              title={broadcast ? "关闭广播输入（全部终端）" : "开启广播输入（全部终端）"}
+              onClick={() => {
+                const next = !broadcast;
+                setBroadcast(next);
+                broadcastEnabled.value = next;
+                if (next) {
+                  broadcastGroup.clear();
+                  // Collect live session slots from the model (defensive
+                  // traversal — getRootRow typing varies across versions).
+                  const root: any = (termModel as any).getRootRow?.() ?? {};
+                  const stack: any[] = [...(root.getChildren?.() ?? [])];
+                  while (stack.length) {
+                    const n: any = stack.pop();
+                    if (!n) continue;
+                    if (n.getType?.() === "tab") {
+                      const m = /term-(\d+)/.exec(n.getId?.() ?? "");
+                      if (m) broadcastGroup.add(Number(m[1]));
+                    } else {
+                      stack.push(...(n.getChildren?.() ?? []));
+                    }
+                  }
+                } else {
+                  broadcastGroup.clear();
+                }
+              }}
+            >
+              <FiRadio size={14} />
+            </button>
             <button
               className="icon-btn"
               title="新建终端（选择 Shell）"

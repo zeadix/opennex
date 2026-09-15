@@ -1,6 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { SearchAddon } from "@xterm/addon-search";
 import SearchBar from "./SearchBar";
+import {
+  broadcastEnabled,
+  broadcastGroup,
+  broadcastInput,
+  focusedSlot,
+  registerSocket,
+  unregisterSocket,
+} from "./registry";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { invoke } from "./tauri";
@@ -116,6 +124,7 @@ export default function TerminalPane({
       setStatus({ state: "attaching" });
       ws = new WebSocket(`ws://127.0.0.1:${start.wsPort}/ws?session=${start.session}`);
       ws.binaryType = "arraybuffer";
+      registerSocket(sessionId, ws);
       ws.onerror = () => {
         if (!disposed) {
           setStatus({ state: "ws-error" });
@@ -135,8 +144,13 @@ export default function TerminalPane({
         return true;
       });
       term.onData((data) => {
+        const bytes = new TextEncoder().encode(data);
         if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(new TextEncoder().encode(data));
+          ws.send(bytes);
+        }
+        // Broadcast mode: replicate keystrokes to the group.
+        if (broadcastGroup.has(sessionId) || broadcastEnabled.value) {
+          broadcastInput(sessionId, bytes);
         }
       });
       const sendResize = () => {
@@ -205,6 +219,7 @@ export default function TerminalPane({
       if (cleanup) cleanup();
       (hostRef.current as any)?._wheelCleanup?.();
       (hostRef.current as any)?._keyCleanup2?.();
+      unregisterSocket(sessionId);
       ws?.close();
       search.dispose();
       term.dispose();
@@ -217,6 +232,9 @@ export default function TerminalPane({
       ref={hostRef}
       className="absolute inset-0 px-2 py-1"
       style={{ background: "var(--bg)" }}
+      onMouseDown={() => {
+        focusedSlot.value = sessionId;
+      }}
     >
       {searchOpen && (
         <SearchBar
