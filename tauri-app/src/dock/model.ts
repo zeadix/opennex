@@ -115,29 +115,35 @@ function termDefault() {
   };
 }
 
+// LAYOUT PERSISTENCE IS DISABLED for now: layouts saved during the
+// flexlayout migration rounds are unreliable (0.11-era blobs, selected:-1
+// states, missing seeded terminals). Every launch starts from the clean
+// default below so the UI is always correct; re-enable persistence once
+// the dock model set is stable.
 export function loadMainModel(): Model {
+  // Also purge any legacy blobs saved under the old keys.
   try {
-    const raw = localStorage.getItem(MAIN_KEY);
-    if (raw) return Model.fromJson(JSON.parse(raw));
+    for (const k of ["opennex-dock-main", "opennex-dock-term", MAIN_KEY, TERM_KEY]) {
+      localStorage.removeItem(k);
+    }
   } catch {
-    /* default below */
+    /* private mode — ignore */
   }
   return Model.fromJson(mainDefault());
 }
 
 export function loadTermModel(): Model {
   try {
-    const raw = localStorage.getItem(TERM_KEY);
-    if (raw) return Model.fromJson(JSON.parse(raw));
+    localStorage.removeItem(TERM_KEY);
   } catch {
-    /* default below */
+    /* ignore */
   }
   return Model.fromJson(termDefault());
 }
 
-export function saveModels(main: Model, term: Model) {
-  localStorage.setItem(MAIN_KEY, JSON.stringify(main.toJson()));
-  localStorage.setItem(TERM_KEY, JSON.stringify(term.toJson()));
+export function saveModels(_main: Model, _term: Model) {
+  // Persistence disabled alongside load (see loadMainModel) — layouts
+  // always start from the clean default until the dock model stabilizes.
 }
 
 /** Does the model contain any terminal pane tab? (legacy layouts saved
