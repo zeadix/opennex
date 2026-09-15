@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
+import { FiLock, FiInfo } from "react-icons/fi";
 import { THEMES } from "../theme/themes";
 import { Settings } from "../settings";
+import { loadWorkspaces, persistWorkspaces, sha256, LOCK_SALT } from "../workspaces";
 
 export default function SettingsPage({
   settings,
@@ -18,9 +20,62 @@ export default function SettingsPage({
     import("@tauri-apps/api/core").then((m) => m.invoke<string[]>("list_shells")).then(setShells).catch(() => {});
   }, []);
 
+  // ---- lock management -------------------------------------------------
+  const workspaces = loadWorkspaces();
+  const [lockPwd, setLockPwd] = useState("");
+  const [lockMsg, setLockMsg] = useState<string | null>(null);
+  const setAllLockPasswords = async () => {
+    if (lockPwd.length < 4) return setLockMsg("密码至少 4 位");
+    const hash = await sha256(LOCK_SALT + lockPwd);
+    const list = loadWorkspaces();
+    persistWorkspaces(list.map((w) => ({ ...w, lockHash: hash })));
+    setLockPwd("");
+    setLockMsg(`已为 ${list.length} 个工作空间设置锁定密码`);
+  };
+  const clearAllLocks = () => {
+    persistWorkspaces(loadWorkspaces().map((w) => ({ ...w, locked: false, lockHash: undefined })));
+    setLockMsg("已清除全部工作空间的锁定密码");
+  };
+
   return (
     <div className="h-full overflow-y-auto px-8 py-6">
       <div className="mx-auto max-w-[560px] space-y-8">
+        <section>
+          <h2 className="mb-3 text-[15px] font-semibold">关于</h2>
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-panel)] p-4">
+            <div className="glow-text animate-fade-up text-[20px] font-bold tracking-wide">OpenNex</div>
+            <div className="mt-1 text-[12px] text-[var(--text-dim)]">
+              Tauri 版 · v0.1.55 · 终端工作台
+            </div>
+            <div className="mt-2 flex items-center gap-1.5 text-[11px] text-[var(--text-faint)]">
+              <FiInfo size={12} /> Rust 后端 + xterm.js WebGL/Canvas 终端
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <h2 className="mb-3 text-[15px] font-semibold">锁定</h2>
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-panel)] p-4">
+            <div className="mb-2 flex items-center gap-1.5 text-[12px] text-[var(--text-dim)]">
+              <FiLock size={13} /> 为全部工作空间设置锁定密码
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="password"
+                value={lockPwd}
+                onChange={(e) => { setLockPwd(e.target.value); setLockMsg(null); }}
+                placeholder="至少 4 位"
+                className="dialog-input !w-52"
+              />
+              <button className="rounded-md bg-[var(--accent-dim)] px-3 py-1.5 text-[12px] text-[var(--accent)] hover:brightness-125"
+                onClick={setAllLockPasswords}>设置</button>
+              <button className="rounded-md border border-[var(--border)] px-3 py-1.5 text-[12px] text-[var(--text-dim)] hover:text-[var(--danger)]"
+                onClick={clearAllLocks}>清除</button>
+            </div>
+            {lockMsg && <div className="mt-2 text-[11px] text-[var(--success)]">{lockMsg}</div>}
+          </div>
+        </section>
+
         <section>
           <h2 className="mb-3 text-[15px] font-semibold">外观</h2>
           <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-panel)] p-4">

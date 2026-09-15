@@ -116,3 +116,27 @@ html, body, #root {
   user-select: text;
 }
 .dialog-input:focus { border-color: var(--accent); }
+
+/* ── react-bits style flourishes ─────────────────────────────── */
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes glow-pulse {
+  0%, 100% { box-shadow: 0 0 12px var(--accent-dim); }
+  50% { box-shadow: 0 0 26px var(--accent-dim); }
+}
+
+.animate-fade-up {
+  animation: fade-up 0.22s ease-out both;
+}
+.card-glow {
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.card-glow:hover {
+  border-color: var(--accent);
+  box-shadow: 0 0 18px var(--accent-dim);
+}
+.glow-pulse {
+  animation: glow-pulse 2.4s ease-in-out infinite;
+}

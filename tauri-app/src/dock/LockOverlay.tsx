@@ -30,7 +30,7 @@ export default function LockOverlay({
   return (
     <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-4 bg-[var(--bg)]/95 backdrop-blur-sm">
       <div
-        className="flex h-14 w-14 items-center justify-center rounded-2xl border border-[var(--border)] bg-[var(--bg-elevated)]"
+        className="glow-pulse flex h-14 w-14 items-center justify-center rounded-2xl border border-[var(--border)] bg-[var(--bg-elevated)]"
         style={{ boxShadow: "0 0 24px var(--accent-dim)" }}
       >
         <FiLock size={24} className="text-[var(--accent)]" />
