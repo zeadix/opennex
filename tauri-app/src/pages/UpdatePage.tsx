@@ -12,7 +12,7 @@ interface UpdateResult {
 /** Update checker: compares against the public manifest and lists the
  * new release's bilingual notes. (Download/install comes with the
  * Tauri updater integration.) */
-export default function UpdatePage({ lang }: { lang: "zh" | "en" }) {
+export default function UpdatePage({ lang }: { lang: string }) {
   const [result, setResult] = useState<UpdateResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [checking, setChecking] = useState(true);
@@ -29,7 +29,7 @@ export default function UpdatePage({ lang }: { lang: "zh" | "en" }) {
   useEffect(check, []);
 
   const notes = result
-    ? lang === "en"
+    ? lang.startsWith("en")
       ? result.changesEn.filter((c) => c.length > 0)
       : result.changes
     : [];
@@ -58,15 +58,15 @@ export default function UpdatePage({ lang }: { lang: "zh" | "en" }) {
                   }`}
                 >
                   {result.updateAvailable
-                    ? lang === "zh" ? "有新版本" : "Update available"
-                    : lang === "zh" ? "已是最新" : "Up to date"}
+                    ? lang.startsWith("zh") ? "有新版本" : "Update available"
+                    : lang.startsWith("en") ? "Up to date" : "已是最新"}
                 </span>
               </div>
             </div>
             {notes.length > 0 && (
               <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-panel)] p-4">
                 <div className="mb-2 text-[12px] font-semibold text-[var(--text-dim)]">
-                  {lang === "zh" ? "更新内容" : "What's new"}
+                  {lang.startsWith("en") ? "What's new" : "更新内容"}
                 </div>
                 <ul className="space-y-1.5">
                   {notes.map((c, i) => (

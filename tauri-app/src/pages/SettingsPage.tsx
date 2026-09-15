@@ -22,7 +22,7 @@ export default function SettingsPage({
   onSettings: (patch: Partial<Settings>) => void;
   themeId: string;
   onTheme: (id: string) => void;
-  lang: "zh" | "en";
+  lang: string;
 }) {
   const [shells, setShells] = useState<string[]>([]);
   useEffect(() => {
