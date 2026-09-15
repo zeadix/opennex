@@ -33,12 +33,14 @@ export default function TerminalPane({
   fontSize,
   command,
   shell,
+  onFontSize,
 }: {
   sessionId: number;
   themeId: string;
   fontSize: number;
   command?: string[];
   shell?: string;
+  onFontSize?: (size: number) => void;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -161,6 +163,16 @@ export default function TerminalPane({
       ws.onclose = () => {
         if (!disposed) setStatus({ state: "closed" });
       };
+      // Ctrl+wheel = font size (matches the egui build's behavior).
+      const host = hostRef.current!;
+      const onWheel = (e: WheelEvent) => {
+        if (!e.ctrlKey || !onFontSize) return;
+        e.preventDefault();
+        const next = Math.min(28, Math.max(8, fontSize + (e.deltaY < 0 ? 1 : -1)));
+        if (next !== fontSize) onFontSize(next);
+      };
+      host.addEventListener("wheel", onWheel, { passive: false });
+      (host as any)._wheelCleanup = () => host.removeEventListener("wheel", onWheel);
       (hostRef.current as any)._cleanup = () => ro.disconnect();
     })();
 
@@ -168,6 +180,7 @@ export default function TerminalPane({
       disposed = true;
       const cleanup = (hostRef.current as any)?._cleanup;
       if (cleanup) cleanup();
+      (hostRef.current as any)?._wheelCleanup?.();
       ws?.close();
       term.dispose();
       termRef.current = null;

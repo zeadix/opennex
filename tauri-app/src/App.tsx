@@ -20,6 +20,7 @@ export default function App() {
   const [themeId, setThemeId] = useTheme();
   const [settings, updateSettings] = useSettings();
   const [sshHosts, setSshHosts] = useState<SshHost[]>(loadHosts);
+  const [shells, setShells] = useState<string[]>([]);
 
   const [mainModel] = useState(() => loadMainModel());
   const [termModel] = useState(() => loadTermModel());
@@ -59,6 +60,12 @@ export default function App() {
   useEffect(() => {
     persistWorkspaces(workspaces);
   }, [workspaces]);
+  useEffect(() => {
+    import("@tauri-apps/api/core")
+      .then((m) => m.invoke<string[]>("list_shells"))
+      .then(setShells)
+      .catch(() => {});
+  }, []);
 
   const createWorkspace = () => {
     const w = makeWorkspace(`工作空间 ${workspaces.length + 1}`);
@@ -120,7 +127,7 @@ export default function App() {
     }
   };
 
-  const addTerminal = () => {
+  const addTerminal = (command?: string[]) => {
     const slot = maxTermSlot(termModel) + 1;
     seedTermSlots(slot);
     termModel.doAction(
@@ -128,11 +135,11 @@ export default function App() {
         {
           type: "tab",
           id: `term-${slot}`,
-          name: `bash ${slot}`,
+          name: command?.[0]?.split("/").pop() ?? `bash ${slot}`,
           component: "termpane",
           enableClose: true,
           enableRenderOnDemand: false,
-          config: { slot, shell: settings.shell || null },
+          config: { slot, command: command ?? null, shell: settings.shell || null },
         },
         termTabsetId(termModel),
         DockLocation.CENTER,
@@ -182,10 +189,14 @@ export default function App() {
       themeId={themeId}
       onTheme={setThemeId}
       fontSize={settings.fontSize}
+      onFontSize={(size) => updateSettings({ fontSize: size })}
       shell={settings.shell}
       page={page}
       onOpenPage={openPage}
-      onAddTerminal={addTerminal}
+      onAddTerminal={() => addTerminal()}
+      onAddTerminalWith={(sh) => addTerminal([sh, "-l"])}
+      shells={shells}
+      defaultShell={settings.shell || shells[0] || ""}
       workspaces={workspaces}
       activeWsId={activeWsId}
       onSwitchWorkspace={setActiveWsId}

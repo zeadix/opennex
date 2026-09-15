@@ -41,9 +41,13 @@ export default function DockRoot({
   onTheme,
   fontSize,
   shell,
+  onFontSize,
   page,
   onOpenPage,
   onAddTerminal,
+  onAddTerminalWith,
+  shells,
+  defaultShell,
   workspaces,
   activeWsId,
   onSwitchWorkspace,
@@ -66,9 +70,13 @@ export default function DockRoot({
   onTheme: (id: string) => void;
   fontSize: number;
   shell: string;
+  onFontSize?: (size: number) => void;
   page: Page;
   onOpenPage: (p: Page) => void;
   onAddTerminal: () => void;
+  onAddTerminalWith: (shell: string) => void;
+  shells: string[];
+  defaultShell: string;
   workspaces: { id: number; name: string; locked: boolean; lockHash?: string }[];
   activeWsId: number;
   onSwitchWorkspace: (id: number) => void;
@@ -87,6 +95,7 @@ export default function DockRoot({
   // Main dock: the two unique panels (nav + workspace area).
   const [renamingId, setRenamingId] = useState<number | null>(null);
   const [renameBuf, setRenameBuf] = useState("");
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const mainFactory = (node: any) => {
     const comp = node.getComponent();
@@ -173,6 +182,7 @@ export default function DockRoot({
               fontSize={fontSize}
               shell={cfg.shell}
               command={cfg.command}
+              onFontSize={onFontSize}
             />
           );
         }
@@ -185,9 +195,44 @@ export default function DockRoot({
       return (
         <div className="relative flex h-full flex-col overflow-hidden">
           <div className="flex h-8 shrink-0 items-center justify-end gap-1 border-b border-[var(--border)] bg-[var(--bg-panel)] px-2">
-            <button className="icon-btn" title="新建终端" onClick={onAddTerminal}>
+            <button
+              className="icon-btn"
+              title="新建终端（选择 Shell）"
+              onClick={(e) => {
+                e.stopPropagation();
+                setMenuOpen(!menuOpen);
+              }}
+            >
               <FiPlus size={14} />
+              <svg width="9" height="9" viewBox="0 0 10 10" className="ml-0.5">
+                <path d="M1 3 L5 7 L9 3" stroke="currentColor" strokeWidth="1.4" fill="none" />
+              </svg>
             </button>
+            {menuOpen && (
+              <div
+                className="absolute right-2 top-9 z-30 w-64 rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] py-1 shadow-xl"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div
+                  className="cursor-pointer px-3 py-1.5 text-[12px] text-[var(--text)] hover:bg-[var(--bg-hover)]"
+                  onClick={() => { setMenuOpen(false); onAddTerminal(); }}
+                >
+                  默认 Shell {defaultShell ? `(${defaultShell.split("/").pop()})` : ""}
+                </div>
+                <div className="my-1 h-px bg-[var(--border)]" />
+                {shells
+                  .filter((sh) => sh !== defaultShell)
+                  .map((sh) => (
+                    <div
+                      key={sh}
+                      className="cursor-pointer px-3 py-1.5 font-mono text-[11px] text-[var(--text-dim)] hover:bg-[var(--bg-hover)] hover:text-[var(--text)]"
+                      onClick={() => { setMenuOpen(false); onAddTerminalWith(sh); }}
+                    >
+                      {sh}
+                    </div>
+                  ))}
+              </div>
+            )}
           </div>
           <div className="relative min-h-0 flex-1">
             <Layout
