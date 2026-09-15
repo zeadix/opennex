@@ -113,6 +113,8 @@ export default function TerminalPane({
           rows: term.rows,
           command: command ?? null,
           shell: shell ?? null,
+          name: name ?? null,
+          sessionId: String(sessionId),
         });
       } catch (e) {
         if (!disposed) {

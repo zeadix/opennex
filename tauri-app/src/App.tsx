@@ -16,6 +16,8 @@ import { useSettings } from "./settings";
 import { loadLang, saveLang, Lang } from "./i18n";
 import SshPage, { SshHost, loadHosts, saveHosts } from "./pages/SshPage";
 import { loadWorkspaces, makeWorkspace, persistWorkspaces, Workspace } from "./workspaces";
+import TopBar from "./components/TopBar";
+import StatusBar from "./components/StatusBar";
 
 export default function App() {
   const [themeId, setThemeId] = useTheme();
@@ -24,6 +26,8 @@ export default function App() {
   const [settings, updateSettings] = useSettings();
   const [sshHosts, setSshHosts] = useState<SshHost[]>(loadHosts);
   const [shells, setShells] = useState<string[]>([]);
+  const [activities, setActivities] = useState<Record<string, number>>({});
+  const [sideBarVisible, setSideBarVisible] = useState(true);
 
   const [mainModel] = useState(() => loadMainModel());
   const [termModel] = useState(() => loadTermModel());
@@ -68,6 +72,18 @@ export default function App() {
       .then((m) => m.invoke<string[]>("list_shells"))
       .then(setShells)
       .catch(() => {});
+  }, []);
+  // Workspace busy indicator: poll per-session last activity every 3s.
+  useEffect(() => {
+    const poll = () => {
+      import("@tauri-apps/api/core")
+        .then((m) => m.invoke<Record<string, number>>("session_activities"))
+        .then(setActivities)
+        .catch(() => {});
+    };
+    poll();
+    const id = window.setInterval(poll, 3000);
+    return () => window.clearInterval(id);
   }, []);
 
   const createWorkspace = () => {
@@ -181,7 +197,27 @@ export default function App() {
   };
 
   return (
-    <DockRoot
+    <div className="flex h-full flex-col">
+      <TopBar
+        lang={lang}
+        onLang={setLang}
+        themeId={themeId}
+        onTheme={setThemeId}
+        onNewTerminal={() => addTerminal()}
+        onLockWorkspace={() => toggleLock(activeWsId)}
+        onCycleWorkspace={() => {
+          const idx = workspaces.findIndex((w) => w.id === activeWsId);
+          const next = workspaces[(idx + 1) % workspaces.length];
+          if (next) setActiveWsId(next.id);
+        }}
+        onPage={openPage}
+        updateAvailable={false}
+        currentVersion="0.1.55"
+        sideBarVisible={sideBarVisible}
+        onToggleSidebar={() => setSideBarVisible(!sideBarVisible)}
+      />
+      <div className="flex min-h-0 flex-1">
+      <DockRoot
       mainModel={mainModel}
       termModel={termModel}
       onModelChange={() => {
@@ -219,6 +255,10 @@ export default function App() {
       onConnectSsh={connectSsh}
       settings={settings}
       onSettings={updateSettings}
+      activities={activities}
     />
+      <StatusBar sessionCount={Object.keys(activities).length} shell={settings.shell || "bash"} />
+      </div>
+    </div>
   );
 }

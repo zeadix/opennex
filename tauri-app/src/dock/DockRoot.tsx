@@ -66,6 +66,7 @@ export default function DockRoot({
   shells,
   defaultShell,
   workspaces,
+  activities,
   activeWsId,
   onSwitchWorkspace,
   onCreateWorkspace,
@@ -97,6 +98,7 @@ export default function DockRoot({
   shells: string[];
   defaultShell: string;
   workspaces: { id: number; name: string; locked: boolean; lockHash?: string }[];
+  activities: Record<string, number>;
   activeWsId: number;
   onSwitchWorkspace: (id: number) => void;
   onCreateWorkspace: () => void;
@@ -119,6 +121,11 @@ export default function DockRoot({
 
   const mainFactory = (node: any) => {
     const comp = node.getComponent();
+    // Workspace busy indicator: any session active within 10s = busy.
+    const now = Date.now();
+    const globalBusy = Object.values(activities ?? {}).some(
+      (ms) => now - ms < 10_000,
+    );
     if (comp === "nav") {
       return (
         <div className="flex h-full flex-col overflow-y-auto bg-[var(--bg-panel)] px-2 py-3">

@@ -16,6 +16,7 @@ use portable_pty::native_pty_system;
 use portable_pty::{CommandBuilder, MasterPty, PtySize};
 use serde_json::json;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::sync::OnceLock as StdOnceLock;
 static SYS: StdOnceLock<Mutex<sysinfo::System>> = StdOnceLock::new();
@@ -29,6 +30,9 @@ struct PtySession {
     killer: Mutex<Box<dyn portable_pty::ChildKiller + Send + Sync>>,
     reader: Mutex<Option<Box<dyn std::io::Read + Send>>>,
     kill: Arc<Mutex<bool>>,
+    /// Last activity (input OR output) in unix ms — feeds the workspace
+    /// busy indicator (red = active within 10s, green = idle).
+    last_activity_ms: Arc<AtomicU64>,
 }
 
 #[derive(Default)]
@@ -187,6 +191,7 @@ fn spawn_pty(
         .try_clone_reader()
         .map_err(|e| format!("clone reader: {e}"))?;
 
+    let last_activity_ms = Arc::new(AtomicU64::new(0));
     sessions.insert_named(
         session_id,
         display_name,
@@ -196,6 +201,7 @@ fn spawn_pty(
             killer: Mutex::new(killer),
             reader: Mutex::new(Some(reader)),
             kill: Arc::new(Mutex::new(false)),
+            last_activity_ms,
         },
     );
     // Waiter thread: reap the child on exit.
@@ -379,8 +385,10 @@ fn start_terminal(
     command: Option<Vec<String>>,
     shell: Option<String>,
     name: Option<String>,
+    session_id: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    let session_id = uuid::Uuid::new_v4().simple().to_string();
+    let session_id = session_id
+        .unwrap_or_else(|| uuid::Uuid::new_v4().simple().to_string());
     let display_name = name.unwrap_or_else(|| "bash".into());
     spawn_pty(
         session_id.clone(),
