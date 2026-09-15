@@ -202,6 +202,12 @@ export default function TerminalPane({
       };
       host.addEventListener("wheel", onWheel, { passive: false });
       (host as any)._wheelCleanup = () => host.removeEventListener("wheel", onWheel);
+      // External search request (global shortcut routes to the focused pane).
+      const onSearchEvent = () => {
+        if (focusedSlot.value === sessionId && !disposed) setSearchOpen(true);
+      };
+      window.addEventListener("opennex-search", onSearchEvent);
+      (host as any)._searchEvtCleanup = () => window.removeEventListener("opennex-search", onSearchEvent);
       // Ctrl+F opens the search strip.
       const onKey = (e: KeyboardEvent) => {
         if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === "f" || e.key === "F")) {
@@ -220,6 +226,7 @@ export default function TerminalPane({
       if (cleanup) cleanup();
       (hostRef.current as any)?._wheelCleanup?.();
       (hostRef.current as any)?._keyCleanup2?.();
+      (hostRef.current as any)?._searchEvtCleanup?.();
       unregisterSocket(sessionId);
       ws?.close();
       search.dispose();

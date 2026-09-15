@@ -11,6 +11,7 @@ import TerminalPane from "../terminal/TerminalPane";
 import { getTheme, THEMES } from "../theme/themes";
 import SshPage, { SshHost } from "../pages/SshPage";
 import HistoryPage from "../pages/HistoryPage";
+import FavoritesPage from "../pages/FavoritesPage";
 import AiPage from "../pages/AiPage";
 import SettingsPage from "../pages/SettingsPage";
 import RemotePage from "../pages/RemotePage";
@@ -20,7 +21,7 @@ import { LANGS, t } from "../i18n";
 import type { Lang } from "../i18n";
 import { broadcastEnabled, broadcastGroup } from "../terminal/registry";
 
-export type Page = "terminal" | "ssh" | "history" | "ai" | "settings" | "remote" | "update";
+export type Page = "terminal" | "ssh" | "history" | "ai" | "settings" | "remote" | "update" | "favorites";
 
 export const PAGE_TAB_ID: Record<Page, string> = {
   terminal: TERM_TAB_ID,
@@ -30,6 +31,7 @@ export const PAGE_TAB_ID: Record<Page, string> = {
   settings: "tab-settings",
   remote: "tab-remote",
   update: "tab-update",
+  favorites: "tab-favorites",
 };
 
 export const PAGE_NAME: Record<Page, string> = {
@@ -40,6 +42,7 @@ export const PAGE_NAME: Record<Page, string> = {
   settings: "设置",
   remote: "远程",
   update: "更新",
+  favorites: "收藏",
 };
 
 export default function DockRoot({
@@ -154,7 +157,7 @@ export default function DockRoot({
 
           <div className="my-3 h-px bg-[var(--border)]" />
           <div className="flex flex-col gap-0.5">
-            {(["terminal", "ssh", "history", "ai", "settings", "remote", "update"] as Page[]).map((p) => (
+            {(["terminal", "ssh", "history", "ai", "settings", "remote", "update", "favorites"] as Page[]).map((p) => (
               <div
                 key={p}
                 className={`nav-item ${page === p ? "active" : ""}`}
@@ -213,6 +216,7 @@ export default function DockRoot({
         }
         if (tcomp === "ssh") return <SshPage hosts={sshHosts} onHosts={onSshHosts} onConnect={onConnectSsh} />;
         if (tcomp === "history") return <HistoryPage />;
+        if (tcomp === "favorites") return <FavoritesPage />;
         if (tcomp === "ai") return <AiPage />;
         if (tcomp === "settings") return <SettingsPage settings={settings} onSettings={onSettings} themeId={themeId} onTheme={onTheme} lang={lang} />;
         if (tcomp === "remote") return <RemotePage />;
