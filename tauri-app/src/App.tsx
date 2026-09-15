@@ -18,6 +18,7 @@ import SshPage, { SshHost, loadHosts, saveHosts } from "./pages/SshPage";
 import { loadWorkspaces, makeWorkspace, persistWorkspaces, Workspace } from "./workspaces";
 import TopBar from "./components/TopBar";
 import StatusBar from "./components/StatusBar";
+import HistoryOverlay from "./terminal/HistoryOverlay";
 
 export default function App() {
   const [themeId, setThemeId] = useTheme();
@@ -28,6 +29,7 @@ export default function App() {
   const [shells, setShells] = useState<string[]>([]);
   const [activities, setActivities] = useState<Record<string, number>>({});
   const [sideBarVisible, setSideBarVisible] = useState(true);
+  const [historyOverlay, setHistoryOverlay] = useState(false);
 
   const [mainModel] = useState(() => loadMainModel());
   const [termModel] = useState(() => loadTermModel());
@@ -258,6 +260,7 @@ export default function App() {
       activities={activities}
     />
       <StatusBar sessionCount={Object.keys(activities).length} shell={settings.shell || "bash"} />
+      {historyOverlay && <HistoryOverlay onClose={() => setHistoryOverlay(false)} />}
       </div>
     </div>
   );
