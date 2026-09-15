@@ -1,4 +1,8 @@
 import { Layout, Model, Actions, DockLocation, Action } from "flexlayout-react";
+// REQUIRED: flexlayout's structural classes (tabsets, tabs, dividers)
+// carry the entire layout geometry — without this sheet the dock
+// collapses into stacked blocks.
+import "flexlayout-react/style/dark.css";
 import { FiPlus } from "react-icons/fi";
 import TerminalPane from "../terminal/TerminalPane";
 import { getTheme, THEMES } from "../theme/themes";
