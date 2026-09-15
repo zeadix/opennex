@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { SearchAddon } from "@xterm/addon-search";
+import SearchBar from "./SearchBar";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { invoke } from "./tauri";
@@ -49,6 +51,8 @@ export default function TerminalPane({
   const [status, setStatus] = useState<{ state: string; detail?: string }>({
     state: "connecting",
   });
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchRef = useRef<SearchAddon | null>(null);
 
   // Live theme/font updates without recreating the PTY.
   useEffect(() => {
@@ -71,6 +75,9 @@ export default function TerminalPane({
     termRef.current = term;
     const fit = new FitAddon();
     term.loadAddon(fit);
+    const search = new SearchAddon();
+    searchRef.current = search;
+    term.loadAddon(search);
     // NOTE: no WebGL addon by default — WebKitGTK's WebGL regularly
     // renders a fully BLACK viewport on Linux GPU stacks, which read as
     // "the terminal is empty and inputs go nowhere". The 2D canvas
@@ -120,6 +127,13 @@ export default function TerminalPane({
         // Session-exit sentinel (OSC 777) is shown as plain text.
         term.write(new Uint8Array(data));
       };
+      term.attachCustomKeyEventHandler((e) => {
+        if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === "f" || e.key === "F") && e.type === "keydown") {
+          if (!disposed) setSearchOpen(true);
+          return false;
+        }
+        return true;
+      });
       term.onData((data) => {
         if (ws && ws.readyState === WebSocket.OPEN) {
           ws.send(new TextEncoder().encode(data));
@@ -173,6 +187,15 @@ export default function TerminalPane({
       };
       host.addEventListener("wheel", onWheel, { passive: false });
       (host as any)._wheelCleanup = () => host.removeEventListener("wheel", onWheel);
+      // Ctrl+F opens the search strip.
+      const onKey = (e: KeyboardEvent) => {
+        if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === "f" || e.key === "F")) {
+          e.preventDefault();
+          if (!disposed) setSearchOpen(true);
+        }
+      };
+      host.addEventListener("keydown", onKey);
+      (host as any)._keyCleanup2 = () => host.removeEventListener("keydown", onKey);
       (hostRef.current as any)._cleanup = () => ro.disconnect();
     })();
 
@@ -181,7 +204,9 @@ export default function TerminalPane({
       const cleanup = (hostRef.current as any)?._cleanup;
       if (cleanup) cleanup();
       (hostRef.current as any)?._wheelCleanup?.();
+      (hostRef.current as any)?._keyCleanup2?.();
       ws?.close();
+      search.dispose();
       term.dispose();
       termRef.current = null;
     };
@@ -193,6 +218,18 @@ export default function TerminalPane({
       className="absolute inset-0 px-2 py-1"
       style={{ background: "var(--bg)" }}
     >
+      {searchOpen && (
+        <SearchBar
+          onSearch={(q) => (q ? searchRef.current?.findNext(q) : searchRef.current?.clearDecorations())}
+          onNext={() => searchRef.current?.findNext("")}
+          onPrev={() => searchRef.current?.findPrevious("")}
+          onClose={() => {
+            searchRef.current?.clearDecorations();
+            setSearchOpen(false);
+            termRef.current?.focus();
+          }}
+        />
+      )}
       <div
         className="pointer-events-none absolute right-2 top-1 z-20 rounded bg-[var(--bg-elevated)] px-1.5 py-0.5 font-mono text-[10px]"
         style={{ color: status.state === "connected" ? "var(--success)" : "var(--danger)" }}
