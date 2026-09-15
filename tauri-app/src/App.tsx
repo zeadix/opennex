@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Actions, DockLocation } from "flexlayout-react";
 import DockRoot, { Page, PAGE_TAB_ID, seedTermSlots } from "./dock/DockRoot";
 import { MAIN_TABSET_ID, loadMainModel, loadTermModel, maxTermSlot, saveModels } from "./dock/model";
+import { hasTermPane } from "./dock/model";
 import { useTheme } from "./theme/useTheme";
 import { useSettings } from "./settings";
 import SshPage, { SshHost, loadHosts, saveHosts } from "./pages/SshPage";
@@ -19,6 +20,27 @@ export default function App() {
     if (!seeded.current) {
       seedTermSlots(maxTermSlot(termModel));
       seeded.current = true;
+      // Legacy saved layouts may carry an EMPTY terminal tabset (from the
+      // era before terminals were seeded) — give it a live terminal.
+      if (!hasTermPane(termModel)) {
+        const slot = maxTermSlot(termModel) + 1;
+        termModel.doAction(
+          Actions.addNode(
+            {
+              type: "tab",
+              id: `term-${slot}`,
+              name: `bash ${slot}`,
+              component: "termpane",
+              enableClose: true,
+              enableRenderOnDemand: false,
+              config: { slot },
+            },
+            "termset",
+            DockLocation.CENTER,
+            -1,
+          ),
+        );
+      }
     }
   }, [termModel]);
 

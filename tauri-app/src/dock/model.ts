@@ -136,6 +136,22 @@ export function saveModels(main: Model, term: Model) {
   localStorage.setItem(TERM_KEY, JSON.stringify(term.toJson()));
 }
 
+/** Does the model contain any terminal pane tab? (legacy layouts saved
+ * an empty tabset — the app seeds one on startup when this is false.) */
+export function hasTermPane(model: Model): boolean {
+  let found = false;
+  const walk = (n: any) => {
+    if (found) return;
+    if (n.getType?.() === "tab") {
+      if (n.getComponent?.() === "termpane") found = true;
+    } else if (n.getChildren) {
+      n.getChildren().forEach(walk);
+    }
+  };
+  walk((model as any).getRoot?.() ?? (model as any).getRootRow());
+  return found;
+}
+
 /** Highest slot number referenced by terminal tabs (bash <n> naming). */
 export function maxTermSlot(term: Model): number {
   let max = 0;
