@@ -293,6 +293,27 @@ export default function DockRoot({
               factory={termFactory}
               onModelChange={onModelChange}
               onAction={(a: Action) => a}
+              onRenderTab={(node, renderValues) => {
+                if (node.getComponent() !== "termpane" || !broadcast) return;
+                const slot = Number((/term-(\d+)/.exec(node.getId() ?? "") ?? [])[1] ?? 0);
+                if (!slot) return;
+                const inGroup = broadcastGroup.has(slot);
+                renderValues.buttons.push(
+                  <button
+                    key="bcast"
+                    className={`icon-btn !p-0.5 ${inGroup ? "!text-[var(--danger)]" : "!text-[var(--text-faint)]"}`}
+                    title={inGroup ? "退出广播组" : "加入广播组"}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (inGroup) broadcastGroup.delete(slot);
+                      else broadcastGroup.add(slot);
+                      setBroadcast(broadcast); // re-render icon state
+                    }}
+                  >
+                    <FiRadio size={11} />
+                  </button>,
+                );
+              }}
               onRenderTabSet={(node, renderValues) => {
                 // "+" button on every tabset in the workspace area.
                 renderValues.buttons.push(
