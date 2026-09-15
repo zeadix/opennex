@@ -177,7 +177,7 @@ fn pump_reader(
     out_tx: mpsc::UnboundedSender<Vec<u8>>,
     kill: Arc<Mutex<bool>>,
 ) {
-    let mut buf = [0u8; 16384];
+    let mut buf = [0u8; 65536];
     loop {
         if *kill.lock().unwrap() {
             break;
@@ -219,7 +219,18 @@ async fn session_ws(mut socket: WebSocket, sessions: Arc<SessionMap>, sid: Strin
             msg = out_rx.recv() => {
                 match msg {
                     Some(bytes) => {
-                        if socket.send(Message::Binary(bytes.into())).await.is_err() {
+                        // Coalesce bursts: drain everything already queued
+                        // (bounded at 256KB) into ONE websocket frame. This
+                        // cuts frame counts dramatically on high-throughput
+                        // output without adding any waiting delay.
+                        let mut batch = bytes;
+                        while batch.len() < 256 * 1024 {
+                            match out_rx.try_recv() {
+                                Ok(more) => batch.extend_from_slice(&more),
+                                Err(_) => break,
+                            }
+                        }
+                        if socket.send(Message::Binary(batch.into())).await.is_err() {
                             break;
                         }
                     }
