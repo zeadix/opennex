@@ -177,7 +177,7 @@ export default function TerminalPane({
   return (
     <div
       ref={hostRef}
-      className="relative h-full w-full px-2 py-1"
+      className="absolute inset-0 px-2 py-1"
       style={{ background: "var(--bg)" }}
     >
       <div

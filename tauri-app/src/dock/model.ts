@@ -3,10 +3,14 @@
 // workspace area ("term" tab = terminals; other pages open as tabs in
 // the same tabset). Both panels can be closed and reopened, unique.
 
-import { Model } from "flexlayout-react";
+import { Actions, Model } from "flexlayout-react";
 
-const MAIN_KEY = "opennex-dock-main";
-const TERM_KEY = "opennex-dock-term";
+// v2 keys: layouts saved by flexlayout 0.11 (the brief first attempt)
+// are INCOMPATIBLE with 0.8.5 — among other traps 0.11 persists
+// `selected: -1` tabsets which render as a fully black empty area.
+// Bumping the key quarantines all legacy blobs.
+const MAIN_KEY = "opennex-dock-v2-main";
+const TERM_KEY = "opennex-dock-v2-term";
 
 export const NAV_TAB_ID = "nav";
 export const NAV_TABSET_ID = "navset";
@@ -153,6 +157,25 @@ export function hasTermPane(model: Model): boolean {
 }
 
 /** Highest slot number referenced by terminal tabs (bash <n> naming). */
+/** Make every tabset select a valid child (0 or first). A tabset whose
+ * `selected` is -1 renders NOTHING — the classic "black empty area". */
+export function ensureSelection(model: Model) {
+  const walk = (n: any) => {
+    if (n.getType?.() === "tabset") {
+      const count = n.getChildren().length;
+      if (count > 0 && (n.getSelected?.() ?? 0) < 0) {
+        model.doAction(Actions.selectTab(n.getChildren()[0].getId()));
+      }
+    }
+    n.getChildren?.().forEach((c: any) => walk(c));
+  };
+  try {
+    walk((model as any).getRootRow?.() ?? (model as any).getRoot?.());
+  } catch {
+    /* best effort */
+  }
+}
+
 /** Id of the main tabset (the second child of the root row). 0.11
  * regenerates ids for EMPTY tabsets, so callers must resolve this at
  * runtime instead of trusting a stored constant. */

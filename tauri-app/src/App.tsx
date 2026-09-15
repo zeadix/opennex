@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Actions, DockLocation } from "flexlayout-react";
 import DockRoot, { Page, PAGE_TAB_ID, seedTermSlots } from "./dock/DockRoot";
 import {
+  ensureSelection,
   hasTermPane,
   loadMainModel,
   loadTermModel,
@@ -134,7 +135,11 @@ export default function App() {
     <DockRoot
       mainModel={mainModel}
       termModel={termModel}
-      onModelChange={() => saveModels(mainModel, termModel)}
+      onModelChange={() => {
+        ensureSelection(mainModel);
+        ensureSelection(termModel);
+        saveModels(mainModel, termModel);
+      }}
       themeId={themeId}
       onTheme={setThemeId}
       fontSize={settings.fontSize}
