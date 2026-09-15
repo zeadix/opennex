@@ -17,6 +17,8 @@ use portable_pty::{CommandBuilder, MasterPty, PtySize};
 use serde_json::json;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::OnceLock as StdOnceLock;
+static SYS: StdOnceLock<Mutex<sysinfo::System>> = StdOnceLock::new();
 
 /// One live PTY session. `reader` is taken by the WebSocket task on
 /// first attach; `master` is kept for resizes; `kill` breaks the
@@ -402,6 +404,34 @@ fn remote_info() -> serde_json::Value {
     json!({ "url": format!("http://{ip}:{port}/remote"), "lanIp": ip, "port": port })
 }
 
+/// System stats for the monitor page (CPU% + memory), via sysinfo.
+#[tauri::command]
+async fn system_stats(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let sessions = state.sessions.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(sys_mutex) = SYS.get() else {
+            return Err("sys not initialized".into());
+        };
+        let mut sys = sys_mutex.lock().unwrap();
+        sys.refresh_cpu_usage();
+        sys.refresh_memory();
+        let cpu = sys.global_cpu_usage();
+        let mem_used = sys.used_memory();
+        let mem_total = sys.total_memory();
+        let session_count = sessions.inner.lock().unwrap().len();
+        Ok(json!({
+            "cpuPct": cpu,
+            "memUsedGb": mem_used as f64 / 1024.0 / 1024.0 / 1024.0,
+            "memTotalGb": mem_total as f64 / 1024.0 / 1024.0 / 1024.0,
+            "sessions": session_count,
+        }))
+    })
+    .await
+    .map_err(|e| format!("task failed: {e}"))?
+}
+
 #[tauri::command]
 fn list_shells() -> Vec<String> {
     let mut out: Vec<String> = std::fs::read_to_string("/etc/shells")
@@ -513,6 +543,7 @@ async fn ai_chat(
 }
 
 pub fn run() {
+    let _ = SYS.set(Mutex::new(sysinfo::System::new()));
     let sessions: Arc<SessionMap> = Arc::default();
     let state = AppState {
         sessions: sessions.clone(),
@@ -535,7 +566,8 @@ pub fn run() {
             remote_info,
             get_history,
             ai_chat,
-            check_update
+            check_update,
+            system_stats
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
