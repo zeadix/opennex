@@ -73,6 +73,7 @@ const zh = {
   ok: "确定",
   cancel: "取消",
   autoMatch: "自动匹配指令",
+  sysmon: "系统资源",
   wsConnected: "已连接",
   wsConnecting: "连接 PTY 中…",
   sessionEnded: "会话已结束",
@@ -127,6 +128,7 @@ const zhTW: Partial<typeof zh> = {
   tplCreated: "已從範本建立工作空間", tplSaved: "已儲存為範本",
   ok: "確定", cancel: "取消",
   autoMatch: "自動匹配指令",
+  sysmon: "系統資源",
 };
 
 const en: Partial<typeof zh> = {
@@ -153,6 +155,7 @@ const en: Partial<typeof zh> = {
   tplCreated: "Workspace created from template", tplSaved: "Saved as template",
   ok: "OK", cancel: "Cancel",
   autoMatch: "Command auto-match",
+  sysmon: "System resources",
   wsConnecting: "connecting PTY…", sessionEnded: "session ended",
   phoneRemote: "Phone remote control",
   phoneRemoteHint: "On the same Wi-Fi, scan the code or open the address below to view and drive your terminals from the phone.",

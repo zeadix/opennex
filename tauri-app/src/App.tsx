@@ -32,6 +32,7 @@ import HistoryPage from "./pages/HistoryPage";
 import AiPage from "./pages/AiPage";
 import MonitorPage from "./pages/MonitorPage";
 import AboutPage from "./pages/AboutPage";
+import SysmonPage from "./pages/SysmonPage";
 import TutorialPage from "./pages/TutorialPage";
 import {
   loadWorkspaces,
@@ -395,12 +396,18 @@ export default function App() {
       .catch(() => {});
   }, [settings.historyCap]);
 
+  // 视图 > 系统资源：floating panel, checked while the window is open.
+  const sysmonOpen = windows.some((w) => w.id === "sysmon");
+  const toggleSysmon = () =>
+    sysmonOpen ? closeWindow("sysmon") : openWindow("sysmon", "系统资源", 460, 560);
+
   /** Open a page as a floating window (terminals stay in the dock). */
-  const openPage = (p: string) => {    setPage(p as any);
+  const openPage = (p: string) => {
+    setPage(p as any);
     if (p !== "terminal") {
       const titles: Record<string, string> = {
         ssh: "SSH", history: "历史", ai: "AI 助手", settings: "设置",
-        remote: "手机远程控制", "remote-wan": "远程控制 · 广域网", update: "检查更新",
+        remote: "远程控制 · 局域网", "remote-wan": "远程控制 · 广域网", update: "检查更新",
         favorites: "收藏指令", about: "关于", tutorial: "教程", monitor: "监控",
       };
       openWindow(p, titles[p] ?? p, 640, 700);
@@ -468,6 +475,8 @@ export default function App() {
         navOpen={navOpen}
         termOpen={termOpen}
         onTogglePanel={togglePanel}
+        sysmonOpen={sysmonOpen}
+        onToggleSysmon={toggleSysmon}
         onSaveLayout={saveLayout}
         onLoadLayout={loadLayout}
         onSaveLayoutAs={(name) => saveLayoutAsTemplate(activeWsId, name)}
@@ -541,6 +550,9 @@ export default function App() {
           {w.id === "favorites" && <FavoritesPage />}
           {w.id === "about" && <AboutPage lang={lang} />}
           {w.id === "tutorial" && <TutorialPage lang={lang} />}
+          {w.id === "sysmon" && (
+            <SysmonPage getWsSlots={() => collectModelTermSlots(termModel)} />
+          )}
         </FloatingWindow>
       ))}
       </div>

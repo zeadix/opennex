@@ -32,6 +32,9 @@ struct PtySession {
     master: Mutex<Box<dyn MasterPty + Send>>,
     killer: Mutex<Box<dyn portable_pty::ChildKiller + Send + Sync>>,
     kill: Arc<Mutex<bool>>,
+    /// Shell child pid — root of this terminal's process tree for the
+    /// resource monitor.
+    pid: u32,
     /// Output fan-out; each attached WebSocket holds a Subscriber.
     bcast: tokio::sync::broadcast::Sender<Vec<u8>>,
     /// Capped tail of raw output bytes, replayed on (re)attach.
@@ -75,6 +78,16 @@ impl SessionMap {
     fn remove(&self, id: &str) {
         self.inner.lock().unwrap().remove(id);
         self.order.lock().unwrap().retain(|(x, _)| x != id);
+    }
+    /// Live session shell pids (resource monitor roots).
+    fn pids(&self) -> Vec<u32> {
+        self.inner
+            .lock()
+            .unwrap()
+            .values()
+            .map(|s| s.pid)
+            .filter(|&p| p != 0)
+            .collect()
     }
 }
 
@@ -215,6 +228,7 @@ fn spawn_pty(
     let last_activity_ms = Arc::new(AtomicU64::new(0));
     let (bcast, _) = tokio::sync::broadcast::channel::<Vec<u8>>(256);
     let scrollback: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::with_capacity(64 * 1024)));
+    let child_pid = child.process_id().unwrap_or(0);
     sessions.insert_named(
         session_id.clone(),
         display_name,
@@ -223,6 +237,7 @@ fn spawn_pty(
             master: Mutex::new(pair.master),
             killer: Mutex::new(killer),
             kill: Arc::new(Mutex::new(false)),
+            pid: child_pid,
             bcast,
             scrollback: scrollback.clone(),
             last_activity_ms,
@@ -533,6 +548,71 @@ fn remote_info() -> serde_json::Value {
     json!({ "url": format!("http://{ip}:{port}/remote"), "lanIp": ip, "port": port })
 }
 
+/// CPU% + RSS aggregated over each root's whole process tree (egui
+/// proc_stats parity). Shells are our children, so the app tree covers
+/// every terminal plus the UI/webview.
+fn tree_agg(
+    sys: &sysinfo::System,
+    roots: &[u32],
+    children: &std::collections::HashMap<u32, Vec<u32>>,
+) -> (f32, u64) {
+    use std::collections::{HashSet, VecDeque};
+    let mut cpu = 0f32;
+    let mut mem = 0u64;
+    let mut seen = HashSet::new();
+    let mut q: VecDeque<u32> = roots.iter().copied().collect();
+    while let Some(pid) = q.pop_front() {
+        if !seen.insert(pid) {
+            continue;
+        }
+        if let Some(p) = sys.process(sysinfo::Pid::from_u32(pid)) {
+            cpu += p.cpu_usage();
+            mem += p.memory();
+        }
+        if let Some(kids) = children.get(&pid) {
+            for k in kids {
+                q.push_back(*k);
+            }
+        }
+    }
+    (cpu, mem)
+}
+
+/// Three-level resource sampling for the 系统资源 panel: focused
+/// terminal, active workspace (frontend passes the slot pids), and the
+/// whole software (the app's own process tree). The SYS snapshot
+/// persists between polls (frontend polls every 2s) so sysinfo reports
+/// real CPU% deltas.
+#[tauri::command]
+fn resource_stats(
+    state: tauri::State<AppState>,
+    focused: Vec<u32>,
+    workspace: Vec<u32>,
+) -> serde_json::Value {
+    let Some(sys_mutex) = SYS.get() else {
+        return json!({ "focused": null, "workspace": null, "app": null });
+    };
+    let all_pids = state.sessions.pids();
+    let mut sys = sys_mutex.lock().unwrap();
+    sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+    let mut children: std::collections::HashMap<u32, Vec<u32>> = std::collections::HashMap::new();
+    for (pid, proc_) in sys.processes() {
+        if let Some(ppid) = proc_.parent() {
+            children.entry(ppid.as_u32()).or_default().push(pid.as_u32());
+        }
+    }
+    let f = tree_agg(&sys, &focused, &children);
+    let w = tree_agg(&sys, &workspace, &children);
+    let a = tree_agg(&sys, &all_pids, &children);
+    let app = tree_agg(&sys, &[std::process::id()], &children);
+    json!({
+        "focused": { "cpu": f.0, "mem": f.1 },
+        "workspace": { "cpu": w.0, "mem": w.1 },
+        "all": { "cpu": a.0, "mem": a.1 },
+        "app": { "cpu": app.0, "mem": app.1 },
+    })
+}
+
 /// System stats for the monitor page (CPU% + memory), via sysinfo.
 #[tauri::command]
 async fn system_stats(
@@ -732,6 +812,7 @@ pub fn run() {
             ai_chat,
             check_update,
             system_stats,
+            resource_stats,
             session_activities,
             set_history_cap,
             clear_history,

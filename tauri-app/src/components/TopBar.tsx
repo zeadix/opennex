@@ -15,6 +15,8 @@ export default function TopBar({
   navOpen,
   termOpen,
   onTogglePanel,
+  sysmonOpen,
+  onToggleSysmon,
   onSaveLayout,
   onLoadLayout,
   onSaveLayoutAs,
@@ -30,6 +32,8 @@ export default function TopBar({
   navOpen: boolean;
   termOpen: boolean;
   onTogglePanel: (panel: "nav" | "term") => void;
+  sysmonOpen: boolean;
+  onToggleSysmon: () => void;
   onSaveLayout: () => void;
   onLoadLayout: () => void;
   onSaveLayoutAs: (name: string) => void;
@@ -68,6 +72,10 @@ export default function TopBar({
       items: [
         { label: T.navPanel, checked: navOpen, onClick: () => onTogglePanel("nav") },
         { label: T.workArea, checked: termOpen, onClick: () => onTogglePanel("term") },
+        { label: T.sysmon, checked: sysmonOpen, onClick: onToggleSysmon },
+        { label: `${T.ai} 助手…`, onClick: () => onPage("ai") },
+        { label: `${T.history}…`, onClick: () => onPage("history") },
+        { label: `${T.favorites}…`, onClick: () => onPage("favorites") },
       ],
     },
     {
@@ -75,6 +83,7 @@ export default function TopBar({
       items: [
         { label: `${T.lan}…`, onClick: () => onPage("remote") },
         { label: `${T.wan}…`, onClick: () => onPage("remote-wan") },
+        { label: "SSH 连接…", onClick: () => onPage("ssh") },
       ],
     },
     {

@@ -8,7 +8,6 @@ import { FiCopy, FiPlus, FiRadio, FiTrash2, FiUnlock, FiEdit2 } from "react-icon
 import LockOverlay from "./LockOverlay";
 import { sha256, LOCK_SALT, WsTemplate, jsonTermSlots } from "../workspaces";
 import TerminalPane from "../terminal/TerminalPane";
-import { getTheme, THEMES } from "../theme/themes";
 import SshPage, { SshHost } from "../pages/SshPage";
 import HistoryPage from "../pages/HistoryPage";
 import FavoritesPage from "../pages/FavoritesPage";
@@ -24,7 +23,7 @@ import {
   collectModelTermSlots, nextSlot,
 } from "./model";
 import { invoke } from "../terminal/tauri";
-import { LANGS, t } from "../i18n";
+import { t } from "../i18n";
 import type { Lang } from "../i18n";
 import { broadcastEnabled, broadcastGroup } from "../terminal/registry";
 
@@ -247,62 +246,6 @@ export default function DockRoot({
             ))}
           </div>
 
-          <div className="my-3 h-px bg-[var(--border)]" />
-          <div className="flex flex-col gap-0.5">
-            {(["terminal", "ssh", "history", "ai", "settings", "remote", "update", "favorites", "monitor"] as Page[]).map((p) => (
-              <div
-                key={p}
-                className={`nav-item ${page === p ? "active" : ""}`}
-                onClick={() => onOpenPage(p)}
-              >
-                <span>{PAGE_NAME[p]}</span>
-              </div>
-            ))}
-          </div>
-
-          <div className="mt-auto">
-            <div
-              className="nav-item"
-              title={L.autoMatch}
-              onClick={() => onSettings({ autoMatch: !settings.autoMatch })}
-            >
-              <span>{L.autoMatch}</span>
-              <span
-                className={`ml-auto flex h-4 w-7 items-center rounded-full px-0.5 transition-colors ${
-                  settings.autoMatch ? "bg-[var(--accent-dim)]" : "bg-[var(--bg-active)]"
-                }`}
-              >
-                <span
-                  className="h-3 w-3 rounded-full bg-[var(--text-dim)] transition-transform"
-                  style={{
-                    transform: settings.autoMatch ? "translateX(12px)" : "translateX(0)",
-                    background: settings.autoMatch ? "var(--accent)" : "var(--text-faint)",
-                  }}
-                />
-              </span>
-            </div>
-            <div
-              className="nav-item"
-              title="Switch language"
-              onClick={() => onLang(lang === "zh" ? "en" : "zh")}
-            >
-              <span className="font-mono text-[11px] font-bold text-[var(--accent)]">
-                {lang === "zh" ? "中" : "EN"}
-              </span>
-              <span>{lang === "zh" ? "中文" : "English"}</span>
-            </div>
-            <div
-              className="nav-item"
-              title="切换主题"
-              onClick={() => {
-                const idx = THEMES.findIndex((t) => t.id === themeId);
-                onTheme(THEMES[(idx + 1) % THEMES.length].id);
-              }}
-            >
-              <span>{getTheme(themeId).name}</span>
-            </div>
-            <div className="px-2 pt-1 text-[11px] text-[var(--text-faint)]">v0.1.55-tauri</div>
-          </div>
         </div>
       );
     }
