@@ -3,7 +3,7 @@
 // workspace area ("term" tab = terminals; other pages open as tabs in
 // the same tabset). Both panels can be closed and reopened, unique.
 
-import { Actions, Model } from "flexlayout-react";
+import { Actions, DockLocation, Model } from "flexlayout-react";
 
 // v2 keys: layouts saved by flexlayout 0.11 (the brief first attempt)
 // are INCOMPATIBLE with 0.8.5 — among other traps 0.11 persists
@@ -38,7 +38,7 @@ function mainDefault() {
   return {
     global: {
       tabEnableClose: true,
-      tabSetEnableDeleteWhenEmpty: false,
+      tabSetEnableDeleteWhenEmpty: true,
       tabSetEnableMaximize: false,
     },
     layout: {
@@ -86,7 +86,7 @@ function termDefault() {
   return {
     global: {
       tabEnableClose: true,
-      tabSetEnableDeleteWhenEmpty: false,
+      tabSetEnableDeleteWhenEmpty: true,
       tabSetEnableMaximize: false,
     },
     layout: {
@@ -160,6 +160,38 @@ export function hasTermPane(model: Model): boolean {
   };
   walk((model as any).getRoot?.() ?? (model as any).getRootRow());
   return found;
+}
+
+/** Root row node id (target for re-opening a closed top-level panel). */
+export function rootRowId(model: Model): string {
+  return ((model as any).getRootRow().getId());
+}
+
+/** Is a top-level panel tab currently in the layout? */
+export function panelOpen(model: Model, tabId: string): boolean {
+  return model.getNodeById(tabId) !== undefined;
+}
+
+/** Remove a top-level panel tab; the emptied tabset auto-deletes and the
+ * sibling panel expands to fill the space (no blank areas). */
+export function closePanel(model: Model, tabId: string) {
+  if (panelOpen(model, tabId)) {
+    model.doAction(Actions.deleteTab(tabId));
+  }
+}
+
+/** (Re-)open a top-level panel tab, docking LEFT (nav) or splitting
+ * into the root row; if the main tabset exists, dock beside it. */
+export function openPanelLeft(model: Model, tabId: string, name: string, component: string) {
+  if (panelOpen(model, tabId)) return;
+  model.doAction(
+    Actions.addNode(
+      { type: "tab", id: tabId, name, component, enableClose: true, enableRenderOnDemand: false },
+      rootRowId(model),
+      DockLocation.LEFT,
+      -1,
+    ),
+  );
 }
 
 /** Highest slot number referenced by terminal tabs (bash <n> naming). */

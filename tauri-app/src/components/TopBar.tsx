@@ -22,6 +22,9 @@ export default function TopBar({
   currentVersion,
   sideBarVisible,
   onToggleSidebar,
+  navOpen,
+  termOpen,
+  onTogglePanel,
 }: {
   lang: Lang;
   onLang: (l: Lang) => void;
@@ -35,6 +38,9 @@ export default function TopBar({
   currentVersion: string;
   sideBarVisible: boolean;
   onToggleSidebar: () => void;
+  navOpen: boolean;
+  termOpen: boolean;
+  onTogglePanel: (panel: "nav" | "term") => void;
 }) {
   const [open, setOpen] = useState<string | null>(null);
   const barRef = useRef<HTMLDivElement>(null);
@@ -85,6 +91,13 @@ export default function TopBar({
       items: [
         { label: T.lock, onClick: onLockWorkspace },
         { label: T.nav + " ↻", onClick: onCycleWorkspace },
+      ],
+    },
+    {
+      label: lang === "zh" ? "窗口" : "Window",
+      items: [
+        { label: lang === "zh" ? "导航面板" : "Navigation panel", checked: navOpen, onClick: () => onTogglePanel("nav") },
+        { label: lang === "zh" ? "终端工作区" : "Terminal area", checked: termOpen, onClick: () => onTogglePanel("term") },
       ],
     },
   ];

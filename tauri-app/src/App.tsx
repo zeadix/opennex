@@ -2,15 +2,20 @@ import { useEffect, useRef, useState } from "react";
 import { Actions, DockLocation } from "flexlayout-react";
 import DockRoot, { Page, PAGE_TAB_ID, seedTermSlots } from "./dock/DockRoot";
 import {
+  closePanel,
+  NAV_TAB_ID,
   ensureSelection,
   hasTermPane,
   loadMainModel,
   loadTermModel,
   mainTabsetId,
   maxTermSlot,
+  panelOpen,
+  rootRowId,
   saveModels,
   termTabsetId,
 } from "./dock/model";
+import { PAGE_NAME } from "./dock/DockRoot";
 import { useTheme } from "./theme/useTheme";
 import { useSettings } from "./settings";
 import { loadLang, saveLang, Lang } from "./i18n";
@@ -109,6 +114,37 @@ export default function App() {
         w.id === id ? { ...w, locked: w.lockHash ? !w.locked : true } : w,
       ),
     );
+
+  // ---- window panel toggles (Window menu) ------------------------------
+  const navOpen = panelOpen(mainModel, NAV_TAB_ID);
+  const termOpen = panelOpen(mainModel, PAGE_TAB_ID.terminal);
+  const togglePanel = (panel: "nav" | "term") => {
+    const tabId = panel === "nav" ? NAV_TAB_ID : PAGE_TAB_ID.terminal;
+    if (panelOpen(mainModel, tabId)) {
+      closePanel(mainModel, tabId);
+      return;
+    }
+    const target =
+      panel === "nav" ? rootRowId(mainModel) : mainTabsetId(mainModel);
+    const location =
+      panel === "nav" ? DockLocation.LEFT : DockLocation.RIGHT;
+    mainModel.doAction(
+      Actions.addNode(
+        {
+          type: "tab",
+          id: tabId,
+          name: PAGE_NAME[panel as Page],
+          component: panel === "term" ? "term" : panel,
+          enableClose: true,
+          enableRenderOnDemand: false,
+        },
+        target,
+        location,
+        -1,
+      ),
+    );
+    setPage(panel === "term" ? "terminal" : page);
+  };
 
   const deleteWorkspace = (id: number) => {
     setWorkspaces((prev) => {
@@ -217,6 +253,9 @@ export default function App() {
         currentVersion="0.1.55"
         sideBarVisible={sideBarVisible}
         onToggleSidebar={() => setSideBarVisible(!sideBarVisible)}
+        navOpen={navOpen}
+        termOpen={termOpen}
+        onTogglePanel={togglePanel}
       />
       <div className="relative flex min-h-0 flex-1">
       <DockRoot
