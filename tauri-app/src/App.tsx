@@ -312,6 +312,7 @@ export default function App() {
     ai: { tabId: PAGE_TAB_ID.ai, location: DockLocation.RIGHT },
     history: { tabId: PAGE_TAB_ID.history, location: DockLocation.RIGHT },
     favorites: { tabId: PAGE_TAB_ID.favorites, location: DockLocation.RIGHT },
+    ssh: { tabId: PAGE_TAB_ID.ssh, location: DockLocation.RIGHT },
   };
   const panelChecks: Record<string, boolean> = {
     nav: panelOpen(mainModel, NAV_TAB_ID),
@@ -320,6 +321,7 @@ export default function App() {
     ai: panelOpen(mainModel, PAGE_TAB_ID.ai),
     history: panelOpen(mainModel, PAGE_TAB_ID.history),
     favorites: panelOpen(mainModel, PAGE_TAB_ID.favorites),
+    ssh: panelOpen(mainModel, PAGE_TAB_ID.ssh),
   };
   const togglePanel = (panel: string) => {
     const def = MAIN_PANELS[panel];

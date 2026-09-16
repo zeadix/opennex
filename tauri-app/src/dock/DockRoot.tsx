@@ -6,7 +6,7 @@ import { Layout, Model, Actions, DockLocation, Action } from "flexlayout-react";
 import "flexlayout-react/style/dark.css";
 import {
   FiActivity, FiClock, FiCopy, FiCpu, FiEdit2, FiMessageSquare, FiPlus,
-  FiRadio, FiSidebar, FiStar, FiTerminal, FiTrash2, FiUnlock,
+  FiRadio, FiServer, FiSidebar, FiStar, FiTerminal, FiTrash2, FiUnlock,
 } from "react-icons/fi";
 import LockOverlay from "./LockOverlay";
 import { sha256, LOCK_SALT, WsTemplate, jsonTermSlots } from "../workspaces";
@@ -269,6 +269,9 @@ export default function DockRoot({
     if (comp === "favorites") {
       return <FavoritesPage />;
     }
+    if (comp === "ssh") {
+      return <SshPage hosts={sshHosts} onHosts={onSshHosts} onConnect={onConnectSsh} />;
+    }
     if (comp === "term") {
       // Workspace area: its own dock model for terminals (and opened pages).
       const activeWs = workspaces.find((w: any) => w.id === activeWsId);
@@ -476,6 +479,7 @@ export default function DockRoot({
       case "ai": return <FiMessageSquare size={11} />;
       case "history": return <FiClock size={11} />;
       case "favorites": return <FiStar size={11} />;
+      case "ssh": return <FiServer size={11} />;
       default: return null;
     }
   };

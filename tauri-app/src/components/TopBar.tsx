@@ -70,6 +70,7 @@ export default function TopBar({
         { label: `${T.ai} 助手`, checked: !!panelChecks.ai, onClick: () => onTogglePanel("ai") },
         { label: T.history, checked: !!panelChecks.history, onClick: () => onTogglePanel("history") },
         { label: T.favorites, checked: !!panelChecks.favorites, onClick: () => onTogglePanel("favorites") },
+        { label: "SSH", checked: !!panelChecks.ssh, onClick: () => onTogglePanel("ssh") },
       ],
     },
     {
@@ -77,7 +78,6 @@ export default function TopBar({
       items: [
         { label: `${T.lan}…`, onClick: () => onPage("remote") },
         { label: `${T.wan}…`, onClick: () => onPage("remote-wan") },
-        { label: "SSH 连接…", onClick: () => onPage("ssh") },
       ],
     },
     {
