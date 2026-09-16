@@ -21,6 +21,7 @@ import { PAGE_NAME } from "./dock/DockRoot";
 import { useTheme } from "./theme/useTheme";
 import { useSettings } from "./settings";
 import { loadLang, saveLang, t, Lang } from "./i18n";
+import { loadShortcuts, matchesBinding } from "./shortcuts/shortcuts";
 import SshPage, { SshHost, loadHosts, saveHosts } from "./pages/SshPage";
 import FavoritesPage from "./pages/FavoritesPage";
 import RemotePage from "./pages/RemotePage";
@@ -333,9 +334,69 @@ export default function App() {
     setPage(panel === "term" ? "terminal" : page);
   };
 
+  // ---- global shortcuts (recordable in Settings; dispatched here) -------
+  // Refs mirror the latest closures; the capture listener installs once.
+  const addTerminalRef = useRef(() => {});
+  addTerminalRef.current = () => addTerminal();
+  const toggleLockRef = useRef(() => {});
+  toggleLockRef.current = () => toggleLock(activeWsId);
+  const cycleWsRef = useRef((_d: number) => {});
+  cycleWsRef.current = (d: number) => {
+    const idx = workspaces.findIndex((w) => w.id === activeWsId);
+    if (idx < 0 || workspaces.length === 0) return;
+    const next = workspaces[(idx + d + workspaces.length) % workspaces.length];
+    switchWorkspace(next.id);
+  };
+  const closeTabRef = useRef(() => {});
+  closeTabRef.current = () => {
+    try {
+      const ts: any = termModel.getNodeById(termTabsetId(termModel));
+      const children = ts?.getChildren?.() ?? [];
+      const sel = ts?.getSelectedNode?.() ?? children[ts.getSelected?.() ?? 0];
+      if (sel) termModel.doAction(Actions.deleteTab(sel.getId()));
+    } catch {
+      /* no tabset */
+    }
+  };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const bs = loadShortcuts();
+      if (matchesBinding(e, bs.historyMenu)) {
+        e.preventDefault();
+        setHistoryOverlay((v) => !v);
+      } else if (matchesBinding(e, bs.newTerminal)) {
+        e.preventDefault();
+        addTerminalRef.current();
+      } else if (matchesBinding(e, bs.closeTab)) {
+        e.preventDefault();
+        closeTabRef.current();
+      } else if (matchesBinding(e, bs.search)) {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent("opennex-search"));
+      } else if (matchesBinding(e, bs.lockWorkspace)) {
+        e.preventDefault();
+        toggleLockRef.current();
+      } else if (matchesBinding(e, bs.workspaceNext)) {
+        e.preventDefault();
+        cycleWsRef.current(1);
+      } else if (matchesBinding(e, bs.workspacePrev)) {
+        e.preventDefault();
+        cycleWsRef.current(-1);
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, []);
+
+  // Sync the history cap to the backend whenever it changes.
+  useEffect(() => {
+    import("@tauri-apps/api/core")
+      .then((m) => m.invoke("set_history_cap", { cap: settings.historyCap }))
+      .catch(() => {});
+  }, [settings.historyCap]);
+
   /** Open a page as a floating window (terminals stay in the dock). */
-  const openPage = (p: string) => {
-    setPage(p as any);
+  const openPage = (p: string) => {    setPage(p as any);
     if (p !== "terminal") {
       const titles: Record<string, string> = {
         ssh: "SSH", history: "历史", ai: "AI 助手", settings: "设置",

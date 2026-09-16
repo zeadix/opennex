@@ -71,6 +71,33 @@ export default function SettingsPage({
         </section>
 
         <section>
+          <h2 className="mb-3 text-[15px] font-semibold">指令</h2>
+          <div className="space-y-3 rounded-lg border border-[var(--border)] bg-[var(--bg-panel)] p-4">
+            <label className="flex cursor-pointer items-center justify-between gap-3">
+              <span className="text-[12px] text-[var(--text-dim)]">输入时自动匹配指令（历史 + PATH 命令）</span>
+              <input
+                type="checkbox"
+                checked={settings.autoMatch}
+                onChange={(e) => onSettings({ autoMatch: e.target.checked })}
+                className="accent-[var(--accent)]"
+              />
+            </label>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-[12px] text-[var(--text-dim)]">历史记录条数上限</span>
+              <select
+                value={settings.historyCap}
+                onChange={(e) => onSettings({ historyCap: Number(e.target.value) })}
+                className="rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1 text-[12px] text-[var(--text)]"
+              >
+                {[100, 300, 500, 1000, 2000, 5000].map((n) => (
+                  <option key={n} value={n}>{n}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </section>
+
+        <section>
           <h2 className="mb-3 text-[15px] font-semibold">快捷键</h2>
           <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-panel)] p-4">
             <div className="space-y-2">

@@ -4,6 +4,10 @@ import { useEffect, useState } from "react";
 export interface Settings {
   shell: string;
   fontSize: number;
+  /** Auto-match command suggestions while typing (egui: auto_match_command). */
+  autoMatch: boolean;
+  /** Command history capacity (synced to the backend via set_history_cap). */
+  historyCap: number;
 }
 
 const KEY = "opennex-settings";
@@ -11,6 +15,8 @@ const KEY = "opennex-settings";
 export const defaultSettings: Settings = {
   shell: "",
   fontSize: 14,
+  autoMatch: true,
+  historyCap: 500,
 };
 
 export function loadSettings(): Settings {

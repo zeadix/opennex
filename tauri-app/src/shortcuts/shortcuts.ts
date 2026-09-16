@@ -8,7 +8,8 @@ export type ShortcutAction =
   | "search"
   | "lockWorkspace"
   | "workspaceNext"
-  | "workspacePrev";
+  | "workspacePrev"
+  | "historyMenu";
 
 export const SHORTCUT_ACTIONS: { id: ShortcutAction; labelZh: string; labelEn: string }[] = [
   { id: "newTerminal", labelZh: "新建终端", labelEn: "New terminal" },
@@ -17,6 +18,7 @@ export const SHORTCUT_ACTIONS: { id: ShortcutAction; labelZh: string; labelEn: s
   { id: "lockWorkspace", labelZh: "锁定工作空间", labelEn: "Lock workspace" },
   { id: "workspaceNext", labelZh: "下一个工作空间", labelEn: "Next workspace" },
   { id: "workspacePrev", labelZh: "上一个工作空间", labelEn: "Previous workspace" },
+  { id: "historyMenu", labelZh: "呼出指令面板（历史/收藏）", labelEn: "Command palette" },
 ];
 
 export const DEFAULT_SHORTCUTS: Record<ShortcutAction, string> = {
@@ -26,6 +28,7 @@ export const DEFAULT_SHORTCUTS: Record<ShortcutAction, string> = {
   lockWorkspace: "Ctrl+Shift+L",
   workspaceNext: "Ctrl+PageDown",
   workspacePrev: "Ctrl+PageUp",
+  historyMenu: "Alt",
 };
 
 const KEY = "opennex-shortcuts";

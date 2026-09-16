@@ -84,6 +84,14 @@ struct AppState {
 
 static WS_PORT: OnceLock<u16> = OnceLock::new();
 
+/// Local remote-server port for the tunnel module (0 until the server
+/// is up — callers treat that as "not ready").
+pub fn ws_port_value() -> u16 {
+    WS_PORT.get().copied().unwrap_or(0)
+}
+
+pub mod tunnel;
+
 /// Remote-control page assets, embedded at compile time (zero network
 /// dependencies at runtime — mirrors the egui build's approach).
 const REMOTE_HTML: &[u8] = include_bytes!("../remote/remote.html");
@@ -481,7 +489,42 @@ fn close_session(state: tauri::State<AppState>, session_id: String) -> Result<()
     Ok(())
 }
 
-/// Shells available on this machine (from /etc/shells, deduped).
+/// Executables reachable via PATH as bare names (sorted, deduped) —
+/// feeds the auto-match suggestion list (port of egui's completion.rs).
+#[tauri::command]
+fn list_path_commands() -> Vec<String> {
+    let mut names: std::collections::HashSet<String> = std::collections::HashSet::new();
+    if let Some(path) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&path) {
+            let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+            for entry in entries.flatten() {
+                let Ok(ft) = entry.file_type() else { continue };
+                if !ft.is_file() {
+                    continue;
+                }
+                let raw = entry.file_name().to_string_lossy().into_owned();
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let executable = entry
+                        .metadata()
+                        .map(|m| m.permissions().mode() & 0o111 != 0)
+                        .unwrap_or(false);
+                    if !executable {
+                        continue;
+                    }
+                }
+                if !raw.is_empty() {
+                    names.insert(raw);
+                }
+            }
+        }
+    }
+    let mut sorted: Vec<String> = names.into_iter().collect();
+    sorted.sort();
+    sorted
+}
+
 /// Remote-control endpoint info for the in-app QR view.
 #[tauri::command]
 fn remote_info() -> serde_json::Value {
@@ -683,6 +726,7 @@ pub fn run() {
             close_session,
             ws_port,
             list_shells,
+            list_path_commands,
             remote_info,
             get_history,
             ai_chat,
@@ -690,7 +734,10 @@ pub fn run() {
             system_stats,
             session_activities,
             set_history_cap,
-            clear_history
+            clear_history,
+            tunnel::tunnel_start,
+            tunnel::tunnel_stop,
+            tunnel::tunnel_status
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

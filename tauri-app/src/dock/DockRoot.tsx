@@ -18,6 +18,7 @@ import SettingsPage from "../pages/SettingsPage";
 import RemotePage from "../pages/RemotePage";
 import UpdatePage from "../pages/UpdatePage";
 import PromptDialog from "../components/PromptDialog";
+import type { Settings } from "../settings";
 import {
   NAV_TAB_ID, NAV_TABSET_ID, TERM_TAB_ID, MAIN_TABSET_ID, TERM_TABSET_ID,
   collectModelTermSlots, nextSlot,
@@ -123,8 +124,8 @@ export default function DockRoot({
   sshHosts: SshHost[];
   onSshHosts: (h: SshHost[]) => void;
   onConnectSsh: (h: SshHost) => void;
-  settings: { fontSize: number; shell: string };
-  onSettings: (patch: { fontSize?: number; shell?: string }) => void;
+  settings: Settings;
+  onSettings: (patch: Partial<Settings>) => void;
 }) {
   // Main dock: the two unique panels (nav + workspace area).
   const [rowMenu, setRowMenu] = useState<{ x: number; y: number; wsId: number } | null>(null);
@@ -262,6 +263,26 @@ export default function DockRoot({
           <div className="mt-auto">
             <div
               className="nav-item"
+              title={L.autoMatch}
+              onClick={() => onSettings({ autoMatch: !settings.autoMatch })}
+            >
+              <span>{L.autoMatch}</span>
+              <span
+                className={`ml-auto flex h-4 w-7 items-center rounded-full px-0.5 transition-colors ${
+                  settings.autoMatch ? "bg-[var(--accent-dim)]" : "bg-[var(--bg-active)]"
+                }`}
+              >
+                <span
+                  className="h-3 w-3 rounded-full bg-[var(--text-dim)] transition-transform"
+                  style={{
+                    transform: settings.autoMatch ? "translateX(12px)" : "translateX(0)",
+                    background: settings.autoMatch ? "var(--accent)" : "var(--text-faint)",
+                  }}
+                />
+              </span>
+            </div>
+            <div
+              className="nav-item"
               title="Switch language"
               onClick={() => onLang(lang === "zh" ? "en" : "zh")}
             >
@@ -301,6 +322,7 @@ export default function DockRoot({
               shell={cfg.shell}
               command={cfg.command}
               name={tn.getName?.()}
+              autoMatch={settings.autoMatch}
               onFontSize={onFontSize}
             />
           );
