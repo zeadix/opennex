@@ -32,11 +32,10 @@ export default function SysmonPage({ getWsSlots }: { getWsSlots: () => number[] 
   useEffect(() => {
     let alive = true;
     const poll = () => {
-      const focused = focusedSlot.value ? [focusedSlot.value] : [];
-      invoke<Stats>("resource_stats", {
-        focused,
-        workspace: wsRef.current(),
-      })
+      // Session SLOT ids (strings) — the backend maps them to shell pids.
+      const focused = focusedSlot.value ? [String(focusedSlot.value)] : [];
+      const workspace = wsRef.current().map(String);
+      invoke<Stats>("resource_stats", { focused, workspace })
         .then((s) => alive && setData(s))
         .catch(() => {});
     };
@@ -54,7 +53,7 @@ export default function SysmonPage({ getWsSlots }: { getWsSlots: () => number[] 
   const rows: { key: string; label: string; icon: JSX.Element; stat: Stat | null; dim?: string }[] = [
     { key: "focused", label: "当前终端", icon: <FiTerminal size={14} />, stat: data?.focused ?? null },
     { key: "workspace", label: "当前工作空间", icon: <FiGrid size={14} />, stat: data?.workspace ?? null },
-    { key: "app", label: "整个软件", icon: <FiCpu size={14} />, stat: data?.app ?? null },
+    { key: "app", label: "全局", icon: <FiCpu size={14} />, stat: data?.app ?? null },
   ];
 
   return (

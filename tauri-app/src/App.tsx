@@ -42,7 +42,6 @@ import {
   WsTemplate,
 } from "./workspaces";
 import TopBar from "./components/TopBar";
-import StatusBar from "./components/StatusBar";
 import HistoryOverlay from "./terminal/HistoryOverlay";
 
 async function closeSessions(slots: number[]) {
@@ -532,7 +531,6 @@ export default function App() {
       onSettings={updateSettings}
       activities={activities}
     />
-      <StatusBar sessionCount={Object.keys(activities).length} shell={settings.shell || "bash"} />
       {historyOverlay && <HistoryOverlay onClose={() => setHistoryOverlay(false)} />}
       {toast && (
         <div className="animate-fade-up pointer-events-none fixed bottom-10 left-1/2 z-[9500] -translate-x-1/2 rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] px-4 py-2 text-[12px] text-[var(--text)] shadow-2xl">
