@@ -122,6 +122,10 @@ export default function TerminalPane({
   const pathCmdsRef = useRef<string[]>([]);
   const autoMatchRef = useRef(autoMatch);
   autoMatchRef.current = autoMatch;
+  // Latch: a palette/history insert rewrote the input line — auto-match
+  // must stay closed until the next REAL keystroke (egui's
+  // history_menu_just_closed latch).
+  const suppressMatchRef = useRef(false);
   // Mirrors `suggest` for the one-time key handler inside the effect.
   const suggestRef = useRef(suggest);
   suggestRef.current = suggest;
@@ -259,7 +263,7 @@ export default function TerminalPane({
       const rankedHistory = () =>
         [...historyRef.current].sort((a, b) => b.hits - a.hits).map((e) => e.cmd);
       const updateSuggest = () => {
-        if (!autoMatchRef.current) {
+        if (!autoMatchRef.current || suppressMatchRef.current) {
           setSuggest(null);
           return;
         }
@@ -269,6 +273,9 @@ export default function TerminalPane({
           setSuggest(null);
           return;
         }
+        // Exclusive with the Alt palette: opening the auto-match list
+        // closes the palette.
+        window.dispatchEvent(new CustomEvent("opennex-close-palette"));
         // Keep the selection across edits; every fresh edit re-opens
         // PRISTINE mode (egui: navigation must be redone after typing).
         setSuggest((prev) => ({
@@ -279,6 +286,8 @@ export default function TerminalPane({
         }));
       };
       term.onData((data) => {
+        // A real keystroke re-arms auto-match after a palette insert.
+        suppressMatchRef.current = false;
         for (const ch of data) {
           if (ch === "\r") buf = "";
           else if (ch === "\x7f" || ch === "\b") buf = buf.slice(0, -1);
@@ -358,11 +367,18 @@ export default function TerminalPane({
         const d = (ev as CustomEvent).detail ?? {};
         if (d.slot === sessionId) {
           buf = String(d.text ?? "");
-          updateSuggest();
+          // Inserted text must not re-open the auto-match overlay.
+          suppressMatchRef.current = true;
+          setSuggest(null);
         }
       };
       window.addEventListener("opennex-line-set", onLineSet);
       (hostRef.current as any)._lineSetCleanup = () => window.removeEventListener("opennex-line-set", onLineSet);
+      // Alt palette opening closes the auto-match list (exclusive pair).
+      const onCloseSuggest = () => setSuggest(null);
+      window.addEventListener("opennex-close-suggest", onCloseSuggest);
+      (hostRef.current as any)._closeSuggestCleanup = () =>
+        window.removeEventListener("opennex-close-suggest", onCloseSuggest);
       const sendResize = () => {
         if (ws && ws.readyState === WebSocket.OPEN && (term.cols !== cols || term.rows !== rows)) {
           cols = term.cols;
@@ -445,6 +461,7 @@ export default function TerminalPane({
       (hostRef.current as any)?._keyCleanup2?.();
       (hostRef.current as any)?._ctxCleanup?.();
       (hostRef.current as any)?._lineSetCleanup?.();
+      (hostRef.current as any)?._closeSuggestCleanup?.();
       (hostRef.current as any)?._searchEvtCleanup?.();
       unregisterSocket(sessionId);
       ws?.close();
@@ -466,7 +483,7 @@ export default function TerminalPane({
     >
       {suggest && (
         <div
-          className="animate-fade-up absolute bottom-1 left-2 z-30 w-[min(480px,calc(100%-16px))] overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] shadow-2xl"
+          className="animate-fade-up absolute bottom-1 left-2 z-[6000] w-[min(480px,calc(100%-16px))] overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] shadow-2xl"
           onMouseDown={(e) => e.stopPropagation()}
         >
           <div className="max-h-[220px] overflow-y-auto py-1">

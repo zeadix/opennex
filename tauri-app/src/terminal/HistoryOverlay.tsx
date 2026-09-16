@@ -73,6 +73,10 @@ export default function HistoryOverlay({ onClose }: { onClose: () => void }) {
     const count = col === "hist" ? hist.length : col === "folders" ? folders.length : activeFolder()?.items.length ?? 0;
     if (count === 0) return;
     const onKey = (e: KeyboardEvent) => {
+      // Capture-phase interception: handled keys must not also reach the
+      // terminal (arrow keys would drive the shell history under us).
+      const handled = ["Escape", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter"].includes(e.key);
+      if (handled) e.stopPropagation();
       if (e.key === "Escape" && !prompt && !addingFolder) {
         e.preventDefault();
         onClose();
@@ -131,7 +135,7 @@ export default function HistoryOverlay({ onClose }: { onClose: () => void }) {
 
   return (
     <div
-      className="animate-fade-up fixed right-6 top-14 z-[100] flex overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] shadow-2xl"
+      className="animate-fade-up fixed right-6 top-14 z-[6000] flex overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] shadow-2xl"
       onMouseDown={(e) => e.stopPropagation()}
     >
       {/* ── 指令历史 ── */}

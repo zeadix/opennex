@@ -412,6 +412,8 @@ export default function App() {
       const bs = loadShortcuts();
       if (matchesBinding(e, bs.historyMenu)) {
         e.preventDefault();
+        // Exclusive pair: the palette closes the auto-match list.
+        window.dispatchEvent(new CustomEvent("opennex-close-suggest"));
         setHistoryOverlay((v) => !v);
       } else if (matchesBinding(e, bs.newTerminal)) {
         e.preventDefault();
@@ -450,6 +452,13 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
+  }, []);
+
+  // The auto-match overlay closes the Alt palette (exclusive pair).
+  useEffect(() => {
+    const close = () => setHistoryOverlay(false);
+    window.addEventListener("opennex-close-palette", close);
+    return () => window.removeEventListener("opennex-close-palette", close);
   }, []);
 
   // Sync the history cap to the backend whenever it changes.
