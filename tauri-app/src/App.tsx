@@ -23,16 +23,12 @@ import { useSettings } from "./settings";
 import { loadLang, saveLang, t, Lang } from "./i18n";
 import { loadShortcuts, matchesBinding } from "./shortcuts/shortcuts";
 import SshPage, { SshHost, loadHosts, saveHosts } from "./pages/SshPage";
-import FavoritesPage from "./pages/FavoritesPage";
 import RemotePage from "./pages/RemotePage";
 import UpdatePage from "./pages/UpdatePage";
 import FloatingWindow, { FloatWin } from "./dock/FloatingWindow";
 import SettingsPage from "./pages/SettingsPage";
-import HistoryPage from "./pages/HistoryPage";
-import AiPage from "./pages/AiPage";
 import MonitorPage from "./pages/MonitorPage";
 import AboutPage from "./pages/AboutPage";
-import SysmonPage from "./pages/SysmonPage";
 import TutorialPage from "./pages/TutorialPage";
 import {
   loadWorkspaces,
@@ -304,31 +300,48 @@ export default function App() {
     return () => window.clearInterval(id);
   }, []);
 
-  // ---- window panel toggles (视图 menu) ----------------------------------
-  const navOpen = panelOpen(mainModel, NAV_TAB_ID);
-  const termOpen = panelOpen(mainModel, PAGE_TAB_ID.terminal);
-  const togglePanel = (panel: "nav" | "term") => {
-    const tabId = panel === "nav" ? NAV_TAB_ID : PAGE_TAB_ID.terminal;
-    if (panelOpen(mainModel, tabId)) {
-      closePanel(mainModel, tabId);
+  // ---- main-dock panel toggles (视图 menu) -------------------------------
+  // View-menu panels are DOCK PANES of the main layout — same level as
+  // the nav panel and the workspace area, freely splittable by drag.
+  // The main dock and the terminal dock are separate Models, so these
+  // panels can never be dragged into the terminal area (and terminals
+  // never leave it).
+  const MAIN_PANELS: Record<string, { tabId: string; location: DockLocation }> = {
+    nav: { tabId: NAV_TAB_ID, location: DockLocation.LEFT },
+    term: { tabId: PAGE_TAB_ID.terminal, location: DockLocation.RIGHT },
+    sysmon: { tabId: PAGE_TAB_ID.sysmon, location: DockLocation.RIGHT },
+    ai: { tabId: PAGE_TAB_ID.ai, location: DockLocation.RIGHT },
+    history: { tabId: PAGE_TAB_ID.history, location: DockLocation.RIGHT },
+    favorites: { tabId: PAGE_TAB_ID.favorites, location: DockLocation.RIGHT },
+  };
+  const panelChecks: Record<string, boolean> = {
+    nav: panelOpen(mainModel, NAV_TAB_ID),
+    term: panelOpen(mainModel, PAGE_TAB_ID.terminal),
+    sysmon: panelOpen(mainModel, PAGE_TAB_ID.sysmon),
+    ai: panelOpen(mainModel, PAGE_TAB_ID.ai),
+    history: panelOpen(mainModel, PAGE_TAB_ID.history),
+    favorites: panelOpen(mainModel, PAGE_TAB_ID.favorites),
+  };
+  const togglePanel = (panel: string) => {
+    const def = MAIN_PANELS[panel];
+    if (!def) return;
+    if (panelOpen(mainModel, def.tabId)) {
+      closePanel(mainModel, def.tabId);
       return;
     }
-    const target =
-      panel === "nav" ? rootRowId(mainModel) : mainTabsetId(mainModel);
-    const location =
-      panel === "nav" ? DockLocation.LEFT : DockLocation.RIGHT;
+    const target = panel === "nav" ? rootRowId(mainModel) : mainTabsetId(mainModel);
     mainModel.doAction(
       Actions.addNode(
         {
           type: "tab",
-          id: tabId,
-          name: PAGE_NAME[panel as Page],
+          id: def.tabId,
+          name: PAGE_NAME[panel as Page] ?? panel,
           component: panel === "term" ? "term" : panel,
           enableClose: true,
           enableRenderOnDemand: false,
         },
         target,
-        location,
+        def.location,
         -1,
       ),
     );
@@ -395,11 +408,6 @@ export default function App() {
       .then((m) => m.invoke("set_history_cap", { cap: settings.historyCap }))
       .catch(() => {});
   }, [settings.historyCap]);
-
-  // 视图 > 系统资源：floating panel, checked while the window is open.
-  const sysmonOpen = windows.some((w) => w.id === "sysmon");
-  const toggleSysmon = () =>
-    sysmonOpen ? closeWindow("sysmon") : openWindow("sysmon", "系统资源", 460, 560);
 
   /** Open a page as a floating window (terminals stay in the dock). */
   const openPage = (p: string) => {
@@ -472,11 +480,8 @@ export default function App() {
         onPage={openPage}
         updateAvailable={false}
         currentVersion="0.1.55"
-        navOpen={navOpen}
-        termOpen={termOpen}
+        panelChecks={panelChecks}
         onTogglePanel={togglePanel}
-        sysmonOpen={sysmonOpen}
-        onToggleSysmon={toggleSysmon}
         onSaveLayout={saveLayout}
         onLoadLayout={loadLayout}
         onSaveLayoutAs={(name) => saveLayoutAsTemplate(activeWsId, name)}
@@ -542,17 +547,11 @@ export default function App() {
           {w.id === "ssh" && (
             <SshPage hosts={sshHosts} onHosts={(h) => { setSshHosts(h); saveHosts(h); }} onConnect={connectSsh} />
           )}
-          {w.id === "history" && <HistoryPage />}
-          {w.id === "ai" && <AiPage />}
           {w.id === "remote" && <RemotePage />}
           {w.id === "remote-wan" && <RemotePage initialTab="wan" />}
           {w.id === "update" && <UpdatePage lang={lang} />}
-          {w.id === "favorites" && <FavoritesPage />}
           {w.id === "about" && <AboutPage lang={lang} />}
           {w.id === "tutorial" && <TutorialPage lang={lang} />}
-          {w.id === "sysmon" && (
-            <SysmonPage getWsSlots={() => collectModelTermSlots(termModel)} />
-          )}
         </FloatingWindow>
       ))}
       </div>

@@ -16,6 +16,7 @@ import AiPage from "../pages/AiPage";
 import SettingsPage from "../pages/SettingsPage";
 import RemotePage from "../pages/RemotePage";
 import UpdatePage from "../pages/UpdatePage";
+import SysmonPage from "../pages/SysmonPage";
 import PromptDialog from "../components/PromptDialog";
 import type { Settings } from "../settings";
 import {
@@ -27,7 +28,7 @@ import { t } from "../i18n";
 import type { Lang } from "../i18n";
 import { broadcastEnabled, broadcastGroup } from "../terminal/registry";
 
-export type Page = "terminal" | "ssh" | "history" | "ai" | "settings" | "remote" | "update" | "favorites" | "monitor";
+export type Page = "terminal" | "ssh" | "history" | "ai" | "settings" | "remote" | "update" | "favorites" | "monitor" | "sysmon";
 
 export const PAGE_TAB_ID: Record<Page, string> = {
   terminal: TERM_TAB_ID,
@@ -39,6 +40,7 @@ export const PAGE_TAB_ID: Record<Page, string> = {
   update: "tab-update",
   favorites: "tab-favorites",
   monitor: "tab-monitor",
+  sysmon: "tab-sysmon",
 };
 
 export const PAGE_NAME: Record<Page, string> = {
@@ -51,6 +53,7 @@ export const PAGE_NAME: Record<Page, string> = {
   update: "更新",
   favorites: "收藏",
   monitor: "监控",
+  sysmon: "系统资源",
 };
 
 export default function DockRoot({
@@ -248,6 +251,20 @@ export default function DockRoot({
 
         </div>
       );
+    }
+    // 视图菜单的工具面板：主布局的 dock 面板（与导航/工作区同级），
+    // 不进终端区布局 —— 主 dock 与终端 dock 是两个独立 Model。
+    if (comp === "sysmon") {
+      return <SysmonPage getWsSlots={() => collectModelTermSlots(termModel)} />;
+    }
+    if (comp === "ai") {
+      return <AiPage />;
+    }
+    if (comp === "history") {
+      return <HistoryPage />;
+    }
+    if (comp === "favorites") {
+      return <FavoritesPage />;
     }
     if (comp === "term") {
       // Workspace area: its own dock model for terminals (and opened pages).

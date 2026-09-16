@@ -12,11 +12,8 @@ export default function TopBar({
   onPage,
   updateAvailable,
   currentVersion,
-  navOpen,
-  termOpen,
+  panelChecks,
   onTogglePanel,
-  sysmonOpen,
-  onToggleSysmon,
   onSaveLayout,
   onLoadLayout,
   onSaveLayoutAs,
@@ -29,11 +26,8 @@ export default function TopBar({
   onPage: (p: string) => void;
   updateAvailable: boolean;
   currentVersion: string;
-  navOpen: boolean;
-  termOpen: boolean;
-  onTogglePanel: (panel: "nav" | "term") => void;
-  sysmonOpen: boolean;
-  onToggleSysmon: () => void;
+  panelChecks: Record<string, boolean>;
+  onTogglePanel: (panel: string) => void;
   onSaveLayout: () => void;
   onLoadLayout: () => void;
   onSaveLayoutAs: (name: string) => void;
@@ -70,12 +64,12 @@ export default function TopBar({
     {
       label: T.menuView,
       items: [
-        { label: T.navPanel, checked: navOpen, onClick: () => onTogglePanel("nav") },
-        { label: T.workArea, checked: termOpen, onClick: () => onTogglePanel("term") },
-        { label: T.sysmon, checked: sysmonOpen, onClick: onToggleSysmon },
-        { label: `${T.ai} 助手…`, onClick: () => onPage("ai") },
-        { label: `${T.history}…`, onClick: () => onPage("history") },
-        { label: `${T.favorites}…`, onClick: () => onPage("favorites") },
+        { label: T.navPanel, checked: !!panelChecks.nav, onClick: () => onTogglePanel("nav") },
+        { label: T.workArea, checked: !!panelChecks.term, onClick: () => onTogglePanel("term") },
+        { label: T.sysmon, checked: !!panelChecks.sysmon, onClick: () => onTogglePanel("sysmon") },
+        { label: `${T.ai} 助手`, checked: !!panelChecks.ai, onClick: () => onTogglePanel("ai") },
+        { label: T.history, checked: !!panelChecks.history, onClick: () => onTogglePanel("history") },
+        { label: T.favorites, checked: !!panelChecks.favorites, onClick: () => onTogglePanel("favorites") },
       ],
     },
     {
