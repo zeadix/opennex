@@ -12,7 +12,9 @@ import {
 } from "./registry";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { FiCopy, FiClipboard } from "react-icons/fi";
 import { invoke } from "./tauri";
+import { t, loadLang } from "../i18n";
 import "@xterm/xterm/css/xterm.css";
 
 function readTerminalTheme() {
@@ -63,6 +65,9 @@ export default function TerminalPane({
   });
   const [searchOpen, setSearchOpen] = useState(false);
   const searchRef = useRef<SearchAddon | null>(null);
+  // Custom right-click menu (copy/paste) — the webview's own context
+  // menu is suppressed app-wide, this is the only menu terminals show.
+  const [ctx, setCtx] = useState<{ x: number; y: number } | null>(null);
   // Auto-match state: current input line + suggestion + history cache.
   const [suggest, setSuggest] = useState<{ full: string; rest: string; line: string } | null>(null);
   const historyRef = useRef<string[]>([]);
@@ -76,6 +81,35 @@ export default function TerminalPane({
     t.options.fontFamily =
       getComputedStyle(document.documentElement).getPropertyValue("--mono") || "monospace";
   }, [themeId, fontSize]);
+
+  // Context menu closes on any outside click or window blur.
+  useEffect(() => {
+    if (!ctx) return;
+    const close = () => setCtx(null);
+    window.addEventListener("mousedown", close);
+    window.addEventListener("blur", close);
+    return () => {
+      window.removeEventListener("mousedown", close);
+      window.removeEventListener("blur", close);
+    };
+  }, [ctx]);
+
+  const copySelection = async () => {
+    const sel = termRef.current?.getSelection() ?? "";
+    if (sel) await navigator.clipboard.writeText(sel);
+    setCtx(null);
+    termRef.current?.focus();
+  };
+  const pasteClipboard = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text) termRef.current?.paste(text);
+    } catch {
+      /* clipboard read denied by the webview */
+    }
+    setCtx(null);
+    termRef.current?.focus();
+  };
 
   useEffect(() => {
     const term = new Terminal({
@@ -240,6 +274,14 @@ export default function TerminalPane({
       };
       host.addEventListener("wheel", onWheel, { passive: false });
       (host as any)._wheelCleanup = () => host.removeEventListener("wheel", onWheel);
+      // Right-click opens OUR menu (copy/paste), never the webview's.
+      const onCtxMenu = (e: MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setCtx({ x: e.clientX, y: e.clientY });
+      };
+      host.addEventListener("contextmenu", onCtxMenu);
+      (host as any)._ctxCleanup = () => host.removeEventListener("contextmenu", onCtxMenu);
       // External search request (global shortcut routes to the focused pane).
       const onSearchEvent = () => {
         if (focusedSlot.value === sessionId && !disposed) setSearchOpen(true);
@@ -264,6 +306,7 @@ export default function TerminalPane({
       if (cleanup) cleanup();
       (hostRef.current as any)?._wheelCleanup?.();
       (hostRef.current as any)?._keyCleanup2?.();
+      (hostRef.current as any)?._ctxCleanup?.();
       (hostRef.current as any)?._searchEvtCleanup?.();
       unregisterSocket(sessionId);
       ws?.close();
@@ -273,6 +316,7 @@ export default function TerminalPane({
     };
   }, [sessionId, command, shell]);
 
+  const L = t(loadLang());
   return (
     <div
       ref={hostRef}
@@ -315,6 +359,24 @@ export default function TerminalPane({
         pty:{status.state}
         {status.detail ? ` ${status.detail}` : ""}
       </div>
+      {ctx && (
+        <div
+          className="ctx-menu animate-fade-up"
+          style={{
+            left: Math.max(4, Math.min(ctx.x, window.innerWidth - 164)),
+            top: Math.max(4, Math.min(ctx.y, window.innerHeight - 96)),
+          }}
+          onMouseDown={(e) => e.stopPropagation()}
+          onContextMenu={(e) => e.preventDefault()}
+        >
+          <button className="ctx-item" disabled={!termRef.current?.hasSelection()} onClick={copySelection}>
+            <FiCopy size={13} /> {L.copy}
+          </button>
+          <button className="ctx-item" onClick={pasteClipboard}>
+            <FiClipboard size={13} /> {L.paste}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

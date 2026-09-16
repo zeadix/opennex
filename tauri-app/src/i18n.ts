@@ -46,6 +46,8 @@ const zh = {
   shortcuts: "快捷键",
   about: "关于",
   insertToTerminal: "插入终端",
+  copy: "复制",
+  paste: "粘贴",
   wsConnected: "已连接",
   wsConnecting: "连接 PTY 中…",
   sessionEnded: "会话已结束",
@@ -90,6 +92,7 @@ const zhTW: Partial<typeof zh> = {
   history: "歷史", settings: "設定", remote: "遠端", update: "更新",
   favorites: "收藏指令", monitor: "監控", newTerminal: "新增終端機",
   defaultShell: "預設 Shell", appearance: "外觀", theme: "主題", about: "關於",
+  copy: "複製", paste: "貼上",
 };
 
 const en: Partial<typeof zh> = {
@@ -104,6 +107,7 @@ const en: Partial<typeof zh> = {
   appearance: "Appearance", theme: "Theme", terminalFontSize: "Terminal font size",
   defaultShellSection: "Default shell", shortcuts: "Shortcuts", about: "About",
   insertToTerminal: "Insert to terminal", wsConnected: "connected",
+  copy: "Copy", paste: "Paste",
   wsConnecting: "connecting PTY…", sessionEnded: "session ended",
   phoneRemote: "Phone remote control",
   phoneRemoteHint: "On the same Wi-Fi, scan the code or open the address below to view and drive your terminals from the phone.",
