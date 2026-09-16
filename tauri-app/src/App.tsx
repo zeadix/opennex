@@ -218,7 +218,7 @@ export default function App() {
         sideBarVisible={sideBarVisible}
         onToggleSidebar={() => setSideBarVisible(!sideBarVisible)}
       />
-      <div className="flex min-h-0 flex-1">
+      <div className="relative flex min-h-0 flex-1">
       <DockRoot
       mainModel={mainModel}
       termModel={termModel}
