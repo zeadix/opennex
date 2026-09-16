@@ -4,7 +4,10 @@ import { Layout, Model, Actions, DockLocation, Action } from "flexlayout-react";
 // carry the entire layout geometry — without this sheet the dock
 // collapses into stacked blocks.
 import "flexlayout-react/style/dark.css";
-import { FiCopy, FiPlus, FiRadio, FiTrash2, FiUnlock, FiEdit2 } from "react-icons/fi";
+import {
+  FiActivity, FiClock, FiCopy, FiCpu, FiEdit2, FiMessageSquare, FiPlus,
+  FiRadio, FiSidebar, FiStar, FiTerminal, FiTrash2, FiUnlock,
+} from "react-icons/fi";
 import LockOverlay from "./LockOverlay";
 import { sha256, LOCK_SALT, WsTemplate, jsonTermSlots } from "../workspaces";
 import TerminalPane from "../terminal/TerminalPane";
@@ -44,7 +47,7 @@ export const PAGE_TAB_ID: Record<Page, string> = {
 };
 
 export const PAGE_NAME: Record<Page, string> = {
-  terminal: "终端",
+  terminal: "终端工作区",
   ssh: "SSH",
   history: "历史",
   ai: "AI",
@@ -462,6 +465,21 @@ export default function DockRoot({
     );
   }
 
+  // Main-dock tab chips: the terminal workspace gets a solid accent
+  // chip, view panels get muted outlined chips with their own icons —
+  // the two kinds read differently at a glance.
+  const mainTabIcon = (comp: string) => {
+    switch (comp) {
+      case "term": return <FiTerminal size={11} />;
+      case "nav": return <FiSidebar size={11} />;
+      case "sysmon": return <FiActivity size={11} />;
+      case "ai": return <FiMessageSquare size={11} />;
+      case "history": return <FiClock size={11} />;
+      case "favorites": return <FiStar size={11} />;
+      default: return null;
+    }
+  };
+
   return (
     <div className="relative h-full w-full">
       <Layout
@@ -469,6 +487,17 @@ export default function DockRoot({
         factory={mainFactory}
         onModelChange={onModelChange}
         onAction={(a: Action) => a}
+        onRenderTab={(node, renderValues) => {
+          const comp = node.getComponent() ?? "";
+          const icon = mainTabIcon(comp);
+          if (!icon) return;
+          renderValues.content = (
+            <span className={`tabchip ${comp === "term" ? "tabchip-term" : "tabchip-view"}`}>
+              {icon}
+              {node.getName()}
+            </span>
+          );
+        }}
       />
       {rowMenu && (
         <div

@@ -64,7 +64,7 @@ function mainDefaultJson(): any {
             {
               type: "tab",
               id: TERM_TAB_ID,
-              name: "终端",
+              name: "终端工作区",
               component: "term",
               enableClose: true,
               enableRenderOnDemand: false,

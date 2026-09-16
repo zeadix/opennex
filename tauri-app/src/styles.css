@@ -110,6 +110,35 @@ img, svg { -webkit-user-drag: none; }
 
 .divider-v { width: 1px; align-self: stretch; background: var(--border); margin: 4px 0; }
 
+/* ── Main-dock tab chips ─────────────────────────────────────────
+   终端工作区 = solid accent chip; 视图面板 = muted outlined chip. */
+.tabchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 9px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  line-height: 16px;
+  white-space: nowrap;
+  transition: color 0.12s;
+}
+.tabchip-term {
+  background: var(--accent-dim);
+  color: var(--accent);
+  font-weight: 600;
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.tabchip-view {
+  background: transparent;
+  color: var(--text-dim);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.flexlayout__tab_button--selected .tabchip-view {
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--text-faint);
+}
+
 .glow-text {
   background: linear-gradient(120deg, var(--accent), #a78bfa);
   -webkit-background-clip: text;
