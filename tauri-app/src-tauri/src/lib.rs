@@ -69,25 +69,12 @@ impl SessionMap {
             .map(|(id, name)| json!({ "id": id, "name": name }))
             .collect()
     }
-    fn insert(&self, id: String, s: PtySession) {
-        self.inner.lock().unwrap().insert(id, Arc::new(s));
-    }
     fn get(&self, id: &str) -> Option<Arc<PtySession>> {
         self.inner.lock().unwrap().get(id).cloned()
     }
     fn remove(&self, id: &str) {
         self.inner.lock().unwrap().remove(id);
         self.order.lock().unwrap().retain(|(x, _)| x != id);
-    }
-    /// Live session shell pids (resource monitor roots).
-    fn pids(&self) -> Vec<u32> {
-        self.inner
-            .lock()
-            .unwrap()
-            .values()
-            .map(|s| s.pid)
-            .filter(|&p| p != 0)
-            .collect()
     }
 }
 
@@ -548,6 +535,29 @@ fn remote_info() -> serde_json::Value {
     json!({ "url": format!("http://{ip}:{port}/remote"), "lanIp": ip, "port": port })
 }
 
+/// PSS (proportional set size) from smaps_rollup: shared pages count
+/// fractionally per process, so summing a process tree reports the
+/// REAL total instead of multiplying shared libraries/WebViews (RSS
+/// summed a WebKit multi-process app to absurd numbers). Falls back to
+/// sysinfo RSS where the file is unavailable (non-Linux).
+#[cfg(target_os = "linux")]
+fn proc_mem_bytes(pid: u32) -> Option<u64> {
+    let content = std::fs::read_to_string(format!("/proc/{pid}/smaps_rollup")).ok()?;
+    let line = content.lines().find(|l| l.starts_with("ProportionalSetSize:"))?;
+    let kb: u64 = line["ProportionalSetSize:".len()..]
+        .trim()
+        .split_whitespace()
+        .next()?
+        .parse()
+        .ok()?;
+    Some(kb * 1024)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn proc_mem_bytes(_pid: u32) -> Option<u64> {
+    None
+}
+
 /// CPU% + RSS aggregated over each root's whole process tree (egui
 /// proc_stats parity). Shells are our children, so the app tree covers
 /// every terminal plus the UI/webview.
@@ -567,7 +577,7 @@ fn tree_agg(
         }
         if let Some(p) = sys.process(sysinfo::Pid::from_u32(pid)) {
             cpu += p.cpu_usage();
-            mem += p.memory();
+            mem += proc_mem_bytes(pid).unwrap_or_else(|| p.memory());
         }
         if let Some(kids) = children.get(&pid) {
             for k in kids {
@@ -579,36 +589,52 @@ fn tree_agg(
 }
 
 /// Three-level resource sampling for the 系统资源 panel: focused
-/// terminal, active workspace (frontend passes the slot pids), and the
-/// whole software (the app's own process tree). The SYS snapshot
-/// persists between polls (frontend polls every 2s) so sysinfo reports
-/// real CPU% deltas.
+/// terminal, active workspace, and the whole software (the app's own
+/// process tree). `focused`/`workspace` carry SESSION SLOT ids (the
+/// frontend's term-N numbers) which map to the session shell pids here
+/// — raw pids from the frontend would be meaningless (and dangerous:
+/// slot 1 is init). CPU% is normalized to the machine's core count so
+/// a tree of busy processes reads as its share of the whole machine
+/// instead of a sum that exceeds 100. The SYS snapshot persists
+/// between polls (frontend polls every 2s) so the deltas are real.
 #[tauri::command]
 fn resource_stats(
     state: tauri::State<AppState>,
-    focused: Vec<u32>,
-    workspace: Vec<u32>,
+    focused: Vec<String>,
+    workspace: Vec<String>,
 ) -> serde_json::Value {
     let Some(sys_mutex) = SYS.get() else {
         return json!({ "focused": null, "workspace": null, "app": null });
     };
-    let all_pids = state.sessions.pids();
+    let roots_of = |slots: &[String]| -> Vec<u32> {
+        slots
+            .iter()
+            .filter_map(|sid| state.sessions.get(sid))
+            .map(|s| s.pid)
+            .filter(|&p| p != 0)
+            .collect()
+    };
+    let f_roots = roots_of(&focused);
+    let w_roots = roots_of(&workspace);
     let mut sys = sys_mutex.lock().unwrap();
     sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+    let cores = sys.cpus().len().max(1) as f32;
     let mut children: std::collections::HashMap<u32, Vec<u32>> = std::collections::HashMap::new();
     for (pid, proc_) in sys.processes() {
         if let Some(ppid) = proc_.parent() {
             children.entry(ppid.as_u32()).or_default().push(pid.as_u32());
         }
     }
-    let f = tree_agg(&sys, &focused, &children);
-    let w = tree_agg(&sys, &workspace, &children);
-    let a = tree_agg(&sys, &all_pids, &children);
-    let app = tree_agg(&sys, &[std::process::id()], &children);
+    let tree = |roots: &[u32]| -> (f32, u64) {
+        let (cpu, mem) = tree_agg(&sys, roots, &children);
+        (cpu / cores, mem)
+    };
+    let f = tree(&f_roots);
+    let w = tree(&w_roots);
+    let app = tree(&[std::process::id()]);
     json!({
         "focused": { "cpu": f.0, "mem": f.1 },
         "workspace": { "cpu": w.0, "mem": w.1 },
-        "all": { "cpu": a.0, "mem": a.1 },
         "app": { "cpu": app.0, "mem": app.1 },
     })
 }
