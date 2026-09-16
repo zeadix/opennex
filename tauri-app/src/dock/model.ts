@@ -4,13 +4,7 @@
 // the same tabset). Both panels can be closed and reopened, unique.
 
 import { Actions, DockLocation, Model } from "flexlayout-react";
-
-// v2 keys: layouts saved by flexlayout 0.11 (the brief first attempt)
-// are INCOMPATIBLE with 0.8.5 — among other traps 0.11 persists
-// `selected: -1` tabsets which render as a fully black empty area.
-// Bumping the key quarantines all legacy blobs.
-const MAIN_KEY = "opennex-dock-v2-main";
-const TERM_KEY = "opennex-dock-v2-term";
+import { jsonTermSlots } from "../workspaces";
 
 export const NAV_TAB_ID = "nav";
 export const NAV_TABSET_ID = "navset";
@@ -34,7 +28,7 @@ export const PAGE_NAME: Record<string, string> = {
   settings: "设置",
 };
 
-function mainDefault() {
+function mainDefaultJson(): any {
   return {
     global: {
       tabEnableClose: true,
@@ -82,7 +76,8 @@ function mainDefault() {
   };
 }
 
-function termDefault() {
+/** Default workspace-area layout with ONE terminal on a fresh slot. */
+function termDefaultJson(slot: number): any {
   return {
     global: {
       tabEnableClose: true,
@@ -101,12 +96,12 @@ function termDefault() {
           children: [
             {
               type: "tab",
-              id: "term-1",
-              name: "bash 1",
+              id: `term-${slot}`,
+              name: `bash ${slot}`,
               component: "termpane",
               enableClose: true,
               enableRenderOnDemand: false,
-              config: { slot: 1 },
+              config: { slot },
             },
           ],
         },
@@ -115,35 +110,83 @@ function termDefault() {
   };
 }
 
-// LAYOUT PERSISTENCE IS DISABLED for now: layouts saved during the
-// flexlayout migration rounds are unreliable (0.11-era blobs, selected:-1
-// states, missing seeded terminals). Every launch starts from the clean
-// default below so the UI is always correct; re-enable persistence once
-// the dock model set is stable.
-export function loadMainModel(): Model {
-  // Also purge any legacy blobs saved under the old keys.
-  try {
-    for (const k of ["opennex-dock-main", "opennex-dock-term", MAIN_KEY, TERM_KEY]) {
-      localStorage.removeItem(k);
+function deepCopy(json: any): any {
+  return JSON.parse(JSON.stringify(json));
+}
+
+function jsonHasTermPane(json: any): boolean {
+  return jsonTermSlots(json).length > 0;
+}
+
+/** Repair a term-dock JSON before Model.fromJson: guarantee at least
+ * one terminal (legacy blobs may carry an empty tabset) and no
+ * `selected: -1` tabsets (renders as a black empty area). */
+function prepareTermJson(json: any | undefined, fallbackSlot: () => number): any {
+  let j = json ? deepCopy(json) : termDefaultJson(fallbackSlot());
+  if (!jsonHasTermPane(j)) {
+    const slot = fallbackSlot();
+    const set = j.layout?.children?.[0];
+    if (set) {
+      set.children = set.children ?? [];
+      set.children.push({
+        type: "tab",
+        id: `term-${slot}`,
+        name: `bash ${slot}`,
+        component: "termpane",
+        enableClose: true,
+        enableRenderOnDemand: false,
+        config: { slot },
+      });
+      set.selected = 0;
     }
-  } catch {
-    /* private mode — ignore */
   }
-  return Model.fromJson(mainDefault());
+  walkJsonTabsets(j, (set: any) => {
+    if (typeof set.selected !== "number" || set.selected < 0) set.selected = 0;
+  });
+  return j;
 }
 
-export function loadTermModel(): Model {
+function walkJsonTabsets(node: any, fn: (set: any) => void) {
+  const walk = (n: any) => {
+    if (!n || typeof n !== "object") return;
+    if (Array.isArray(n)) {
+      n.forEach(walk);
+      return;
+    }
+    if (n.type === "tabset") fn(n);
+    if (n.children) walk(n.children);
+    if (n.layout) walk(n.layout);
+  };
+  walk(node);
+}
+
+/** Build a Model from a saved JSON, falling back to a fresh default when
+ * absent/corrupt. Deep-copies the input (fromJson takes ownership). */
+export function modelFromJson(json: any | undefined, makeDefault: () => any): Model {
+  const src = json ? deepCopy(json) : makeDefault();
   try {
-    localStorage.removeItem(TERM_KEY);
+    return Model.fromJson(src);
   } catch {
-    /* ignore */
+    return Model.fromJson(makeDefault());
   }
-  return Model.fromJson(termDefault());
 }
 
-export function saveModels(_main: Model, _term: Model) {
-  // Persistence disabled alongside load (see loadMainModel) — layouts
-  // always start from the clean default until the dock model stabilizes.
+/** Workspace-area model with repairs applied (≥1 terminal, valid selections). */
+export function termModelFrom(json: any | undefined, fallbackSlot: () => number): Model {
+  try {
+    return Model.fromJson(prepareTermJson(json, fallbackSlot));
+  } catch {
+    return Model.fromJson(termDefaultJson(fallbackSlot()));
+  }
+}
+
+export function mainModelFrom(json: any | undefined): Model {
+  return modelFromJson(json, mainDefaultJson);
+}
+
+/** Fresh single-terminal workspace JSON on a globally unique slot. */
+export function newTermJson(): any {
+  return termDefaultJson(nextSlot());
 }
 
 /** Does the model contain any terminal pane tab? (legacy layouts saved
@@ -229,15 +272,57 @@ export function termTabsetId(model: Model): string {
 }
 
 export function maxTermSlot(term: Model): number {
-  let max = 0;
+  return collectModelTermSlots(term).reduce((a, b) => Math.max(a, b), 0);
+}
+
+/** All terminal slots referenced by term-N tabs in a LIVE model. */
+export function collectModelTermSlots(term: Model): number[] {
+  const out: number[] = [];
   const walk = (n: any) => {
     if (n.getType?.() === "tabset") {
       for (const t of n.getChildren()) walk(t);
     } else if (n.getType?.() === "tab") {
       const m = /term-(\d+)/.exec(n.getId() ?? "");
-      if (m) max = Math.max(max, Number(m[1]));
+      if (m) out.push(Number(m[1]));
     }
   };
   walk((term as any).getRootRow());
-  return max;
+  return out;
+}
+
+// ---- global terminal-slot counter ---------------------------------------
+// Slot numbers are GLOBAL across workspaces: a term-N id maps 1:1 to a
+// backend PTY session, so two workspaces must never share one.
+let slotCounter = 1;
+export function seedTermSlots(v: number) {
+  slotCounter = Math.max(slotCounter, v + 1);
+}
+export function nextSlot(): number {
+  return slotCounter++;
+}
+
+/** Deep-copy a term layout JSON, renumbering every term-N tab to fresh
+ * slots (used when spawning a workspace copy from a template — the
+ * original's sessions must not be shared with the copy). */
+export function renumberTermJson(json: any): { json: any; max: number } {
+  const j = JSON.parse(JSON.stringify(json));
+  let max = 0;
+  const walk = (n: any) => {
+    if (!n || typeof n !== "object") return;
+    if (Array.isArray(n)) {
+      n.forEach(walk);
+      return;
+    }
+    const m = /^term-(\d+)$/.exec(String(n.id ?? ""));
+    if (m) {
+      const slot = nextSlot();
+      n.id = `term-${slot}`;
+      if (n.config) n.config.slot = slot;
+      n.name = `bash ${slot}`;
+      max = Math.max(max, slot);
+    }
+    if (n.children) walk(n.children);
+  };
+  walk(j);
+  return { json: j, max };
 }

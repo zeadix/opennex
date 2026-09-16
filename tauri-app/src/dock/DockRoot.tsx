@@ -1,12 +1,12 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Layout, Model, Actions, DockLocation, Action } from "flexlayout-react";
 // REQUIRED: flexlayout's structural classes (tabsets, tabs, dividers)
 // carry the entire layout geometry — without this sheet the dock
 // collapses into stacked blocks.
 import "flexlayout-react/style/dark.css";
-import { FiPlus, FiRadio, FiTrash2, FiUnlock, FiEdit2 } from "react-icons/fi";
+import { FiCopy, FiPlus, FiRadio, FiTrash2, FiUnlock, FiEdit2 } from "react-icons/fi";
 import LockOverlay from "./LockOverlay";
-import { sha256, LOCK_SALT } from "../workspaces";
+import { sha256, LOCK_SALT, WsTemplate, jsonTermSlots } from "../workspaces";
 import TerminalPane from "../terminal/TerminalPane";
 import { getTheme, THEMES } from "../theme/themes";
 import SshPage, { SshHost } from "../pages/SshPage";
@@ -17,7 +17,11 @@ import AiPage from "../pages/AiPage";
 import SettingsPage from "../pages/SettingsPage";
 import RemotePage from "../pages/RemotePage";
 import UpdatePage from "../pages/UpdatePage";
-import { NAV_TAB_ID, NAV_TABSET_ID, TERM_TAB_ID, MAIN_TABSET_ID, TERM_TABSET_ID } from "./model";
+import PromptDialog from "../components/PromptDialog";
+import {
+  NAV_TAB_ID, NAV_TABSET_ID, TERM_TAB_ID, MAIN_TABSET_ID, TERM_TABSET_ID,
+  collectModelTermSlots, nextSlot,
+} from "./model";
 import { invoke } from "../terminal/tauri";
 import { LANGS, t } from "../i18n";
 import type { Lang } from "../i18n";
@@ -76,6 +80,10 @@ export default function DockRoot({
   onRenameWorkspace,
   onSetLockPassword,
   onUnlock,
+  templates,
+  onCreateFromTemplate,
+  onSaveAsTemplate,
+  onDeleteTemplate,
   sshHosts,
   onSshHosts,
   onConnectSsh,
@@ -108,6 +116,10 @@ export default function DockRoot({
   onRenameWorkspace: (id: number, name: string) => void;
   onSetLockPassword: (id: number, hash: string) => void;
   onUnlock: (id: number) => void;
+  templates: WsTemplate[];
+  onCreateFromTemplate: (tpl: WsTemplate, name: string) => void;
+  onSaveAsTemplate: (wsId: number, name: string) => void;
+  onDeleteTemplate: (id: string) => void;
   sshHosts: SshHost[];
   onSshHosts: (h: SshHost[]) => void;
   onConnectSsh: (h: SshHost) => void;
@@ -115,19 +127,38 @@ export default function DockRoot({
   onSettings: (patch: { fontSize?: number; shell?: string }) => void;
 }) {
   // Main dock: the two unique panels (nav + workspace area).
-  const [renamingId, setRenamingId] = useState<number | null>(null);
-  const [renameBuf, setRenameBuf] = useState("");
+  const [rowMenu, setRowMenu] = useState<{ x: number; y: number; wsId: number } | null>(null);
+  const [prompt, setPrompt] = useState<
+    { title: string; value?: string; onOk: (v: string) => void } | null
+  >(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [broadcast, setBroadcast] = useState(false);
 
+  // Right-click workspace menu / prompts close on any outside click.
+  useEffect(() => {
+    if (!rowMenu && !prompt) return;
+    const close = () => setRowMenu(null);
+    window.addEventListener("mousedown", close);
+    window.addEventListener("blur", close);
+    return () => {
+      window.removeEventListener("mousedown", close);
+      window.removeEventListener("blur", close);
+    };
+  }, [rowMenu, prompt]);
+
   const mainFactory = (node: any) => {
     const comp = node.getComponent();
-    // Workspace busy indicator: any session active within 10s = busy.
     const now = Date.now();
-    const globalBusy = Object.values(activities ?? {}).some(
-      (ms) => now - ms < 10_000,
-    );
     if (comp === "nav") {
+      const L = t(lang);
+      // Per-workspace busy state: any of its terminal sessions active
+      // within 10s. The active workspace uses the live model; others use
+      // their committed layout JSON.
+      const wsBusy = (w: any) => {
+        const slots =
+          w.id === activeWsId ? collectModelTermSlots(termModel) : jsonTermSlots(w.termJson);
+        return slots.some((s) => now - (activities?.[String(s)] ?? 0) < 10_000);
+      };
       return (
         <div className="flex h-full flex-col overflow-y-auto bg-[var(--bg-panel)] px-2 py-3">
           <div className="mb-3 flex items-center gap-2 px-2">
@@ -136,27 +167,43 @@ export default function DockRoot({
           </div>
 
           <div className="flex items-center justify-between px-2 pb-1">
-            <span className="text-[11px] font-semibold tracking-wider text-[var(--text-faint)]">{t(lang).nav}</span>
-            <button className="icon-btn !p-1" title="新建工作空间" onClick={onCreateWorkspace}>
+            <span className="text-[11px] font-semibold tracking-wider text-[var(--text-faint)]">{L.nav}</span>
+            <button className="icon-btn !p-1" title={L.newWorkspace} onClick={onCreateWorkspace}>
               <FiPlus size={13} />
             </button>
           </div>
           <div className="flex flex-col gap-0.5">
             {workspaces.map((w) => {
               const isActive = w.id === activeWsId && page === "terminal";
+              const busy = wsBusy(w);
               return (
                 <div
                   key={w.id}
                   onClick={() => { onSwitchWorkspace(w.id); onOpenPage("terminal"); }}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setRowMenu({ x: e.clientX, y: e.clientY, wsId: w.id });
+                  }}
+                  title={busy ? L.busy : L.idle}
                   className={`group flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[12px] transition-colors ${
                     isActive ? "bg-[var(--accent-dim)] text-[var(--text)]" : "text-[var(--text-dim)] hover:bg-[var(--bg-hover)] hover:text-[var(--text)]"
                   }`}
                 >
+                  {/* 工作状态指示器：行名左侧，红=繁忙 绿=空闲 */}
+                  <span
+                    className="h-2 w-2 shrink-0 rounded-full"
+                    style={{
+                      background: busy ? "var(--danger)" : "var(--success)",
+                      opacity: busy ? 1 : 0.5,
+                      boxShadow: busy ? "0 0 6px var(--danger)" : "none",
+                    }}
+                  />
                   {w.locked && <FiLock size={12} className="shrink-0 text-[var(--accent)]" />}
                   <span className="min-w-0 flex-1 truncate">{w.name}</span>
                   <button
                     className="icon-btn !p-0.5 shrink-0 opacity-0 group-hover:opacity-100 hover:!text-[var(--danger)]"
-                    title="删除工作空间"
+                    title={L.deleteWorkspace}
                     onClick={(e) => { e.stopPropagation(); onDeleteWorkspace(w.id); }}
                   >
                     <svg width="11" height="11" viewBox="0 0 12 12"><path d="M2 2 L10 10 M10 2 L2 10" stroke="currentColor" strokeWidth="1.6" /></svg>
@@ -164,6 +211,39 @@ export default function DockRoot({
                 </div>
               );
             })}
+          </div>
+
+          <div className="my-3 h-px bg-[var(--border)]" />
+          <div className="flex items-center justify-between px-2 pb-1">
+            <span className="text-[11px] font-semibold tracking-wider text-[var(--text-faint)]">{L.template}</span>
+          </div>
+          <div className="flex flex-col gap-0.5">
+            {templates.length === 0 && (
+              <div className="px-2 py-0.5 text-[11px] leading-relaxed text-[var(--text-faint)]">{L.tplHint}</div>
+            )}
+            {templates.map((tpl) => (
+              <div
+                key={tpl.id}
+                onClick={() =>
+                  setPrompt({
+                    title: `${L.newWorkspace} · ${L.template}`,
+                    value: tpl.name,
+                    onOk: (name) => onCreateFromTemplate(tpl, name),
+                  })
+                }
+                className="group flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[12px] text-[var(--text-dim)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text)]"
+              >
+                <FiCopy size={12} className="shrink-0 text-[var(--text-faint)]" />
+                <span className="min-w-0 flex-1 truncate">{tpl.name}</span>
+                <button
+                  className="icon-btn !p-0.5 shrink-0 opacity-0 group-hover:opacity-100 hover:!text-[var(--danger)]"
+                  title={L.deleteWorkspace}
+                  onClick={(e) => { e.stopPropagation(); onDeleteTemplate(tpl.id); }}
+                >
+                  <svg width="11" height="11" viewBox="0 0 12 12"><path d="M2 2 L10 10 M10 2 L2 10" stroke="currentColor" strokeWidth="1.6" /></svg>
+                </button>
+              </div>
+            ))}
           </div>
 
           <div className="my-3 h-px bg-[var(--border)]" />
@@ -401,23 +481,95 @@ export default function DockRoot({
   }
 
   return (
-    <Layout
-      model={mainModel}
-      factory={mainFactory}
-      onModelChange={onModelChange}
-      onAction={(a: Action) => a}
-    />
+    <div className="relative h-full w-full">
+      <Layout
+        model={mainModel}
+        factory={mainFactory}
+        onModelChange={onModelChange}
+        onAction={(a: Action) => a}
+      />
+      {rowMenu && (
+        <div
+          className="ctx-menu animate-fade-up"
+          style={{
+            left: Math.max(4, Math.min(rowMenu.x, window.innerWidth - 176)),
+            top: Math.max(4, Math.min(rowMenu.y, window.innerHeight - 168)),
+          }}
+          onMouseDown={(e) => e.stopPropagation()}
+          onContextMenu={(e) => e.preventDefault()}
+        >
+          {(() => {
+            const L = t(lang);
+            const ws = workspaces.find((w) => w.id === rowMenu.wsId);
+            if (!ws) return null;
+            return (
+              <>
+                <button
+                  className="ctx-item"
+                  onClick={() => {
+                    setRowMenu(null);
+                    setPrompt({
+                      title: L.rename,
+                      value: ws.name,
+                      onOk: (v) => onRenameWorkspace(ws.id, v),
+                    });
+                  }}
+                >
+                  <FiEdit2 size={13} /> {L.rename}
+                </button>
+                <button
+                  className="ctx-item"
+                  onClick={() => {
+                    setRowMenu(null);
+                    onToggleLock(ws.id);
+                  }}
+                >
+                  <FiUnlock size={13} /> {ws.locked ? L.unlock : L.lock}
+                </button>
+                <button
+                  className="ctx-item"
+                  onClick={() => {
+                    setRowMenu(null);
+                    setPrompt({
+                      title: L.tplNamePrompt,
+                      value: ws.name,
+                      onOk: (v) => onSaveAsTemplate(ws.id, v),
+                    });
+                  }}
+                >
+                  <FiCopy size={13} /> {L.saveAsTemplate}
+                </button>
+                <div className="my-1 h-px bg-[var(--border)]" />
+                <button
+                  className="ctx-item hover:!text-[var(--danger)]"
+                  onClick={() => {
+                    setRowMenu(null);
+                    onDeleteWorkspace(ws.id);
+                  }}
+                >
+                  <FiTrash2 size={13} /> {L.deleteWorkspace}
+                </button>
+              </>
+            );
+          })()}
+        </div>
+      )}
+      {prompt && (
+        <PromptDialog
+          title={prompt.title}
+          defaultValue={prompt.value}
+          okText={t(lang).ok}
+          cancelText={t(lang).cancel}
+          onOk={(v) => {
+            const fn = prompt.onOk;
+            setPrompt(null);
+            fn(v);
+          }}
+          onCancel={() => setPrompt(null)}
+        />
+      )}
+    </div>
   );
-}
-
-// Slot counter is global; seeds are advanced past restored model tabs by
-// the caller (App).
-let slotCounter = 1;
-export function seedTermSlots(v: number) {
-  slotCounter = Math.max(slotCounter, v + 1);
-}
-function nextSlot() {
-  return slotCounter++;
 }
 
 function FiLock({ size, className }: { size: number; className?: string }) {
