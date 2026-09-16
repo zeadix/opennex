@@ -20,6 +20,14 @@ import { useTheme } from "./theme/useTheme";
 import { useSettings } from "./settings";
 import { loadLang, saveLang, Lang } from "./i18n";
 import SshPage, { SshHost, loadHosts, saveHosts } from "./pages/SshPage";
+import FavoritesPage from "./pages/FavoritesPage";
+import RemotePage from "./pages/RemotePage";
+import UpdatePage from "./pages/UpdatePage";
+import FloatingWindow, { FloatWin } from "./dock/FloatingWindow";
+import SettingsPage from "./pages/SettingsPage";
+import HistoryPage from "./pages/HistoryPage";
+import AiPage from "./pages/AiPage";
+import MonitorPage from "./pages/MonitorPage";
 import { loadWorkspaces, makeWorkspace, persistWorkspaces, Workspace } from "./workspaces";
 import TopBar from "./components/TopBar";
 import StatusBar from "./components/StatusBar";
@@ -35,6 +43,38 @@ export default function App() {
   const [activities, setActivities] = useState<Record<string, number>>({});
   const [sideBarVisible, setSideBarVisible] = useState(true);
   const [historyOverlay, setHistoryOverlay] = useState(false);
+  const [windows, setWindows] = useState<FloatWin[]>([]);
+  const winZ = useRef(1);
+
+  /** Open (or focus) a floating page window, cascading from center. */
+  const openWindow = (id: string, title: string, w = 620, h = 680) => {
+    setWindows((prev) => {
+      const existing = prev.find((x) => x.id === id);
+      const maxZ = prev.reduce((m, x) => Math.max(m, x.z), 0);
+      if (existing) return prev.map((x) => (x.id === id ? { ...x, z: maxZ + 1 } : x));
+      const vw = window.innerWidth, vh = window.innerHeight;
+      const n = prev.length;
+      return [
+        ...prev,
+        {
+          id, title, w, h,
+          x: Math.max(8, (vw - w) / 2 + n * 28),
+          y: Math.max(8, (vh - h) / 2 - 20 + n * 24),
+          z: maxZ + 1,
+        },
+      ];
+    });
+  };
+  const closeWindow = (id: string) => setWindows((prev) => prev.filter((x) => x.id !== id));
+  const focusWindow = (id: string) =>
+    setWindows((prev) => {
+      const maxZ = prev.reduce((m, x) => Math.max(m, x.z), 0);
+      const target = prev.find((x) => x.id === id);
+      if (!target || target.z === maxZ) return prev;
+      return prev.map((x) => (x.id === id ? { ...x, z: maxZ + 1 } : x));
+    });
+  const moveWindow = (id: string, nx: number, ny: number) =>
+    setWindows((prev) => prev.map((x) => (x.id === id ? { ...x, x: nx, y: ny } : x)));
 
   const [mainModel] = useState(() => loadMainModel());
   const [termModel] = useState(() => loadTermModel());
@@ -159,28 +199,15 @@ export default function App() {
     });
   };
 
-  /** Open a page tab in the main tabset (recreate if it was closed). */
+  /** Open a page as a floating window (terminals stay in the dock). */
   const openPage = (p: string) => {
     setPage(p as any);
-    const tabId = PAGE_TAB_ID[p as Page];
-    if (mainModel.getNodeById(tabId)) {
-      mainModel.doAction(Actions.selectTab(tabId));
-    } else {
-      mainModel.doAction(
-        Actions.addNode(
-          {
-            type: "tab",
-            id: tabId,
-            name: p === "remote" ? "远程" : p === "terminal" ? "终端" : p.toUpperCase(),
-            component: p,
-            enableClose: true,
-            enableRenderOnDemand: false,
-          },
-          mainTabsetId(mainModel),
-          DockLocation.CENTER,
-          -1,
-        ),
-      );
+    if (p !== "terminal") {
+      const titles: Record<string, string> = {
+        ssh: "SSH", history: "历史", ai: "AI 助手", settings: "设置",
+        remote: "手机远程控制", update: "检查更新", favorites: "收藏指令",
+      };
+      openWindow(p, titles[p] ?? p, 640, 700);
     }
   };
 
@@ -300,6 +327,21 @@ export default function App() {
     />
       <StatusBar sessionCount={Object.keys(activities).length} shell={settings.shell || "bash"} />
       {historyOverlay && <HistoryOverlay onClose={() => setHistoryOverlay(false)} />}
+      {windows.map((w) => (
+        <FloatingWindow key={w.id} win={w} onFocus={focusWindow} onClose={closeWindow} onMove={moveWindow}>
+          {w.id === "settings" && (
+            <SettingsPage settings={settings} onSettings={updateSettings} themeId={themeId} onTheme={setThemeId} lang={lang} />
+          )}
+          {w.id === "ssh" && (
+            <SshPage hosts={sshHosts} onHosts={(h) => { setSshHosts(h); saveHosts(h); }} onConnect={connectSsh} />
+          )}
+          {w.id === "history" && <HistoryPage />}
+          {w.id === "ai" && <AiPage />}
+          {w.id === "remote" && <RemotePage />}
+          {w.id === "update" && <UpdatePage lang={lang} />}
+          {w.id === "favorites" && <FavoritesPage />}
+        </FloatingWindow>
+      ))}
       </div>
     </div>
   );

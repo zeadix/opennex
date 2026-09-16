@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { SearchAddon } from "@xterm/addon-search";
 import SearchBar from "./SearchBar";
+import { bestMatch, remainder } from "./automatch";
 import {
   broadcastEnabled,
   broadcastGroup,
@@ -62,6 +63,9 @@ export default function TerminalPane({
   });
   const [searchOpen, setSearchOpen] = useState(false);
   const searchRef = useRef<SearchAddon | null>(null);
+  // Auto-match state: current input line + suggestion + history cache.
+  const [suggest, setSuggest] = useState<{ full: string; rest: string; line: string } | null>(null);
+  const historyRef = useRef<string[]>([]);
 
   // Live theme/font updates without recreating the PTY.
   useEffect(() => {
@@ -106,6 +110,9 @@ export default function TerminalPane({
     let cols = term.cols;
 
     (async () => {
+      invoke<string[]>("get_history")
+        .then((h) => (historyRef.current = h))
+        .catch(() => {});
       let start: StartResult;
       try {
         start = await invoke("start_terminal", {
@@ -146,7 +153,20 @@ export default function TerminalPane({
         }
         return true;
       });
+      // Auto-match: track the input line locally, suggest a history
+      // command with the same prefix. Tab accepts (sends the remainder).
+      let buf = "";
+      const updateSuggest = () => {
+        const m = buf.trim().length >= 2 ? bestMatch(buf, historyRef.current) : null;
+        setSuggest(m ? { full: m, rest: remainder(buf, m), line: buf } : null);
+      };
       term.onData((data) => {
+        for (const ch of data) {
+          if (ch === "\r") buf = "";
+          else if (ch === "\x7f" || ch === "\b") buf = buf.slice(0, -1);
+          else if (ch >= " ") buf += ch;
+        }
+        updateSuggest();
         const bytes = new TextEncoder().encode(data);
         if (ws && ws.readyState === WebSocket.OPEN) {
           ws.send(bytes);
@@ -155,6 +175,22 @@ export default function TerminalPane({
         if (broadcastGroup.has(sessionId) || broadcastEnabled.value) {
           broadcastInput(sessionId, bytes);
         }
+      });
+      // Tab accepts the suggestion (sends the remainder, not a raw Tab).
+      term.attachCustomKeyEventHandler((e) => {
+        if (e.type !== "keydown" || e.key !== "Tab" || e.ctrlKey || e.altKey) return true;
+        const current = buf.trim();
+        const m = current.length >= 2 ? bestMatch(current, historyRef.current) : null;
+        if (!m) return true; // no suggestion: let the shell handle Tab
+        e.preventDefault();
+        const rest = remainder(current, m);
+        if (rest) {
+          const bytes = new TextEncoder().encode(rest);
+          if (ws && ws.readyState === WebSocket.OPEN) ws.send(bytes);
+        }
+        buf = m;
+        setSuggest(null);
+        return false;
       });
       const sendResize = () => {
         if (ws && ws.readyState === WebSocket.OPEN && (term.cols !== cols || term.rows !== rows)) {
@@ -246,6 +282,20 @@ export default function TerminalPane({
         focusedSlot.value = sessionId;
       }}
     >
+      {suggest && (
+        <div
+          className="absolute bottom-1 left-2 right-2 z-20 flex items-center justify-between rounded border border-[var(--border)] bg-[var(--bg-elevated)] px-2 py-1 text-[11px]"
+          style={{ color: "var(--text-dim)" }}
+        >
+          <span className="truncate font-mono">
+            <span className="text-[var(--text-dim)]">{suggest.line}</span>
+            <span className="text-[var(--accent)]">{suggest.rest}</span>
+          </span>
+          <span className="ml-2 shrink-0 rounded bg-[var(--bg-active)] px-1.5 py-0.5 font-mono text-[10px]">
+            Tab 补全
+          </span>
+        </div>
+      )}
       {searchOpen && (
         <SearchBar
           onSearch={(q) => (q ? searchRef.current?.findNext(q) : searchRef.current?.clearDecorations())}

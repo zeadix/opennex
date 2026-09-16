@@ -90,7 +90,8 @@ fn lan_ipv4() -> Option<String> {
 /// Global command history, captured from the INPUT path (bytes the user
 /// sends are line-buffered; a carriage return commits the line). Newest
 /// first, adjacent-dedup, capped.
-const HISTORY_CAP: usize = 500;
+const HISTORY_CAP_DEFAULT: usize = 500;
+static HISTORY_CAP: Mutex<usize> = Mutex::new(HISTORY_CAP_DEFAULT);
 static HISTORY: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 struct LineBuf {
@@ -138,8 +139,9 @@ fn record_line(line: String) {
         hist.remove(pos);
     }
     hist.insert(0, line);
-    if hist.len() > HISTORY_CAP {
-        hist.truncate(HISTORY_CAP);
+    let cap = *HISTORY_CAP.lock().unwrap();
+    if hist.len() > cap {
+        hist.truncate(cap);
     }
 }
 
@@ -216,6 +218,7 @@ fn pump_reader(
     mut reader: Box<dyn std::io::Read + Send>,
     out_tx: mpsc::UnboundedSender<Vec<u8>>,
     kill: Arc<Mutex<bool>>,
+    activity: Arc<AtomicU64>,
 ) {
     let mut buf = [0u8; 65536];
     loop {
@@ -225,6 +228,7 @@ fn pump_reader(
         match reader.read(&mut buf) {
             Ok(0) => break,
             Ok(n) => {
+                activity.store(unix_ms(), Ordering::Relaxed);
                 if out_tx.send(buf[..n].to_vec()).is_err() {
                     break;
                 }
@@ -250,7 +254,8 @@ async fn session_ws(mut socket: WebSocket, sessions: Arc<SessionMap>, sid: Strin
     if let Some(reader) = session.reader.lock().unwrap().take() {
         let tx = out_tx.clone();
         let kill = session.kill.clone();
-        tokio::task::spawn_blocking(move || pump_reader(reader, tx, kill));
+        let activity = session.last_activity_ms.clone();
+        tokio::task::spawn_blocking(move || pump_reader(reader, tx, kill, activity));
     }
 
     // select: PTY output -> socket ; socket messages -> PTY.
@@ -292,6 +297,9 @@ async fn session_ws(mut socket: WebSocket, sessions: Arc<SessionMap>, sid: Strin
                         }
                     }
                     Some(Ok(Message::Binary(bytes))) => {
+                        session
+                            .last_activity_ms
+                            .store(unix_ms(), std::sync::atomic::Ordering::Relaxed);
                         for line in line_buf.lock().unwrap().feed(&bytes) {
                             record_line(line);
                         }
@@ -467,6 +475,39 @@ fn get_history() -> Vec<String> {
     HISTORY.lock().unwrap().clone()
 }
 
+fn unix_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// Per-session last-activity timestamps for the workspace busy indicator.
+#[tauri::command]
+fn session_activities(state: tauri::State<AppState>) -> serde_json::Value {
+    let sessions = state.sessions.inner.lock().unwrap();
+    let mut out = serde_json::Map::new();
+    for (id, s) in sessions.iter() {
+        out.insert(
+            id.clone(),
+            json!(s.last_activity_ms.load(std::sync::atomic::Ordering::Relaxed)),
+        );
+    }
+    json!(out)
+}
+
+#[tauri::command]
+fn set_history_cap(cap: usize) {
+    *HISTORY_CAP.lock().unwrap() = cap.clamp(10, 10_000);
+    let mut hist = HISTORY.lock().unwrap();
+    hist.truncate(*HISTORY_CAP.lock().unwrap());
+}
+
+#[tauri::command]
+fn clear_history() {
+    HISTORY.lock().unwrap().clear();
+}
+
 #[derive(serde::Deserialize)]
 struct ChatMsg {
     role: String,
@@ -575,7 +616,10 @@ pub fn run() {
             get_history,
             ai_chat,
             check_update,
-            system_stats
+            system_stats,
+            session_activities,
+            set_history_cap,
+            clear_history
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

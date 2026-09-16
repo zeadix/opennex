@@ -224,14 +224,8 @@ export default function DockRoot({
             />
           );
         }
-        if (tcomp === "ssh") return <SshPage hosts={sshHosts} onHosts={onSshHosts} onConnect={onConnectSsh} />;
-        if (tcomp === "history") return <HistoryPage />;
-        if (tcomp === "favorites") return <FavoritesPage />;
-        if (tcomp === "monitor") return <MonitorPage />;
-        if (tcomp === "ai") return <AiPage />;
-        if (tcomp === "settings") return <SettingsPage settings={settings} onSettings={onSettings} themeId={themeId} onTheme={onTheme} lang={lang} />;
-        if (tcomp === "remote") return <RemotePage />;
-        if (tcomp === "update") return <UpdatePage lang={lang} />;
+        // Pages (SSH/history/AI/settings/…) are floating windows now —
+        // the workspace dock hosts TERMINALS only.
         return null;
       };
       return (
