@@ -21,19 +21,29 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::sync::OnceLock as StdOnceLock;
 static SYS: StdOnceLock<Mutex<sysinfo::System>> = StdOnceLock::new();
 
-/// One live PTY session. `reader` is taken by the WebSocket task on
-/// first attach; `master` is kept for resizes; `kill` breaks the
+/// One live PTY session. The reader pump runs ONCE per session and
+/// fans output out through `bcast`; `scrollback` replays to every new
+/// attach. Sessions are DETACH-SAFE: a closed WebSocket (workspace
+/// switch, layout change) keeps the shell running — only `close_session`
+/// (tab close) ends it. `master` is kept for resizes; `kill` breaks the
 /// blocking read loop on shutdown.
 struct PtySession {
     writer: Mutex<Box<dyn std::io::Write + Send>>,
     master: Mutex<Box<dyn MasterPty + Send>>,
     killer: Mutex<Box<dyn portable_pty::ChildKiller + Send + Sync>>,
-    reader: Mutex<Option<Box<dyn std::io::Read + Send>>>,
     kill: Arc<Mutex<bool>>,
+    /// Output fan-out; each attached WebSocket holds a Subscriber.
+    bcast: tokio::sync::broadcast::Sender<Vec<u8>>,
+    /// Capped tail of raw output bytes, replayed on (re)attach.
+    scrollback: Arc<Mutex<Vec<u8>>>,
     /// Last activity (input OR output) in unix ms — feeds the workspace
     /// busy indicator (red = active within 10s, green = idle).
     last_activity_ms: Arc<AtomicU64>,
 }
+
+/// Scrollback kept per session for reattach replay (~512KB of raw VT
+/// bytes is plenty to rebuild the visible screen).
+const SCROLLBACK_CAP: usize = 512 * 1024;
 
 #[derive(Default)]
 struct SessionMap {
@@ -64,6 +74,7 @@ impl SessionMap {
     }
     fn remove(&self, id: &str) {
         self.inner.lock().unwrap().remove(id);
+        self.order.lock().unwrap().retain(|(x, _)| x != id);
     }
 }
 
@@ -194,18 +205,27 @@ fn spawn_pty(
         .map_err(|e| format!("clone reader: {e}"))?;
 
     let last_activity_ms = Arc::new(AtomicU64::new(0));
+    let (bcast, _) = tokio::sync::broadcast::channel::<Vec<u8>>(256);
+    let scrollback: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::with_capacity(64 * 1024)));
     sessions.insert_named(
-        session_id,
+        session_id.clone(),
         display_name,
         PtySession {
             writer: Mutex::new(pair.master.take_writer().map_err(|e| format!("writer: {e}"))?),
             master: Mutex::new(pair.master),
             killer: Mutex::new(killer),
-            reader: Mutex::new(Some(reader)),
             kill: Arc::new(Mutex::new(false)),
+            bcast,
+            scrollback: scrollback.clone(),
             last_activity_ms,
         },
     );
+    // Output pump: exactly ONE per session, started at spawn — attached
+    // sockets come and go, the shell (and this pump) keeps running.
+    let s = sessions.get(&session_id).expect("just inserted");
+    std::thread::spawn(move || {
+        pump_reader(reader, s.bcast.clone(), scrollback, s.kill.clone(), s.last_activity_ms.clone());
+    });
     // Waiter thread: reap the child on exit.
     std::thread::spawn(move || {
         let _ = child.wait();
@@ -213,10 +233,13 @@ fn spawn_pty(
     Ok(())
 }
 
-/// Blocking PTY -> channel pump, run inside spawn_blocking.
+/// Blocking PTY -> broadcast pump, run once per session on a worker
+/// thread. Every chunk appends to the scrollback tail and fans out to
+/// all currently-attached WebSockets.
 fn pump_reader(
     mut reader: Box<dyn std::io::Read + Send>,
-    out_tx: mpsc::UnboundedSender<Vec<u8>>,
+    bcast: tokio::sync::broadcast::Sender<Vec<u8>>,
+    scrollback: Arc<Mutex<Vec<u8>>>,
     kill: Arc<Mutex<bool>>,
     activity: Arc<AtomicU64>,
 ) {
@@ -229,15 +252,25 @@ fn pump_reader(
             Ok(0) => break,
             Ok(n) => {
                 activity.store(unix_ms(), Ordering::Relaxed);
-                if out_tx.send(buf[..n].to_vec()).is_err() {
-                    break;
+                let chunk = buf[..n].to_vec();
+                {
+                    let mut sb = scrollback.lock().unwrap();
+                    sb.extend_from_slice(&chunk);
+                    let len = sb.len();
+                    if len > SCROLLBACK_CAP {
+                        sb.drain(..len - SCROLLBACK_CAP);
+                    }
+                }
+                if bcast.send(chunk).is_err() {
+                    // No attach right now — keep reading, the session
+                    // stays alive and scrollback accumulates.
                 }
             }
             Err(_) => break,
         }
     }
     // Session ended: a sentinel lets the frontend print the exit state.
-    let _ = out_tx.send(b"\x1b]777;session-exit\x07".to_vec());
+    let _ = bcast.send(b"\x1b]777;session-exit\x07".to_vec());
 }
 
 async fn session_ws(mut socket: WebSocket, sessions: Arc<SessionMap>, sid: String) {
@@ -250,12 +283,29 @@ async fn session_ws(mut socket: WebSocket, sessions: Arc<SessionMap>, sid: Strin
     let (out_tx, mut out_rx) = mpsc::unbounded_channel::<Vec<u8>>();
     let line_buf = Arc::new(Mutex::new(LineBuf::new()));
 
-    // PTY -> WS pump.
-    if let Some(reader) = session.reader.lock().unwrap().take() {
+    // (Re)attach: replay the scrollback tail, then bridge live output.
+    // Subscribe WHILE holding the scrollback lock — the pump appends
+    // under that same lock before broadcasting, so snapshot + live
+    // stream have neither a gap nor an overlap.
+    {
+        let sb = session.scrollback.lock().unwrap();
+        let mut rx = session.bcast.subscribe();
+        let _ = out_tx.send(sb.clone());
+        drop(sb);
         let tx = out_tx.clone();
-        let kill = session.kill.clone();
-        let activity = session.last_activity_ms.clone();
-        tokio::task::spawn_blocking(move || pump_reader(reader, tx, kill, activity));
+        tokio::task::spawn(async move {
+            loop {
+                match rx.recv().await {
+                    Ok(chunk) => {
+                        if tx.send(chunk).is_err() {
+                            break;
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        });
     }
 
     // select: PTY output -> socket ; socket messages -> PTY.
@@ -314,10 +364,11 @@ async fn session_ws(mut socket: WebSocket, sessions: Arc<SessionMap>, sid: Strin
             }
         }
     }
-    // Cleanup: kill child (already exited in the common case) and drop.
-    *session.kill.lock().unwrap() = true;
-    let _ = session.killer.lock().unwrap().kill();
-    sessions.remove(&sid);
+    // Detach ONLY: the WebSocket going away (workspace switch, layout
+    // drag, floating-window focus changes that remount panes) must NOT
+    // end the session — the shell keeps running and its scrollback
+    // accumulates for the next attach. Ending a session is explicit:
+    // the frontend calls close_session when its tab is closed.
 }
 
 async fn ws_handler(
@@ -398,6 +449,13 @@ fn start_terminal(
     let session_id = session_id
         .unwrap_or_else(|| uuid::Uuid::new_v4().simple().to_string());
     let display_name = name.unwrap_or_else(|| "bash".into());
+    // Reattach path: the session already exists (workspace switch
+    // remounted the pane) — keep the running shell, just hand back the
+    // WS port; the socket replays scrollback into the fresh xterm.
+    if state.sessions.get(&session_id).is_some() {
+        let ws_port = wait_ws_port();
+        return Ok(json!({ "session": session_id, "wsPort": ws_port, "name": display_name }));
+    }
     spawn_pty(
         session_id.clone(),
         display_name.clone(),
@@ -409,6 +467,18 @@ fn start_terminal(
     )?;
     let ws_port = wait_ws_port();
     Ok(json!({ "session": session_id, "wsPort": ws_port, "name": display_name }))
+}
+
+/// Explicitly end a session (its terminal tab was closed). Detached
+/// sessions are otherwise kept alive for reattach.
+#[tauri::command]
+fn close_session(state: tauri::State<AppState>, session_id: String) -> Result<(), String> {
+    if let Some(s) = state.sessions.get(&session_id) {
+        *s.kill.lock().unwrap() = true;
+        let _ = s.killer.lock().unwrap().kill();
+    }
+    state.sessions.remove(&session_id);
+    Ok(())
 }
 
 /// Shells available on this machine (from /etc/shells, deduped).
@@ -610,6 +680,7 @@ pub fn run() {
         .manage(state)
         .invoke_handler(tauri::generate_handler![
             start_terminal,
+            close_session,
             ws_port,
             list_shells,
             remote_info,

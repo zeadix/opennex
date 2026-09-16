@@ -34,6 +34,19 @@ interface StartResult {
   wsPort: number;
 }
 
+const SENTINEL = new TextEncoder().encode("\x1b]777;session-exit\x07");
+
+/** Byte offset of the session-exit sentinel in a WS chunk (-1 if absent). */
+function findSentinel(hay: Uint8Array): number {
+  outer: for (let i = 0; i + SENTINEL.length <= hay.length; i++) {
+    for (let j = 0; j < SENTINEL.length; j++) {
+      if (hay[i + j] !== SENTINEL[j]) continue outer;
+    }
+    return i;
+  }
+  return -1;
+}
+
 /**
  * One PTY-backed terminal. Raw bytes flow over a localhost WebSocket:
  * PTY(Rust) -> WS -> xterm.write, and xterm.onData -> WS -> PTY.
@@ -176,9 +189,21 @@ export default function TerminalPane({
         }
       };
       ws.onmessage = (ev) => {
-        const data = ev.data as ArrayBuffer;
-        // Session-exit sentinel (OSC 777) is shown as plain text.
-        term.write(new Uint8Array(data));
+        const bytes = new Uint8Array(ev.data as ArrayBuffer);
+        // Session-exit sentinel (OSC 777) rides in its own chunk from the
+        // pump — swap it for a visible end-of-session line and flip the
+        // status badge (sessions now survive detaches, so the socket
+        // stays open and onclose no longer signals this).
+        const idx = findSentinel(bytes);
+        if (idx >= 0) {
+          if (idx > 0) term.write(bytes.subarray(0, idx));
+          if (!disposed) {
+            setStatus({ state: "ended" });
+            term.write("\r\n\x1b[90m[会话已结束]\x1b[0m\r\n");
+          }
+          return;
+        }
+        term.write(bytes);
       };
       term.attachCustomKeyEventHandler((e) => {
         if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === "f" || e.key === "F") && e.type === "keydown") {
@@ -354,7 +379,14 @@ export default function TerminalPane({
       )}
       <div
         className="pointer-events-none absolute right-2 top-1 z-20 rounded bg-[var(--bg-elevated)] px-1.5 py-0.5 font-mono text-[10px]"
-        style={{ color: status.state === "connected" ? "var(--success)" : "var(--danger)" }}
+        style={{
+          color:
+            status.state === "connected"
+              ? "var(--success)"
+              : status.state === "ended"
+                ? "var(--text-faint)"
+                : "var(--danger)",
+        }}
       >
         pty:{status.state}
         {status.detail ? ` ${status.detail}` : ""}

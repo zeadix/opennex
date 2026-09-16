@@ -18,6 +18,7 @@ import SettingsPage from "../pages/SettingsPage";
 import RemotePage from "../pages/RemotePage";
 import UpdatePage from "../pages/UpdatePage";
 import { NAV_TAB_ID, NAV_TABSET_ID, TERM_TAB_ID, MAIN_TABSET_ID, TERM_TABSET_ID } from "./model";
+import { invoke } from "../terminal/tauri";
 import { LANGS, t } from "../i18n";
 import type { Lang } from "../i18n";
 import { broadcastEnabled, broadcastGroup } from "../terminal/registry";
@@ -305,7 +306,16 @@ export default function DockRoot({
               model={termModel}
               factory={termFactory}
               onModelChange={onModelChange}
-              onAction={(a: Action) => a}
+              onAction={(a: Action) => {
+                // Closing a terminal tab is the ONLY thing that ends its
+                // session — unmounts from workspace switches/drag must
+                // not kill the running shell (detach-safe backend).
+                if (a.type === Actions.DELETE_TAB) {
+                  const m = /term-(\d+)/.exec(String(a.data?.node ?? ""));
+                  if (m) invoke("close_session", { sessionId: m[1] }).catch(() => {});
+                }
+                return a;
+              }}
               onRenderTab={(node, renderValues) => {
                 if (node.getComponent() !== "termpane" || !broadcast) return;
                 const slot = Number((/term-(\d+)/.exec(node.getId() ?? "") ?? [])[1] ?? 0);
