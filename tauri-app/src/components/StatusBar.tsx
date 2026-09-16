@@ -8,7 +8,7 @@ export default function StatusBar({
   shell: string;
 }) {
   return (
-    <div className="flex h-6 shrink-0 items-center gap-4 border-t border-[var(--border)] bg-[var(--bg-panel)] px-3 text-[11px] text-[var(--text-faint)]">
+    <div className="flex h-8 shrink-0 items-center gap-4 border-t-2 border-[var(--danger)] bg-[#7a1f1f] px-3 text-[13px] font-bold text-[#ffffff]">
       <span className="flex items-center gap-1.5">
         <VscTerminalPowershell size={12} />
         {shell}
