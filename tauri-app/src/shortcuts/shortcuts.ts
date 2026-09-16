@@ -4,34 +4,50 @@
 
 export type ShortcutAction =
   | "newTerminal"
-  | "closeTab"
+  | "nextTerminal"
+  | "nextPanel"
+  | "closeTerminal"
   | "search"
   | "lockWorkspace"
   | "workspaceNext"
   | "workspacePrev"
+  | "workspaceUp"
+  | "workspaceDown"
+  | "saveLayout"
   | "historyMenu";
 
 export const SHORTCUT_ACTIONS: { id: ShortcutAction; labelZh: string; labelEn: string }[] = [
   { id: "newTerminal", labelZh: "新建终端", labelEn: "New terminal" },
-  { id: "closeTab", labelZh: "关闭当前终端", labelEn: "Close current terminal" },
+  { id: "nextTerminal", labelZh: "下一个终端标签", labelEn: "Next terminal tab" },
+  { id: "nextPanel", labelZh: "切换主面板标签", labelEn: "Cycle main panels" },
+  { id: "closeTerminal", labelZh: "关闭当前终端", labelEn: "Close current terminal" },
   { id: "search", labelZh: "终端内搜索", labelEn: "Search in terminal" },
+  { id: "saveLayout", labelZh: "保存布局", labelEn: "Save layout" },
   { id: "lockWorkspace", labelZh: "锁定工作空间", labelEn: "Lock workspace" },
   { id: "workspaceNext", labelZh: "下一个工作空间", labelEn: "Next workspace" },
   { id: "workspacePrev", labelZh: "上一个工作空间", labelEn: "Previous workspace" },
+  { id: "workspaceUp", labelZh: "上移工作空间", labelEn: "Workspace up" },
+  { id: "workspaceDown", labelZh: "下移工作空间", labelEn: "Workspace down" },
   { id: "historyMenu", labelZh: "呼出指令面板（历史/收藏）", labelEn: "Command palette" },
 ];
 
+// Defaults mirror the egui build's keymap.
 export const DEFAULT_SHORTCUTS: Record<ShortcutAction, string> = {
-  newTerminal: "Ctrl+Shift+N",
-  closeTab: "Ctrl+Shift+Q",
-  search: "Ctrl+Shift+F",
-  lockWorkspace: "Ctrl+Shift+L",
-  workspaceNext: "Ctrl+PageDown",
-  workspacePrev: "Ctrl+PageUp",
+  newTerminal: "Ctrl+N",
+  nextTerminal: "Ctrl+Tab",
+  nextPanel: "Ctrl+Q",
+  closeTerminal: "Ctrl+E",
+  search: "Ctrl+F",
+  saveLayout: "Ctrl+S",
+  lockWorkspace: "Ctrl+L",
+  workspaceNext: "Ctrl+W",
+  workspacePrev: "Ctrl+Shift+W",
+  workspaceUp: "Ctrl+ArrowUp",
+  workspaceDown: "Ctrl+ArrowDown",
   historyMenu: "Alt",
 };
 
-const KEY = "opennex-shortcuts";
+const KEY = "opennex-shortcuts-v2";
 
 export function loadShortcuts(): Record<ShortcutAction, string> {
   try {

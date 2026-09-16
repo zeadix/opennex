@@ -1,19 +1,30 @@
 import { useEffect, useState } from "react";
-import { FiCopy } from "react-icons/fi";
+import { FiCopy, FiTrash2 } from "react-icons/fi";
 import { invoke } from "../terminal/tauri";
 
+interface HistEntry {
+  id: number;
+  cmd: string;
+  hits: number;
+}
+
 export default function HistoryPage() {
-  const [items, setItems] = useState<string[]>([]);
-  const [copied, setCopied] = useState<string | null>(null);
+  const [items, setItems] = useState<HistEntry[]>([]);
+  const [copied, setCopied] = useState<number | null>(null);
 
-  useEffect(() => {
-    invoke<string[]>("get_history").then(setItems).catch(() => {});
-  }, []);
+  const reload = () => {
+    invoke<HistEntry[]>("get_history").then(setItems).catch(() => {});
+  };
+  useEffect(reload, []);
 
-  const copy = async (cmd: string) => {
-    await navigator.clipboard.writeText(cmd);
-    setCopied(cmd);
+  const copy = async (e: HistEntry) => {
+    await navigator.clipboard.writeText(e.cmd);
+    setCopied(e.id);
     setTimeout(() => setCopied(null), 1200);
+  };
+  const remove = (e: HistEntry) => {
+    invoke("delete_history", { id: e.id }).catch(() => {});
+    setItems((prev) => prev.filter((x) => x.id !== e.id));
   };
 
   return (
@@ -26,21 +37,34 @@ export default function HistoryPage() {
           </div>
         ) : (
           <div className="space-y-1">
-            {items.map((cmd, i) => (
+            {items.map((e) => (
               <div
-                key={i}
+                key={e.id}
                 className="group flex items-center gap-3 rounded-md border border-transparent px-3 py-2 transition-colors hover:border-[var(--border)] hover:bg-[var(--bg-hover)]"
               >
-                <span className="font-mono text-[12px] text-[var(--text-dim)]">{cmd}</span>
+                <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-[var(--text-dim)]">{e.cmd}</span>
+                <span
+                  className="shrink-0 font-mono text-[10px] text-[var(--text-faint)]"
+                  title="执行次数"
+                >
+                  ×{e.hits}
+                </span>
                 <button
-                  className="icon-btn ml-auto opacity-0 group-hover:opacity-100"
+                  className="icon-btn opacity-0 group-hover:opacity-100"
                   title="复制"
-                  onClick={() => copy(cmd)}
+                  onClick={() => copy(e)}
                 >
                   <FiCopy size={13} />
                 </button>
-                {copied === cmd && (
-                  <span className="text-[11px] text-[var(--success)]">已复制</span>
+                <button
+                  className="icon-btn opacity-0 group-hover:opacity-100 hover:!text-[var(--danger)]"
+                  title="删除该记录"
+                  onClick={() => remove(e)}
+                >
+                  <FiTrash2 size={13} />
+                </button>
+                {copied === e.id && (
+                  <span className="shrink-0 text-[11px] text-[var(--success)]">已复制</span>
                 )}
               </div>
             ))}

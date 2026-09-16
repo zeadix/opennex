@@ -11,6 +11,10 @@ export const broadcastEnabled = { value: false };
 /** The pane the user last clicked/focused — target for "insert". */
 export const focusedSlot = { value: 0 };
 
+/** Session slot -> last activity unix ms, mirrored from App's poll so
+ * components outside the dock models (busy dots) can read it freely. */
+export const activityStore: { map: Record<string, number> } = { map: {} };
+
 export function registerSocket(slot: number, ws: WebSocket) {
   sockets.set(slot, ws);
 }

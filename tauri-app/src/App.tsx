@@ -22,6 +22,7 @@ import { useTheme } from "./theme/useTheme";
 import { useSettings } from "./settings";
 import { loadLang, saveLang, t, Lang } from "./i18n";
 import { loadShortcuts, matchesBinding } from "./shortcuts/shortcuts";
+import { activityStore } from "./terminal/registry";
 import SshPage, { SshHost, loadHosts, saveHosts } from "./pages/SshPage";
 import RemotePage from "./pages/RemotePage";
 import UpdatePage from "./pages/UpdatePage";
@@ -291,7 +292,10 @@ export default function App() {
     const poll = () => {
       import("@tauri-apps/api/core")
         .then((m) => m.invoke<Record<string, number>>("session_activities"))
-        .then(setActivities)
+        .then((m) => {
+          activityStore.map = m;
+          setActivities(m);
+        })
         .catch(() => {});
     };
     poll();
@@ -373,6 +377,36 @@ export default function App() {
       /* no tabset */
     }
   };
+  /** Cycle the selected terminal tab inside the terminal dock. */
+  const nextTerminalRef = useRef(() => {});
+  nextTerminalRef.current = () => {
+    try {
+      const set: any = termModel.getNodeById(termTabsetId(termModel));
+      const kids: any[] = set?.getChildren?.() ?? [];
+      if (kids.length < 1) return;
+      const cur = set.getSelectedNode?.() ?? kids[set.getSelected?.() ?? 0];
+      const idx = kids.findIndex((k) => k.getId?.() === cur?.getId?.());
+      termModel.doAction(Actions.selectTab(kids[(idx + 1) % kids.length].getId()));
+    } catch {
+      /* ignore */
+    }
+  };
+  /** Cycle the selected tab of the MAIN dock (nav / workspace area / view panels). */
+  const nextPanelRef = useRef(() => {});
+  nextPanelRef.current = () => {
+    try {
+      const set: any = mainModel.getNodeById(mainTabsetId(mainModel));
+      const kids: any[] = set?.getChildren?.() ?? [];
+      if (kids.length < 1) return;
+      const cur = set.getSelectedNode?.() ?? kids[set.getSelected?.() ?? 0];
+      const idx = kids.findIndex((k) => k.getId?.() === cur?.getId?.());
+      mainModel.doAction(Actions.selectTab(kids[(idx + 1) % kids.length].getId()));
+    } catch {
+      /* ignore */
+    }
+  };
+  const saveLayoutRef = useRef(() => {});
+  saveLayoutRef.current = () => saveLayout();
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const bs = loadShortcuts();
@@ -382,7 +416,7 @@ export default function App() {
       } else if (matchesBinding(e, bs.newTerminal)) {
         e.preventDefault();
         addTerminalRef.current();
-      } else if (matchesBinding(e, bs.closeTab)) {
+      } else if (matchesBinding(e, bs.closeTerminal)) {
         e.preventDefault();
         closeTabRef.current();
       } else if (matchesBinding(e, bs.search)) {
@@ -397,6 +431,21 @@ export default function App() {
       } else if (matchesBinding(e, bs.workspacePrev)) {
         e.preventDefault();
         cycleWsRef.current(-1);
+      } else if (matchesBinding(e, bs.workspaceUp)) {
+        e.preventDefault();
+        cycleWsRef.current(-1);
+      } else if (matchesBinding(e, bs.workspaceDown)) {
+        e.preventDefault();
+        cycleWsRef.current(1);
+      } else if (matchesBinding(e, bs.nextTerminal)) {
+        e.preventDefault();
+        nextTerminalRef.current();
+      } else if (matchesBinding(e, bs.nextPanel)) {
+        e.preventDefault();
+        nextPanelRef.current();
+      } else if (matchesBinding(e, bs.saveLayout)) {
+        e.preventDefault();
+        saveLayoutRef.current();
       }
     };
     window.addEventListener("keydown", onKey, true);

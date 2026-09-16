@@ -29,7 +29,7 @@ import {
 import { invoke } from "../terminal/tauri";
 import { t } from "../i18n";
 import type { Lang } from "../i18n";
-import { broadcastEnabled, broadcastGroup } from "../terminal/registry";
+import { activityStore, broadcastEnabled, broadcastGroup } from "../terminal/registry";
 
 export type Page = "terminal" | "ssh" | "history" | "ai" | "settings" | "remote" | "update" | "favorites" | "monitor" | "sysmon";
 
@@ -157,14 +157,10 @@ export default function DockRoot({
     const now = Date.now();
     if (comp === "nav") {
       const L = t(lang);
-      // Per-workspace busy state: any of its terminal sessions active
-      // within 10s. The active workspace uses the live model; others use
-      // their committed layout JSON.
-      const wsBusy = (w: any) => {
-        const slots =
-          w.id === activeWsId ? collectModelTermSlots(termModel) : jsonTermSlots(w.termJson);
-        return slots.some((s) => now - (activities?.[String(s)] ?? 0) < 10_000);
-      };
+      // Per-workspace busy slots: the active workspace uses the live
+      // model; others use their committed layout JSON.
+      const wsSlots = (w: any) =>
+        w.id === activeWsId ? collectModelTermSlots(termModel) : jsonTermSlots(w.termJson);
       return (
         <div className="flex h-full flex-col overflow-y-auto bg-[var(--bg-panel)] px-2 py-3">
           <div className="mb-3 flex items-center gap-2 px-2">
@@ -181,7 +177,6 @@ export default function DockRoot({
           <div className="flex flex-col gap-0.5">
             {workspaces.map((w) => {
               const isActive = w.id === activeWsId && page === "terminal";
-              const busy = wsBusy(w);
               return (
                 <div
                   key={w.id}
@@ -191,20 +186,12 @@ export default function DockRoot({
                     e.stopPropagation();
                     setRowMenu({ x: e.clientX, y: e.clientY, wsId: w.id });
                   }}
-                  title={busy ? L.busy : L.idle}
                   className={`group flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[12px] transition-colors ${
                     isActive ? "bg-[var(--accent-dim)] text-[var(--text)]" : "text-[var(--text-dim)] hover:bg-[var(--bg-hover)] hover:text-[var(--text)]"
                   }`}
                 >
                   {/* 工作状态指示器：行名左侧，红=繁忙 绿=空闲 */}
-                  <span
-                    className="h-2 w-2 shrink-0 rounded-full"
-                    style={{
-                      background: busy ? "var(--danger)" : "var(--success)",
-                      opacity: busy ? 1 : 0.5,
-                      boxShadow: busy ? "0 0 6px var(--danger)" : "none",
-                    }}
-                  />
+                  <BusyDot slots={wsSlots(w)} lang={lang} />
                   {w.locked && <FiLock size={12} className="shrink-0 text-[var(--accent)]" />}
                   <span className="min-w-0 flex-1 truncate">{w.name}</span>
                   <button
@@ -584,6 +571,32 @@ export default function DockRoot({
         />
       )}
     </div>
+  );
+}
+
+/** 工作状态指示器（行名左侧）：红 = 10 秒内有活动，绿 = 空闲。
+ * Self-refreshing on its own 3s tick — the dock's factory output is
+ * not guaranteed to re-render on activities polls, which previously
+ * froze the dot until a workspace switch remounted the dock. */
+function BusyDot({ slots, lang }: { slots: number[]; lang: Lang }) {
+  const [, force] = useState(0);
+  useEffect(() => {
+    const id = window.setInterval(() => force((v) => v + 1), 3000);
+    return () => window.clearInterval(id);
+  }, []);
+  const now = Date.now();
+  const busy = slots.some((s) => now - (activityStore.map[String(s)] ?? 0) < 10_000);
+  const L = t(lang);
+  return (
+    <span
+      className="h-2 w-2 shrink-0 rounded-full"
+      title={busy ? L.busy : L.idle}
+      style={{
+        background: busy ? "var(--danger)" : "var(--success)",
+        opacity: busy ? 1 : 0.5,
+        boxShadow: busy ? "0 0 6px var(--danger)" : "none",
+      }}
+    />
   );
 }
 

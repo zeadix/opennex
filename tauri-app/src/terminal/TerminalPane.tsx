@@ -118,7 +118,7 @@ export default function TerminalPane({
     sel: number;
     navigated: boolean;
   } | null>(null);
-  const historyRef = useRef<string[]>([]);
+  const historyRef = useRef<{ id: number; cmd: string; hits: number }[]>([]);
   const pathCmdsRef = useRef<string[]>([]);
   const autoMatchRef = useRef(autoMatch);
   autoMatchRef.current = autoMatch;
@@ -198,7 +198,7 @@ export default function TerminalPane({
     let cols = term.cols;
 
     (async () => {
-      invoke<string[]>("get_history")
+      invoke<Array<{ id: number; cmd: string; hits: number }>>("get_history")
         .then((h) => (historyRef.current = h))
         .catch(() => {});
       invoke<string[]>("list_path_commands")
@@ -255,11 +255,9 @@ export default function TerminalPane({
       // PRISTINE until an arrow key is used: Enter stays a plain
       // terminal Enter, Tab completes the highlighted suggestion.
       let buf = "";
-      const rankedHistory = () => {
-        const counts = new Map<string, number>();
-        for (const h of historyRef.current) counts.set(h, (counts.get(h) ?? 0) + 1);
-        return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([c]) => c);
-      };
+      // Backend already ranks newest-first with re-run counts — sort by hits.
+      const rankedHistory = () =>
+        [...historyRef.current].sort((a, b) => b.hits - a.hits).map((e) => e.cmd);
       const updateSuggest = () => {
         if (!autoMatchRef.current) {
           setSuggest(null);

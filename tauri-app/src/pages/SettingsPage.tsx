@@ -101,10 +101,13 @@ export default function SettingsPage({
                     <select
                       value={settings.historyCap}
                       onChange={(e) => onSettings({ historyCap: Number(e.target.value) })}
-                      className="rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1 text-[12px] text-[var(--text)]"
+                      className="rounded-md border border-[var(--border)] px-2 py-1 text-[12px] outline-none"
+                      style={{ backgroundColor: "var(--bg-elevated)", color: "var(--text)" }}
                     >
                       {[100, 300, 500, 1000, 2000, 5000].map((n) => (
-                        <option key={n} value={n}>{n}</option>
+                        <option key={n} value={n} style={{ backgroundColor: "var(--bg-elevated)", color: "var(--text)" }}>
+                          {n} 条
+                        </option>
                       ))}
                     </select>
                   </div>
