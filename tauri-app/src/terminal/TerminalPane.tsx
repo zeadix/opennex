@@ -177,7 +177,7 @@ function WorkspaceTerminalPane({
   const suggestRef = useRef(suggest);
   suggestRef.current = suggest;
   // Remembered overlay position (followCursor off): draggable, restored
-  // across restarts.
+  // across restarts. suggestManual = 本次弹出生命周期内的拖拽覆盖。
   const [suggestPos, setSuggestPos] = useState<{ x: number; y: number } | null>(() => {
     try {
       return JSON.parse(localStorage.getItem("opennex-suggest-pos") ?? "null");
@@ -185,13 +185,22 @@ function WorkspaceTerminalPane({
       return null;
     }
   });
+  const [suggestManual, setSuggestManual] = useState<{ x: number; y: number } | null>(null);
   const dragSuggest = (e: React.MouseEvent) => {
     beginOverlayDrag(e, (x, y) => {
       const p = { x: Math.max(0, x), y: Math.max(0, y) };
+      setSuggestManual(p);
       setSuggestPos(p);
       localStorage.setItem("opennex-suggest-pos", JSON.stringify(p));
     });
   };
+  // 每一轮弹出重新跟随光标（拖拽只在本次弹层生命周期内生效）。
+  const prevOpen = useRef(false);
+  useEffect(() => {
+    const open = !!suggest;
+    if (open && !prevOpen.current) setSuggestManual(null);
+    prevOpen.current = open;
+  }, [suggest]);
 
   // Live theme/font updates without recreating the PTY.
   useEffect(() => {
@@ -410,6 +419,7 @@ function WorkspaceTerminalPane({
           const ch = dims?.cell?.height ?? 20;
           lastCursor.x = rect.left + 8 + (term.buffer.active.cursorX ?? 0) * cw;
           lastCursor.y = rect.top + 4 + (term.buffer.active.cursorY ?? 0) * ch;
+          lastCursor.h = ch;
         } catch {
           /* ignore */
         }
@@ -700,23 +710,48 @@ function WorkspaceTerminalPane({
         <div
           className="animate-fade-up fixed z-[6000] w-[min(480px,calc(100vw-16px))] overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] shadow-2xl"
           style={
-            followCursor && lastCursor.x > 0
-              ? (() => {
-                  // 跟随光标：弹出层位于光标右下方，并整体钳制在窗口内
-                  // 完整显示（忽略记忆位置 —— 记忆位置仅在关闭跟随时生效）。
-                  const w = Math.min(480, window.innerWidth - 16);
-                  const h = 264;
-                  return {
-                    left: Math.max(4, Math.min(lastCursor.x, window.innerWidth - w - 4)),
-                    top: Math.max(4, Math.min(lastCursor.y + 24, window.innerHeight - h - 4)),
-                  };
-                })()
-              : suggestPos
-                ? { left: suggestPos.x, top: suggestPos.y }
-                : { right: 12, bottom: 44 }
+            suggestManual
+              ? { left: suggestManual.x, top: suggestManual.y }
+              : followCursor && lastCursor.x > 0
+                ? (() => {
+                    // 跟随光标：默认光标行下方、左缘对齐光标；贴底时翻到
+                    // 光标上方，左右贴边时右上角对齐光标 —— 保证弹层
+                    // 完整可见且不遮挡光标行。
+                    const w = Math.min(480, window.innerWidth - 16);
+                    const h = 264;
+                    const lineBottom = lastCursor.y + (lastCursor.h || 20);
+                    const left = Math.max(
+                      4,
+                      Math.min(lastCursor.x, window.innerWidth - w - 4),
+                    );
+                    let top = lineBottom + 4;
+                    if (top + h > window.innerHeight - 4) top = lastCursor.y - h - 6;
+                    top = Math.max(4, Math.min(top, window.innerHeight - h - 4));
+                    return { left, top };
+                  })()
+                : suggestPos
+                  ? { left: suggestPos.x, top: suggestPos.y }
+                  : { right: 12, bottom: 44 }
           }
           onMouseDown={(e) => e.stopPropagation()}
         >
+          <div
+            className="overlay-grip"
+            title={T.uDragPosition}
+            onMouseDown={(e) => {
+              e.stopPropagation();
+              dragSuggest(e);
+            }}
+          >
+            <svg width="22" height="6" aria-hidden="true">
+              {[3, 11, 19].map((cx) => (
+                <g key={cx}>
+                  <circle cx={cx} cy="1.5" r="1.2" fill="currentColor" />
+                  <circle cx={cx} cy="4.5" r="1.2" fill="currentColor" />
+                </g>
+              ))}
+            </svg>
+          </div>
           <div className="max-h-[220px] overflow-y-auto py-1">
             {suggest.list.map((cmd, i) => (
               <div

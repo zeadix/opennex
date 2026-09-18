@@ -57,34 +57,45 @@ function WorkspaceHistoryOverlay({ workspaceId, onClose }: HistoryOverlayProps) 
       return null;
     }
   });
-  const dragPos = (e: React.MouseEvent) => {
-    beginOverlayDrag(e, (x, y) => {
-      const p = { x: Math.max(0, x), y: Math.max(0, y) };
-      setPos(p);
-      localStorage.setItem("opennex-palette-pos", JSON.stringify(p));
-    });
-  };
   // 挂载后（首帧绘制前）强制刷新一次光标屏幕坐标：终端可能刚完成
   // 布局，缓存的 lastCursor 已过期。刷新后立即重定位，用户无感。
   const [, forcePos] = useState(0);
+  const overlayRef = useRef<HTMLDivElement | null>(null);
+  const [manualPos, setManualPos] = useState<{ x: number; y: number } | null>(null);
+  const [anchored, setAnchored] = useState<{ left: number; top: number } | null>(null);
   useLayoutEffect(() => {
-    cursorRefreshers.forEach((fn) => fn());
-    forcePos((v) => v + 1);
-  }, []);
+    // 打开时（及窗口尺寸变化时）强制刷新光标屏幕坐标再定位：
+    // 默认 光标行下方、左缘对齐光标；贴底改到光标上方，贴右缘改右上角
+    // 对齐 —— 无论如何保持弹层完整可见、不遮挡光标行。
+    const compute = () => {
+      cursorRefreshers.forEach((fn) => fn());
+      const el = overlayRef.current;
+      if (!el || !(follow && lastCursor.x > 0)) {
+        setAnchored(null);
+        return;
+      }
+      const r = el.getBoundingClientRect();
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const curX = Math.min(lastCursor.x, vw - r.width - 4);
+      const curTop = lastCursor.y;
+      const curBottom = curTop + (lastCursor.h || 20);
+      let left = curX;
+      if (left + r.width > vw - 4) left = curX - r.width;
+      left = Math.max(4, Math.min(left, vw - r.width - 4));
+      let top = curBottom + 4;
+      if (top + r.height > vh - 4) top = Math.max(4, curTop - r.height - 6);
+      top = Math.max(4, Math.min(top, vh - r.height - 4));
+      setAnchored({ left, top });
+    };
+    compute();
+    window.addEventListener("resize", compute);
+    return () => window.removeEventListener("resize", compute);
+  }, [follow]);
 
-  const posStyle: React.CSSProperties | undefined =
-    follow && lastCursor.x > 0
-      ? {
-          // 随光标开启时光标定位优先；拖拽记忆的位置仅在关闭跟随时生效。
-          left: Math.max(4, Math.min(lastCursor.x, window.innerWidth - 700)),
-          top:
-            lastCursor.y + 240 > window.innerHeight
-              ? Math.max(4, lastCursor.y - 240)
-              : lastCursor.y + 24,
-        }
-      : pos
-        ? { left: pos.x, top: pos.y }
-        : undefined;
+  const posStyle: React.CSSProperties | undefined = manualPos
+    ? { left: manualPos.x, top: manualPos.y }
+    : anchored ?? (pos ? { left: pos.x, top: pos.y } : undefined);
 
   useEffect(() => {
     let stale = false;
@@ -197,18 +208,34 @@ function WorkspaceHistoryOverlay({ workspaceId, onClose }: HistoryOverlayProps) 
       style={posStyle}
       onMouseDown={(e) => e.stopPropagation()}
     >
-      {/* ── 搜索（设计稿：⌕ 搜索历史指令…）── */}
+      {/* ── 拖拽把手（明确的拖拽区域）── */}
       <div
-        className={`flex items-center gap-2 border-b border-[var(--border)] px-3 py-2 ${
-          pos || follow ? "" : "cursor-move"
-        }`}
-        title={!follow ? T.uDragPosition : undefined}
+        className="overlay-grip"
+        title={T.uDragPosition}
         onMouseDown={(e) => {
-          if (follow) return;
           e.stopPropagation();
-          dragPos(e);
+          beginOverlayDrag(e, (x, y) => {
+            const p = { x: Math.max(4, x), y: Math.max(4, y) };
+            setManualPos(p);
+            if (!follow) {
+              setPos(p);
+              localStorage.setItem("opennex-palette-pos", JSON.stringify(p));
+            }
+          });
         }}
       >
+        <svg width="22" height="6" aria-hidden="true">
+          {[3, 11, 19].map((cx) => (
+            <g key={cx}>
+              <circle cx={cx} cy="1.5" r="1.2" fill="currentColor" />
+              <circle cx={cx} cy="4.5" r="1.2" fill="currentColor" />
+            </g>
+          ))}
+        </svg>
+      </div>
+
+      {/* ── 搜索（设计稿：⌕ 搜索历史指令…）── */}
+      <div className="flex items-center gap-2 border-b border-[var(--border)] px-3 py-2">
         <svg viewBox="0 0 12 12" className="h-3 w-3 shrink-0 text-[var(--text-faint)]" aria-hidden="true">
           <circle cx="5" cy="5" r="3.4" fill="none" stroke="currentColor" strokeWidth="1.2" />
           <path d="M7.6 7.6L10.6 10.6" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />

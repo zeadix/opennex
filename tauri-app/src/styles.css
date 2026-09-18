@@ -207,6 +207,21 @@ img, svg { -webkit-user-drag: none; }
   overflow: hidden;
 }
 
+/* ── 浮层拖拽把手（明确的拖拽区域）────────────────────────────── */
+.overlay-grip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 16px;
+  cursor: move;
+  background: color-mix(in srgb, var(--text-faint) 14%, transparent);
+  color: var(--text-faint);
+  border-bottom: 1px solid var(--border);
+  user-select: none;
+  touch-action: none;
+}
+.overlay-grip:hover { color: var(--text-dim); background: color-mix(in srgb, var(--text-faint) 22%, transparent); }
+
 /* ── flexlayout tabs: website chip language ─────────────────────
    Rounded tops everywhere; the focused terminal tab wears the
    accent wash + accent text (site "active chip" motif).

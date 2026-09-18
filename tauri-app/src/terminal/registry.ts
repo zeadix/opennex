@@ -16,8 +16,10 @@ export const focusedSlot = { value: 0 };
 export const activityStore: { map: Record<string, number> } = { map: {} };
 
 /** Screen position of the focused terminal's input cursor (px) — lets
- * the auto-match overlay and the Alt palette follow the caret. */
-export const lastCursor = { x: 0, y: 0 };
+ * the auto-match overlay and the Alt palette follow the caret. `h` is
+ * the cursor cell height, so popups can sit just below the caret line
+ * without covering it. */
+export const lastCursor = { x: 0, y: 0, h: 20 };
 
 /** Per-pane cursor-position refreshers — the Alt palette runs them all
  * right before mounting so it positions against the LIVE caret, not a
