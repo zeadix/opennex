@@ -51,8 +51,16 @@ export default function FloatingWindow({
 
   return (
     <div
-      className="animate-fade-up absolute flex flex-col overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--bg)] shadow-[var(--shadow-pop)]"
-      style={{ left: win.x, top: win.y, width: win.w, height: win.h, zIndex: 7000 + win.z }}
+      className="animate-fade-up absolute flex flex-col overflow-hidden rounded-[14px] border border-[var(--border)] bg-[var(--bg)] shadow-[var(--shadow-pop)]"
+      style={{
+        left: win.x,
+        top: win.y,
+        width: win.w,
+        // 高度随内容自适应；上限为 开窗高度 与 视口 可用高度中较小者，
+        // 超出部分在内容区滚动 —— 短内容不再留大片空白。
+        maxHeight: `min(${win.h}px, calc(100vh - 24px))`,
+        zIndex: 7000 + win.z,
+      }}
       onMouseDown={() => onFocus(win.id)}
     >
       <div
@@ -67,7 +75,7 @@ export default function FloatingWindow({
           <FiX size={14} />
         </button>
       </div>
-      <div className="min-h-0 flex-1 overflow-hidden">{children}</div>
+      <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
     </div>
   );
 }
