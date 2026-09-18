@@ -60,7 +60,6 @@ function Sparkline({ points, hot }: { points: number[]; hot: boolean }) {
 export default function SysmonPage({ getWsSlots }: { getWsSlots: () => number[] }) {
   const T = useI18n();
   const [data, setData] = useState<Stats | null>(null);
-  const [tick, setTick] = useState(0);
   const wsRef = useRef(getWsSlots);
   wsRef.current = getWsSlots;
   // CPU 采样历史（每 scope 最近 60 个点），驱动曲线图。
@@ -88,10 +87,7 @@ export default function SysmonPage({ getWsSlots }: { getWsSlots: () => number[] 
         .catch(() => {});
     };
     poll();
-    const id = window.setInterval(() => {
-      poll();
-      setTick((t) => t + 1);
-    }, 2000);
+    const id = window.setInterval(poll, 2000);
     return () => {
       alive = false;
       window.clearInterval(id);
@@ -105,7 +101,7 @@ export default function SysmonPage({ getWsSlots }: { getWsSlots: () => number[] 
   ];
 
   return (
-    <div className="h-full min-w-0 overflow-y-auto p-3" key={tick % 2}>
+    <div className="h-full min-w-0 overflow-y-auto p-3">
       <div className="w-full min-w-0">
         <h2 className="mb-1 flex items-center gap-2 text-[15px] font-semibold">
           <FiWatch size={15} className="text-[var(--accent)]" /> {T.sysmon}

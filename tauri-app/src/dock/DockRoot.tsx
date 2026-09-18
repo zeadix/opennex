@@ -6,7 +6,7 @@ import { Layout, Model, Actions, DockLocation, Action } from "flexlayout-react";
 // collapses into stacked blocks.
 import "flexlayout-react/style/dark.css";
 import {
-  FiCopy, FiEdit2, FiFolder, FiPlus, FiRadio, FiServer,
+  FiCopy, FiEdit2, FiLayers, FiPlus, FiRadio, FiServer,
   FiTrash2, FiUnlock,
 } from "react-icons/fi";
 import LockOverlay from "./LockOverlay";
@@ -253,7 +253,7 @@ export default function DockRoot({
                     setTplMenu(true);
                   }}
                 >
-                  <FiFolder size={13} />
+                  <FiLayers size={13} />
                 </button>
                 {tplMenu && templates.length > 0 && createPortal(
                   <div
@@ -270,7 +270,7 @@ export default function DockRoot({
                           onCreateFromTemplate(tpl, tpl.name);
                         }}
                       >
-                        <FiFolder size={11} className="shrink-0 text-[var(--text-faint)]" />
+                        <FiLayers size={11} className="shrink-0 text-[var(--text-faint)]" />
                         <span className="min-w-0 flex-1 truncate">{tpl.name}</span>
                         <span className="shrink-0 font-mono text-[10px] text-[var(--text-faint)]">
                           {jsonTermSlots(tpl.termJson).length} {T.cTerminals}

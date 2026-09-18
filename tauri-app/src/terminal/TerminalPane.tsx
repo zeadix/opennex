@@ -565,14 +565,44 @@ function WorkspaceTerminalPane({
       host.addEventListener("wheel", onWheel, { passive: false });
       (host as any)._wheelCleanup = () => host.removeEventListener("wheel", onWheel);
       // 拖选即复制（设置可关）：松开鼠标时把选中文本送入剪贴板。
+      // navigator.clipboard 在 WebKitGTK 的非安全上下文里可能不存在，
+      // 需要退回 隐藏 textarea + execCommand 的传统路径。
+      const copyText = async (text: string): Promise<boolean> => {
+        try {
+          if (navigator.clipboard?.writeText) {
+            await navigator.clipboard.writeText(text);
+            return true;
+          }
+        } catch {
+          /* fall through to the legacy path */
+        }
+        try {
+          const ta = document.createElement("textarea");
+          ta.value = text;
+          ta.setAttribute("readonly", "");
+          ta.style.position = "fixed";
+          ta.style.top = "-1000px";
+          document.body.appendChild(ta);
+          ta.select();
+          const ok = document.execCommand("copy");
+          ta.remove();
+          return ok;
+        } catch {
+          return false;
+        }
+      };
       const onMouseUp = () => {
         if (!copyOnSelectRef.current) return;
         const sel = term.getSelection();
         if (!sel) return;
-        navigator.clipboard
-          .writeText(sel)
-          .then(() => window.dispatchEvent(new CustomEvent("opennex-toast", { detail: Tref.current.uCopiedClipboard })))
-          .catch(() => {});
+        copyText(sel).then((ok) => {
+          if (ok) {
+            term.focus();
+            window.dispatchEvent(
+              new CustomEvent("opennex-toast", { detail: { text: Tref.current.uCopiedClipboard, ms: 1000 } }),
+            );
+          }
+        });
       };
       host.addEventListener("mouseup", onMouseUp);
       (host as any)._mouseupCleanup = () => host.removeEventListener("mouseup", onMouseUp);
@@ -636,16 +666,19 @@ function WorkspaceTerminalPane({
         <div
           className="animate-fade-up fixed z-[6000] w-[min(480px,calc(100vw-16px))] overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] shadow-2xl"
           style={
-            suggestPos
-              ? { left: suggestPos.x, top: suggestPos.y }
-              : followCursor && lastCursor.x > 0
-                ? {
-                    left: Math.max(4, Math.min(lastCursor.x, window.innerWidth - 496)),
-                    top:
-                      lastCursor.y + 190 > window.innerHeight
-                        ? Math.max(4, lastCursor.y - 190)
-                        : lastCursor.y + 24,
-                  }
+            followCursor && lastCursor.x > 0
+              ? (() => {
+                  // 跟随光标：弹出层位于光标右下方，并整体钳制在窗口内
+                  // 完整显示（忽略记忆位置 —— 记忆位置仅在关闭跟随时生效）。
+                  const w = Math.min(480, window.innerWidth - 16);
+                  const h = 264;
+                  return {
+                    left: Math.max(4, Math.min(lastCursor.x, window.innerWidth - w - 4)),
+                    top: Math.max(4, Math.min(lastCursor.y + 24, window.innerHeight - h - 4)),
+                  };
+                })()
+              : suggestPos
+                ? { left: suggestPos.x, top: suggestPos.y }
                 : { right: 12, bottom: 44 }
           }
           onMouseDown={(e) => e.stopPropagation()}

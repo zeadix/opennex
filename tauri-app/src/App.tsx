@@ -79,10 +79,10 @@ export default function App() {
   useEffect(startUpdateCheck, []);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<number | null>(null);
-  const showToast = (msg: string) => {
+  const showToast = (msg: string, ms = 2200) => {
     setToast(msg);
     if (toastTimer.current) window.clearTimeout(toastTimer.current);
-    toastTimer.current = window.setTimeout(() => setToast(null), 2200);
+    toastTimer.current = window.setTimeout(() => setToast(null), ms);
   };
   useEffect(
     () => () => {
@@ -531,10 +531,12 @@ export default function App() {
   }, []);
 
   // Panes surface lightweight hints (e.g. copy-on-select) via this event.
+  // detail: string, or { text, ms } for a custom toast duration.
   useEffect(() => {
     const onToast = (e: Event) => {
       const msg = (e as CustomEvent).detail;
       if (typeof msg === "string") showToast(msg);
+      else if (msg && typeof msg === "object") showToast(String(msg.text ?? ""), Number(msg.ms) || 2200);
     };
     window.addEventListener("opennex-toast", onToast);
     return () => window.removeEventListener("opennex-toast", onToast);
@@ -713,7 +715,7 @@ export default function App() {
       </div>
       {historyOverlay && <HistoryOverlay workspaceId={activeWsId} onClose={() => setHistoryOverlay(false)} />}
       {toast && (
-        <div className="animate-fade-up pointer-events-none fixed bottom-10 left-1/2 z-[9500] -translate-x-1/2 rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] px-4 py-2 text-[12px] text-[var(--text)] shadow-2xl">
+        <div className="animate-fade-up pointer-events-none fixed left-1/2 top-10 z-[9500] -translate-x-1/2 rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] px-4 py-2 text-[12px] text-[var(--text)] shadow-2xl">
           {toast}
         </div>
       )}
