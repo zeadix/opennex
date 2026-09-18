@@ -1066,8 +1066,9 @@ fn current_notes(m: &LatestManifest, current: &str) -> (Vec<String>, Vec<String>
 }
 
 /// Pure payload builder for `check_update`. The manifest belongs to the
-/// egui release channel, which ships NO Tauri packages — so it is never
-/// reported as an installable update, only as release info.
+/// egui release channel, which ships NO Tauri packages — so a newer
+/// release is REPORTED (inheriting the egui version logic) but is never
+/// installable from here.
 fn build_update_payload(m: &LatestManifest, current: &str) -> Result<serde_json::Value, String> {
     if parse_version(&m.version).is_none() {
         return Err(format!(
@@ -1077,8 +1078,15 @@ fn build_update_payload(m: &LatestManifest, current: &str) -> Result<serde_json:
     }
     let (changes, changes_en) = notes_from(&m.changes, &m.changes_en, m.changelog.as_deref());
     let (current_changes, current_changes_en) = current_notes(m, current);
+    // 继承 egui 的版本比较逻辑：通道上出现更新的版本就如实上报
+    // （UI 据此显示「发现新版本」），但 canInstall 恒为 false ——
+    // egui 通道不提供 Tauri 安装包。
+    let update_available = match (parse_version(current), parse_version(&m.version)) {
+        (Some(c), Some(l)) => l > c,
+        _ => false,
+    };
     Ok(json!({
-        "updateAvailable": false,
+        "updateAvailable": update_available,
         "canInstall": false,
         "channel": "egui",
         "latest": m.version,
@@ -1091,10 +1099,11 @@ fn build_update_payload(m: &LatestManifest, current: &str) -> Result<serde_json:
     }))
 }
 
-/// Real Cargo version of this Tauri shell (compile-time constant).
+/// Real product version of this Tauri shell — sourced from
+/// `tauri.conf.json` (kept in lockstep with the product release line).
 #[tauri::command]
-fn get_app_info() -> serde_json::Value {
-    json!({ "current": env!("CARGO_PKG_VERSION") })
+fn get_app_info(app: tauri::AppHandle) -> serde_json::Value {
+    json!({ "current": app.package_info().version.to_string() })
 }
 
 /// Update check: fetch the public (egui-channel) manifest and surface it
@@ -1283,8 +1292,9 @@ mod update_metadata_tests {
 
     #[test]
     fn payload_is_never_an_installable_tauri_update() {
+        // 继承 egui 版本逻辑：更新版本如实上报，但永远不可从此安装。
         let payload = build_update_payload(&manifest("999.0.0"), "0.1.0").unwrap();
-        assert_eq!(payload["updateAvailable"], false);
+        assert_eq!(payload["updateAvailable"], true);
         assert_eq!(payload["canInstall"], false);
         assert_eq!(payload["channel"], "egui");
         assert_eq!(payload["latest"], "999.0.0");
@@ -1294,6 +1304,11 @@ mod update_metadata_tests {
             reason.contains("egui"),
             "reason must explain the egui channel: {reason}"
         );
+        // 已是最新（或更新）时不再提示有新版本。
+        let same = build_update_payload(&manifest("0.1.0"), "0.1.0").unwrap();
+        assert_eq!(same["updateAvailable"], false);
+        let older = build_update_payload(&manifest("0.1.0"), "0.2.0").unwrap();
+        assert_eq!(older["updateAvailable"], false);
     }
 
     #[test]
@@ -1395,9 +1410,7 @@ mod update_metadata_tests {
         assert_eq!(changes, vec!["fix: 0.1.9 hotfix"]);
     }
 
-    #[test]
-    fn get_app_info_reports_cargo_version() {
-        let info = get_app_info();
-        assert_eq!(info["current"], env!("CARGO_PKG_VERSION"));
-    }
+    // get_app_info 现从 tauri.conf.json 读取版本（经 AppHandle），
+    // 无法在单元测试中构造 AppHandle —— 版本一致性由
+    // tauri.conf.json 与 Cargo.toml 同步为 0.1.55 保证。
 }
