@@ -168,45 +168,6 @@ img, svg { -webkit-user-drag: none; }
   isolation: isolate;
   overflow: hidden;
 }
-.workspace-activity-sweep {
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  overflow: hidden;
-  border-radius: inherit;
-}
-.workspace-activity-beam {
-  position: absolute;
-  inset: 2px 0;
-  animation: workspace-sweep 3s linear infinite;
-}
-.workspace-activity-beam::before {
-  content: "";
-  position: absolute;
-  right: 0;
-  top: 0;
-  bottom: 0;
-  width: 30%;
-  background: linear-gradient(to right, transparent, color-mix(in srgb, var(--accent) 24%, transparent));
-}
-.workspace-activity-beam::after {
-  content: "";
-  position: absolute;
-  right: 0;
-  top: 0;
-  bottom: 0;
-  width: 1px;
-  background: var(--accent);
-  opacity: 0.7;
-}
-@keyframes workspace-sweep {
-  from { transform: translateX(-100%); }
-  to { transform: translateX(30%); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .workspace-activity-beam { animation: none; opacity: 0.35; }
-}
 
 /* ── flexlayout tabs: website chip language ─────────────────────
    Rounded tops everywhere; the focused terminal tab wears the

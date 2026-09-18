@@ -299,7 +299,7 @@ export default function DockRoot({
                     isActive ? "bg-[var(--accent-dim)] text-[var(--text)]" : "text-[var(--text-dim)] hover:bg-[var(--bg-hover)] hover:text-[var(--text)]"
                   }`}
                 >
-                  <WorkspaceActivitySweep slots={wsSlots(w)} lang={lang} />
+                  <WorkspaceActivityDot slots={wsSlots(w)} lang={lang} />
                   {w.locked && <FiLock size={12} className="shrink-0 text-[var(--accent)]" />}
                   <span className="min-w-0 flex-1 truncate">{w.name}</span>
                   <button
@@ -743,63 +743,55 @@ function ShellPickerMenu({
   );
 }
 
-const ACTIVITY_IDLE_MS = 5_000;
+const ACTIVITY_IDLE_MS = 10_000;
 
-/** Pure busy decision shared by every sweep indicator: a slot with no
+/** Pure busy decision shared by every workspace indicator: a slot with no
  * recorded activity (startup) is NEVER busy; otherwise busy within the
  * idle window. */
 export function isSlotBusy(lastActivityMs: number, now: number): boolean {
   if (lastActivityMs <= 0) return false;
   return now - lastActivityMs < ACTIVITY_IDLE_MS;
 }
-const SWEEP_PERIOD_MS = 3_000;
-// A shared monotonic epoch survives dock remounts on workspace switches.
-const SWEEP_EPOCH = performance.now();
 
-// Dock factory output may stay cached across activity polls, so the indicator
-// reads the shared activity clock independently of its parent's renders.
-function WorkspaceActivitySweep({ slots, lang }: { slots: number[]; lang: Lang }) {
+/** 闲忙指示灯（官网设计稿）：工作区行左缘常显圆点 —
+ * 红 = 近 10s 内有终端活动，绿 = 全部空闲，灰 = 无终端。 */
+function WorkspaceActivityDot({ slots, lang }: { slots: number[]; lang: Lang }) {
+  const T = t(lang);
   const isBusy = () => {
     const now = Date.now();
     return slots.some((slot) => isSlotBusy(activityStore.map[String(slot)] ?? 0, now));
   };
-  const [busy, setBusy] = useState(isBusy);
-  // busy=false only stops NEW sweeps: the running cycle plays out to a
-  // clean end (iteration end) instead of vanishing mid-pass.
-  const [everBusy, setEverBusy] = useState(isBusy);
-  const beamRef = useRef<HTMLSpanElement>(null);
-  useLayoutEffect(() => {
-    // On mount only: re-syncing mid-flight would make a still-mounted
-    // beam jump when busy toggles within one pass.
-    if (!beamRef.current) return;
-    const phase = (performance.now() - SWEEP_EPOCH) % SWEEP_PERIOD_MS;
-    beamRef.current.style.animationDelay = `-${phase}ms`;
-  }, [everBusy]);
+  const [state, setState] = useState<"busy" | "idle" | "none">(() =>
+    slots.length === 0 ? "none" : isBusy() ? "busy" : "idle",
+  );
   useEffect(() => {
     const tick = () => {
       const now = Date.now();
-      setBusy(slots.some((slot) => isSlotBusy(activityStore.map[String(slot)] ?? 0, now)));
+      setState(
+        slots.length === 0
+          ? "none"
+          : slots.some((slot) => isSlotBusy(activityStore.map[String(slot)] ?? 0, now))
+            ? "busy"
+            : "idle",
+      );
     };
     tick();
     const timer = window.setInterval(tick, 250);
     return () => window.clearInterval(timer);
   }, [slots]);
-  useEffect(() => {
-    if (busy) setEverBusy(true);
-  }, [busy]);
-  if (!everBusy) return null;
+  const color =
+    state === "busy" ? "var(--danger)" : state === "idle" ? "var(--success)" : "var(--text-faint)";
   return (
-    <span className="workspace-activity-sweep" role="img" aria-label={t(lang).busy}>
-      <span
-        ref={beamRef}
-        className="workspace-activity-beam"
-        style={{ animationDuration: `${SWEEP_PERIOD_MS}ms` }}
-        onAnimationIteration={() => {
-          // Cycle boundary: keep sweeping only while still busy.
-          if (!busy) setEverBusy(false);
-        }}
-      />
-    </span>
+    <span
+      role="img"
+      aria-label={state === "busy" ? T.busy : T.idle}
+      title={state === "busy" ? T.busy : T.idle}
+      className="h-[7px] w-[7px] shrink-0 rounded-full"
+      style={{
+        background: color,
+        boxShadow: state === "busy" ? "0 0 6px color-mix(in srgb, var(--danger) 60%, transparent)" : "none",
+      }}
+    />
   );
 }
 
