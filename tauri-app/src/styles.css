@@ -103,6 +103,44 @@ img, svg { -webkit-user-drag: none; }
   .settings-controls input[type="checkbox"]::before { content: none; }
 }
 
+/* ── Switch（快捷设置等开关）──────────────────────────────────── */
+.switch {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  width: 32px;
+  height: 18px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: var(--bg-active);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+}
+.switch::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background: var(--text-dim);
+  transition: transform 0.2s, background 0.2s;
+}
+.switch:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.switch:checked::before {
+  transform: translateX(14px);
+  background: #ffffff;
+}
+.switch:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .icon-btn {
   display: inline-flex;
   align-items: center;
