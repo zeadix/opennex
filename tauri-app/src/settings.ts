@@ -27,7 +27,7 @@ const KEY = "opennex-settings";
 
 export const defaultSettings: Settings = {
   shell: "",
-  fontSize: 14,
+  fontSize: 13,
   autoMatch: true,
   historyCap: 500,
   followCursor: false,

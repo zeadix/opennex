@@ -232,7 +232,7 @@ export default function DockRoot({
           <div className="flex shrink-0 items-center justify-between px-2 pb-1">
             <span className="text-[11px] font-semibold tracking-wider text-[var(--text-faint)]">{L.nav}</span>
             <div className="flex items-center gap-0.5">
-              {/* Order: 新建工作区 → 模板创建 → 工作区广播 */}
+              {/* Order: 新建工作区 → 模板创建 */}
               <button className="icon-btn !p-1" title={L.newWorkspace} onClick={onCreateWorkspace}>
                 <FiPlus size={13} />
               </button>
@@ -281,13 +281,6 @@ export default function DockRoot({
                   document.body,
                 )}
               </div>
-              <button
-                className={`icon-btn !p-1 ${broadcast ? "!text-[var(--danger)]" : ""}`}
-                title={broadcast ? T.cBroadcastStop : T.cBroadcastStart}
-                onClick={toggleBroadcast}
-              >
-                <FiRadio size={13} />
-              </button>
             </div>
           </div>
           <div data-testid="workspace-list" className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
@@ -445,6 +438,20 @@ export default function DockRoot({
                     }}
                   >
                     <FiPlus size={13} />
+                  </button>,
+                );
+                // 工作区广播（原导航栏头部）——固定在标签栏最右侧。
+                renderValues.buttons.push(
+                  <button
+                    key="bcast-toggle"
+                    className={`icon-btn !p-1 ${broadcast ? "!text-[var(--danger)]" : ""}`}
+                    title={broadcast ? T.cBroadcastStop : T.cBroadcastStart}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleBroadcast();
+                    }}
+                  >
+                    <FiRadio size={13} />
                   </button>,
                 );
               }}
