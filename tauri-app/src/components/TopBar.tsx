@@ -51,7 +51,15 @@ export default function TopBar({
     if (open !== null && open !== label) setOpen(label);
   };
 
-  const menus: { label: string; items: { label: string; onClick?: () => void; checked?: boolean }[] }[] = [
+  type MenuItem = {
+    label: string;
+    onClick?: () => void;
+    checked?: boolean;
+    /** 配色框（主题菜单）：[强调色, 次要色, 背景色] 三段色条。 */
+    swatch?: [string, string, string];
+  };
+
+  const menus: { label: string; items: MenuItem[] }[] = [
     {
       label: T.menuWorkspace,
       items: [
@@ -86,6 +94,7 @@ export default function TopBar({
       items: allThemes().map((th) => ({
         label: th.name,
         checked: th.id === themeId,
+        swatch: [th.colors.accent, th.colors.danger, th.colors.bg] as [string, string, string],
         onClick: () => onTheme(th.id),
       })),
     },
@@ -138,7 +147,16 @@ export default function TopBar({
                   }}
                   className="flex cursor-pointer items-center justify-between gap-4 px-3 py-1.5 text-[12px] text-[var(--text-dim)] hover:bg-[var(--bg-hover)] hover:text-[var(--text)]"
                 >
-                  <span>{it.label}</span>
+                  <span className="flex min-w-0 items-center gap-2">
+                    {it.swatch && (
+                      <span className="inline-flex shrink-0 overflow-hidden rounded-[3px]">
+                        {it.swatch.map((c, k) => (
+                          <i key={k} className="h-[13px] w-[5px]" style={{ background: c }} />
+                        ))}
+                      </span>
+                    )}
+                    <span className="truncate">{it.label}</span>
+                  </span>
                   {it.checked && <span className="text-[var(--accent)]">✓</span>}
                 </div>
               ))}
