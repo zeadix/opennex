@@ -6,6 +6,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
 import { FiCopy, FiClipboard } from "react-icons/fi";
 import SearchBar from "./SearchBar";
+import { loadShortcuts, matchesBinding } from "../shortcuts/shortcuts";
 import {
   broadcastEnabled,
   broadcastGroup,
@@ -445,6 +446,39 @@ function WorkspaceTerminalPane({
         if (e.type !== "keydown") return true;
         if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === "f" || e.key === "F")) {
           if (!disposed) setSearchOpen(true);
+          return false;
+        }
+        // 终端级快捷键（设置 → 快捷键 可改）：中断 / 复制选中 / 粘贴。
+        const sc = loadShortcuts();
+        if (matchesBinding(e, sc.terminalInterrupt)) {
+          e.preventDefault();
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            const bytes = new TextEncoder().encode("\x03");
+            ws.send(bytes);
+            if (broadcastGroup.has(sessionId) || broadcastEnabled.value) {
+              broadcastInput(sessionId, bytes);
+            }
+          }
+          return false;
+        }
+        if (matchesBinding(e, sc.terminalCopy)) {
+          const sel = term.getSelection();
+          if (!sel) return true; // 无选中：放行为普通 ^C（中断）
+          e.preventDefault();
+          copyText(sel).then((ok) => {
+            if (ok) {
+              window.dispatchEvent(
+                new CustomEvent("opennex-toast", {
+                  detail: { text: Tref.current.uCopiedClipboard, ms: 1000 },
+                }),
+              );
+            }
+          });
+          return false;
+        }
+        if (matchesBinding(e, sc.terminalPaste)) {
+          e.preventDefault();
+          void pasteClipboard();
           return false;
         }
         const sg = suggestRef.current;

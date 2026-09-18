@@ -476,6 +476,12 @@ export default function App() {
   };
   const saveLayoutRef = useRef(() => {});
   saveLayoutRef.current = () => saveLayout();
+  const togglePanelRef = useRef<(panel: string) => void>(() => {});
+  togglePanelRef.current = (panel) => togglePanel(panel);
+  const uiFontSizeRef = useRef(settings.uiFontSize);
+  uiFontSizeRef.current = settings.uiFontSize;
+  const updateSettingsRef = useRef(updateSettings);
+  updateSettingsRef.current = updateSettings;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const bs = loadShortcuts();
@@ -517,6 +523,14 @@ export default function App() {
       } else if (matchesBinding(e, bs.saveLayout)) {
         e.preventDefault();
         saveLayoutRef.current();
+      } else if (matchesBinding(e, bs.toggleSidebar)) {
+        e.preventDefault();
+        togglePanelRef.current("nav");
+      } else if (matchesBinding(e, bs.zoomIn) || matchesBinding(e, bs.zoomOut)) {
+        e.preventDefault();
+        const step = matchesBinding(e, bs.zoomIn) ? 1 : -1;
+        const next = Math.min(18, Math.max(11, uiFontSizeRef.current + step));
+        if (next !== uiFontSizeRef.current) updateSettingsRef.current({ uiFontSize: next });
       }
     };
     window.addEventListener("keydown", onKey, true);

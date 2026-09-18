@@ -5,6 +5,7 @@ import type { Lang } from "../i18n";
 import ShortcutRecorder from "../shortcuts/ShortcutRecorder";
 import FontSelect, { FontOption } from "../components/FontSelect";
 import {
+  DEFAULT_SHORTCUTS,
   SHORTCUT_ACTIONS,
   loadShortcuts,
   saveShortcuts,
@@ -526,6 +527,11 @@ export default function SettingsPage({
             <section>
               <h2 className="mb-3 text-[15px] font-semibold">{t0.shortcuts}</h2>
               <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-panel)] p-4">
+                <p className="mb-3 text-[11px] text-[var(--text-faint)]">
+                  {lang === "zh" || lang === "zh-TW"
+                    ? "点击快捷键名称后按下新按键即可修改"
+                    : "Click a binding, then press new keys to rebind"}
+                </p>
                 <div className="space-y-2">
                   {SHORTCUT_ACTIONS.map((a) => (
                     <div key={a.id} className="flex items-center justify-between gap-3">
@@ -541,9 +547,14 @@ export default function SettingsPage({
                 </div>
                 <button
                   className="mt-3 rounded-md border border-[var(--border)] px-2.5 py-1 text-[11px] text-[var(--text-dim)] hover:text-[var(--text)]"
-                  onClick={() => setShortcuts(loadShortcuts())}
+                  onClick={() => {
+                    // 恢复默认必须显式落盘：loadShortcuts() 会先读到旧存档。
+                    const defaults = { ...DEFAULT_SHORTCUTS };
+                    setShortcuts(defaults);
+                    saveShortcuts(defaults);
+                  }}
                 >
-                  恢复默认
+                  {lang === "zh" || lang === "zh-TW" ? "恢复默认按键" : "Reset to defaults"}
                 </button>
               </div>
             </section>

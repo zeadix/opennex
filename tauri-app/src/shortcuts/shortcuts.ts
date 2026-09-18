@@ -8,11 +8,17 @@ export type ShortcutAction =
   | "nextPanel"
   | "closeTerminal"
   | "search"
+  | "terminalInterrupt"
+  | "terminalCopy"
+  | "terminalPaste"
   | "lockWorkspace"
   | "workspaceNext"
   | "workspacePrev"
   | "workspaceUp"
   | "workspaceDown"
+  | "toggleSidebar"
+  | "zoomIn"
+  | "zoomOut"
   | "saveLayout"
   | "historyMenu";
 
@@ -22,12 +28,18 @@ export const SHORTCUT_ACTIONS: { id: ShortcutAction; labelZh: string; labelEn: s
   { id: "nextPanel", labelZh: "切换主面板标签", labelEn: "Cycle main panels" },
   { id: "closeTerminal", labelZh: "关闭当前终端", labelEn: "Close current terminal" },
   { id: "search", labelZh: "终端内搜索", labelEn: "Search in terminal" },
+  { id: "terminalInterrupt", labelZh: "终端中断 (^C)", labelEn: "Terminal interrupt (^C)" },
+  { id: "terminalCopy", labelZh: "复制终端选中文本", labelEn: "Copy terminal selection" },
+  { id: "terminalPaste", labelZh: "粘贴到终端", labelEn: "Paste into terminal" },
   { id: "saveLayout", labelZh: "保存布局", labelEn: "Save layout" },
   { id: "lockWorkspace", labelZh: "锁定工作空间", labelEn: "Lock workspace" },
   { id: "workspaceNext", labelZh: "下一个工作空间", labelEn: "Next workspace" },
   { id: "workspacePrev", labelZh: "上一个工作空间", labelEn: "Previous workspace" },
   { id: "workspaceUp", labelZh: "上移工作空间", labelEn: "Workspace up" },
   { id: "workspaceDown", labelZh: "下移工作空间", labelEn: "Workspace down" },
+  { id: "toggleSidebar", labelZh: "显示/隐藏侧栏", labelEn: "Toggle sidebar" },
+  { id: "zoomIn", labelZh: "界面放大", labelEn: "Zoom in" },
+  { id: "zoomOut", labelZh: "界面缩小", labelEn: "Zoom out" },
   { id: "historyMenu", labelZh: "呼出指令面板（历史/收藏）", labelEn: "Command palette" },
 ];
 
@@ -38,12 +50,18 @@ export const DEFAULT_SHORTCUTS: Record<ShortcutAction, string> = {
   nextPanel: "Ctrl+Q",
   closeTerminal: "Ctrl+E",
   search: "Ctrl+F",
+  terminalInterrupt: "Ctrl+Shift+C",
+  terminalCopy: "Ctrl+C",
+  terminalPaste: "Ctrl+V",
   saveLayout: "Ctrl+S",
   lockWorkspace: "Ctrl+L",
   workspaceNext: "Ctrl+W",
   workspacePrev: "Ctrl+Shift+W",
   workspaceUp: "Ctrl+ArrowUp",
   workspaceDown: "Ctrl+ArrowDown",
+  toggleSidebar: "F1",
+  zoomIn: "Ctrl+=",
+  zoomOut: "Ctrl+-",
   historyMenu: "Alt",
 };
 
