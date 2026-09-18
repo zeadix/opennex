@@ -10,6 +10,7 @@ import {
   broadcastEnabled,
   broadcastGroup,
   broadcastInput,
+  cursorRefreshers,
   focusedSlot,
   lastCursor,
   registerSocket,
@@ -403,6 +404,13 @@ function WorkspaceTerminalPane({
           broadcastInput(sessionId, bytes);
         }
       });
+      // Keep the tracked caret fresh WITHOUT keystrokes too (shell output
+      // redraws, scrolls, pane resizes) — the Alt palette reads it at open.
+      term.onRender(() => updateCursorPos());
+      term.onScroll(() => updateCursorPos());
+      // Alt 面板打开前由 registry 逐一调用，强制刷新光标屏幕坐标。
+      cursorRefreshers.add(updateCursorPos);
+      (hostRef.current as any)._cursorCleanup = () => cursorRefreshers.delete(updateCursorPos);
       // Overlay + search key handling (single dispatcher; suggestRef
       // mirrors the latest overlay state for this one-time handler).
       term.attachCustomKeyEventHandler((e) => {
@@ -568,6 +576,7 @@ function WorkspaceTerminalPane({
 
     return () => {
       disposed = true;
+      (hostRef.current as any)?._cursorCleanup?.();
       const cleanup = (hostRef.current as any)?._cleanup;
       if (cleanup) cleanup();
       (hostRef.current as any)?._wheelCleanup?.();

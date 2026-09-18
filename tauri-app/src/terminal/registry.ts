@@ -19,6 +19,11 @@ export const activityStore: { map: Record<string, number> } = { map: {} };
  * the auto-match overlay and the Alt palette follow the caret. */
 export const lastCursor = { x: 0, y: 0 };
 
+/** Per-pane cursor-position refreshers — the Alt palette runs them all
+ * right before mounting so it positions against the LIVE caret, not a
+ * coordinate cached from the last keystroke/render. */
+export const cursorRefreshers = new Set<() => void>();
+
 export function registerSocket(slot: number, ws: WebSocket) {
   sockets.set(slot, ws);
 }

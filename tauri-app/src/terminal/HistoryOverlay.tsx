@@ -1,8 +1,8 @@
 import { useI18n } from '../i18n-context';
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { FiFolder, FiPlus, FiStar, FiTrash2, FiEdit2, FiX } from "react-icons/fi";
 import { invoke } from "./tauri";
-import { focusedSlot, lastCursor, sendTo } from "./registry";
+import { cursorRefreshers, focusedSlot, lastCursor, sendTo } from "./registry";
 import { beginOverlayDrag } from "./TerminalPane";
 import { loadSettings } from "../settings";
 import { FavFolder, loadFolders, newFolderId, persistFolders } from "../favorites";
@@ -64,17 +64,26 @@ function WorkspaceHistoryOverlay({ workspaceId, onClose }: HistoryOverlayProps) 
       localStorage.setItem("opennex-palette-pos", JSON.stringify(p));
     });
   };
+  // 挂载后（首帧绘制前）强制刷新一次光标屏幕坐标：终端可能刚完成
+  // 布局，缓存的 lastCursor 已过期。刷新后立即重定位，用户无感。
+  const [, forcePos] = useState(0);
+  useLayoutEffect(() => {
+    cursorRefreshers.forEach((fn) => fn());
+    forcePos((v) => v + 1);
+  }, []);
+
   const posStyle: React.CSSProperties | undefined =
-    pos
-      ? { left: pos.x, top: pos.y }
-      : follow && lastCursor.x > 0
-        ? {
-            left: Math.max(4, Math.min(lastCursor.x, window.innerWidth - 700)),
-            top:
-              lastCursor.y + 240 > window.innerHeight
-                ? Math.max(4, lastCursor.y - 240)
-                : lastCursor.y + 24,
-          }
+    follow && lastCursor.x > 0
+      ? {
+          // 随光标开启时光标定位优先；拖拽记忆的位置仅在关闭跟随时生效。
+          left: Math.max(4, Math.min(lastCursor.x, window.innerWidth - 700)),
+          top:
+            lastCursor.y + 240 > window.innerHeight
+              ? Math.max(4, lastCursor.y - 240)
+              : lastCursor.y + 24,
+        }
+      : pos
+        ? { left: pos.x, top: pos.y }
         : undefined;
 
   useEffect(() => {
