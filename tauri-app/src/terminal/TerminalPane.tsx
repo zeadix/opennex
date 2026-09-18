@@ -147,6 +147,8 @@ function WorkspaceTerminalPane({
   const termRef = useRef<Terminal | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const searchRef = useRef<SearchAddon | null>(null);
+  /** 字号/字体变化后的重适配入口（big effect 内赋值）。 */
+  const fitRef = useRef<{ fitAndSync: () => void } | null>(null);
   // Custom right-click menu (copy/paste) — the webview's own context
   // menu is suppressed app-wide, this is the only menu terminals show.
   const [ctx, setCtx] = useState<{ x: number; y: number } | null>(null);
@@ -198,6 +200,12 @@ function WorkspaceTerminalPane({
     t.options.fontSize = fontSize;
     t.options.fontFamily =
       getComputedStyle(document.documentElement).getPropertyValue("--mono") || "monospace";
+    // 字号/字体变化后必须重新 fit（重算列数）并同步 PTY winsize，
+    // 否则换行停留 在旧列数 —— 小字号时内容右侧留白一大块。
+    // xterm 异步重测字形 → 立即一次 + 80ms 后补一次。
+    fitRef.current?.fitAndSync();
+    const tid = window.setTimeout(() => fitRef.current?.fitAndSync(), 80);
+    return () => window.clearTimeout(tid);
   }, [themeId, fontSize]);
 
   // Theme editor live preview + font changes: tokens changed under the
@@ -209,6 +217,8 @@ function WorkspaceTerminalPane({
       t.options.theme = readTerminalTheme();
       t.options.fontFamily =
         getComputedStyle(document.documentElement).getPropertyValue("--mono") || "monospace";
+      // 字体族变化会改变字形宽度 → 重新 fit 并同步 PTY。
+      fitRef.current?.fitAndSync();
     };
     window.addEventListener("opennex-terminal-theme", onTheme);
     return () => window.removeEventListener("opennex-terminal-theme", onTheme);
@@ -273,6 +283,24 @@ function WorkspaceTerminalPane({
     let disposed = false;
     let rows = term.rows;
     let cols = term.cols;
+
+    // 字号/字体变化（font effect 与 Ctrl+滚轮）后的重适配入口：
+    // fit 重算列数 → 把新 cols/rows 同步给 PTY（经 registry socket）。
+    fitRef.current = {
+      fitAndSync: () => {
+        try {
+          fit.fit();
+          const sock = sockets.get(sessionId);
+          if (sock && sock.readyState === WebSocket.OPEN && (term.cols !== cols || term.rows !== rows)) {
+            cols = term.cols;
+            rows = term.rows;
+            sock.send(JSON.stringify({ type: "resize", cols, rows }));
+          }
+        } catch {
+          /* not laid out yet */
+        }
+      },
+    };
 
     (async () => {
       invoke<Array<{ id: number; cmd: string; hits: number }>>("get_history", { workspaceId })
