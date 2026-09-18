@@ -1,12 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Layout, Model, Actions, DockLocation, Action } from "flexlayout-react";
 // REQUIRED: flexlayout's structural classes (tabsets, tabs, dividers)
 // carry the entire layout geometry — without this sheet the dock
 // collapses into stacked blocks.
 import "flexlayout-react/style/dark.css";
 import {
-  FiActivity, FiClock, FiCopy, FiCpu, FiEdit2, FiMessageSquare, FiPlus,
-  FiRadio, FiServer, FiSidebar, FiStar, FiTerminal, FiTrash2, FiUnlock,
+  FiCopy, FiEdit2, FiFolder, FiPlus, FiRadio, FiServer,
+  FiTrash2, FiUnlock,
 } from "react-icons/fi";
 import LockOverlay from "./LockOverlay";
 import { sha256, LOCK_SALT, WsTemplate, jsonTermSlots } from "../workspaces";
@@ -20,18 +21,19 @@ import SettingsPage from "../pages/SettingsPage";
 import RemotePage from "../pages/RemotePage";
 import UpdatePage from "../pages/UpdatePage";
 import SysmonPage from "../pages/SysmonPage";
+import QuickSettingsPage from "../pages/QuickSettingsPage";
 import PromptDialog from "../components/PromptDialog";
 import type { Settings } from "../settings";
 import {
   NAV_TAB_ID, NAV_TABSET_ID, TERM_TAB_ID, MAIN_TABSET_ID, TERM_TABSET_ID,
-  collectModelTermSlots, nextSlot,
+  canCloseTerminal, collectModelTermSlots, nextSlot,
 } from "./model";
 import { invoke } from "../terminal/tauri";
 import { t } from "../i18n";
 import type { Lang } from "../i18n";
 import { activityStore, broadcastEnabled, broadcastGroup } from "../terminal/registry";
 
-export type Page = "terminal" | "ssh" | "history" | "ai" | "settings" | "remote" | "update" | "favorites" | "monitor" | "sysmon";
+export type Page = "terminal" | "ssh" | "history" | "ai" | "settings" | "remote" | "update" | "favorites" | "monitor" | "sysmon" | "quick-settings";
 
 export const PAGE_TAB_ID: Record<Page, string> = {
   terminal: TERM_TAB_ID,
@@ -44,19 +46,7 @@ export const PAGE_TAB_ID: Record<Page, string> = {
   favorites: "tab-favorites",
   monitor: "tab-monitor",
   sysmon: "tab-sysmon",
-};
-
-export const PAGE_NAME: Record<Page, string> = {
-  terminal: "终端工作区",
-  ssh: "SSH",
-  history: "历史",
-  ai: "AI",
-  settings: "设置",
-  remote: "远程",
-  update: "更新",
-  favorites: "收藏",
-  monitor: "监控",
-  sysmon: "系统资源",
+  "quick-settings": "tab-quick-settings",
 };
 
 export default function DockRoot({
@@ -132,13 +122,79 @@ export default function DockRoot({
   settings: Settings;
   onSettings: (patch: Partial<Settings>) => void;
 }) {
+  const T = t(lang);
   // Main dock: the two unique panels (nav + workspace area).
   const [rowMenu, setRowMenu] = useState<{ x: number; y: number; wsId: number } | null>(null);
   const [prompt, setPrompt] = useState<
     { title: string; value?: string; onOk: (v: string) => void } | null
   >(null);
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [tplMenu, setTplMenu] = useState(false);
+  const [tplPosition, setTplPosition] = useState({ left: 0, top: 0 });
+  const [, refreshBroadcast] = useState(0);
+  // Term-tab context menu state (rename / close).
+  const [termTabMenu, setTermTabMenu] = useState<{ x: number; y: number; tabId: string; name: string } | null>(null);
+  const [plusMenu, setPlusMenu] = useState<{ x: number; y: number; tabsetId: string } | null>(null);
+  // Broadcast is PER-WORKSPACE: switching (or unmounting) a workspace
+  // clears the group so keystrokes never leak into another workspace's
+  // terminals.
   const [broadcast, setBroadcast] = useState(false);
+  const toggleBroadcast = () => {
+    const next = !broadcast;
+    setBroadcast(next);
+    broadcastEnabled.value = next;
+    broadcastGroup.clear();
+    if (next) {
+      // Collect live session slots from the model (defensive traversal —
+      // getRootRow typing varies across versions).
+      const root: any = (termModel as any).getRootRow?.() ?? {};
+      const stack: any[] = [...(root.getChildren?.() ?? [])];
+      while (stack.length) {
+        const n: any = stack.pop();
+        if (!n) continue;
+        if (n.getType?.() === "tab") {
+          const m = /term-(\d+)/.exec(n.getId?.() ?? "");
+          if (m) broadcastGroup.add(Number(m[1]));
+        } else {
+          stack.push(...(n.getChildren?.() ?? []));
+        }
+      }
+    }
+  };
+  // Switching workspaces must tear the broadcast group down with the
+  // outgoing workspace — otherwise typing in one workspace's terminal
+  // lands in the previous workspace's shells too.
+  useEffect(() => {
+    setBroadcast(false);
+    broadcastEnabled.value = false;
+    broadcastGroup.clear();
+  }, [activeWsId, termModel]);
+  useEffect(() => () => {
+    broadcastEnabled.value = false;
+    broadcastGroup.clear();
+  }, []);
+
+  useEffect(() => {
+    setRowMenu(null);
+    setPrompt(null);
+    setTplMenu(false);
+    setTermTabMenu(null);
+    setPlusMenu(null);
+  }, [activeWsId, termModel]);
+
+  useEffect(() => {
+    if (!tplMenu) return;
+    const close = () => setTplMenu(false);
+    window.addEventListener("mousedown", close);
+    return () => window.removeEventListener("mousedown", close);
+  }, [tplMenu]);
+
+  // Outside click closes the tabset "+" picker.
+  useEffect(() => {
+    if (!plusMenu) return;
+    const close = () => setPlusMenu(null);
+    window.addEventListener("mousedown", close);
+    return () => window.removeEventListener("mousedown", close);
+  }, [plusMenu]);
 
   // Right-click workspace menu / prompts close on any outside click.
   useEffect(() => {
@@ -151,6 +207,16 @@ export default function DockRoot({
       window.removeEventListener("blur", close);
     };
   }, [rowMenu, prompt]);
+  useEffect(() => {
+    if (!termTabMenu) return;
+    const close = () => setTermTabMenu(null);
+    window.addEventListener("mousedown", close);
+    window.addEventListener("blur", close);
+    return () => {
+      window.removeEventListener("mousedown", close);
+      window.removeEventListener("blur", close);
+    };
+  }, [termTabMenu]);
 
   const mainFactory = (node: any) => {
     const comp = node.getComponent();
@@ -162,19 +228,69 @@ export default function DockRoot({
       const wsSlots = (w: any) =>
         w.id === activeWsId ? collectModelTermSlots(termModel) : jsonTermSlots(w.termJson);
       return (
-        <div className="flex h-full flex-col overflow-y-auto bg-[var(--bg-panel)] px-2 py-3">
-          <div className="mb-3 flex items-center gap-2 px-2">
-            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-[var(--accent-dim)] font-mono text-[13px] font-bold text-[var(--accent)]">N</div>
-            <span className="text-[14px] font-semibold tracking-wide">OpenNex</span>
-          </div>
-
-          <div className="flex items-center justify-between px-2 pb-1">
+        <div className="flex h-full min-h-0 flex-col overflow-hidden bg-[var(--bg-panel)] px-2 py-3">
+          <div className="flex shrink-0 items-center justify-between px-2 pb-1">
             <span className="text-[11px] font-semibold tracking-wider text-[var(--text-faint)]">{L.nav}</span>
-            <button className="icon-btn !p-1" title={L.newWorkspace} onClick={onCreateWorkspace}>
-              <FiPlus size={13} />
-            </button>
+            <div className="flex items-center gap-0.5">
+              {/* Order: 新建工作区 → 模板创建 → 工作区广播 */}
+              <button className="icon-btn !p-1" title={L.newWorkspace} onClick={onCreateWorkspace}>
+                <FiPlus size={13} />
+              </button>
+              {/* 模板按钮：hover 展示模板列表，点击即复制其终端布局 */}
+              <div className="relative">
+                <button
+                  className="icon-btn !p-1"
+                  title={templates.length > 0 ? T.cTemplateCreate : T.cTemplateEmpty}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onMouseEnter={(e) => {
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    setTplPosition({ left: Math.max(4, Math.min(rect.right - 192, window.innerWidth - 196)), top: rect.bottom + 4 });
+                    setTplMenu(true);
+                  }}
+                  onClick={(e) => {
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    setTplPosition({ left: Math.max(4, Math.min(rect.right - 192, window.innerWidth - 196)), top: rect.bottom + 4 });
+                    setTplMenu(true);
+                  }}
+                >
+                  <FiFolder size={13} />
+                </button>
+                {tplMenu && templates.length > 0 && createPortal(
+                  <div
+                    className="fixed z-50 max-h-80 w-48 overflow-y-auto rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] py-1"
+                    style={tplPosition}
+                    onMouseDown={(e) => e.stopPropagation()}
+                  >
+                    {templates.map((tpl) => (
+                      <div
+                        key={tpl.id}
+                        className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-dim)] hover:bg-[var(--bg-hover)] hover:text-[var(--text)]"
+                        onClick={() => {
+                          setTplMenu(false);
+                          onCreateFromTemplate(tpl, tpl.name);
+                        }}
+                      >
+                        <FiFolder size={11} className="shrink-0 text-[var(--text-faint)]" />
+                        <span className="min-w-0 flex-1 truncate">{tpl.name}</span>
+                        <span className="shrink-0 font-mono text-[10px] text-[var(--text-faint)]">
+                          {jsonTermSlots(tpl.termJson).length} {T.cTerminals}
+                        </span>
+                      </div>
+                    ))}
+                  </div>,
+                  document.body,
+                )}
+              </div>
+              <button
+                className={`icon-btn !p-1 ${broadcast ? "!text-[var(--danger)]" : ""}`}
+                title={broadcast ? T.cBroadcastStop : T.cBroadcastStart}
+                onClick={toggleBroadcast}
+              >
+                <FiRadio size={13} />
+              </button>
+            </div>
           </div>
-          <div className="flex flex-col gap-0.5">
+          <div data-testid="workspace-list" className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
             {workspaces.map((w) => {
               const isActive = w.id === activeWsId && page === "terminal";
               return (
@@ -186,12 +302,11 @@ export default function DockRoot({
                     e.stopPropagation();
                     setRowMenu({ x: e.clientX, y: e.clientY, wsId: w.id });
                   }}
-                  className={`group flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[12px] transition-colors ${
+                  className={`workspace-row group flex shrink-0 cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[12px] transition-colors ${
                     isActive ? "bg-[var(--accent-dim)] text-[var(--text)]" : "text-[var(--text-dim)] hover:bg-[var(--bg-hover)] hover:text-[var(--text)]"
                   }`}
                 >
-                  {/* 工作状态指示器：行名左侧，红=繁忙 绿=空闲 */}
-                  <BusyDot slots={wsSlots(w)} lang={lang} />
+                  <WorkspaceActivitySweep slots={wsSlots(w)} lang={lang} />
                   {w.locked && <FiLock size={12} className="shrink-0 text-[var(--accent)]" />}
                   <span className="min-w-0 flex-1 truncate">{w.name}</span>
                   <button
@@ -206,44 +321,14 @@ export default function DockRoot({
             })}
           </div>
 
-          <div className="my-3 h-px bg-[var(--border)]" />
-          <div className="flex items-center justify-between px-2 pb-1">
-            <span className="text-[11px] font-semibold tracking-wider text-[var(--text-faint)]">{L.template}</span>
-          </div>
-          <div className="flex flex-col gap-0.5">
-            {templates.length === 0 && (
-              <div className="px-2 py-0.5 text-[11px] leading-relaxed text-[var(--text-faint)]">{L.tplHint}</div>
-            )}
-            {templates.map((tpl) => (
-              <div
-                key={tpl.id}
-                onClick={() =>
-                  setPrompt({
-                    title: `${L.newWorkspace} · ${L.template}`,
-                    value: tpl.name,
-                    onOk: (name) => onCreateFromTemplate(tpl, name),
-                  })
-                }
-                className="group flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[12px] text-[var(--text-dim)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text)]"
-              >
-                <FiCopy size={12} className="shrink-0 text-[var(--text-faint)]" />
-                <span className="min-w-0 flex-1 truncate">{tpl.name}</span>
-                <button
-                  className="icon-btn !p-0.5 shrink-0 opacity-0 group-hover:opacity-100 hover:!text-[var(--danger)]"
-                  title={L.deleteWorkspace}
-                  onClick={(e) => { e.stopPropagation(); onDeleteTemplate(tpl.id); }}
-                >
-                  <svg width="11" height="11" viewBox="0 0 12 12"><path d="M2 2 L10 10 M10 2 L2 10" stroke="currentColor" strokeWidth="1.6" /></svg>
-                </button>
-              </div>
-            ))}
-          </div>
-
         </div>
       );
     }
     // 视图菜单的工具面板：主布局的 dock 面板（与导航/工作区同级），
     // 不进终端区布局 —— 主 dock 与终端 dock 是两个独立 Model。
+    if (comp === "quick-settings") {
+      return <QuickSettingsPage settings={settings} onSettings={onSettings} lang={lang} />;
+    }
     if (comp === "sysmon") {
       return <SysmonPage getWsSlots={() => collectModelTermSlots(termModel)} />;
     }
@@ -251,7 +336,7 @@ export default function DockRoot({
       return <AiPage />;
     }
     if (comp === "history") {
-      return <HistoryPage />;
+      return <HistoryPage workspaceId={activeWsId} />;
     }
     if (comp === "favorites") {
       return <FavoritesPage />;
@@ -270,12 +355,16 @@ export default function DockRoot({
           return (
             <TerminalPane
               sessionId={cfg.slot ?? 0}
+              workspaceId={activeWsId}
               themeId={themeId}
               fontSize={fontSize}
               shell={cfg.shell}
+              cwd={cfg.cwd}
               command={cfg.command}
               name={tn.getName?.()}
               autoMatch={settings.autoMatch}
+              followCursor={settings.followCursor}
+              copyOnSelect={settings.copyOnSelect}
               onFontSize={onFontSize}
             />
           );
@@ -286,78 +375,9 @@ export default function DockRoot({
       };
       return (
         <div className="relative flex h-full flex-col overflow-hidden">
-          <div className="flex h-8 shrink-0 items-center justify-end gap-1 border-b border-[var(--border)] bg-[var(--bg-panel)] px-2">
-            <button
-              className={`icon-btn ${broadcast ? "!text-[var(--danger)]" : ""}`}
-              title={broadcast ? "关闭广播输入（全部终端）" : "开启广播输入（全部终端）"}
-              onClick={() => {
-                const next = !broadcast;
-                setBroadcast(next);
-                broadcastEnabled.value = next;
-                if (next) {
-                  broadcastGroup.clear();
-                  // Collect live session slots from the model (defensive
-                  // traversal — getRootRow typing varies across versions).
-                  const root: any = (termModel as any).getRootRow?.() ?? {};
-                  const stack: any[] = [...(root.getChildren?.() ?? [])];
-                  while (stack.length) {
-                    const n: any = stack.pop();
-                    if (!n) continue;
-                    if (n.getType?.() === "tab") {
-                      const m = /term-(\d+)/.exec(n.getId?.() ?? "");
-                      if (m) broadcastGroup.add(Number(m[1]));
-                    } else {
-                      stack.push(...(n.getChildren?.() ?? []));
-                    }
-                  }
-                } else {
-                  broadcastGroup.clear();
-                }
-              }}
-            >
-              <FiRadio size={14} />
-            </button>
-            <button
-              className="icon-btn"
-              title="新建终端（选择 Shell）"
-              onClick={(e) => {
-                e.stopPropagation();
-                setMenuOpen(!menuOpen);
-              }}
-            >
-              <FiPlus size={14} />
-              <svg width="9" height="9" viewBox="0 0 10 10" className="ml-0.5">
-                <path d="M1 3 L5 7 L9 3" stroke="currentColor" strokeWidth="1.4" fill="none" />
-              </svg>
-            </button>
-            {menuOpen && (
-              <div
-                className="absolute right-2 top-9 z-30 w-64 rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] py-1 shadow-xl"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div
-                  className="cursor-pointer px-3 py-1.5 text-[12px] text-[var(--text)] hover:bg-[var(--bg-hover)]"
-                  onClick={() => { setMenuOpen(false); onAddTerminal(); }}
-                >
-                  默认 Shell {defaultShell ? `(${defaultShell.split("/").pop()})` : ""}
-                </div>
-                <div className="my-1 h-px bg-[var(--border)]" />
-                {shells
-                  .filter((sh) => sh !== defaultShell)
-                  .map((sh) => (
-                    <div
-                      key={sh}
-                      className="cursor-pointer px-3 py-1.5 font-mono text-[11px] text-[var(--text-dim)] hover:bg-[var(--bg-hover)] hover:text-[var(--text)]"
-                      onClick={() => { setMenuOpen(false); onAddTerminalWith(sh); }}
-                    >
-                      {sh}
-                    </div>
-                  ))}
-              </div>
-            )}
-          </div>
-          <div className="relative min-h-0 flex-1">
+          <div className="term-dock relative min-h-0 flex-1">
             <Layout
+              key={activeWsId}
               model={termModel}
               factory={termFactory}
               onModelChange={onModelChange}
@@ -366,12 +386,31 @@ export default function DockRoot({
                 // session — unmounts from workspace switches/drag must
                 // not kill the running shell (detach-safe backend).
                 if (a.type === Actions.DELETE_TAB) {
+                  if (!canCloseTerminal(termModel, String(a.data?.node ?? ""))) return undefined;
                   const m = /term-(\d+)/.exec(String(a.data?.node ?? ""));
-                  if (m) invoke("close_session", { sessionId: m[1] }).catch(() => {});
+                  if (m) {
+                    invoke("close_session", { sessionId: m[1] }).catch(() => {});
+                    // A closed terminal must not linger in the broadcast group.
+                    broadcastGroup.delete(Number(m[1]));
+                  }
                 }
                 return a;
               }}
               onRenderTab={(node, renderValues) => {
+                if (node.getComponent() === "termpane") {
+                  // Right-click a terminal tab: rename / close.
+                  renderValues.content = (
+                    <span
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setTermTabMenu({ x: e.clientX, y: e.clientY, tabId: node.getId(), name: node.getName() });
+                      }}
+                    >
+                      {node.getName()}
+                    </span>
+                  );
+                }
                 if (node.getComponent() !== "termpane" || !broadcast) return;
                 const slot = Number((/term-(\d+)/.exec(node.getId() ?? "") ?? [])[1] ?? 0);
                 if (!slot) return;
@@ -380,12 +419,12 @@ export default function DockRoot({
                   <button
                     key="bcast"
                     className={`icon-btn !p-0.5 ${inGroup ? "!text-[var(--danger)]" : "!text-[var(--text-faint)]"}`}
-                    title={inGroup ? "退出广播组" : "加入广播组"}
+                    title={inGroup ? T.cBroadcastLeave : T.cBroadcastJoin}
                     onClick={(e) => {
                       e.stopPropagation();
                       if (inGroup) broadcastGroup.delete(slot);
                       else broadcastGroup.add(slot);
-                      setBroadcast(broadcast); // re-render icon state
+                      refreshBroadcast((v) => v + 1);
                     }}
                   >
                     <FiRadio size={11} />
@@ -393,15 +432,16 @@ export default function DockRoot({
                 );
               }}
               onRenderTabSet={(node, renderValues) => {
-                // "+" button on every tabset in the workspace area.
+                // "+" button on every tabset in the workspace area —
+                // opens the shell/SSH picker at the button position.
                 renderValues.buttons.push(
                   <button
                     key="new-term"
                     className="icon-btn !p-1"
-                    title="新建终端"
+                    title={T.newTerminal}
                     onClick={(e) => {
                       e.stopPropagation();
-                      onAddTerminalIn(node.getId());
+                      setPlusMenu({ x: e.clientX, y: e.clientY, tabsetId: node.getId() });
                     }}
                   >
                     <FiPlus size={13} />
@@ -434,19 +474,25 @@ export default function DockRoot({
     return null;
   };
 
-  /** New terminal tab inside the tabset that owns `tabsetId`. */
-  function onAddTerminalIn(tabsetId: string) {
+  /** New terminal tab inside the tabset that owns `tabsetId` — default
+   * shell, a picked shell, or an SSH host connection. */
+  function onAddTerminalIn(tabsetId: string, sh?: string | null, host?: SshHost) {
     const slot = nextSlot();
+    const command = host
+      ? ["ssh", "-p", String(host.port), `${host.user}@${host.host}`]
+      : sh
+        ? [sh, "-l"]
+        : null;
     termModel.doAction(
       Actions.addNode(
         {
           type: "tab",
           id: `term-${slot}`,
-          name: `bash ${slot}`,
+          name: host?.name ?? (command ? command[0].split("/").pop()! : `bash ${slot}`),
           component: "termpane",
           enableClose: true,
           enableRenderOnDemand: false,
-          config: { slot, shell: settings.shell || null },
+          config: { slot, shell: host ? null : settings.shell || null, command },
         },
         tabsetId,
         DockLocation.CENTER,
@@ -454,22 +500,6 @@ export default function DockRoot({
       ),
     );
   }
-
-  // Main-dock tab chips: the terminal workspace gets a solid accent
-  // chip, view panels get muted outlined chips with their own icons —
-  // the two kinds read differently at a glance.
-  const mainTabIcon = (comp: string) => {
-    switch (comp) {
-      case "term": return <FiTerminal size={11} />;
-      case "nav": return <FiSidebar size={11} />;
-      case "sysmon": return <FiActivity size={11} />;
-      case "ai": return <FiMessageSquare size={11} />;
-      case "history": return <FiClock size={11} />;
-      case "favorites": return <FiStar size={11} />;
-      case "ssh": return <FiServer size={11} />;
-      default: return null;
-    }
-  };
 
   return (
     <div className="relative h-full w-full">
@@ -479,18 +509,79 @@ export default function DockRoot({
         onModelChange={onModelChange}
         onAction={(a: Action) => a}
         onRenderTab={(node, renderValues) => {
-          const comp = node.getComponent() ?? "";
-          const icon = mainTabIcon(comp);
-          if (!icon) return;
-          renderValues.content = (
-            <span className={`tabchip ${comp === "term" ? "tabchip-term" : "tabchip-view"}`}>
-              {icon}
-              {node.getName()}
-            </span>
-          );
+          // Every main-dock tab is PLAIN text — no button/chip chrome.
+          renderValues.content = <span>{node.getName()}</span>;
         }}
       />
-      {rowMenu && (
+      {plusMenu &&
+        createPortal(
+        <ShellPickerMenu
+          lang={lang}
+          style={{
+            position: "fixed",
+            left: Math.max(4, Math.min(plusMenu.x, window.innerWidth - 272)),
+            top: Math.max(4, Math.min(plusMenu.y, window.innerHeight - 340)),
+          }}
+          shells={shells}
+          defaultShell={defaultShell}
+          sshHosts={sshHosts}
+          onShell={(sh) => {
+            setPlusMenu(null);
+            onAddTerminalIn(plusMenu.tabsetId, sh);
+          }}
+          onSsh={(h) => {
+            setPlusMenu(null);
+            onAddTerminalIn(plusMenu.tabsetId, null, h);
+          }}
+        />,
+        document.body,
+      )}
+      {termTabMenu &&
+        createPortal(
+        <div
+          className="ctx-menu animate-fade-up"
+          style={{
+            left: Math.max(4, Math.min(termTabMenu.x, window.innerWidth - 176)),
+            top: Math.max(4, Math.min(termTabMenu.y, window.innerHeight - 100)),
+          }}
+          onMouseDown={(e) => e.stopPropagation()}
+          onContextMenu={(e) => e.preventDefault()}
+        >
+          <button
+            className="ctx-item"
+            onClick={() => {
+              const menu = termTabMenu;
+              setTermTabMenu(null);
+              setPrompt({
+                title: T.cRenameTerminal,
+                value: menu.name,
+                onOk: (v) => termModel.doAction(Actions.renameTab(menu.tabId, v)),
+              });
+            }}
+          >
+            <FiEdit2 size={13} /> {T.rename}
+          </button>
+          <button
+            className="ctx-item hover:!text-[var(--danger)] disabled:opacity-40"
+            disabled={!canCloseTerminal(termModel, termTabMenu.tabId)}
+            onClick={() => {
+              if (!canCloseTerminal(termModel, termTabMenu.tabId)) return;
+              const slot = /term-(\d+)/.exec(termTabMenu.tabId)?.[1];
+              if (slot) {
+                invoke("close_session", { sessionId: slot }).catch(() => {});
+                broadcastGroup.delete(Number(slot));
+              }
+              termModel.doAction(Actions.deleteTab(termTabMenu.tabId));
+              setTermTabMenu(null);
+            }}
+          >
+            <FiTrash2 size={13} /> {T.cCloseTerminal}
+          </button>
+        </div>,
+        document.body,
+      )}
+      {rowMenu &&
+        createPortal(
         <div
           className="ctx-menu animate-fade-up"
           style={{
@@ -554,49 +645,154 @@ export default function DockRoot({
               </>
             );
           })()}
-        </div>
+        </div>,
+        document.body,
       )}
-      {prompt && (
-        <PromptDialog
-          title={prompt.title}
-          defaultValue={prompt.value}
-          okText={t(lang).ok}
-          cancelText={t(lang).cancel}
-          onOk={(v) => {
-            const fn = prompt.onOk;
-            setPrompt(null);
-            fn(v);
-          }}
-          onCancel={() => setPrompt(null)}
-        />
+      {prompt &&
+        createPortal(
+          <PromptDialog
+            title={prompt.title}
+            defaultValue={prompt.value}
+            okText={t(lang).ok}
+            cancelText={t(lang).cancel}
+            onOk={(v) => {
+              const fn = prompt.onOk;
+              setPrompt(null);
+              fn(v);
+            }}
+            onCancel={() => setPrompt(null)}
+          />,
+          document.body,
+        )}
+    </div>
+  );
+}
+
+/** 终端类型选择菜单：默认 Shell + 可选 Shell + 分割线下方的 SSH 主机
+ * 列表（过多时滚动）。工具栏 "+" 与每个 tabset 的 "+" 共用。 */
+function ShellPickerMenu({
+  lang,
+  shells,
+  defaultShell,
+  sshHosts,
+  onShell,
+  onSsh,
+  style,
+}: {
+  lang: Lang;
+  shells: string[];
+  defaultShell: string;
+  sshHosts: SshHost[];
+  onShell: (sh: string | null) => void;
+  onSsh: (h: SshHost) => void;
+  style?: React.CSSProperties;
+}) {
+  return (
+    <div
+      className="absolute z-50 w-64 rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] py-1 shadow-xl"
+      style={style}
+      onMouseDown={(e) => e.stopPropagation()}
+    >
+      <div
+        className="cursor-pointer px-3 py-1.5 text-[12px] text-[var(--text)] hover:bg-[var(--bg-hover)]"
+        onClick={() => onShell(null)}
+      >
+        {t(lang).defaultShell} {defaultShell ? `(${defaultShell.split("/").pop()})` : ""}
+      </div>
+      <div className="my-1 h-px bg-[var(--border)]" />
+      <div className="max-h-40 overflow-y-auto">
+        {shells
+          .filter((sh) => sh !== defaultShell)
+          .map((sh) => (
+            <div
+              key={sh}
+              className="cursor-pointer px-3 py-1.5 font-mono text-[11px] text-[var(--text-dim)] hover:bg-[var(--bg-hover)] hover:text-[var(--text)]"
+              onClick={() => onShell(sh)}
+            >
+              {sh}
+            </div>
+          ))}
+      </div>
+      {sshHosts.length > 0 && (
+        <>
+          <div className="my-1 h-px bg-[var(--border)]" />
+          <div className="px-3 py-1 text-[10px] font-semibold tracking-wider text-[var(--text-faint)]">{t(lang).sshHosts}</div>
+          <div className="max-h-40 overflow-y-auto">
+            {sshHosts.map((h) => (
+              <div
+                key={h.id}
+                className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-[11px] text-[var(--text-dim)] hover:bg-[var(--bg-hover)] hover:text-[var(--text)]"
+                onClick={() => onSsh(h)}
+              >
+                <FiServer size={11} className="shrink-0 text-[var(--text-faint)]" />
+                <span className="min-w-0 flex-1 truncate">{h.name}</span>
+                <span className="shrink-0 font-mono text-[10px] text-[var(--text-faint)]">{h.port}</span>
+              </div>
+            ))}
+          </div>
+        </>
       )}
     </div>
   );
 }
 
-/** 工作状态指示器（行名左侧）：红 = 10 秒内有活动，绿 = 空闲。
- * Self-refreshing on its own 3s tick — the dock's factory output is
- * not guaranteed to re-render on activities polls, which previously
- * froze the dot until a workspace switch remounted the dock. */
-function BusyDot({ slots, lang }: { slots: number[]; lang: Lang }) {
-  const [, force] = useState(0);
+const ACTIVITY_IDLE_MS = 5_000;
+
+/** Pure busy decision shared by every sweep indicator: a slot with no
+ * recorded activity (startup) is NEVER busy; otherwise busy within the
+ * idle window. */
+export function isSlotBusy(lastActivityMs: number, now: number): boolean {
+  if (lastActivityMs <= 0) return false;
+  return now - lastActivityMs < ACTIVITY_IDLE_MS;
+}
+const SWEEP_PERIOD_MS = 3_000;
+// A shared monotonic epoch survives dock remounts on workspace switches.
+const SWEEP_EPOCH = performance.now();
+
+// Dock factory output may stay cached across activity polls, so the indicator
+// reads the shared activity clock independently of its parent's renders.
+function WorkspaceActivitySweep({ slots, lang }: { slots: number[]; lang: Lang }) {
+  const isBusy = () => {
+    const now = Date.now();
+    return slots.some((slot) => isSlotBusy(activityStore.map[String(slot)] ?? 0, now));
+  };
+  const [busy, setBusy] = useState(isBusy);
+  // busy=false only stops NEW sweeps: the running cycle plays out to a
+  // clean end (iteration end) instead of vanishing mid-pass.
+  const [everBusy, setEverBusy] = useState(isBusy);
+  const beamRef = useRef<HTMLSpanElement>(null);
+  useLayoutEffect(() => {
+    // On mount only: re-syncing mid-flight would make a still-mounted
+    // beam jump when busy toggles within one pass.
+    if (!beamRef.current) return;
+    const phase = (performance.now() - SWEEP_EPOCH) % SWEEP_PERIOD_MS;
+    beamRef.current.style.animationDelay = `-${phase}ms`;
+  }, [everBusy]);
   useEffect(() => {
-    const id = window.setInterval(() => force((v) => v + 1), 3000);
-    return () => window.clearInterval(id);
-  }, []);
-  const now = Date.now();
-  const busy = slots.some((s) => now - (activityStore.map[String(s)] ?? 0) < 10_000);
-  const L = t(lang);
+    const tick = () => {
+      const now = Date.now();
+      setBusy(slots.some((slot) => isSlotBusy(activityStore.map[String(slot)] ?? 0, now)));
+    };
+    tick();
+    const timer = window.setInterval(tick, 250);
+    return () => window.clearInterval(timer);
+  }, [slots]);
+  useEffect(() => {
+    if (busy) setEverBusy(true);
+  }, [busy]);
+  if (!everBusy) return null;
   return (
-    <span
-      className="h-2 w-2 shrink-0 rounded-full"
-      title={busy ? L.busy : L.idle}
-      style={{
-        background: busy ? "var(--danger)" : "var(--success)",
-        opacity: busy ? 1 : 0.5,
-        boxShadow: busy ? "0 0 6px var(--danger)" : "none",
-      }}
-    />
+    <span className="workspace-activity-sweep" role="img" aria-label={t(lang).busy}>
+      <span
+        ref={beamRef}
+        className="workspace-activity-beam"
+        style={{ animationDuration: `${SWEEP_PERIOD_MS}ms` }}
+        onAnimationIteration={() => {
+          // Cycle boundary: keep sweeping only while still busy.
+          if (!busy) setEverBusy(false);
+        }}
+      />
+    </span>
   );
 }
 

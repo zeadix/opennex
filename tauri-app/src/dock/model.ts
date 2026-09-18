@@ -3,7 +3,7 @@
 // workspace area ("term" tab = terminals; other pages open as tabs in
 // the same tabset). Both panels can be closed and reopened, unique.
 
-import { Actions, DockLocation, Model } from "flexlayout-react";
+import { Actions, DockLocation, Model, TabNode } from "flexlayout-react";
 import { jsonTermSlots } from "../workspaces";
 
 export const NAV_TAB_ID = "nav";
@@ -18,14 +18,6 @@ export const PAGE_TAB_ID: Record<string, string> = {
   history: "tab-history",
   ai: "tab-ai",
   settings: "tab-settings",
-};
-
-export const PAGE_NAME: Record<string, string> = {
-  terminal: "终端",
-  ssh: "SSH",
-  history: "历史",
-  ai: "AI",
-  settings: "设置",
 };
 
 function mainDefaultJson(): any {
@@ -48,7 +40,7 @@ function mainDefaultJson(): any {
             {
               type: "tab",
               id: NAV_TAB_ID,
-              name: "导航",
+              name: "导航栏",
               component: "nav",
               enableClose: true,
               enableRenderOnDemand: false,
@@ -81,6 +73,7 @@ function termDefaultJson(slot: number): any {
   return {
     global: {
       tabEnableClose: true,
+      tabEnableRename: true, // double-click a terminal tab to rename it
       tabSetEnableDeleteWhenEmpty: true,
       tabSetEnableMaximize: false,
     },
@@ -173,15 +166,63 @@ export function modelFromJson(json: any | undefined, makeDefault: () => any): Mo
 
 /** Workspace-area model with repairs applied (≥1 terminal, valid selections). */
 export function termModelFrom(json: any | undefined, fallbackSlot: () => number): Model {
+  let model: Model;
   try {
-    return Model.fromJson(prepareTermJson(json, fallbackSlot));
+    model = Model.fromJson(prepareTermJson(json, fallbackSlot));
   } catch {
-    return Model.fromJson(termDefaultJson(fallbackSlot()));
+    model = Model.fromJson(termDefaultJson(fallbackSlot()));
   }
+  let updating = false;
+  const syncCloseButtons = () => {
+    if (updating) return;
+    updating = true;
+    try {
+      const slots = collectModelTermSlots(model);
+      for (const slot of slots) {
+        const node = model.getNodeById(`term-${slot}`);
+        if (node instanceof TabNode && node.isEnableClose() !== (slots.length > 1)) {
+          model.doAction(Actions.updateNodeAttributes(`term-${slot}`, { enableClose: slots.length > 1 }));
+        }
+      }
+    } finally {
+      updating = false;
+    }
+  };
+  syncCloseButtons();
+  model.addChangeListener(syncCloseButtons);
+  return model;
+}
+
+export function canCloseTerminal(model: Model, tabId: string): boolean {
+  return model.getNodeById(tabId)?.getType() === "tab" && collectModelTermSlots(model).length > 1;
 }
 
 export function mainModelFrom(json: any | undefined): Model {
-  return modelFromJson(json, mainDefaultJson);
+  const src = json ? deepCopy(json) : mainDefaultJson();
+  // Normalize panel tab titles — layouts saved before the rename still
+  // carry 导航/终端.
+  const fix = (n: any) => {
+    if (!n || typeof n !== "object") return;
+    if (Array.isArray(n)) {
+      n.forEach(fix);
+      return;
+    }
+    if (n.type === "tab") {
+      if (n.id === NAV_TAB_ID) n.name = "导航栏";
+      const titles: Record<string, string> = { "tab-ai": "AI助手", "tab-history": "历史指令", "tab-favorites": "指令收藏夹", "tab-ssh": "SSH 配置" };
+      if (titles[n.id]) n.name = titles[n.id];
+      if (n.id === TERM_TAB_ID) n.name = "终端工作区";
+    }
+    if (n.children) fix(n.children);
+    if (n.layout) fix(n.layout);
+  };
+  fix(src.layout);
+  fix(src.borders);
+  try {
+    return Model.fromJson(src);
+  } catch {
+    return Model.fromJson(mainDefaultJson());
+  }
 }
 
 /** Fresh single-terminal workspace JSON on a globally unique slot. */
@@ -275,19 +316,60 @@ export function maxTermSlot(term: Model): number {
   return collectModelTermSlots(term).reduce((a, b) => Math.max(a, b), 0);
 }
 
-/** All terminal slots referenced by term-N tabs in a LIVE model. */
+/** All terminal slots referenced by term-N tabs in a LIVE model.
+ * Recurses EVERY node type (row AND tabset): the dock root is a row,
+ * and a tabset-only walk never reaches the tabs under it. */
 export function collectModelTermSlots(term: Model): number[] {
   const out: number[] = [];
   const walk = (n: any) => {
-    if (n.getType?.() === "tabset") {
-      for (const t of n.getChildren()) walk(t);
-    } else if (n.getType?.() === "tab") {
+    if (!n) return;
+    if (n.getType?.() === "tab") {
       const m = /term-(\d+)/.exec(n.getId() ?? "");
       if (m) out.push(Number(m[1]));
+      return;
     }
+    n.getChildren?.().forEach(walk);
   };
   walk((term as any).getRootRow());
   return out;
+}
+
+/** Inject per-terminal cwd from a workspace's path memory into the
+ * layout JSON's tab configs (before Model.fromJson). */
+export function withCwd(json: any | undefined | null, map: Record<string, string> | undefined): any | undefined {
+  if (!json || !map) return json;
+  const j = deepCopy(json);
+  const walk = (n: any) => {
+    if (!n || typeof n !== "object") return;
+    if (Array.isArray(n)) {
+      n.forEach(walk);
+      return;
+    }
+    const m = /^term-(\d+)$/.exec(String(n.id ?? ""));
+    if (m && map[m[1]] && n.config) n.config.cwd = map[m[1]];
+    if (n.children) walk(n.children);
+    if (n.layout) walk(n.layout);
+  };
+  walk(j);
+  return j;
+}
+
+/** Read {slot -> cwd} back out of a layout JSON (after renumbering). */
+export function cwdMapFromJson(json: any): Record<string, string> {
+  const map: Record<string, string> = {};
+  const walk = (n: any) => {
+    if (!n || typeof n !== "object") return;
+    if (Array.isArray(n)) {
+      n.forEach(walk);
+      return;
+    }
+    const m = /^term-(\d+)$/.exec(String(n.id ?? ""));
+    if (m && n.config?.cwd) map[m[1]] = String(n.config.cwd);
+    if (n.children) walk(n.children);
+    if (n.layout) walk(n.layout);
+  };
+  walk(json);
+  return map;
 }
 
 // ---- global terminal-slot counter ---------------------------------------
@@ -322,6 +404,7 @@ export function renumberTermJson(json: any): { json: any; max: number } {
       max = Math.max(max, slot);
     }
     if (n.children) walk(n.children);
+    if (n.layout) walk(n.layout);
   };
   walk(j);
   return { json: j, max };

@@ -1,4 +1,5 @@
 import type { Lang } from "../i18n";
+import { useI18n } from "../i18n-context";
 
 const STEPS: { zh: [string, string]; en: [string, string] }[] = [
   {
@@ -29,17 +30,20 @@ const STEPS: { zh: [string, string]; en: [string, string] }[] = [
 
 /** Help > 教程 — quick-start steps. */
 export default function TutorialPage({ lang }: { lang: Lang }) {
+  const T = useI18n();
   const zh = lang === "zh" || lang === "zh-TW";
+  const titles = [T.sTut1Title, T.sTut2Title, T.sTut3Title, T.sTut4Title, T.sTut5Title, T.sTut6Title];
   return (
     <div className="h-full overflow-y-auto px-8 py-6">
       <div className="mx-auto max-w-[560px]">
-        <h2 className="mb-1 text-[15px] font-semibold">{zh ? "快速上手" : "Quick start"}</h2>
+        <h2 className="mb-1 text-[15px] font-semibold">{T.sQuickStart}</h2>
         <p className="mb-4 text-[12px] text-[var(--text-dim)]">
-          {zh ? "五分钟了解 OpenNex 的核心工作流。" : "Learn the core OpenNex workflow in five minutes."}
+          {T.sQuickStartSub}
         </p>
         <div className="space-y-3">
           {STEPS.map((s, i) => {
-            const [title, body] = zh ? s.zh : s.en;
+            const [, body] = zh ? s.zh : s.en;
+            const title = titles[i];
             return (
               <div key={i} className="card-glow flex gap-3 rounded-xl border border-[var(--border)] bg-[var(--bg-panel)] p-4">
                 <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[var(--accent-dim)] font-mono text-[12px] font-bold text-[var(--accent)]">

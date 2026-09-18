@@ -1,7 +1,10 @@
+import { useI18n } from '../i18n-context';
 import { useEffect, useRef, useState } from "react";
 import { FiFolder, FiPlus, FiStar, FiTrash2, FiEdit2, FiX } from "react-icons/fi";
 import { invoke } from "./tauri";
-import { focusedSlot, sendTo } from "./registry";
+import { focusedSlot, lastCursor, sendTo } from "./registry";
+import { beginOverlayDrag } from "./TerminalPane";
+import { loadSettings } from "../settings";
 import { FavFolder, loadFolders, newFolderId, persistFolders } from "../favorites";
 import PromptDialog from "../components/PromptDialog";
 
@@ -22,7 +25,17 @@ type Col = "hist" | "folders" | "items";
  * 3. 指令 — the selected folder's commands; click/Enter inserts, × removes.
  * Insert puts the command on the terminal's input line WITHOUT executing.
  */
-export default function HistoryOverlay({ onClose }: { onClose: () => void }) {
+interface HistoryOverlayProps {
+  workspaceId: number;
+  onClose: () => void;
+}
+
+export default function HistoryOverlay(props: HistoryOverlayProps) {
+  return <WorkspaceHistoryOverlay key={props.workspaceId} {...props} />;
+}
+
+function WorkspaceHistoryOverlay({ workspaceId, onClose }: HistoryOverlayProps) {
+  const T = useI18n();
   const [hist, setHist] = useState<HistEntry[]>([]);
   const [folders, setFolders] = useState<FavFolder[]>(() => loadFolders());
   const [col, setCol] = useState<Col>("hist");
@@ -34,12 +47,42 @@ export default function HistoryOverlay({ onClose }: { onClose: () => void }) {
   const [addingFolder, setAddingFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
   const listRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  // Positioning: remembered > caret-follow (setting) > default top-right.
+  const follow = loadSettings().followCursor;
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(() => {
+    try {
+      return JSON.parse(localStorage.getItem("opennex-palette-pos") ?? "null");
+    } catch {
+      return null;
+    }
+  });
+  const dragPos = (e: React.MouseEvent) => {
+    beginOverlayDrag(e, (x, y) => {
+      const p = { x: Math.max(0, x), y: Math.max(0, y) };
+      setPos(p);
+      localStorage.setItem("opennex-palette-pos", JSON.stringify(p));
+    });
+  };
+  const posStyle: React.CSSProperties | undefined =
+    pos
+      ? { left: pos.x, top: pos.y }
+      : follow && lastCursor.x > 0
+        ? {
+            left: Math.max(4, Math.min(lastCursor.x, window.innerWidth - 700)),
+            top:
+              lastCursor.y + 240 > window.innerHeight
+                ? Math.max(4, lastCursor.y - 240)
+                : lastCursor.y + 24,
+          }
+        : undefined;
 
   useEffect(() => {
-    invoke<HistEntry[]>("get_history")
-      .then((list) => setHist(list))
-      .catch(() => setHist([]));
-  }, []);
+    let stale = false;
+    invoke<HistEntry[]>("get_history", { workspaceId })
+      .then((list) => { if (!stale) setHist(list); })
+      .catch(() => { if (!stale) setHist([]); });
+    return () => { stale = true; };
+  }, [workspaceId]);
 
   const saveFolders = (next: FavFolder[]) => {
     setFolders(next);
@@ -65,13 +108,11 @@ export default function HistoryOverlay({ onClose }: { onClose: () => void }) {
   };
 
   const deleteHist = (id: number) => {
-    invoke("delete_history", { id }).catch(() => {});
+    invoke("delete_history", { workspaceId, id }).catch(() => {});
     setHist((prev) => prev.filter((e) => e.id !== id));
   };
 
   useEffect(() => {
-    const count = col === "hist" ? hist.length : col === "folders" ? folders.length : activeFolder()?.items.length ?? 0;
-    if (count === 0) return;
     const onKey = (e: KeyboardEvent) => {
       // Capture-phase interception: handled keys must not also reach the
       // terminal (arrow keys would drive the shell history under us).
@@ -135,21 +176,34 @@ export default function HistoryOverlay({ onClose }: { onClose: () => void }) {
 
   return (
     <div
-      className="animate-fade-up fixed right-6 top-14 z-[6000] flex overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] shadow-2xl"
+      className={`animate-fade-up fixed z-[6000] flex overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] shadow-2xl ${
+        posStyle ? "" : "right-6 top-14"
+      }`}
+      style={posStyle}
       onMouseDown={(e) => e.stopPropagation()}
     >
       {/* ── 指令历史 ── */}
       <div className="flex w-[300px] flex-col border-r border-[var(--border)]">
-        <div className="flex items-center justify-between border-b border-[var(--border)] px-3 py-1.5">
-          <span className={colHeadCls("hist")}>指令历史</span>
-          <span className="text-[10px] text-[var(--text-faint)]">↑↓ 选择 · Enter 插入 · Esc 关闭</span>
+        <div
+          className={`flex items-center justify-between border-b border-[var(--border)] px-3 py-1.5 ${
+            pos || follow ? "" : "cursor-move"
+          }`}
+          title={!follow ? T.uDragPosition : undefined}
+          onMouseDown={(e) => {
+            if (follow) return;
+            e.stopPropagation();
+            dragPos(e);
+          }}
+        >
+          <span className={colHeadCls("hist")}>{T.cmdHistory}</span>
+          <span className="text-[10px] text-[var(--text-faint)]">{T.uHistoryKeys}</span>
         </div>
         <div
           ref={(el) => (listRefs.current.hist = el)}
           className="max-h-[320px] min-h-[140px] overflow-y-auto py-1"
         >
           {hist.length === 0 ? (
-            <div className="px-4 py-6 text-center text-[12px] text-[var(--text-faint)]">暂无历史命令</div>
+            <div className="px-4 py-6 text-center text-[12px] text-[var(--text-faint)]">{T.uNoHistory}</div>
           ) : (
             hist.map((e, i) => (
               <div
@@ -164,12 +218,12 @@ export default function HistoryOverlay({ onClose }: { onClose: () => void }) {
                 <span className="min-w-0 flex-1 truncate">{e.cmd}</span>
                 <button
                   className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
-                  title="收藏到选中收藏夹"
+                  title={T.uFavoriteSelected}
                   onClick={(ev) => {
                     ev.stopPropagation();
                     let fid = activeFolder()?.id;
                     if (!fid) {
-                      const f: FavFolder = { id: newFolderId(), name: "收藏", items: [] };
+                      const f: FavFolder = { id: newFolderId(), name: T.uDefaultFolder, items: [] };
                       saveFolders([...folders, f]);
                       fid = f.id;
                     }
@@ -180,7 +234,7 @@ export default function HistoryOverlay({ onClose }: { onClose: () => void }) {
                 </button>
                 <button
                   className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100 hover:text-[var(--danger)]"
-                  title="删除该记录"
+                  title={T.uDeleteRecord}
                   onClick={(ev) => { ev.stopPropagation(); deleteHist(e.id); }}
                 >
                   <FiX size={12} />
@@ -194,10 +248,10 @@ export default function HistoryOverlay({ onClose }: { onClose: () => void }) {
       {/* ── 收藏夹 ── */}
       <div className="flex w-[170px] flex-col border-r border-[var(--border)]">
         <div className="flex items-center justify-between border-b border-[var(--border)] px-3 py-1.5">
-          <span className={colHeadCls("folders")}>收藏夹</span>
+          <span className={colHeadCls("folders")}>{T.uFolders}</span>
           <button
             className="text-[var(--text-faint)] hover:text-[var(--accent)]"
-            title="新建收藏夹"
+            title={T.uNewFolder}
             onClick={() => { setAddingFolder(true); setNewFolderName(""); }}
           >
             <FiPlus size={12} />
@@ -216,7 +270,7 @@ export default function HistoryOverlay({ onClose }: { onClose: () => void }) {
                   setAddingFolder(false);
                 } else if (e.key === "Escape") setAddingFolder(false);
               }}
-              placeholder="收藏夹名称"
+              placeholder={T.uFolderName}
               className="dialog-input !py-1 !text-[11px]"
             />
           </div>
@@ -227,9 +281,9 @@ export default function HistoryOverlay({ onClose }: { onClose: () => void }) {
         >
           {folders.length === 0 ? (
             <div className="px-3 py-6 text-center text-[11px] leading-relaxed text-[var(--text-faint)]">
-              点击 + 新建收藏夹
+              {T.uNewFolderHint}
               <br />
-              或把历史命令拖进来
+              {T.uDragHistory}
             </div>
           ) : (
             folders.map((f, i) => (
@@ -259,11 +313,11 @@ export default function HistoryOverlay({ onClose }: { onClose: () => void }) {
                 <span className="shrink-0 font-mono text-[10px] text-[var(--text-faint)]">{f.items.length}</span>
                 <button
                   className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100 hover:text-[var(--accent)]"
-                  title="重命名"
+                  title={T.rename}
                   onClick={(ev) => {
                     ev.stopPropagation();
                     setPrompt({
-                      title: "重命名收藏夹",
+                      title: T.uRenameFolder,
                       value: f.name,
                       onOk: (v) => saveFolders(folders.map((x) => (x.id === f.id ? { ...x, name: v } : x))),
                     });
@@ -273,7 +327,7 @@ export default function HistoryOverlay({ onClose }: { onClose: () => void }) {
                 </button>
                 <button
                   className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100 hover:text-[var(--danger)]"
-                  title="删除收藏夹"
+                  title={T.uDeleteFolder}
                   onClick={(ev) => {
                     ev.stopPropagation();
                     saveFolders(folders.filter((x) => x.id !== f.id));
@@ -290,7 +344,7 @@ export default function HistoryOverlay({ onClose }: { onClose: () => void }) {
       {/* ── 指令 ── */}
       <div className="flex w-[220px] flex-col">
         <div className="border-b border-[var(--border)] px-3 py-1.5">
-          <span className={colHeadCls("items")}>{activeFolder()?.name ?? "指令"}</span>
+          <span className={colHeadCls("items")}>{activeFolder()?.name ?? T.uCommands}</span>
         </div>
         <div
           ref={(el) => (listRefs.current.items = el)}
@@ -298,9 +352,9 @@ export default function HistoryOverlay({ onClose }: { onClose: () => void }) {
         >
           {!activeFolder() || items.length === 0 ? (
             <div className="px-3 py-6 text-center text-[11px] leading-relaxed text-[var(--text-faint)]">
-              双击收藏夹查看指令
+              {T.uOpenFolderHint}
               <br />
-              历史命令可拖拽进收藏夹
+              {T.uDragToFolderHint}
             </div>
           ) : (
             items.map((cmd, i) => (
@@ -313,7 +367,7 @@ export default function HistoryOverlay({ onClose }: { onClose: () => void }) {
                 <span className="min-w-0 flex-1 truncate">{cmd}</span>
                 <button
                   className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100 hover:text-[var(--danger)]"
-                  title="从收藏夹移除"
+                  title={T.uRemoveFromFolder}
                   onClick={(ev) => {
                     ev.stopPropagation();
                     const fid = activeFolder()!.id;

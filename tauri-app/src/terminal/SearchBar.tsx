@@ -1,3 +1,4 @@
+import { useI18n } from '../i18n-context';
 import { useEffect, useRef, useState } from "react";
 import { FiChevronUp, FiChevronDown, FiX } from "react-icons/fi";
 
@@ -15,6 +16,7 @@ export default function SearchBar({
   onPrev: () => void;
   onClose: () => void;
 }) {
+  const T = useI18n();
   const [q, setQ] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -41,17 +43,17 @@ export default function SearchBar({
           }
           if (e.key === "Escape") onClose();
         }}
-        placeholder="搜索…"
+        placeholder={T.searchPh}
         className="w-44 bg-transparent text-[12px] outline-none"
         style={{ userSelect: "text", fontFamily: "var(--mono)" }}
       />
-      <button className="icon-btn !p-1" title="上一个" onClick={onPrev}>
+      <button className="icon-btn !p-1" title={T.uPrevious} onClick={onPrev}>
         <FiChevronUp size={13} />
       </button>
-      <button className="icon-btn !p-1" title="下一个" onClick={onNext}>
+      <button className="icon-btn !p-1" title={T.uNext} onClick={onNext}>
         <FiChevronDown size={13} />
       </button>
-      <button className="icon-btn !p-1" title="关闭" onClick={onClose}>
+      <button className="icon-btn !p-1" title={T.uClose} onClick={onClose}>
         <FiX size={13} />
       </button>
     </div>

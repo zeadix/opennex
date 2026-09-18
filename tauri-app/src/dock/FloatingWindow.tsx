@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useI18n } from "../i18n-context";
 import { FiX } from "react-icons/fi";
 
 export interface FloatWin {
@@ -29,6 +30,7 @@ export default function FloatingWindow({
   onMove: (id: string, x: number, y: number) => void;
   children: React.ReactNode;
 }) {
+  const T = useI18n();
   const dragRef = useRef<{ dx: number; dy: number } | null>(null);
 
   const onTitleDown = (e: React.MouseEvent) => {
@@ -61,7 +63,7 @@ export default function FloatingWindow({
           <span className="h-1.5 w-1.5 rounded-full bg-[var(--accent)]" />
           {win.title}
         </span>
-        <button className="icon-btn !p-1" title="关闭" onClick={(e) => { e.stopPropagation(); onClose(win.id); }}>
+        <button className="icon-btn !p-1" title={T.cClose} onClick={(e) => { e.stopPropagation(); onClose(win.id); }}>
           <FiX size={14} />
         </button>
       </div>

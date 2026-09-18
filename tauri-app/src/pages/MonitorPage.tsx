@@ -1,3 +1,4 @@
+import { useI18n } from '../i18n-context';
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "../terminal/tauri";
 
@@ -27,6 +28,7 @@ function Sparkline({ points, color }: { points: number[]; color: string }) {
 }
 
 export default function MonitorPage() {
+  const T = useI18n();
   const [cpu, setCpu] = useState<number[]>([]);
   const [latest, setLatest] = useState<Stat | null>(null);
   const timer = useRef<number | null>(null);
@@ -56,11 +58,11 @@ export default function MonitorPage() {
   return (
     <div className="h-full overflow-y-auto px-8 py-6">
       <div className="mx-auto max-w-[560px] space-y-6">
-        <h2 className="text-[15px] font-semibold">系统监控</h2>
+        <h2 className="text-[15px] font-semibold">{T.uSystemMonitor}</h2>
 
         <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-panel)] p-4">
           <div className="mb-2 flex items-center justify-between text-[12px] text-[var(--text-dim)]">
-            <span>CPU 使用率</span>
+            <span>{T.uCpuUsage}</span>
             <span className="font-mono">{latest ? latest.cpuPct.toFixed(1) : "—"}%</span>
           </div>
           <Sparkline points={cpu} color="var(--accent)" />
@@ -68,7 +70,7 @@ export default function MonitorPage() {
 
         <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-panel)] p-4">
           <div className="mb-2 flex items-center justify-between text-[12px] text-[var(--text-dim)]">
-            <span>内存</span>
+            <span>{T.uMemory}</span>
             <span className="font-mono">
               {latest ? latest.memUsedGb.toFixed(2) : "—"} / {latest ? latest.memTotalGb.toFixed(1) : "—"} GB
             </span>
@@ -82,7 +84,7 @@ export default function MonitorPage() {
         </div>
 
         <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-panel)] p-4 text-[12px] text-[var(--text-dim)]">
-          活跃终端会话：<span className="font-mono text-[var(--text)]">{latest?.sessions ?? 0}</span>
+          {T.uActiveSessions} <span className="font-mono text-[var(--text)]">{latest?.sessions ?? 0}</span>
         </div>
       </div>
     </div>

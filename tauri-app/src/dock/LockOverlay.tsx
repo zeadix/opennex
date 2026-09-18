@@ -1,3 +1,4 @@
+import { useI18n } from '../i18n-context';
 import { useState } from "react";
 import { FiLock } from "react-icons/fi";
 
@@ -11,6 +12,7 @@ export default function LockOverlay({
   mode: "unlock" | "set";
   onSubmit: (password: string) => Promise<boolean>;
 }) {
+  const T = useI18n();
   const [pwd, setPwd] = useState("");
   const [error, setError] = useState(false);
   const [shake, setShake] = useState(false);
@@ -36,7 +38,7 @@ export default function LockOverlay({
         <FiLock size={24} className="text-[var(--accent)]" />
       </div>
       <div className="text-[15px] font-semibold">
-        {mode === "set" ? "设置锁定密码（至少 4 位）" : "工作空间已锁定"}
+        {mode === "set" ? T.uSetLockPassword : T.uWorkspaceLocked}
       </div>
       <div
         className={`flex items-center gap-2 ${shake ? "animate-[shake_0.35s]" : ""}`}
@@ -52,16 +54,16 @@ export default function LockOverlay({
           onKeyDown={(e) => e.key === "Enter" && submit()}
           className="w-60 rounded-md border border-[var(--border)] bg-[var(--bg-panel)] px-3 py-2 text-[13px] outline-none transition-colors focus:border-[var(--accent)]"
           style={{ userSelect: "text" }}
-          placeholder="密码"
+          placeholder={T.uPassword}
         />
         <button
           className="rounded-md bg-[var(--accent-dim)] px-3 py-2 text-[12px] text-[var(--accent)] transition-all hover:brightness-125"
           onClick={submit}
         >
-          {mode === "set" ? "设置" : "解锁"}
+          {mode === "set" ? T.set : T.uUnlockAction}
         </button>
       </div>
-      {error && <div className="text-[12px] text-[var(--danger)]">密码错误或过短</div>}
+      {error && <div className="text-[12px] text-[var(--danger)]">{T.uPasswordError}</div>}
       <style>{`@keyframes shake { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-6px)} 75%{transform:translateX(6px)} }`}</style>
     </div>
   );

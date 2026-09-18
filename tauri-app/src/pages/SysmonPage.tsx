@@ -1,3 +1,4 @@
+import { useI18n } from '../i18n-context';
 import { useEffect, useRef, useState } from "react";
 import { FiCpu, FiTerminal, FiGrid, FiWatch } from "react-icons/fi";
 import { invoke } from "../terminal/tauri";
@@ -24,6 +25,7 @@ function fmtMem(bytes: number): string {
  * focused terminal's process tree, the active workspace's terminals,
  * and the whole software (the app tree covers every shell + UI). */
 export default function SysmonPage({ getWsSlots }: { getWsSlots: () => number[] }) {
+  const T = useI18n();
   const [data, setData] = useState<Stats | null>(null);
   const [tick, setTick] = useState(0);
   const wsRef = useRef(getWsSlots);
@@ -51,19 +53,19 @@ export default function SysmonPage({ getWsSlots }: { getWsSlots: () => number[] 
   }, []);
 
   const rows: { key: string; label: string; icon: JSX.Element; stat: Stat | null; dim?: string }[] = [
-    { key: "focused", label: "当前终端", icon: <FiTerminal size={14} />, stat: data?.focused ?? null },
-    { key: "workspace", label: "当前工作空间", icon: <FiGrid size={14} />, stat: data?.workspace ?? null },
-    { key: "app", label: "全局", icon: <FiCpu size={14} />, stat: data?.app ?? null },
+    { key: "focused", label: T.uCurrentTerminal, icon: <FiTerminal size={14} />, stat: data?.focused ?? null },
+    { key: "workspace", label: T.uCurrentWorkspace, icon: <FiGrid size={14} />, stat: data?.workspace ?? null },
+    { key: "app", label: T.uGlobal, icon: <FiCpu size={14} />, stat: data?.app ?? null },
   ];
 
   return (
-    <div className="h-full overflow-y-auto px-8 py-6" key={tick % 2}>
-      <div className="mx-auto max-w-[460px]">
+    <div className="h-full min-w-0 overflow-y-auto p-3" key={tick % 2}>
+      <div className="w-full min-w-0">
         <h2 className="mb-1 flex items-center gap-2 text-[15px] font-semibold">
-          <FiWatch size={15} className="text-[var(--accent)]" /> 系统资源
+          <FiWatch size={15} className="text-[var(--accent)]" /> {T.sysmon}
         </h2>
         <p className="mb-4 text-[11px] text-[var(--text-faint)]">
-          按进程树聚合 · 每 2 秒刷新
+          {T.uResourceHint}
         </p>
         <div className="space-y-3">
           {rows.map((r) => {
@@ -97,7 +99,7 @@ export default function SysmonPage({ getWsSlots }: { getWsSlots: () => number[] 
                 </div>
                 <div className="flex justify-between font-mono text-[11px] text-[var(--text-dim)]">
                   <span>CPU {cpu === null ? "—" : `${cpu.toFixed(1)}%`}</span>
-                  <span>内存 {r.stat ? fmtMem(r.stat.mem) : "—"}</span>
+                  <span>{T.uMemory} {r.stat ? fmtMem(r.stat.mem) : "—"}</span>
                 </div>
               </div>
             );

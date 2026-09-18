@@ -1,3 +1,4 @@
+import { useI18n } from '../i18n-context';
 import { useEffect, useState } from "react";
 import { FiCopy, FiTrash2 } from "react-icons/fi";
 import { invoke } from "../terminal/tauri";
@@ -8,14 +9,22 @@ interface HistEntry {
   hits: number;
 }
 
-export default function HistoryPage() {
+export default function HistoryPage({ workspaceId }: { workspaceId: number }) {
+  return <WorkspaceHistoryPage key={workspaceId} workspaceId={workspaceId} />;
+}
+
+function WorkspaceHistoryPage({ workspaceId }: { workspaceId: number }) {
+  const T = useI18n();
   const [items, setItems] = useState<HistEntry[]>([]);
   const [copied, setCopied] = useState<number | null>(null);
 
-  const reload = () => {
-    invoke<HistEntry[]>("get_history").then(setItems).catch(() => {});
-  };
-  useEffect(reload, []);
+  useEffect(() => {
+    let stale = false;
+    invoke<HistEntry[]>("get_history", { workspaceId })
+      .then((list) => { if (!stale) setItems(list); })
+      .catch(() => {});
+    return () => { stale = true; };
+  }, [workspaceId]);
 
   const copy = async (e: HistEntry) => {
     await navigator.clipboard.writeText(e.cmd);
@@ -23,17 +32,17 @@ export default function HistoryPage() {
     setTimeout(() => setCopied(null), 1200);
   };
   const remove = (e: HistEntry) => {
-    invoke("delete_history", { id: e.id }).catch(() => {});
+    invoke("delete_history", { workspaceId, id: e.id }).catch(() => {});
     setItems((prev) => prev.filter((x) => x.id !== e.id));
   };
 
   return (
-    <div className="h-full overflow-y-auto px-8 py-6">
-      <div className="mx-auto max-w-[640px]">
-        <h2 className="mb-4 text-[15px] font-semibold">指令历史</h2>
+    <div className="h-full min-w-0 overflow-y-auto p-3">
+      <div className="w-full min-w-0">
+        <h2 className="mb-4 text-[15px] font-semibold">{T.history}</h2>
         {items.length === 0 ? (
           <div className="rounded-lg border border-dashed border-[var(--border)] py-12 text-center text-[12px] text-[var(--text-faint)]">
-            在终端里执行的命令会出现在这里
+            {T.historyEmpty}
           </div>
         ) : (
           <div className="space-y-1">
@@ -45,26 +54,26 @@ export default function HistoryPage() {
                 <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-[var(--text-dim)]">{e.cmd}</span>
                 <span
                   className="shrink-0 font-mono text-[10px] text-[var(--text-faint)]"
-                  title="执行次数"
+                  title={T.uRunCount}
                 >
                   ×{e.hits}
                 </span>
                 <button
                   className="icon-btn opacity-0 group-hover:opacity-100"
-                  title="复制"
+                  title={T.copy}
                   onClick={() => copy(e)}
                 >
                   <FiCopy size={13} />
                 </button>
                 <button
                   className="icon-btn opacity-0 group-hover:opacity-100 hover:!text-[var(--danger)]"
-                  title="删除该记录"
+                  title={T.uDeleteRecord}
                   onClick={() => remove(e)}
                 >
                   <FiTrash2 size={13} />
                 </button>
                 {copied === e.id && (
-                  <span className="shrink-0 text-[11px] text-[var(--success)]">已复制</span>
+                  <span className="shrink-0 text-[11px] text-[var(--success)]">{T.uCopied}</span>
                 )}
               </div>
             ))}

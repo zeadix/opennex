@@ -1,3 +1,4 @@
+import { useI18n } from '../i18n-context';
 import { useEffect, useState } from "react";
 import QRCode from "qrcode";
 import { FiGlobe, FiWifi, FiCopy, FiPlay, FiSquare, FiRefreshCw } from "react-icons/fi";
@@ -20,6 +21,7 @@ interface TunnelStatus {
  * http://lan-ip:port/remote; WAN tab = Cloudflare quick tunnel that
  * exposes the same page to the internet (no account needed). */
 export default function RemotePage({ initialTab = "lan" }: { initialTab?: "lan" | "wan" }) {
+  const T = useI18n();
   const [tab, setTab] = useState<"lan" | "wan">(initialTab);
   const [info, setInfo] = useState<RemoteInfo | null>(null);
   const [lanQr, setLanQr] = useState<string | null>(null);
@@ -64,15 +66,15 @@ export default function RemotePage({ initialTab = "lan" }: { initialTab?: "lan" 
     return <div className="p-8 text-[13px] text-[var(--danger)]">{error}</div>;
   }
   if (!info) {
-    return <div className="p-8 text-[13px] text-[var(--text-faint)]">加载中…</div>;
+    return <div className="p-8 text-[13px] text-[var(--text-faint)]">{T.uLoading}</div>;
   }
 
   return (
     <div className="h-full overflow-y-auto px-8 py-6">
       <div className="mx-auto max-w-[520px]">
-        <h2 className="mb-1 text-[15px] font-semibold">手机远程控制</h2>
+        <h2 className="mb-1 text-[15px] font-semibold">{T.phoneRemote}</h2>
         <p className="mb-4 text-[12px] text-[var(--text-dim)]">
-          在手机上查看和操作本机终端：局域网直连或广域网隧道。
+          {T.uRemoteHint}
         </p>
 
         {/* 页签切换 */}
@@ -88,7 +90,7 @@ export default function RemotePage({ initialTab = "lan" }: { initialTab?: "lan" 
               onClick={() => setTab(k)}
             >
               {k === "lan" ? <FiWifi size={13} /> : <FiGlobe size={13} />}
-              {k === "lan" ? "局域网" : "广域网"}
+              {k === "lan" ? T.lan : T.wan}
             </button>
           ))}
         </div>
@@ -98,19 +100,19 @@ export default function RemotePage({ initialTab = "lan" }: { initialTab?: "lan" 
             <div className="card-glow rounded-xl border border-[var(--border)] bg-[var(--bg-panel)] p-6">
               {lanQr && (
                 <div className="mb-4 flex justify-center">
-                  <img src={lanQr} alt="Remote URL QR" className="rounded-lg" width={220} height={220} />
+                  <img src={lanQr} alt={T.uLanQr} className="rounded-lg" width={220} height={220} />
                 </div>
               )}
               <div className="mb-2 break-all text-center font-mono text-[12px] text-[var(--accent)]">
                 {info.url}
               </div>
               <div className="text-center text-[11px] text-[var(--text-faint)]">
-                局域网 IP {info.lanIp} · 端口 {info.port} · 同一 Wi-Fi 下可用
+                {T.uLanAddress.replace("{ip}", () => info.lanIp).replace("{port}", String(info.port))}
               </div>
             </div>
             <div className="mt-4 space-y-1 text-[11px] text-[var(--text-faint)]">
-              <div>· 远程页面支持查看终端输出、发送命令、切换会话</div>
-              <div>· 会话结束或应用退出后远程访问自动失效</div>
+              <div>{T.remoteNote1}</div>
+              <div>{T.remoteNote2}</div>
             </div>
           </>
         )}
@@ -122,7 +124,7 @@ export default function RemotePage({ initialTab = "lan" }: { initialTab?: "lan" 
                 <>
                   {wanQr && (
                     <div className="mb-4 flex justify-center">
-                      <img src={wanQr} alt="WAN URL QR" className="rounded-lg" width={220} height={220} />
+                      <img src={wanQr} alt={T.uWanQr} className="rounded-lg" width={220} height={220} />
                     </div>
                   )}
                   <div className="mb-2 break-all text-center font-mono text-[12px] text-[var(--accent)]">
@@ -133,20 +135,20 @@ export default function RemotePage({ initialTab = "lan" }: { initialTab?: "lan" 
                       className="flex items-center gap-1.5 rounded-md border border-[var(--border)] px-3 py-1.5 text-[11px] text-[var(--text-dim)] hover:bg-[var(--bg-hover)] hover:text-[var(--text)]"
                       onClick={() => navigator.clipboard.writeText(tunnel.url!).catch(() => {})}
                     >
-                      <FiCopy size={12} /> 复制地址
+                      <FiCopy size={12} /> {T.uCopyAddress}
                     </button>
                     <button
                       className="flex items-center gap-1.5 rounded-md border border-[var(--border)] px-3 py-1.5 text-[11px] text-[var(--danger)] hover:bg-[var(--bg-hover)]"
                       onClick={() => invoke("tunnel_stop").catch(() => {})}
                     >
-                      <FiSquare size={12} /> 停止隧道
+                      <FiSquare size={12} /> {T.uStopTunnel}
                     </button>
                   </div>
                 </>
               ) : tunnel?.state === "downloading" ? (
                 <div className="py-4 text-center">
                   <div className="mb-3 text-[12px] text-[var(--text-dim)]">
-                    正在下载 cloudflared（首次使用，约 20-60 MB）…
+                    {T.uTunnelDownloading}
                   </div>
                   <div className="mx-auto h-1.5 w-64 overflow-hidden rounded-full bg-[var(--bg-active)]">
                     <div
@@ -157,38 +159,37 @@ export default function RemotePage({ initialTab = "lan" }: { initialTab?: "lan" 
                 </div>
               ) : tunnel?.state === "starting" ? (
                 <div className="py-6 text-center text-[12px] text-[var(--text-dim)]">
-                  正在建立隧道（通常需要 5-20 秒）…
+                  {T.uTunnelStarting}
                 </div>
               ) : tunnel?.state === "failed" ? (
                 <div className="py-4 text-center">
                   <div className="mb-2 text-[12px] text-[var(--danger)]">
-                    隧道启动失败{tunnel.error ? `：${tunnel.error}` : ""}
+                    {T.uTunnelFailed}{tunnel.error ? `: ${tunnel.error}` : ""}
                   </div>
                   <button
                     className="mx-auto flex items-center gap-1.5 rounded-md bg-[var(--accent-dim)] px-3 py-1.5 text-[11px] text-[var(--accent)]"
                     onClick={() => invoke<TunnelStatus>("tunnel_start").then(setTunnel).catch(() => {})}
                   >
-                    <FiRefreshCw size={12} /> 重试
+                    <FiRefreshCw size={12} /> {T.uRetry}
                   </button>
                 </div>
               ) : (
                 <div className="py-4 text-center">
                   <div className="mb-3 text-[12px] leading-relaxed text-[var(--text-dim)]">
-                    通过 Cloudflare 隧道把远程页面暴露到公网，<br />
-                    手机在任何网络下均可访问（无需账号，地址临时有效）。
+                    {T.uTunnelHint}
                   </div>
                   <button
                     className="mx-auto flex items-center gap-1.5 rounded-md bg-[var(--accent-dim)] px-4 py-2 text-[12px] font-semibold text-[var(--accent)] hover:brightness-125"
                     onClick={() => invoke<TunnelStatus>("tunnel_start").then(setTunnel).catch(() => {})}
                   >
-                    <FiPlay size={12} /> 启动广域网隧道
+                    <FiPlay size={12} /> {T.uStartTunnel}
                   </button>
                 </div>
               )}
             </div>
             <div className="mt-4 space-y-1 text-[11px] text-[var(--text-faint)]">
-              <div>· 数据经 Cloudflare 边缘 TLS 加密传输，隧道地址停用后立即失效</div>
-              <div>· 首次启动会自动下载 cloudflared 到应用数据目录</div>
+              <div>{T.uTunnelSecurity}</div>
+              <div>{T.uTunnelFirstRun}</div>
             </div>
           </>
         )}

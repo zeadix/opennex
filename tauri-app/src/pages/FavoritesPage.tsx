@@ -1,3 +1,4 @@
+import { useI18n } from '../i18n-context';
 import { useState } from "react";
 import { FiEdit2, FiFolder, FiPlus, FiTrash2 } from "react-icons/fi";
 import { focusedSlot, sendTo } from "../terminal/registry";
@@ -7,6 +8,7 @@ import PromptDialog from "../components/PromptDialog";
 /** 收藏指令页：收藏夹（增删改名）+ 每个收藏夹内的指令（增删、点击
  * 插入聚焦终端，不自动执行）。 */
 export default function FavoritesPage() {
+  const T = useI18n();
   const [folders, setFolders] = useState<FavFolder[]>(() => loadFolders());
   const [activeId, setActiveId] = useState<string | null>(folders[0]?.id ?? null);
   const [buf, setBuf] = useState("");
@@ -40,13 +42,13 @@ export default function FavoritesPage() {
       {/* 收藏夹列表 */}
       <div className="flex w-44 shrink-0 flex-col border-r border-[var(--border)] bg-[var(--bg-panel)] py-3">
         <div className="flex items-center justify-between px-3 pb-2">
-          <span className="text-[11px] font-semibold tracking-wider text-[var(--text-faint)]">收藏夹</span>
+          <span className="text-[11px] font-semibold tracking-wider text-[var(--text-faint)]">{T.uFolders}</span>
           <button
             className="icon-btn !p-1"
-            title="新建收藏夹"
+            title={T.uNewFolder}
             onClick={() =>
               setPrompt({
-                title: "新建收藏夹",
+                title: T.uNewFolder,
                 onOk: (v) => {
                   const f: FavFolder = { id: newFolderId(), name: v, items: [] };
                   save([...folders, f]);
@@ -61,7 +63,7 @@ export default function FavoritesPage() {
         <div className="flex-1 overflow-y-auto px-2">
           {folders.length === 0 && (
             <div className="px-2 py-4 text-[11px] leading-relaxed text-[var(--text-faint)]">
-              点击 + 新建收藏夹
+              {T.uNewFolderHint}
             </div>
           )}
           {folders.map((f) => (
@@ -79,11 +81,11 @@ export default function FavoritesPage() {
               <span className="shrink-0 font-mono text-[10px] text-[var(--text-faint)]">{f.items.length}</span>
               <button
                 className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100 hover:text-[var(--accent)]"
-                title="重命名收藏夹"
+                title={T.uRenameFolder}
                 onClick={(e) => {
                   e.stopPropagation();
                   setPrompt({
-                    title: "重命名收藏夹",
+                    title: T.uRenameFolder,
                     value: f.name,
                     onOk: (v) => save(folders.map((x) => (x.id === f.id ? { ...x, name: v } : x))),
                   });
@@ -93,7 +95,7 @@ export default function FavoritesPage() {
               </button>
               <button
                 className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100 hover:text-[var(--danger)]"
-                title="删除收藏夹"
+                title={T.uDeleteFolder}
                 onClick={(e) => {
                   e.stopPropagation();
                   const rest = folders.filter((x) => x.id !== f.id);
@@ -111,13 +113,13 @@ export default function FavoritesPage() {
       {/* 指令列表 */}
       <div className="min-w-0 flex-1 overflow-y-auto px-6 py-5">
         <div className="mx-auto max-w-[520px]">
-          <h2 className="mb-3 text-[15px] font-semibold">{active ? active.name : "收藏指令"}</h2>
+          <h2 className="mb-3 text-[15px] font-semibold">{active ? active.name : T.favorites}</h2>
           {active && (
             <>
               <div className="mb-3 flex gap-2">
                 <input
                   className="dialog-input font-mono"
-                  placeholder="输入命令后回车添加"
+                  placeholder={T.uAddCommandHint}
                   value={buf}
                   onChange={(e) => setBuf(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && addItem()}
@@ -127,26 +129,26 @@ export default function FavoritesPage() {
                   className="flex shrink-0 items-center gap-1 rounded-md border border-[var(--border)] px-2.5 text-[12px] hover:border-[var(--accent)] hover:text-[var(--accent)]"
                   onClick={addItem}
                 >
-                  <FiPlus size={13} /> 添加
+                  <FiPlus size={13} /> {T.uAdd}
                 </button>
               </div>
               <div className="space-y-0.5">
                 {active.items.length === 0 && (
                   <div className="py-6 text-center text-[12px] text-[var(--text-faint)]">
-                    收藏夹为空 · 在 Alt 指令面板中把历史命令拖进来，或在上方添加
+                    {T.uFolderEmpty}
                   </div>
                 )}
                 {active.items.map((cmd, i) => (
                   <div
                     key={`${cmd}-${i}`}
                     onClick={() => insert(cmd)}
-                    title="点击插入聚焦终端（不执行）"
+                    title={T.uInsertHint}
                     className="group flex cursor-pointer items-center gap-2 rounded-md border border-transparent px-3 py-1.5 font-mono text-[12px] text-[var(--text-dim)] transition-colors hover:border-[var(--border)] hover:bg-[var(--bg-hover)] hover:text-[var(--text)]"
                   >
                     <span className="min-w-0 flex-1 truncate">{cmd}</span>
                     <button
                       className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100 hover:text-[var(--danger)]"
-                      title="删除"
+                      title={T.uDelete}
                       onClick={(e) => { e.stopPropagation(); removeItem(i); }}
                     >
                       <FiTrash2 size={12} />

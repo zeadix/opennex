@@ -1,4 +1,6 @@
+import { useI18n } from '../i18n-context';
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
@@ -9,12 +11,29 @@ import {
   broadcastGroup,
   broadcastInput,
   focusedSlot,
+  lastCursor,
   registerSocket,
   sockets,
   unregisterSocket,
 } from "./registry";
+
+/** Drag an overlay by a handle; `apply` receives the new viewport position. */
+export function beginOverlayDrag(e: React.MouseEvent, apply: (x: number, y: number) => void) {
+  const el = (e.currentTarget as HTMLElement).parentElement;
+  if (!el) return;
+  const rect = el.getBoundingClientRect();
+  const dx = e.clientX - rect.left;
+  const dy = e.clientY - rect.top;
+  const move = (ev: MouseEvent) => apply(ev.clientX - dx, ev.clientY - dy);
+  const up = () => {
+    window.removeEventListener("mousemove", move);
+    window.removeEventListener("mouseup", up);
+  };
+  window.addEventListener("mousemove", move);
+  window.addEventListener("mouseup", up);
+}
 import { invoke } from "./tauri";
-import { t, loadLang } from "../i18n";
+
 import "@xterm/xterm/css/xterm.css";
 
 /**
@@ -44,13 +63,20 @@ function suggestions(word: string, rankedHistory: string[], pathCmds: string[], 
 
 function readTerminalTheme() {
   const cs = getComputedStyle(document.documentElement);
-  const v = (name: string) => cs.getPropertyValue(name).trim();
+  const v = (name: string, fallback: string) => cs.getPropertyValue(name).trim() || fallback;
+  // Dedicated --term-* tokens (theme editor) fall back to the UI colors.
+  const ansi = Array.from({ length: 16 }, (_, i) => v(`--term-ansi-${i}`, "#000000"));
   return {
-    background: v("--bg"),
-    foreground: v("--text"),
-    cursor: v("--accent"),
-    cursorAccent: v("--bg"),
-    selectionBackground: v("--accent-dim"),
+    background: v("--term-background", v("--bg", "#0b0e14")),
+    foreground: v("--term-foreground", v("--text", "#d7dce7")),
+    cursor: v("--term-cursor", v("--accent", "#4fc3f7")),
+    cursorAccent: v("--bg", "#0b0e14"),
+    selectionBackground: v("--term-selection", v("--accent-dim", "#23465c")),
+    black: ansi[0], red: ansi[1], green: ansi[2], yellow: ansi[3],
+    blue: ansi[4], magenta: ansi[5], cyan: ansi[6], white: ansi[7],
+    brightBlack: ansi[8], brightRed: ansi[9], brightGreen: ansi[10],
+    brightYellow: ansi[11], brightBlue: ansi[12], brightMagenta: ansi[13],
+    brightCyan: ansi[14], brightWhite: ansi[15],
   };
 }
 
@@ -78,31 +104,46 @@ function findSentinel(hay: Uint8Array): number {
  * Resize: ResizeObserver -> fit -> resize message -> Rust resizes the
  * PTY winsize.
  */
-export default function TerminalPane({
-  sessionId,
-  themeId,
-  fontSize,
-  command,
-  shell,
-  autoMatch,
-  onFontSize,
-}: {
+interface TerminalPaneProps {
+  workspaceId: number;
   sessionId: number;
   themeId: string;
   fontSize: number;
   command?: string[];
   shell?: string;
+  cwd?: string;
   autoMatch?: boolean;
+  followCursor?: boolean;
+  copyOnSelect?: boolean;
   onFontSize?: (size: number) => void;
   name?: string;
-}) {
+}
+
+export default function TerminalPane(props: TerminalPaneProps) {
+  // Reset local caches and overlays before another workspace can render them.
+  return <WorkspaceTerminalPane key={`${props.workspaceId}:${props.sessionId}`} {...props} />;
+}
+
+function WorkspaceTerminalPane({
+  workspaceId,
+  sessionId,
+  themeId,
+  fontSize,
+  command,
+  shell,
+  cwd,
+  autoMatch,
+  followCursor,
+  copyOnSelect,
+  onFontSize,
+  name,
+}: TerminalPaneProps) {
+  const T = useI18n();
+  // Keep long-lived PTY callbacks current without restarting the session.
+  const Tref = useRef(T);
+  Tref.current = T;
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
-  // HTML-level status badge: always visible even when the xterm canvas
-  // itself fails to draw (webview rendering bugs).
-  const [status, setStatus] = useState<{ state: string; detail?: string }>({
-    state: "connecting",
-  });
   const [searchOpen, setSearchOpen] = useState(false);
   const searchRef = useRef<SearchAddon | null>(null);
   // Custom right-click menu (copy/paste) — the webview's own context
@@ -122,6 +163,8 @@ export default function TerminalPane({
   const pathCmdsRef = useRef<string[]>([]);
   const autoMatchRef = useRef(autoMatch);
   autoMatchRef.current = autoMatch;
+  const copyOnSelectRef = useRef(copyOnSelect);
+  copyOnSelectRef.current = copyOnSelect;
   // Latch: a palette/history insert rewrote the input line — auto-match
   // must stay closed until the next REAL keystroke (egui's
   // history_menu_just_closed latch).
@@ -129,6 +172,22 @@ export default function TerminalPane({
   // Mirrors `suggest` for the one-time key handler inside the effect.
   const suggestRef = useRef(suggest);
   suggestRef.current = suggest;
+  // Remembered overlay position (followCursor off): draggable, restored
+  // across restarts.
+  const [suggestPos, setSuggestPos] = useState<{ x: number; y: number } | null>(() => {
+    try {
+      return JSON.parse(localStorage.getItem("opennex-suggest-pos") ?? "null");
+    } catch {
+      return null;
+    }
+  });
+  const dragSuggest = (e: React.MouseEvent) => {
+    beginOverlayDrag(e, (x, y) => {
+      const p = { x: Math.max(0, x), y: Math.max(0, y) };
+      setSuggestPos(p);
+      localStorage.setItem("opennex-suggest-pos", JSON.stringify(p));
+    });
+  };
 
   // Live theme/font updates without recreating the PTY.
   useEffect(() => {
@@ -139,6 +198,20 @@ export default function TerminalPane({
     t.options.fontFamily =
       getComputedStyle(document.documentElement).getPropertyValue("--mono") || "monospace";
   }, [themeId, fontSize]);
+
+  // Theme editor live preview + font changes: tokens changed under the
+  // same theme id.
+  useEffect(() => {
+    const onTheme = () => {
+      const t = termRef.current;
+      if (!t) return;
+      t.options.theme = readTerminalTheme();
+      t.options.fontFamily =
+        getComputedStyle(document.documentElement).getPropertyValue("--mono") || "monospace";
+    };
+    window.addEventListener("opennex-terminal-theme", onTheme);
+    return () => window.removeEventListener("opennex-terminal-theme", onTheme);
+  }, []);
 
   // Context menu closes on any outside click or window blur.
   useEffect(() => {
@@ -189,7 +262,6 @@ export default function TerminalPane({
     // renderer is the stable path here; add WebGL behind a setting once
     // verified per-machine.
     term.open(hostRef.current!);
-    term.writeln("\x1b[90m[连接 PTY 中…]\x1b[0m");
     try {
       fit.fit();
     } catch {
@@ -202,12 +274,27 @@ export default function TerminalPane({
     let cols = term.cols;
 
     (async () => {
-      invoke<Array<{ id: number; cmd: string; hits: number }>>("get_history")
-        .then((h) => (historyRef.current = h))
+      invoke<Array<{ id: number; cmd: string; hits: number }>>("get_history", { workspaceId })
+        .then((h) => { if (!disposed) historyRef.current = h; })
         .catch(() => {});
       invoke<string[]>("list_path_commands")
-        .then((c) => (pathCmdsRef.current = c))
+        .then((c) => { if (!disposed) pathCmdsRef.current = c; })
         .catch(() => {});
+      // Wait for a REAL layout before spawning the shell: a PTY born at
+      // 1–2 columns makes the prompt wrap into garbage that the
+      // scrollback then replays forever (the "flooded characters" bug).
+      for (let i = 0; i < 100; i++) {
+        if (disposed) return;
+        const el = hostRef.current;
+        if (el && el.clientWidth > 60 && el.clientHeight > 40) break;
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      if (disposed) return;
+      try {
+        fit.fit();
+      } catch {
+        /* still not laid out */
+      }
       let start: StartResult;
       try {
         start = await invoke("start_terminal", {
@@ -217,25 +304,23 @@ export default function TerminalPane({
           shell: shell ?? null,
           name: name ?? null,
           sessionId: String(sessionId),
+          workspaceId,
+          cwd: cwd ?? null,
         });
       } catch (e) {
         if (!disposed) {
-          setStatus({ state: "failed", detail: String(e) });
-          term.writeln(`\x1b[31m[启动 PTY 失败: ${e}]\x1b[0m`);
+          term.writeln(`\x1b[31m[${Tref.current.uPtyFailed}: ${e}]\x1b[0m`);
         }
         return;
       }
+      // A delayed response can belong to a workspace that was just detached.
+      // Do not kill its session: another mount may already have reattached it.
+      // Explicit tab/workspace deletion owns close_session.
       if (disposed) return;
-      setStatus({ state: "attaching" });
       ws = new WebSocket(`ws://127.0.0.1:${start.wsPort}/ws?session=${start.session}`);
       ws.binaryType = "arraybuffer";
       registerSocket(sessionId, ws);
-      ws.onerror = () => {
-        if (!disposed) {
-          setStatus({ state: "ws-error" });
-          term.writeln("\x1b[31m[WS 错误]\x1b[0m");
-        }
-      };
+      ws.onerror = () => {};
       ws.onmessage = (ev) => {
         const bytes = new Uint8Array(ev.data as ArrayBuffer);
         // Session-exit sentinel (OSC 777) rides in its own chunk from the
@@ -246,8 +331,7 @@ export default function TerminalPane({
         if (idx >= 0) {
           if (idx > 0) term.write(bytes.subarray(0, idx));
           if (!disposed) {
-            setStatus({ state: "ended" });
-            term.write("\r\n\x1b[90m[会话已结束]\x1b[0m\r\n");
+            term.write(`\r\n\x1b[90m[${Tref.current.sessionEnded}]\x1b[0m\r\n`);
           }
           return;
         }
@@ -285,6 +369,21 @@ export default function TerminalPane({
           navigated: false,
         }));
       };
+      // Track the input caret in SCREEN px (palette/overlay positioning).
+      const updateCursorPos = () => {
+        try {
+          const host = hostRef.current;
+          if (!host) return;
+          const rect = host.getBoundingClientRect();
+          const dims = (term as any)?._core?._renderService?.dimensions?.css;
+          const cw = dims?.cell?.width ?? 9;
+          const ch = dims?.cell?.height ?? 20;
+          lastCursor.x = rect.left + 8 + (term.buffer.active.cursorX ?? 0) * cw;
+          lastCursor.y = rect.top + 4 + (term.buffer.active.cursorY ?? 0) * ch;
+        } catch {
+          /* ignore */
+        }
+      };
       term.onData((data) => {
         // A real keystroke re-arms auto-match after a palette insert.
         suppressMatchRef.current = false;
@@ -293,6 +392,7 @@ export default function TerminalPane({
           else if (ch === "\x7f" || ch === "\b") buf = buf.slice(0, -1);
           else if (ch >= " ") buf += ch;
         }
+        updateCursorPos();
         updateSuggest();
         const bytes = new TextEncoder().encode(data);
         if (ws && ws.readyState === WebSocket.OPEN) {
@@ -395,28 +495,29 @@ export default function TerminalPane({
       // session end so keystrokes are visibly going nowhere.
       ws.onclose = () => {
         if (!disposed) {
-          term.write("\r\n\x1b[90m[会话已结束]\x1b[0m\r\n");
+          term.write(`\r\n\x1b[90m[${Tref.current.sessionEnded}]\x1b[0m\r\n`);
         }
       };
+      // Debounced resize: the dock settles over several frames — resizing
+      // the PTY at every intermediate width makes readline repaint the
+      // prompt each time.
+      let roTimer: number | null = null;
       const ro = new ResizeObserver(() => {
-        try {
-          fit.fit();
-          sendResize();
-        } catch {
-          /* zero-size during layout */
-        }
+        if (roTimer !== null) window.clearTimeout(roTimer);
+        roTimer = window.setTimeout(() => {
+          roTimer = null;
+          const el = hostRef.current;
+          if (!el || el.clientWidth < 60 || el.clientHeight < 40) return;
+          try {
+            fit.fit();
+            sendResize();
+          } catch {
+            /* zero-size during layout */
+          }
+        }, 120);
       });
       ro.observe(hostRef.current!);
-      ws.onopen = () => {
-        if (!disposed) {
-          setStatus({ state: "connected" });
-          term.writeln("\x1b[90m[已连接]\x1b[0m");
-        }
-        sendResize();
-      };
-      ws.onclose = () => {
-        if (!disposed) setStatus({ state: "closed" });
-      };
+      ws.onopen = () => sendResize();
       // Ctrl+wheel = font size (matches the egui build's behavior).
       const host = hostRef.current!;
       const onWheel = (e: WheelEvent) => {
@@ -427,6 +528,18 @@ export default function TerminalPane({
       };
       host.addEventListener("wheel", onWheel, { passive: false });
       (host as any)._wheelCleanup = () => host.removeEventListener("wheel", onWheel);
+      // 拖选即复制（设置可关）：松开鼠标时把选中文本送入剪贴板。
+      const onMouseUp = () => {
+        if (!copyOnSelectRef.current) return;
+        const sel = term.getSelection();
+        if (!sel) return;
+        navigator.clipboard
+          .writeText(sel)
+          .then(() => window.dispatchEvent(new CustomEvent("opennex-toast", { detail: Tref.current.uCopiedClipboard })))
+          .catch(() => {});
+      };
+      host.addEventListener("mouseup", onMouseUp);
+      (host as any)._mouseupCleanup = () => host.removeEventListener("mouseup", onMouseUp);
       // Right-click opens OUR menu (copy/paste), never the webview's.
       const onCtxMenu = (e: MouseEvent) => {
         e.preventDefault();
@@ -460,6 +573,7 @@ export default function TerminalPane({
       (hostRef.current as any)?._wheelCleanup?.();
       (hostRef.current as any)?._keyCleanup2?.();
       (hostRef.current as any)?._ctxCleanup?.();
+      (hostRef.current as any)?._mouseupCleanup?.();
       (hostRef.current as any)?._lineSetCleanup?.();
       (hostRef.current as any)?._closeSuggestCleanup?.();
       (hostRef.current as any)?._searchEvtCleanup?.();
@@ -469,9 +583,8 @@ export default function TerminalPane({
       term.dispose();
       termRef.current = null;
     };
-  }, [sessionId, command, shell]);
+  }, [sessionId, workspaceId, command, shell]);
 
-  const L = t(loadLang());
   return (
     <div
       ref={hostRef}
@@ -481,9 +594,23 @@ export default function TerminalPane({
         focusedSlot.value = sessionId;
       }}
     >
-      {suggest && (
+      {suggest &&
+        createPortal(
         <div
-          className="animate-fade-up absolute bottom-1 left-2 z-[6000] w-[min(480px,calc(100%-16px))] overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] shadow-2xl"
+          className="animate-fade-up fixed z-[6000] w-[min(480px,calc(100vw-16px))] overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] shadow-2xl"
+          style={
+            suggestPos
+              ? { left: suggestPos.x, top: suggestPos.y }
+              : followCursor && lastCursor.x > 0
+                ? {
+                    left: Math.max(4, Math.min(lastCursor.x, window.innerWidth - 496)),
+                    top:
+                      lastCursor.y + 190 > window.innerHeight
+                        ? Math.max(4, lastCursor.y - 190)
+                        : lastCursor.y + 24,
+                  }
+                : { right: 12, bottom: 44 }
+          }
           onMouseDown={(e) => e.stopPropagation()}
         >
           <div className="max-h-[220px] overflow-y-auto py-1">
@@ -509,10 +636,22 @@ export default function TerminalPane({
               </div>
             ))}
           </div>
-          <div className="border-t border-[var(--border)] px-3 py-1 text-[10px] text-[var(--text-faint)]">
-            ↑↓ 选择 · Tab 补全 · {suggest.navigated ? "Enter 插入选中指令" : "Enter 直接执行"} · Esc 关闭
+          <div
+            className="flex cursor-move items-center justify-between border-t border-[var(--border)] px-3 py-1 text-[10px] text-[var(--text-faint)]"
+            title={T.uDragPosition}
+            onMouseDown={(e) => {
+              if (followCursor) return;
+              e.stopPropagation();
+              dragSuggest(e);
+            }}
+          >
+            <span>
+              {suggest.navigated ? T.uSuggestNavigated : T.uSuggestPristine}
+            </span>
+            {!followCursor && <span className="ml-2 opacity-60">⣿</span>}
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
       {searchOpen && (
         <SearchBar
@@ -526,23 +665,10 @@ export default function TerminalPane({
           }}
         />
       )}
-      <div
-        className="pointer-events-none absolute right-2 top-1 z-20 rounded bg-[var(--bg-elevated)] px-1.5 py-0.5 font-mono text-[10px]"
-        style={{
-          color:
-            status.state === "connected"
-              ? "var(--success)"
-              : status.state === "ended"
-                ? "var(--text-faint)"
-                : "var(--danger)",
-        }}
-      >
-        pty:{status.state}
-        {status.detail ? ` ${status.detail}` : ""}
-      </div>
-      {ctx && (
+      {ctx &&
+        createPortal(
         <div
-          className="ctx-menu animate-fade-up"
+          className="ctx-menu animate-fade-up fixed"
           style={{
             left: Math.max(4, Math.min(ctx.x, window.innerWidth - 164)),
             top: Math.max(4, Math.min(ctx.y, window.innerHeight - 96)),
@@ -551,12 +677,13 @@ export default function TerminalPane({
           onContextMenu={(e) => e.preventDefault()}
         >
           <button className="ctx-item" disabled={!termRef.current?.hasSelection()} onClick={copySelection}>
-            <FiCopy size={13} /> {L.copy}
+            <FiCopy size={13} /> {T.copy}
           </button>
           <button className="ctx-item" onClick={pasteClipboard}>
-            <FiClipboard size={13} /> {L.paste}
+            <FiClipboard size={13} /> {T.paste}
           </button>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

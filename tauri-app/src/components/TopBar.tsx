@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { FiChevronDown } from "react-icons/fi";
-import { getTheme, THEMES } from "../theme/themes";
+import { allThemes, getTheme } from "../theme/themes";
 import { LANGS, t, Lang } from "../i18n";
 import PromptDialog from "./PromptDialog";
 
@@ -58,38 +58,39 @@ export default function TopBar({
         { label: T.newWorkspace, onClick: () => onCreateWorkspace() },
         { label: T.saveLayout, onClick: onSaveLayout },
         { label: T.loadLayout, onClick: onLoadLayout },
-        { label: T.saveLayoutAs, onClick: () => setSaveAsOpen(true) },
+        { label: T.saveLayoutAs.replace(/(?:…|\.{3})$/, ""), onClick: () => setSaveAsOpen(true) },
       ],
     },
     {
       label: T.menuView,
       items: [
+        { label: T.quickSettings, checked: !!panelChecks["quick-settings"], onClick: () => onTogglePanel("quick-settings") },
         { label: T.navPanel, checked: !!panelChecks.nav, onClick: () => onTogglePanel("nav") },
         { label: T.workArea, checked: !!panelChecks.term, onClick: () => onTogglePanel("term") },
         { label: T.sysmon, checked: !!panelChecks.sysmon, onClick: () => onTogglePanel("sysmon") },
-        { label: `${T.ai} 助手`, checked: !!panelChecks.ai, onClick: () => onTogglePanel("ai") },
+        { label: T.ai, checked: !!panelChecks.ai, onClick: () => onTogglePanel("ai") },
         { label: T.history, checked: !!panelChecks.history, onClick: () => onTogglePanel("history") },
         { label: T.favorites, checked: !!panelChecks.favorites, onClick: () => onTogglePanel("favorites") },
-        { label: "SSH", checked: !!panelChecks.ssh, onClick: () => onTogglePanel("ssh") },
+        { label: T.ssh, checked: !!panelChecks.ssh, onClick: () => onTogglePanel("ssh") },
       ],
     },
     {
       label: T.menuRemote,
       items: [
-        { label: `${T.lan}…`, onClick: () => onPage("remote") },
-        { label: `${T.wan}…`, onClick: () => onPage("remote-wan") },
+        { label: T.lan, onClick: () => onPage("remote") },
+        { label: T.wan, onClick: () => onPage("remote-wan") },
       ],
     },
     {
       label: T.theme,
-      items: THEMES.map((th) => ({
+      items: allThemes().map((th) => ({
         label: th.name,
         checked: th.id === themeId,
         onClick: () => onTheme(th.id),
       })),
     },
     {
-      label: lang === "zh" ? "语言" : "Language",
+      label: T.language,
       items: LANGS.map((l) => ({
         label: l.label,
         checked: l.id === lang,
@@ -153,14 +154,14 @@ export default function TopBar({
         {T.settings}
       </button>
       <div className="flex-1" />
-      {updateAvailable && (
-        <button
-          onClick={() => onPage("update")}
-          className="rounded-md bg-[var(--accent-dim)] px-2 py-1 text-[11px] font-semibold text-[var(--accent)] transition-colors hover:brightness-125"
-        >
-          {lang === "zh" ? "更新至最新版" : "Update available"}
-        </button>
-      )}
+      <button
+        onClick={() => onPage("update")}
+        className={`shrink-0 rounded px-2 py-1 text-[11px] hover:bg-[var(--bg-hover)] ${updateAvailable ? "bg-[var(--accent-dim)] font-semibold text-[var(--accent)]" : "text-[var(--text-dim)]"}`}
+      >
+        {updateAvailable
+          ? T.cUpdateLatest
+          : T.updateCheck}
+      </button>
       <span className="ml-1 font-mono text-[11px] text-[var(--text-faint)]">v{currentVersion}</span>
 
       {saveAsOpen && (

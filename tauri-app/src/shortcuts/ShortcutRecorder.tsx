@@ -1,3 +1,4 @@
+import { useI18n } from '../i18n-context';
 import { useEffect, useState } from "react";
 import { eventToBinding } from "./shortcuts";
 
@@ -9,6 +10,7 @@ export default function ShortcutRecorder({
   binding: string;
   onChange: (binding: string) => void;
 }) {
+  const T = useI18n();
   const [recording, setRecording] = useState(false);
   const [captured, setCaptured] = useState<string | null>(null);
 
@@ -37,7 +39,7 @@ export default function ShortcutRecorder({
           : "border-[var(--border)] text-[var(--text-dim)] hover:text-[var(--text)]"
       }`}
     >
-      {recording ? "按下组合键…" : captured ?? binding}
+      {recording ? T.sPressKeys : captured ?? binding}
     </button>
   );
 }

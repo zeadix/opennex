@@ -29,7 +29,12 @@ pub struct TunnelStatus {
 
 impl TunnelStatus {
     fn new(state: &str) -> Self {
-        Self { state: state.into(), progress: 0.0, url: None, error: None }
+        Self {
+            state: state.into(),
+            progress: 0.0,
+            url: None,
+            error: None,
+        }
     }
 }
 
@@ -105,11 +110,14 @@ fn download_cloudflared(dest: &Path, inner: &Arc<Inner>) -> Result<(), String> {
     let mut buf = [0u8; 64 * 1024];
     let mut done: u64 = 0;
     loop {
-        let n = reader.read(&mut buf).map_err(|e| format!("read failed: {e}"))?;
+        let n = reader
+            .read(&mut buf)
+            .map_err(|e| format!("read failed: {e}"))?;
         if n == 0 {
             break;
         }
-        file.write_all(&buf[..n]).map_err(|e| format!("write failed: {e}"))?;
+        file.write_all(&buf[..n])
+            .map_err(|e| format!("write failed: {e}"))?;
         done += n as u64;
         if total > 0 {
             set_status(
@@ -145,8 +153,18 @@ fn download_cloudflared(dest: &Path, inner: &Arc<Inner>) -> Result<(), String> {
 pub fn tunnel_start(app: tauri::AppHandle) -> Result<TunnelStatus, String> {
     let mut guard = TUNNEL.lock().unwrap();
     if let Some(inner) = guard.as_ref() {
-        // Already active (or starting) — just report.
-        return Ok(inner.status.lock().unwrap().clone());
+        let st = inner.status.lock().unwrap().clone();
+        // Active (or starting/downloading) — just report. A FAILED (or
+        // stopped) handle must NOT block a retry: tear it down and fall
+        // through to a fresh start.
+        if st.state == "starting" || st.state == "downloading" || st.state == "ready" {
+            return Ok(st);
+        }
+        if let Some(mut child) = inner.child.lock().unwrap().take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        *guard = None;
     }
     let data_dir = app
         .path()
@@ -169,15 +187,63 @@ pub fn tunnel_start(app: tauri::AppHandle) -> Result<TunnelStatus, String> {
             if let Err(e) = download_cloudflared(&bin, &inner) {
                 set_status(
                     &inner,
-                    TunnelStatus { state: "failed".into(), progress: 0.0, url: None, error: Some(e) },
+                    TunnelStatus {
+                        state: "failed".into(),
+                        progress: 0.0,
+                        url: None,
+                        error: Some(e),
+                    },
                 );
                 return;
+            }
+            // The macOS release asset is a tar.gz — unpack it (the
+            // archive contains the plain `cloudflared` binary).
+            #[cfg(target_os = "macos")]
+            {
+                let dir = bin.parent().unwrap().to_path_buf();
+                let ex = Command::new("tar")
+                    .arg("-xzf")
+                    .arg(&bin)
+                    .current_dir(&dir)
+                    .status();
+                match ex {
+                    Ok(st) if st.success() => {}
+                    Err(e) => {
+                        set_status(
+                            &inner,
+                            TunnelStatus {
+                                state: "failed".into(),
+                                progress: 0.0,
+                                url: None,
+                                error: Some(format!("tar extract failed: {e}")),
+                            },
+                        );
+                        return;
+                    }
+                    _ => {
+                        set_status(
+                            &inner,
+                            TunnelStatus {
+                                state: "failed".into(),
+                                progress: 0.0,
+                                url: None,
+                                error: Some("tar extract failed".into()),
+                            },
+                        );
+                        return;
+                    }
+                }
             }
         }
         let child = Command::new(&bin)
             .arg("tunnel")
             .arg("--url")
             .arg(format!("http://127.0.0.1:{}", crate::ws_port_value()))
+            // QUIC (UDP 7844) is routinely blocked by firewalls/carriers —
+            // a dead connector shows up to visitors as Cloudflare error
+            // 1033. http2 rides TCP 443 and is far more reliable.
+            .arg("--protocol")
+            .arg("http2")
             .arg("--no-autoupdate")
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -201,6 +267,40 @@ pub fn tunnel_start(app: tauri::AppHandle) -> Result<TunnelStatus, String> {
         let stderr = child.stderr.take();
         *inner.child.lock().unwrap() = Some(child);
 
+        // Process-exit watcher: if cloudflared dies (edge unreachable,
+        // killed, crash) the URL is dead — surface it instead of leaving
+        // a stale "ready" link that renders Cloudflare error 1033.
+        {
+            let inner = inner.clone();
+            std::thread::spawn(move || loop {
+                std::thread::sleep(Duration::from_secs(2));
+                let mut guard = inner.child.lock().unwrap();
+                let Some(child) = guard.as_mut() else { return };
+                match child.try_wait() {
+                    Ok(Some(st)) => {
+                        let cur = inner.status.lock().unwrap().clone();
+                        if cur.state == "ready" || cur.state == "starting" {
+                            set_status(
+                                &inner,
+                                TunnelStatus {
+                                    state: "failed".into(),
+                                    progress: 0.0,
+                                    url: None,
+                                    error: Some(format!(
+                                        "cloudflared 进程已退出（{}）——通常是无法连接 Cloudflare 边缘节点，请检查网络后重试",
+                                        st
+                                    )),
+                                },
+                            );
+                        }
+                        return;
+                    }
+                    Ok(None) => {}
+                    Err(_) => return,
+                }
+            });
+        }
+
         // Either output stream carries the URL; first hit wins.
         let hits = Arc::new(Mutex::new(false));
         let mut readers: Vec<Box<dyn std::io::Read + Send>> = Vec::new();
@@ -215,22 +315,29 @@ pub fn tunnel_start(app: tauri::AppHandle) -> Result<TunnelStatus, String> {
             let hits = hits.clone();
             std::thread::spawn(move || {
                 let reader = std::io::BufReader::new(r);
+                // DRAIN until EOF — never stop reading (and never close
+                // the pipe early): cloudflared logs continuously, and a
+                // closed pipe kills it with SIGPIPE (signal 13).
                 for line in reader.lines().map_while(Result::ok) {
                     if let Some(url) = parse_tunnel_url(&line) {
                         let mut hit = hits.lock().unwrap();
                         if !*hit {
                             *hit = true;
+                            // The remote gate requires the access token.
                             set_status(
                                 &inner,
                                 TunnelStatus {
                                     state: "ready".into(),
                                     progress: 1.0,
-                                    url: Some(url),
+                                    url: Some(format!(
+                                        "{}/remote?k={}",
+                                        url,
+                                        crate::remote_token()
+                                    )),
                                     error: None,
                                 },
                             );
                         }
-                        break;
                     }
                 }
             });

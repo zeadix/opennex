@@ -1,25 +1,22 @@
-// Workspace model (v3): a named, lockable entry that OWNS its dock
-// layout. `mainJson`/`termJson` are flexlayout JSON snapshots — the
-// committed copy (restored by 加载布局 / app start); the live models in
-// App are memory-only until committed on switch / explicit save.
-// Templates are named snapshots of a whole workspace layout, created
-// from the workspace row's right-click menu, and spawn identical
-// copies (terminal slots renumbered fresh on copy).
+// Workspaces and templates own only the terminal dock and terminal paths.
+// The outer view-panel layout is persisted independently in dock/mainLayout.ts.
 
 export interface Workspace {
   id: number;
   name: string;
   locked: boolean;
   lockHash?: string;
-  mainJson?: any;
   termJson?: any;
+  /** Per-terminal working directory memory: slot -> cwd (captured on
+   * switch/save, restored on open/template copy). */
+  cwdMap?: Record<string, string>;
 }
 
 export interface WsTemplate {
   id: string;
   name: string;
-  mainJson: any;
   termJson: any;
+  cwdMap?: Record<string, string>;
   createdAt: number;
 }
 
@@ -40,8 +37,8 @@ export function loadWorkspaces(): Workspace[] {
         name: String(w.name ?? "工作空间"),
         locked: !!w.locked,
         lockHash: w.lockHash,
-        mainJson: w.mainJson ?? undefined,
         termJson: w.termJson ?? undefined,
+        cwdMap: w.cwdMap ?? undefined,
       }));
       // Keep the seed clear of restored ids.
       seed = Math.max(seed, ...list.map((w) => w.id + 1));
@@ -70,8 +67,8 @@ export function loadTemplates(): WsTemplate[] {
       return raw.map((t: any) => ({
         id: String(t.id ?? crypto.randomUUID?.() ?? `${Date.now()}`),
         name: String(t.name ?? "模板"),
-        mainJson: t.mainJson ?? undefined,
         termJson: t.termJson ?? undefined,
+        cwdMap: t.cwdMap ?? undefined,
         createdAt: Number(t.createdAt ?? Date.now()),
       }));
     }

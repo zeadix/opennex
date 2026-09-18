@@ -1,48 +1,67 @@
 import type { Lang } from "../i18n";
+import { useI18n } from "../i18n-context";
+import { releaseNotes, useUpdates } from "../updates";
+import ReleaseNotes from "../components/ReleaseNotes";
 
-/** Help > 关于 — product card with version and links. */
-export default function AboutPage({ lang }: { lang: Lang }) {
-  const zh = lang === "zh" || lang === "zh-TW";
+export default function AboutPage({ lang, embedded = false }: { lang: Lang; embedded?: boolean }) {
+  const T = useI18n();
+  const { current, result, checking, error } = useUpdates();
+  const version = current ?? "—";
   return (
-    <div className="h-full overflow-y-auto px-8 py-6">
-      <div className="mx-auto max-w-[520px]">
-        <div className="mb-6 flex items-center gap-3">
+    <div className={embedded ? "min-w-0" : "h-full overflow-y-auto p-3"}>
+      <div className="w-full min-w-0">
+        <div className="mb-5 flex items-center gap-3">
           <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-[var(--accent-dim)] font-mono text-[20px] font-bold text-[var(--accent)]">
             N
           </div>
-          <div>
+          <div className="min-w-0">
             <div className="glow-text text-[18px] font-bold">OpenNex</div>
-            <div className="font-mono text-[11px] text-[var(--text-faint)]">v0.1.55-tauri</div>
+            <div className="font-mono text-[11px] text-[var(--text-faint)]">v{version}</div>
           </div>
         </div>
         <p className="mb-4 text-[12.5px] leading-relaxed text-[var(--text-dim)]">
-          {zh
-            ? "现代化的终端管理器：多工作空间、可拖拽分屏、指令收藏与自动补全、SSH 连接、局域网/广域网远程控制、AI 助手。"
-            : "A modern terminal manager: multi-workspace, draggable split panes, command favorites & auto-complete, SSH, LAN/WAN remote control and an AI assistant."}
+          {T.sAboutIntro}
         </p>
-        <div className="card-glow rounded-xl border border-[var(--border)] bg-[var(--bg-panel)] p-4 text-[12px]">
-          <div className="mb-2 font-semibold">{zh ? "技术栈" : "Tech stack"}</div>
-          <div className="grid grid-cols-2 gap-1.5 text-[11px] text-[var(--text-dim)]">
-            <span>Tauri v2 · Rust</span>
-            <span>React 18 · TypeScript</span>
-            <span>xterm.js · portable-pty</span>
-            <span>flexlayout-react</span>
+        <section className="rounded-lg border border-[var(--border)] bg-[var(--bg-panel)] p-4">
+          <h3 className="mb-2 text-[12px] font-semibold text-[var(--text-dim)]">
+            {T.sCurrentNotes}
+          </h3>
+          {result ? (
+            <ReleaseNotes
+              lang={lang}
+              notes={releaseNotes(result.currentChanges, result.currentChangesEn, lang)}
+            />
+          ) : (
+            <p className="text-[12px] text-[var(--text-dim)]">
+              {checking ? T.sLoadingInfo
+                : error ? T.sNotesError
+                : T.sNoNotes}
+            </p>
+          )}
+        </section>
+        <section className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--bg-panel)] p-4 text-[12px] leading-relaxed">
+          <div className="grid gap-x-6 gap-y-1.5 sm:grid-cols-2">
+            <div>
+              <span className="text-[var(--text-faint)]">{T.sAuthor}: </span>
+              KunPeng.Wang · <a className="break-all text-[var(--accent)] hover:underline" href="mailto:msr.rsm@qq.com">msr.rsm@qq.com</a>
+            </div>
+            <div>
+              <span className="text-[var(--text-faint)]">{T.sLicense}: </span>
+              MIT
+            </div>
+            <div className="sm:col-span-2">
+              <span className="text-[var(--text-faint)]">{T.sHome}: </span>
+              <a className="text-[var(--accent)] hover:underline" href="https://opennex.zeadix.com" rel="noreferrer" target="_blank">opennex.zeadix.com</a>
+            </div>
+            <div className="sm:col-span-2">
+              <span className="text-[var(--text-faint)]">{T.sSource}: </span>
+              <a className="text-[var(--accent)] hover:underline" href="https://github.com/zeadix/opennex" rel="noreferrer" target="_blank">github.com/zeadix/opennex</a>
+            </div>
           </div>
-        </div>
-        <div className="mt-4 text-[11px] text-[var(--text-faint)]">
-          {zh ? "项目主页：" : "Project home: "}
-          <a
-            className="text-[var(--accent)] hover:underline"
-            href="https://github.com/zeadix/opennex"
-            target="_blank"
-            rel="noreferrer"
-          >
-            github.com/zeadix/opennex
-          </a>
-        </div>
-        <div className="mt-1 text-[11px] text-[var(--text-faint)]">
-          © 2026 OpenNex · {zh ? "本构建为 Tauri 预览版" : "This build is the Tauri preview"}
-        </div>
+          <div className="mt-2 text-[11px] text-[var(--text-faint)]">
+            © 2026 KunPeng.Wang · OpenNex · MIT License
+          </div>
+        </section>
       </div>
     </div>
   );

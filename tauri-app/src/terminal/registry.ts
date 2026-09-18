@@ -15,6 +15,10 @@ export const focusedSlot = { value: 0 };
  * components outside the dock models (busy dots) can read it freely. */
 export const activityStore: { map: Record<string, number> } = { map: {} };
 
+/** Screen position of the focused terminal's input cursor (px) — lets
+ * the auto-match overlay and the Alt palette follow the caret. */
+export const lastCursor = { x: 0, y: 0 };
+
 export function registerSocket(slot: number, ws: WebSocket) {
   sockets.set(slot, ws);
 }
@@ -34,7 +38,7 @@ export function sendTo(slot: number, data: Uint8Array): boolean {
 
 /** Broadcast input to every OTHER session in the broadcast group. */
 export function broadcastInput(fromSlot: number, data: Uint8Array) {
-  if (!broadcastEnabled.value) return false;
+  if (!broadcastEnabled.value || !broadcastGroup.has(fromSlot)) return false;
   let sent = false;
   for (const slot of broadcastGroup) {
     if (slot === fromSlot) continue;

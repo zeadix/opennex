@@ -1,3 +1,4 @@
+import { useI18n } from '../i18n-context';
 import { useRef, useState } from "react";
 import { FiSend, FiCpu, FiPlay, FiSkipForward } from "react-icons/fi";
 import { invoke } from "../terminal/tauri";
@@ -33,6 +34,7 @@ export function saveAiConfig(c: AiConfig) {
 }
 
 export default function AiPage() {
+  const T = useI18n();
   const [cfg, setCfg] = useState<AiConfig>(loadAiConfig);
   const [editing, setEditing] = useState(false);
   const [messages, setMessages] = useState<Msg[]>([]);
@@ -77,7 +79,7 @@ export default function AiPage() {
     setBusy(true);
     setAgentPlan(null);
     setAgentStep(0);
-    setAgentLog([`目标: ${goal}`]);
+    setAgentLog([T.uGoalLog.replace("{goal}", () => goal)]);
     try {
       const reply = await invoke<string>("ai_chat", {
         baseUrl: cfg.baseUrl,
@@ -96,9 +98,9 @@ export default function AiPage() {
       const cmds: string[] = Array.isArray(parsed.commands) ? parsed.commands : [String(parsed)];
       setAgentPlan(cmds);
       setAgentStep(0);
-      setAgentLog((l) => [...l, `计划 ${cmds.length} 步`]);
+      setAgentLog((l) => [...l, T.uPlanSteps.replace("{count}", String(cmds.length))]);
     } catch (e) {
-      setAgentLog((l) => [...l, `⚠ 计划失败: ${e}`]);
+      setAgentLog((l) => [...l, `⚠ ${T.uPlanFailed}: ${e}`]);
     } finally {
       setBusy(false);
     }
@@ -115,20 +117,20 @@ export default function AiPage() {
       <div className="flex h-full flex-col">
         <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-2.5">
           <span className="flex items-center gap-2 text-[13px] font-medium">
-            <FiCpu size={15} className="text-[var(--accent)]" /> Agent · 命令规划执行
+            <FiCpu size={15} className="text-[var(--accent)]" /> {T.agentTitle}
           </span>
           <button className="text-[12px] text-[var(--text-dim)] hover:text-[var(--accent)]" onClick={() => setTab("chat")}>
-            ← 对话模式
+            {T.uChatMode}
           </button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
           <div className="mb-3 text-[12px] text-[var(--text-dim)]">
-            输入目标 → AI 生成命令计划 → 你逐步批准执行（写入最近聚焦的终端并回车）
+            {T.uAgentHint}
           </div>
           <div className="flex gap-2">
             <input
               className="dialog-input"
-              placeholder="例如: 在 /tmp 搭建一个 python venv 并安装 requests"
+              placeholder={T.uGoalExample}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && !busy && planGoal()}
@@ -136,7 +138,7 @@ export default function AiPage() {
             />
             <button className="shrink-0 rounded-md bg-[var(--accent-dim)] px-4 text-[12px] text-[var(--accent)] hover:brightness-125 disabled:opacity-50"
               disabled={busy || !input.trim()} onClick={planGoal}>
-              {busy ? "规划中…" : "生成计划"}
+              {busy ? T.uPlanning : T.uGeneratePlan}
             </button>
           </div>
           {agentPlan && (
@@ -151,11 +153,11 @@ export default function AiPage() {
                     <>
                       <button className="flex items-center gap-1 rounded-md bg-[var(--accent-dim)] px-2.5 py-1 text-[11px] text-[var(--accent)]"
                         onClick={() => { runStep(cmd); }}>
-                        <FiPlay size={11} /> 执行
+                        <FiPlay size={11} /> {T.uExecute}
                       </button>
                       <button className="flex items-center gap-1 rounded-md border border-[var(--border)] px-2.5 py-1 text-[11px] text-[var(--text-dim)]"
-                        onClick={() => { setAgentLog((l) => [...l, `⊘ 跳过: ${cmd}`]); setAgentStep((s) => s + 1); }}>
-                        <FiSkipForward size={11} /> 跳过
+                        onClick={() => { setAgentLog((l) => [...l, `⊘ ${T.uSkip}: ${cmd}`]); setAgentStep((s) => s + 1); }}>
+                        <FiSkipForward size={11} /> {T.uSkip}
                       </button>
                     </>
                   )}
@@ -163,7 +165,7 @@ export default function AiPage() {
               ))}
               {agentStep >= agentPlan.length && (
                 <div className="rounded-md border border-[var(--success)] px-3 py-2 text-[12px] text-[var(--success)]">
-                  计划执行完毕 ✓
+                  {T.uPlanDone}
                 </div>
               )}
             </div>
@@ -182,21 +184,21 @@ export default function AiPage() {
     return (
       <div className="h-full overflow-y-auto px-8 py-6">
         <div className="mx-auto max-w-[520px] space-y-3">
-          <h2 className="text-[15px] font-semibold">AI 设置</h2>
-          <input className="dialog-input" placeholder="API Base URL（OpenAI 兼容）"
+          <h2 className="text-[15px] font-semibold">{T.uAiSettings}</h2>
+          <input className="dialog-input" placeholder={T.uApiBaseUrl}
             value={cfg.baseUrl}
             onChange={(e) => setCfg({ ...cfg, baseUrl: e.target.value })} />
           <input className="dialog-input" type="password" placeholder="API Key"
             value={cfg.apiKey}
             onChange={(e) => setCfg({ ...cfg, apiKey: e.target.value })} />
-          <input className="dialog-input" placeholder="模型名（如 gpt-4o-mini）"
+          <input className="dialog-input" placeholder={T.uModelHint}
             value={cfg.model}
             onChange={(e) => setCfg({ ...cfg, model: e.target.value })} />
           <div className="flex justify-end gap-2">
             <button className="rounded-md px-3 py-1.5 text-[12px] text-[var(--text-dim)] hover:text-[var(--text)]"
-              onClick={() => setEditing(false)}>返回</button>
+              onClick={() => setEditing(false)}>{T.uBack}</button>
             <button className="rounded-md bg-[var(--accent-dim)] px-3 py-1.5 text-[12px] text-[var(--accent)] hover:brightness-125"
-              onClick={() => { saveAiConfig(cfg); setEditing(false); }}>保存</button>
+              onClick={() => { saveAiConfig(cfg); setEditing(false); }}>{T.save}</button>
           </div>
         </div>
       </div>
@@ -206,14 +208,14 @@ export default function AiPage() {
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-2.5">
-        <span className="text-[13px] font-medium">AI 助手 · {cfg.model}</span>
+        <span className="text-[13px] font-medium">{T.ai} · {cfg.model}</span>
         <button className="text-[12px] text-[var(--text-dim)] hover:text-[var(--accent)]"
-          onClick={() => setEditing(true)}>配置</button>
+          onClick={() => setEditing(true)}>{T.uConfigure}</button>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
         {messages.length === 0 && (
           <div className="pt-16 text-center text-[12px] text-[var(--text-faint)]">
-            输入问题开始对话 · 需要 OpenAI 兼容 API
+            {T.uChatEmpty}
           </div>
         )}
         <div className="space-y-3">
@@ -238,13 +240,13 @@ export default function AiPage() {
                     setInserted(ok ? i : -1);
                   }}
                 >
-                  ⤓ 插入终端{inserted === i ? " ✓" : ""}
+                  ⤓ {T.insertToTerminal}{inserted === i ? " ✓" : ""}
                 </button>
               )}
             </div>
           ))}
           {busy && (
-            <div className="text-[12px] text-[var(--text-faint)]">思考中…</div>
+            <div className="text-[12px] text-[var(--text-faint)]">{T.uThinking}</div>
           )}
           <div ref={bottomRef} />
         </div>
@@ -253,13 +255,13 @@ export default function AiPage() {
         <div className="flex items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--bg-panel)] px-3 py-2 focus-within:border-[var(--accent)]">
           <input
             className="min-w-0 flex-1 bg-transparent text-[13px] outline-none"
-            placeholder="问点什么…"
+            placeholder={T.uAskHint}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && send()}
             style={{ userSelect: "text" }}
           />
-          <button className="icon-btn" onClick={send} disabled={busy}>
+          <button className="icon-btn" title={T.uSend} onClick={send} disabled={busy}>
             <FiSend size={15} />
           </button>
         </div>

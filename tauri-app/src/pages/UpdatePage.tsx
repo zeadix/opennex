@@ -1,91 +1,53 @@
-import { useEffect, useState } from "react";
-import { invoke } from "../terminal/tauri";
+import { checkForUpdates, releaseNotes, useUpdates } from "../updates";
+import { fmt } from "../i18n";
+import { useI18n } from "../i18n-context";
+import ReleaseNotes from "../components/ReleaseNotes";
 
-interface UpdateResult {
-  updateAvailable: boolean;
-  latest: string;
-  current: string;
-  changes: string[];
-  changesEn: string[];
-}
-
-/** Update checker: compares against the public manifest and lists the
- * new release's bilingual notes. (Download/install comes with the
- * Tauri updater integration.) */
 export default function UpdatePage({ lang }: { lang: string }) {
-  const [result, setResult] = useState<UpdateResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [checking, setChecking] = useState(true);
-
-  const check = () => {
-    setChecking(true);
-    setError(null);
-    invoke<UpdateResult>("check_update")
-      .then(setResult)
-      .catch((e) => setError(String(e)))
-      .finally(() => setChecking(false));
-  };
-
-  useEffect(check, []);
-
-  const notes = result
-    ? lang.startsWith("en")
-      ? result.changesEn.filter((c) => c.length > 0)
-      : result.changes
-    : [];
+  const T = useI18n();
+  const { current, checking, result, error } = useUpdates();
+  const available = !!result?.updateAvailable;
+  const notes = result ? releaseNotes(
+    available ? result.changes : result.currentChanges,
+    available ? result.changesEn : result.currentChangesEn,
+    lang,
+  ) : [];
 
   return (
-    <div className="h-full overflow-y-auto px-8 py-6">
-      <div className="mx-auto max-w-[560px]">
-        <h2 className="mb-4 text-[15px] font-semibold">检查更新</h2>
-        {checking && <div className="text-[13px] text-[var(--text-dim)]">检查中…</div>}
-        {error && <div className="text-[13px] text-[var(--danger)]">{error}</div>}
-        {result && !checking && (
-          <div className="space-y-4">
-            <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-panel)] p-4">
-              <div className="flex items-center gap-3">
-                <span className="text-[12px] text-[var(--text-dim)]">当前版本</span>
-                <span className="font-mono text-[13px]">v{result.current}</span>
-              </div>
-              <div className="mt-1 flex items-center gap-3">
-                <span className="text-[12px] text-[var(--text-dim)]">最新版本</span>
-                <span className="font-mono text-[13px] text-[var(--accent)]">v{result.latest}</span>
-                <span
-                  className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                    result.updateAvailable
-                      ? "bg-[var(--accent-dim)] text-[var(--accent)]"
-                      : "bg-[var(--bg-active)] text-[var(--text-dim)]"
-                  }`}
-                >
-                  {result.updateAvailable
-                    ? lang.startsWith("zh") ? "有新版本" : "Update available"
-                    : lang.startsWith("en") ? "Up to date" : "已是最新"}
-                </span>
-              </div>
-            </div>
-            {notes.length > 0 && (
-              <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-panel)] p-4">
-                <div className="mb-2 text-[12px] font-semibold text-[var(--text-dim)]">
-                  {lang.startsWith("en") ? "What's new" : "更新内容"}
-                </div>
-                <ul className="space-y-1.5">
-                  {notes.map((c, i) => (
-                    <li key={i} className="text-[13px] leading-relaxed text-[var(--text)]">
-                      {c}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            <button
-              className="rounded-md border border-[var(--border)] px-3 py-1.5 text-[12px] text-[var(--text-dim)] hover:text-[var(--text)]"
-              onClick={check}
-            >
-              重新检查
-            </button>
-          </div>
-        )}
+    <div className="flex h-full min-w-0 flex-col p-3">
+      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto">
+        <header className="space-y-2">
+          <h2 className="text-[15px] font-semibold">{T.sSoftwareUpdate}</h2>
+          <p className="text-[12px] text-[var(--text-dim)]">
+            {T.currentVersion} <span className="font-mono text-[var(--text)]">v{current ?? "—"}</span>
+          </p>
+          <p role="status" className="text-[12px] text-[var(--text)]">
+            {checking ? T.sChecking
+              : error ? T.sCheckFailed
+              : available ? fmt(T.sNewFound, { v: result!.latest })
+              : result ? T.sUpToDate
+              : T.sNotChecked}
+          </p>
+        </header>
+        {error && <p role="alert" className="break-words text-[12px] text-[var(--danger)]">{error}</p>}
+        <section className="border-t border-[var(--border)] pt-3">
+          <h3 className="mb-3 text-[12px] font-semibold">
+            {available ? fmt(T.sWhatsNewV, { v: result!.latest })
+              : T.sCurrentNotes}
+          </h3>
+          {checking && !result ? <p className="text-[12px] text-[var(--text-dim)]">{T.sLoadingRelease}</p>
+            : <ReleaseNotes lang={lang} notes={notes} />}
+        </section>
       </div>
+      <footer className="mt-3 flex shrink-0 justify-end border-t border-[var(--border)] pt-3">
+        <button
+          disabled={checking}
+          onClick={() => void checkForUpdates()}
+          className="rounded border border-[var(--border)] px-3 py-1.5 text-[12px] hover:bg-[var(--bg-hover)] disabled:cursor-wait disabled:opacity-50"
+        >
+          {checking ? T.sCheckingShort : T.recheck}
+        </button>
+      </footer>
     </div>
   );
 }

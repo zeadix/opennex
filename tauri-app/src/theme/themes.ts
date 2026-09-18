@@ -17,11 +17,34 @@ export interface ThemeColors {
   success: string;
 }
 
+/** Terminal-side colors: xterm background/foreground/cursor/selection
+ * plus the 16-color ANSI palette (egui theme editor parity). */
+export interface TermPalette {
+  background: string;
+  foreground: string;
+  cursor: string;
+  selection: string;
+  ansi: string[];
+}
+
+/** Per-theme font configuration (主题字体): overrides the global font
+ * settings when settings.useThemeFont is on. Sizes in px. */
+export interface ThemeFonts {
+  uiFont: string;
+  uiFontSize: number;
+  termFont: string;
+  termFontSize: number;
+}
+
 export interface Theme {
   id: string;
   name: string;
   dark: boolean;
   colors: ThemeColors;
+  /** Present on custom themes; presets derive from their UI colors. */
+  term?: TermPalette;
+  /** Optional font pack (主题编辑器里配置). */
+  font?: ThemeFonts;
 }
 
 export const THEMES: Theme[] = [
@@ -74,6 +97,66 @@ export const THEMES: Theme[] = [
     },
   },
   {
+    id: "tokyo-night",
+    name: "Tokyo Night",
+    dark: true,
+    colors: {
+      bg: "#1a1b26", bgPanel: "#16161e", bgElevated: "#1f2335",
+      bgHover: "#292e42", bgActive: "#2f334d", border: "#292e42",
+      text: "#a9b1d6", textDim: "#737aa2", textFaint: "#565f89",
+      accent: "#7dcfff", accentDim: "#2a3b56",
+      danger: "#f7768e", success: "#9ece6a",
+    },
+  },
+  {
+    id: "catppuccin",
+    name: "Catppuccin Mocha",
+    dark: true,
+    colors: {
+      bg: "#1e1e2e", bgPanel: "#181825", bgElevated: "#24243a",
+      bgHover: "#313244", bgActive: "#3b3b52", border: "#313244",
+      text: "#cdd6f4", textDim: "#9399b2", textFaint: "#6c7086",
+      accent: "#89b4fa", accentDim: "#31406b",
+      danger: "#f38ba8", success: "#a6e3a1",
+    },
+  },
+  {
+    id: "one-dark",
+    name: "One Dark",
+    dark: true,
+    colors: {
+      bg: "#282c34", bgPanel: "#21252b", bgElevated: "#2f343d",
+      bgHover: "#3a3f4b", bgActive: "#454b56", border: "#3a3f4b",
+      text: "#dcdfe4", textDim: "#9da5b4", textFaint: "#636d83",
+      accent: "#61afef", accentDim: "#2f4a66",
+      danger: "#e06c75", success: "#98c379",
+    },
+  },
+  {
+    id: "rose-pine",
+    name: "Rosé Pine",
+    dark: true,
+    colors: {
+      bg: "#191724", bgPanel: "#1f1d2e", bgElevated: "#26233a",
+      bgHover: "#312e48", bgActive: "#3f3a5a", border: "#312e48",
+      text: "#e0def4", textDim: "#908caa", textFaint: "#6e6a86",
+      accent: "#c4a7e7", accentDim: "#3d2f56",
+      danger: "#eb6f92", success: "#31748f",
+    },
+  },
+  {
+    id: "everforest",
+    name: "Everforest",
+    dark: true,
+    colors: {
+      bg: "#2b3339", bgPanel: "#262d33", bgElevated: "#323c41",
+      bgHover: "#3a454b", bgActive: "#414b52", border: "#3a454b",
+      text: "#d3c6aa", textDim: "#9da9a0", textFaint: "#7a8478",
+      accent: "#a7c080", accentDim: "#42503a",
+      danger: "#e67e80", success: "#a7c080",
+    },
+  },
+  {
     id: "paper",
     name: "Paper",
     dark: false,
@@ -88,9 +171,99 @@ export const THEMES: Theme[] = [
 ];
 
 const KEY = "opennex-theme";
+const USER_KEY = "opennex-user-themes";
+
+// ---- user-defined themes (主题编辑器) ------------------------------------
+
+export function getUserThemes(): Theme[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem(USER_KEY) ?? "[]");
+    if (Array.isArray(raw)) {
+      return raw
+        .filter((t: any) => t && typeof t.id === "string")
+        .map((t: any) => normalizeTheme(t));
+    }
+  } catch {
+    /* ignore */
+  }
+  return [];
+}
+
+export function persistUserThemes(list: Theme[]) {
+  localStorage.setItem(USER_KEY, JSON.stringify(list));
+}
+
+function normalizeTheme(t: any): Theme {
+  const term = t.term ?? {};
+  return {
+    id: String(t.id),
+    name: String(t.name ?? "自定义主题"),
+    dark: t.dark !== false,
+    colors: { ...THEMES[0].colors, ...(t.colors ?? {}) },
+    term: {
+      background: String(term.background ?? ""),
+      foreground: String(term.foreground ?? ""),
+      cursor: String(term.cursor ?? ""),
+      selection: String(term.selection ?? ""),
+      ansi: Array.isArray(term.ansi) && term.ansi.length === 16 ? term.ansi.map(String) : [...defaultAnsi(t.dark !== false)],
+    },
+    font:
+      t.font && typeof t.font === "object"
+        ? {
+            uiFont: String(t.font.uiFont ?? ""),
+            uiFontSize: Number(t.font.uiFontSize ?? 13),
+            termFont: String(t.font.termFont ?? ""),
+            termFontSize: Number(t.font.termFontSize ?? 14),
+          }
+        : undefined,
+  };
+}
+
+/** Canonical ANSI-16 sets (standard 8 + bright 8) per light/dark base. */
+export function defaultAnsi(dark: boolean): string[] {
+  return dark
+    ? ["#282c34", "#e06c75", "#98c379", "#e5c07b", "#61afef", "#c678dd", "#56b6c2", "#abb2bf",
+       "#5c6370", "#e06c75", "#98c379", "#e5c07b", "#61afef", "#c678dd", "#56b6c2", "#ffffff"]
+    : ["#4b505b", "#d43d4f", "#2e8b57", "#c18401", "#0f6fad", "#8a4fbf", "#0e8a86", "#3d4452",
+       "#8b93a5", "#d43d4f", "#2e8b57", "#c18401", "#0f6fad", "#8a4fbf", "#0e8a86", "#1d2129"];
+}
+
+/** Derive a terminal palette from UI colors (preset themes without an
+ * explicit term palette). */
+export function deriveTerm(t: Theme): TermPalette {
+  if (t.term && t.term.ansi.length === 16) return t.term;
+  return {
+    background: t.colors.bg,
+    foreground: t.colors.text,
+    cursor: t.colors.accent,
+    selection: t.colors.accentDim,
+    ansi: defaultAnsi(t.dark),
+  };
+}
+
+/** Presets + user themes, presets first. */
+export function allThemes(): Theme[] {
+  return [...THEMES, ...getUserThemes()];
+}
+
+export function newThemeId(): string {
+  return `user-${crypto.randomUUID?.() ?? Date.now()}`;
+}
+
+/** Draft a custom theme from an existing one (编辑副本). */
+export function cloneAsCustom(src: Theme): Theme {
+  return {
+    id: newThemeId(),
+    name: `${src.name} 副本`,
+    dark: src.dark,
+    colors: { ...src.colors },
+    term: { ...deriveTerm(src), ansi: [...deriveTerm(src).ansi] },
+    font: src.font ? { ...src.font } : undefined,
+  };
+}
 
 export function getTheme(id: string): Theme {
-  return THEMES.find((t) => t.id === id) ?? THEMES[0];
+  return allThemes().find((t) => t.id === id) ?? THEMES[0];
 }
 
 export function loadThemeId(): string {
@@ -99,32 +272,62 @@ export function loadThemeId(): string {
 
 export function applyTheme(id: string) {
   const theme = getTheme(id);
+  applyThemeObject(theme);
+  localStorage.setItem(KEY, theme.id);
+}
+
+/** Apply a theme object's tokens to :root (used by the live editor too).
+ * Terminal colors get dedicated --term-* variables so the terminal can
+ * diverge from the UI palette. */
+export function applyThemeObject(theme: Theme) {
   const root = document.documentElement;
   for (const [k, v] of Object.entries(theme.colors)) {
     root.style.setProperty(`--${k.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase())}`, v);
   }
-  // flexlayout-react's stylesheet reads --fl-color-* — map our tokens so
-  // the dock chrome (tabsets/tabs/dividers) follows the app theme.
+  // FlexLayout declares its private --fl-* variables on each layout;
+  // only the public --flexlayout-* inputs inherit from :root.
   const fl = {
-    "--fl-color-background": theme.colors.bg,
-    "--fl-color-tabset-background": theme.colors.bgPanel,
-    "--fl-color-tab-content": theme.colors.bg,
-    "--fl-color-tabset-background-selected": theme.colors.bgActive,
-    "--fl-color-tabset-background-hover": theme.colors.bgHover,
-    "--fl-color-border": theme.colors.border,
-    "--fl-color-divider": theme.colors.border,
-    "--fl-color-text": theme.colors.text,
-    "--fl-color-text-unselected": theme.colors.textDim,
-    "--fl-color-text-disabled": theme.colors.textFaint,
-    "--fl-color-selected-active": theme.colors.accent,
-    "--fl-color-selected-background": theme.colors.bgActive,
-    "--fl-color-hover": theme.colors.bgHover,
-    "--fl-color-button": theme.colors.bgHover,
-    "--fl-color-button-hover": theme.colors.bgActive,
-    "--fl-color-button-active": theme.colors.accentDim,
+    background: theme.colors.bg,
+    base: theme.colors.bg,
+    text: theme.colors.text,
+    "tabset-background": theme.colors.bgElevated,
+    "tabset-background-selected": theme.colors.bgElevated,
+    "tabset-divider-line": theme.colors.border,
+    "tab-content": theme.colors.bgPanel,
+    "tab-selected": theme.colors.text,
+    "tab-selected-background": theme.colors.bgPanel,
+    "tab-unselected": theme.colors.textDim,
+    "border-background": theme.colors.bgElevated,
+    "border-divider-line": theme.colors.border,
+    "border-tab-content": theme.colors.bgPanel,
+    "border-tab-selected": theme.colors.text,
+    "border-tab-selected-background": theme.colors.bgPanel,
+    "border-tab-unselected": theme.colors.textDim,
+    "border-tab-unselected-background": theme.colors.bgElevated,
+    icon: theme.colors.textDim,
+    overflow: theme.colors.textDim,
+    focus: theme.colors.accent,
+    splitter: theme.colors.border,
+    "splitter-hover": theme.colors.bgHover,
+    "splitter-drag": theme.colors.accentDim,
+    "toolbar-button-hover": theme.colors.bgHover,
+    "1": theme.colors.bgPanel,
+    "2": theme.colors.bg,
+    "3": theme.colors.bgElevated,
+    "4": theme.colors.border,
+    "5": theme.colors.bgHover,
+    "6": theme.colors.bgActive,
   };
   for (const [k, v] of Object.entries(fl)) {
-    root.style.setProperty(k, v);
+    root.style.setProperty(`--flexlayout-color-${k}`, v);
   }
-  localStorage.setItem(KEY, theme.id);
+  // Terminal-specific tokens (fall back to UI colors when unset).
+  const term = deriveTerm(theme);
+  root.style.setProperty("--term-background", term.background);
+  root.style.setProperty("--term-foreground", term.foreground);
+  root.style.setProperty("--term-cursor", term.cursor);
+  root.style.setProperty("--term-selection", term.selection);
+  term.ansi.forEach((c, i) => root.style.setProperty(`--term-ansi-${i}`, c));
+  // Panes re-read the variables live (theme editor preview).
+  window.dispatchEvent(new CustomEvent("opennex-terminal-theme"));
 }

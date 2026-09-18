@@ -5,24 +5,30 @@ import {
   closePanel,
   NAV_TAB_ID,
   ensureSelection,
-  mainModelFrom,
   termModelFrom,
   newTermJson,
   nextSlot,
   seedTermSlots,
   renumberTermJson,
   collectModelTermSlots,
+  withCwd,
+  cwdMapFromJson,
   mainTabsetId,
   panelOpen,
   rootRowId,
   termTabsetId,
+  canCloseTerminal,
 } from "./dock/model";
-import { PAGE_NAME } from "./dock/DockRoot";
+import { loadMainModel, persistMainModel } from "./dock/mainLayout";
+import { panelTitles, translatePanelTitles } from "./dock/titles";
+import { I18nProvider } from "./i18n-context";
 import { useTheme } from "./theme/useTheme";
+import { getTheme } from "./theme/themes";
 import { useSettings } from "./settings";
 import { loadLang, saveLang, t, Lang } from "./i18n";
 import { loadShortcuts, matchesBinding } from "./shortcuts/shortcuts";
-import { activityStore } from "./terminal/registry";
+import { activityStore, broadcastGroup } from "./terminal/registry";
+import { checkForUpdates, startUpdateCheck, useUpdates } from "./updates";
 import SshPage, { SshHost, loadHosts, saveHosts } from "./pages/SshPage";
 import RemotePage from "./pages/RemotePage";
 import UpdatePage from "./pages/UpdatePage";
@@ -61,6 +67,7 @@ export default function App() {
   const [themeId, setThemeId] = useTheme();
   const [lang, setLang] = useState<Lang>(loadLang);
   useEffect(() => saveLang(lang), [lang]);
+  const titles = panelTitles(lang);
   const [settings, updateSettings] = useSettings();
   const [sshHosts, setSshHosts] = useState<SshHost[]>(loadHosts);
   const [shells, setShells] = useState<string[]>([]);
@@ -68,6 +75,8 @@ export default function App() {
   const [historyOverlay, setHistoryOverlay] = useState(false);
   const [windows, setWindows] = useState<FloatWin[]>([]);
   const winZ = useRef(1);
+  const updates = useUpdates();
+  useEffect(startUpdateCheck, []);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<number | null>(null);
   const showToast = (msg: string) => {
@@ -75,6 +84,12 @@ export default function App() {
     if (toastTimer.current) window.clearTimeout(toastTimer.current);
     toastTimer.current = window.setTimeout(() => setToast(null), 2200);
   };
+  useEffect(
+    () => () => {
+      if (toastTimer.current) window.clearTimeout(toastTimer.current);
+    },
+    [],
+  );
 
   /** Open (or focus) a floating page window, cascading from center. */
   const openWindow = (id: string, title: string, w = 620, h = 680) => {
@@ -106,7 +121,7 @@ export default function App() {
   const moveWindow = (id: string, nx: number, ny: number) =>
     setWindows((prev) => prev.map((x) => (x.id === id ? { ...x, x: nx, y: ny } : x)));
 
-  // ---- workspaces own their layouts -------------------------------------
+  // ---- workspaces own only terminal layouts -------------------------------------
   const [workspaces, setWorkspaces] = useState<Workspace[]>(loadWorkspaces);
   const [activeWsId, setActiveWsId] = useState(workspaces[0]?.id ?? 1);
   const [page, setPage] = useState<Page>("terminal");
@@ -121,35 +136,78 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Live dock models — memory-only until committed (switch / save / unload).
-  const [mainModel, setMainModel] = useState<Model>(() => mainModelFrom(workspaces[0]?.mainJson));
+  // The outer dock survives every workspace operation.
+  const [mainModel] = useState<Model>(loadMainModel);
+  useEffect(() => {
+    const save = () => persistMainModel(mainModel);
+    save();
+    mainModel.addChangeListener(save);
+    return () => mainModel.removeChangeListener(save);
+  }, [mainModel]);
   const [termModel, setTermModel] = useState<Model>(() =>
-    termModelFrom(workspaces[0]?.termJson, nextSlot),
+    termModelFrom(withCwd(workspaces[0]?.termJson, workspaces[0]?.cwdMap), nextSlot),
   );
+
+  useEffect(() => { translatePanelTitles(mainModel, lang); }, [mainModel, lang]);
+
+  // ---- terminal path memory ----------------------------------------------
+  const termModelRef = useRef(termModel);
+  termModelRef.current = termModel;
+  const cwdRef = useRef<Record<string, string>>({});
+  const captureCwdMap = async (): Promise<Record<string, string>> => {
+    const slots = collectModelTermSlots(termModelRef.current);
+    if (slots.length === 0) return {};
+    try {
+      const m = await import("@tauri-apps/api/core");
+      const map: Record<string, string> = {};
+      await Promise.all(
+        slots.map(async (slot) => {
+          try {
+            const cwd = await m.invoke<string | null>("session_cwd", { sessionId: String(slot) });
+            if (cwd) map[String(slot)] = cwd;
+          } catch {
+            /* session gone */
+          }
+        }),
+      );
+      return map;
+    } catch {
+      return {};
+    }
+  };
+  /** Persist the live cwd map onto a workspace record (fire-and-forget). */
+  const storeCwdMap = (id: number) => {
+    void captureCwdMap().then((cwdMap) => {
+      cwdRef.current = cwdMap;
+      if (Object.keys(cwdMap).length === 0) return;
+      setWorkspaces((prev) => prev.map((w) => (w.id === id ? { ...w, cwdMap } : w)));
+    });
+  };
 
   useEffect(() => {
     persistWorkspaces(workspaces);
   }, [workspaces]);
 
-  /** Snapshot the live models into the active workspace's committed copy. */
+  /** Snapshot the terminal layout into the active workspace's committed copy. */
   const commitLayout = () => {
-    const snapMain = mainModel.toJson();
     const snapTerm = termModel.toJson();
     setWorkspaces((prev) =>
-      prev.map((w) => (w.id === activeWsId ? { ...w, mainJson: snapMain, termJson: snapTerm } : w)),
+      prev.map((w) => (w.id === activeWsId ? { ...w, termJson: snapTerm } : w)),
     );
+    storeCwdMap(activeWsId);
   };
 
   // App close without an explicit save: best-effort commit straight to
   // localStorage (setState would not flush in time).
   const commitRef = useRef<() => void>(() => {});
   commitRef.current = () => {
+    persistMainModel(mainModel);
     try {
       const list: Workspace[] = JSON.parse(localStorage.getItem("opennex-workspaces") ?? "[]");
       const i = list.findIndex((w) => w.id === activeWsId);
       if (i >= 0) {
-        list[i].mainJson = mainModel.toJson();
         list[i].termJson = termModel.toJson();
+        if (Object.keys(cwdRef.current).length > 0) list[i].cwdMap = cwdRef.current;
         localStorage.setItem("opennex-workspaces", JSON.stringify(list));
       }
     } catch {
@@ -168,23 +226,22 @@ export default function App() {
     if (id === activeWsId) return;
     const target = workspaces.find((w) => w.id === id);
     if (!target) return;
-    const snapMain = mainModel.toJson();
     const snapTerm = termModel.toJson();
     setWorkspaces((prev) =>
-      prev.map((w) => (w.id === activeWsId ? { ...w, mainJson: snapMain, termJson: snapTerm } : w)),
+      prev.map((w) => (w.id === activeWsId ? { ...w, termJson: snapTerm } : w)),
     );
-    setMainModel(mainModelFrom(target.mainJson));
-    setTermModel(termModelFrom(target.termJson, nextSlot));
+    storeCwdMap(activeWsId);
+    setTermModel(termModelFrom(withCwd(target.termJson, target.cwdMap), nextSlot));
     setActiveWsId(id);
     setPage("terminal");
   };
 
   const createWorkspace = (name?: string) => {
     commitLayout();
-    const w = makeWorkspace(name ?? `工作空间 ${workspaces.length + 1}`);
+    const w = makeWorkspace(name ?? `${t(lang).cWorkspace} ${workspaces.length + 1}`);
     w.termJson = newTermJson(); // one fresh terminal on a unique slot
     setWorkspaces((prev) => [...prev, w]);
-    setMainModel(mainModelFrom(undefined));
+    void captureCwdMap().then((cwdMap) => cwdRef.current = cwdMap);
     setTermModel(termModelFrom(w.termJson, nextSlot));
     setActiveWsId(w.id);
     setPage("terminal");
@@ -194,14 +251,15 @@ export default function App() {
    * must not share PTY sessions with the template's source). */
   const createFromTemplate = (tpl: WsTemplate, name: string) => {
     commitLayout();
-    const src = tpl.termJson ?? newTermJson();
+    // Inject the template's per-terminal paths BEFORE renumbering — the
+    // cwd travels with each tab config to its fresh slot.
+    const src = withCwd(tpl.termJson ?? newTermJson(), tpl.cwdMap);
     const { json: termJson, max } = renumberTermJson(src);
     seedTermSlots(max);
     const w = makeWorkspace(name || tpl.name);
-    w.mainJson = tpl.mainJson ? JSON.parse(JSON.stringify(tpl.mainJson)) : undefined;
     w.termJson = termJson;
+    w.cwdMap = cwdMapFromJson(termJson);
     setWorkspaces((prev) => [...prev, w]);
-    setMainModel(mainModelFrom(w.mainJson));
     setTermModel(termModelFrom(termJson, nextSlot));
     setActiveWsId(w.id);
     setPage("terminal");
@@ -216,10 +274,9 @@ export default function App() {
     }
     const rest = workspaces.filter((x) => x.id !== id);
     if (rest.length === 0) {
-      const nw = makeWorkspace("默认工作空间");
+      const nw = makeWorkspace(t(lang).cDefaultWorkspace);
       nw.termJson = newTermJson();
       setWorkspaces([nw]);
-      setMainModel(mainModelFrom(undefined));
       setTermModel(termModelFrom(nw.termJson, nextSlot));
       setActiveWsId(nw.id);
       return;
@@ -227,8 +284,7 @@ export default function App() {
     setWorkspaces(rest);
     if (activeWsId === id) {
       const next = rest[0];
-      setMainModel(mainModelFrom(next.mainJson));
-      setTermModel(termModelFrom(next.termJson, nextSlot));
+      setTermModel(termModelFrom(withCwd(next.termJson, next.cwdMap), nextSlot));
       setActiveWsId(next.id);
     }
   };
@@ -255,19 +311,23 @@ export default function App() {
   /** Menu 工作空间 > 布局另存为… / row right-click > 保存为模板. */
   const saveLayoutAsTemplate = (wsId: number, name: string) => {
     const live = wsId === activeWsId;
-    const mainJson = live ? mainModel.toJson() : workspaces.find((w) => w.id === wsId)?.mainJson;
     const termJson = live ? termModel.toJson() : workspaces.find((w) => w.id === wsId)?.termJson;
-    setTemplates((prev) => [
-      ...prev,
-      {
-        id: crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`,
-        name,
-        mainJson: mainJson ? JSON.parse(JSON.stringify(mainJson)) : undefined,
-        termJson: termJson ? JSON.parse(JSON.stringify(termJson)) : undefined,
-        createdAt: Date.now(),
-      },
-    ]);
-    showToast(t(lang).tplSaved);
+    // Live save captures each terminal's current cwd so the template
+    // restores paths on copy.
+    void (async () => {
+      const cwdMap = live ? await captureCwdMap() : (workspaces.find((w) => w.id === wsId)?.cwdMap ?? {});
+      setTemplates((prev) => [
+        ...prev,
+        {
+          id: crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`,
+          name,
+          termJson: termJson ? JSON.parse(JSON.stringify(termJson)) : undefined,
+          cwdMap,
+          createdAt: Date.now(),
+        },
+      ]);
+      showToast(t(lang).tplSaved);
+    })();
   };
 
   const saveLayout = () => {
@@ -276,8 +336,7 @@ export default function App() {
   };
   const loadLayout = () => {
     const w = workspaces.find((x) => x.id === activeWsId);
-    setMainModel(mainModelFrom(w?.mainJson));
-    setTermModel(termModelFrom(w?.termJson, nextSlot));
+    setTermModel(termModelFrom(withCwd(w?.termJson, w?.cwdMap), nextSlot));
     showToast(t(lang).layoutLoaded);
   };
 
@@ -297,6 +356,7 @@ export default function App() {
           setActivities(m);
         })
         .catch(() => {});
+      void captureCwdMap().then((cwdMap) => (cwdRef.current = cwdMap));
     };
     poll();
     const id = window.setInterval(poll, 3000);
@@ -309,16 +369,18 @@ export default function App() {
   // The main dock and the terminal dock are separate Models, so these
   // panels can never be dragged into the terminal area (and terminals
   // never leave it).
-  const MAIN_PANELS: Record<string, { tabId: string; location: DockLocation }> = {
-    nav: { tabId: NAV_TAB_ID, location: DockLocation.LEFT },
-    term: { tabId: PAGE_TAB_ID.terminal, location: DockLocation.RIGHT },
-    sysmon: { tabId: PAGE_TAB_ID.sysmon, location: DockLocation.RIGHT },
-    ai: { tabId: PAGE_TAB_ID.ai, location: DockLocation.RIGHT },
-    history: { tabId: PAGE_TAB_ID.history, location: DockLocation.RIGHT },
-    favorites: { tabId: PAGE_TAB_ID.favorites, location: DockLocation.RIGHT },
-    ssh: { tabId: PAGE_TAB_ID.ssh, location: DockLocation.RIGHT },
+  const MAIN_PANELS: Record<string, { tabId: string; name: string; location: DockLocation }> = {
+    "quick-settings": { tabId: PAGE_TAB_ID["quick-settings"], name: t(lang).quickSettings, location: DockLocation.RIGHT },
+    nav: { tabId: NAV_TAB_ID, name: titles.nav, location: DockLocation.LEFT },
+    term: { tabId: PAGE_TAB_ID.terminal, name: titles.term, location: DockLocation.RIGHT },
+    sysmon: { tabId: PAGE_TAB_ID.sysmon, name: titles.sysmon, location: DockLocation.RIGHT },
+    ai: { tabId: PAGE_TAB_ID.ai, name: titles.ai, location: DockLocation.RIGHT },
+    history: { tabId: PAGE_TAB_ID.history, name: titles.history, location: DockLocation.RIGHT },
+    favorites: { tabId: PAGE_TAB_ID.favorites, name: titles.favorites, location: DockLocation.RIGHT },
+    ssh: { tabId: PAGE_TAB_ID.ssh, name: titles.ssh, location: DockLocation.RIGHT },
   };
   const panelChecks: Record<string, boolean> = {
+    "quick-settings": panelOpen(mainModel, PAGE_TAB_ID["quick-settings"]),
     nav: panelOpen(mainModel, NAV_TAB_ID),
     term: panelOpen(mainModel, PAGE_TAB_ID.terminal),
     sysmon: panelOpen(mainModel, PAGE_TAB_ID.sysmon),
@@ -340,7 +402,7 @@ export default function App() {
         {
           type: "tab",
           id: def.tabId,
-          name: PAGE_NAME[panel as Page] ?? panel,
+          name: def.name,
           component: panel === "term" ? "term" : panel,
           enableClose: true,
           enableRenderOnDemand: false,
@@ -372,7 +434,14 @@ export default function App() {
       const ts: any = termModel.getNodeById(termTabsetId(termModel));
       const children = ts?.getChildren?.() ?? [];
       const sel = ts?.getSelectedNode?.() ?? children[ts.getSelected?.() ?? 0];
-      if (sel) termModel.doAction(Actions.deleteTab(sel.getId()));
+      if (sel && canCloseTerminal(termModel, sel.getId())) {
+        const slot = /term-(\d+)/.exec(sel.getId())?.[1];
+        if (slot) {
+          void closeSessions([Number(slot)]);
+          broadcastGroup.delete(Number(slot));
+        }
+        termModel.doAction(Actions.deleteTab(sel.getId()));
+      }
     } catch {
       /* no tabset */
     }
@@ -461,22 +530,69 @@ export default function App() {
     return () => window.removeEventListener("opennex-close-palette", close);
   }, []);
 
+  // Panes surface lightweight hints (e.g. copy-on-select) via this event.
+  useEffect(() => {
+    const onToast = (e: Event) => {
+      const msg = (e as CustomEvent).detail;
+      if (typeof msg === "string") showToast(msg);
+    };
+    window.addEventListener("opennex-toast", onToast);
+    return () => window.removeEventListener("opennex-toast", onToast);
+  }, []);
+
   // Sync the history cap to the backend whenever it changes.
   useEffect(() => {
     import("@tauri-apps/api/core")
-      .then((m) => m.invoke("set_history_cap", { cap: settings.historyCap }))
+      .then((m) => m.invoke("set_history_cap", { workspaceId: activeWsId, cap: settings.historyCap }))
       .catch(() => {});
-  }, [settings.historyCap]);
+  }, [settings.historyCap, activeWsId]);
+
+  // User theme packs may change without a themeId change (re-save).
+  const [themesV, setThemesV] = useState(0);
+  useEffect(() => {
+    const bump = () => setThemesV((v) => v + 1);
+    window.addEventListener("opennex-themes-changed", bump);
+    return () => window.removeEventListener("opennex-themes-changed", bump);
+  }, []);
+
+  // Effective font pack: the theme's fonts win when 使用主题字体 is on
+  // and the theme defines one; otherwise the global settings apply.
+  const effFonts = useMemo(() => {
+    if (settings.useThemeFont) {
+      const th = getTheme(themeId);
+      if (th.font) return th.font;
+    }
+    return {
+      uiFont: settings.uiFont,
+      uiFontSize: settings.uiFontSize,
+      termFont: settings.termFont,
+      termFontSize: settings.fontSize,
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.useThemeFont, settings.uiFont, settings.uiFontSize, settings.termFont, settings.fontSize, themeId, themesV]);
+
+  // Font settings: UI family via --ui-font, terminal family via --mono
+  // (panes re-read both on the terminal-style event).
+  useEffect(() => {
+    const root = document.documentElement;
+    if (effFonts.uiFont) root.style.setProperty("--ui-font", effFonts.uiFont);
+    else root.style.removeProperty("--ui-font");
+    root.style.setProperty(
+      "--mono",
+      effFonts.termFont ||
+        '"JetBrains Mono", "Cascadia Code", "Fira Code", ui-monospace, monospace',
+    );
+    window.dispatchEvent(new CustomEvent("opennex-terminal-theme"));
+  }, [effFonts]);
+
+  /** UI scale from the effective 界面字号 (13px = 1.0). */
+  const uiScale = effFonts.uiFontSize / 13;
 
   /** Open a page as a floating window (terminals stay in the dock). */
   const openPage = (p: string) => {
+    if (p === "update") void checkForUpdates();
     setPage(p as any);
     if (p !== "terminal") {
-      const titles: Record<string, string> = {
-        ssh: "SSH", history: "历史", ai: "AI 助手", settings: "设置",
-        remote: "远程控制 · 局域网", "remote-wan": "远程控制 · 广域网", update: "检查更新",
-        favorites: "收藏指令", about: "关于", tutorial: "教程", monitor: "监控",
-      };
       openWindow(p, titles[p] ?? p, 640, 700);
     }
   };
@@ -530,15 +646,17 @@ export default function App() {
   };
 
   return (
+    <I18nProvider lang={lang}>
     <div className="flex h-full flex-col">
+      <div className="shrink-0" style={{ zoom: uiScale }}>
       <TopBar
         lang={lang}
         onLang={setLang}
         themeId={themeId}
         onTheme={setThemeId}
         onPage={openPage}
-        updateAvailable={false}
-        currentVersion="0.1.55"
+        updateAvailable={!!updates.result?.updateAvailable}
+        currentVersion={updates.current ?? "—"}
         panelChecks={panelChecks}
         onTogglePanel={togglePanel}
         onSaveLayout={saveLayout}
@@ -546,9 +664,10 @@ export default function App() {
         onSaveLayoutAs={(name) => saveLayoutAsTemplate(activeWsId, name)}
         onCreateWorkspace={(name) => createWorkspace(name)}
       />
+      </div>
       <div className="relative flex min-h-0 flex-1">
+      <div className="min-h-0 flex-1" style={{ zoom: uiScale }}>
       <DockRoot
-      key={activeWsId}
       mainModel={mainModel}
       termModel={termModel}
       onModelChange={() => {
@@ -559,7 +678,7 @@ export default function App() {
       onTheme={setThemeId}
       lang={lang}
       onLang={(l: Lang) => { setLang(l); }}
-      fontSize={settings.fontSize}
+      fontSize={effFonts.termFontSize}
       onFontSize={(size) => updateSettings({ fontSize: size })}
       shell={settings.shell}
       page={page}
@@ -591,14 +710,15 @@ export default function App() {
       onSettings={updateSettings}
       activities={activities}
     />
-      {historyOverlay && <HistoryOverlay onClose={() => setHistoryOverlay(false)} />}
+      </div>
+      {historyOverlay && <HistoryOverlay workspaceId={activeWsId} onClose={() => setHistoryOverlay(false)} />}
       {toast && (
         <div className="animate-fade-up pointer-events-none fixed bottom-10 left-1/2 z-[9500] -translate-x-1/2 rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] px-4 py-2 text-[12px] text-[var(--text)] shadow-2xl">
           {toast}
         </div>
       )}
       {windows.map((w) => (
-        <FloatingWindow key={w.id} win={w} onFocus={focusWindow} onClose={closeWindow} onMove={moveWindow}>
+        <FloatingWindow key={w.id} win={{ ...w, title: titles[w.id] ?? w.title }} onFocus={focusWindow} onClose={closeWindow} onMove={moveWindow}>
           {w.id === "settings" && (
             <SettingsPage settings={settings} onSettings={updateSettings} themeId={themeId} onTheme={setThemeId} lang={lang} />
           )}
@@ -614,5 +734,6 @@ export default function App() {
       ))}
       </div>
     </div>
+    </I18nProvider>
   );
 }

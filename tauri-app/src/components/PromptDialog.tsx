@@ -1,3 +1,4 @@
+import { useI18n } from '../i18n-context';
 import { useEffect, useRef, useState } from "react";
 
 /** Modal single-line prompt (template naming, workspace rename).
@@ -6,8 +7,8 @@ export default function PromptDialog({
   title,
   defaultValue,
   placeholder,
-  okText = "确定",
-  cancelText = "取消",
+  okText,
+  cancelText,
   onOk,
   onCancel,
 }: {
@@ -19,6 +20,7 @@ export default function PromptDialog({
   onOk: (value: string) => void;
   onCancel: () => void;
 }) {
+  const T = useI18n();
   const [val, setVal] = useState(defaultValue ?? "");
   const ref = useRef<HTMLInputElement>(null);
   useEffect(() => {
@@ -55,13 +57,13 @@ export default function PromptDialog({
             className="rounded-md border border-[var(--border)] px-3 py-1.5 text-[12px] text-[var(--text-dim)] hover:bg-[var(--bg-hover)]"
             onClick={onCancel}
           >
-            {cancelText}
+            {cancelText ?? T.cancel}
           </button>
           <button
             className="rounded-md bg-[var(--accent-dim)] px-3 py-1.5 text-[12px] text-[var(--accent)] hover:brightness-125"
             onClick={submit}
           >
-            {okText}
+            {okText ?? T.ok}
           </button>
         </div>
       </div>

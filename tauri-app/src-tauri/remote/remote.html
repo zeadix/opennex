@@ -62,7 +62,7 @@
   new ResizeObserver(doFit).observe(document.getElementById("term"));
   let ws = null, cur = "";
   async function loadSessions() {
-    const r = await fetch("/remote/sessions");
+    const r = await fetch("/remote/sessions?k=" + encodeURIComponent(myToken));
     const list = await r.json();
     const sel = document.getElementById("sessionSel");
     sel.innerHTML = "";
@@ -77,7 +77,7 @@
     if (ws) { ws.onclose = null; ws.close(); }
     term.reset();
     cur = sessionId;
-    ws = new WebSocket(((location.protocol === "https:") ? "wss://" : "ws://") + location.host + "/ws?session=" + sessionId);
+    ws = new WebSocket(((location.protocol === "https:") ? "wss://" : "ws://") + location.host + "/ws?session=" + sessionId + "&k=" + encodeURIComponent(myToken));
     ws.binaryType = "arraybuffer";
     ws.onmessage = (e) => term.write(new Uint8Array(e.data));
     ws.onopen = () => { doFit(); term.scrollToBottom(); };

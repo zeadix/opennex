@@ -8,6 +8,19 @@ export interface Settings {
   autoMatch: boolean;
   /** Command history capacity (synced to the backend via set_history_cap). */
   historyCap: number;
+  /** Command popups follow the input caret; off = fixed bottom-right
+   * corner, draggable, position remembered across restarts. */
+  followCursor: boolean;
+  /** UI font family ("" = system default). */
+  uiFont: string;
+  /** UI font size in px at scale 1 (13 = default); drives the UI zoom. */
+  uiFontSize: number;
+  /** Terminal font family ("" = built-in mono stack via --mono). */
+  termFont: string;
+  /** Drag-select in the terminal copies to the clipboard on mouse-up. */
+  copyOnSelect: boolean;
+  /** Use the applied theme's font pack instead of the global settings. */
+  useThemeFont: boolean;
 }
 
 const KEY = "opennex-settings";
@@ -17,6 +30,12 @@ export const defaultSettings: Settings = {
   fontSize: 14,
   autoMatch: true,
   historyCap: 500,
+  followCursor: false,
+  uiFont: "",
+  uiFontSize: 13,
+  termFont: "",
+  copyOnSelect: true,
+  useThemeFont: false,
 };
 
 export function loadSettings(): Settings {
