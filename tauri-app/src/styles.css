@@ -210,12 +210,19 @@ img, svg { -webkit-user-drag: none; }
 
 /* ── flexlayout tabs: website chip language ─────────────────────
    Rounded tops everywhere; the focused terminal tab wears the
-   accent wash + accent text (site "active chip" motif). */
-.flexlayout__tab_button { border-radius: 8px 8px 0 0; }
-.term-dock .flexlayout__tab_button {
+   accent wash + accent text (site "active chip" motif).
+   Per design feedback: main-dock tabs take the terminal tabs'
+   former height/font, term tabs take the smaller ones, 3px corners. */
+.flexlayout__tab_button {
+  border-radius: 3px 3px 0 0;
+  font-size: 14px;
   padding-top: 2px;
   padding-bottom: 2px;
-  font-size: 14px;
+}
+.term-dock .flexlayout__tab_button {
+  font-size: 13px;
+  padding-top: 3px;
+  padding-bottom: 3px;
 }
 .term-dock .flexlayout__tab_button_content {
   line-height: 1.25;
@@ -230,7 +237,7 @@ img, svg { -webkit-user-drag: none; }
 .term-dock .flexlayout__tab_button.flexlayout__tab_selected {
   background: var(--accent-soft);
   color: var(--accent);
-  border-radius: 8px 8px 0 0;
+  border-radius: 3px 3px 0 0;
 }
 
 .glow-text {

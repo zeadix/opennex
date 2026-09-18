@@ -21,6 +21,39 @@ function fmtMem(bytes: number): string {
   return `${(bytes / 1024).toFixed(0)} KB`;
 }
 
+const MAX_POINTS = 60;
+
+/** 曲线图（官网监控面板样式）：accent 折线 + 近 60 个采样点，过热转 danger。 */
+function Sparkline({ points, hot }: { points: number[]; hot: boolean }) {
+  const w = 240;
+  const h = 44;
+  if (points.length < 2) {
+    return (
+      <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className="h-12 w-full rounded-md bg-[var(--bg)]" />
+    );
+  }
+  const max = Math.max(100, ...points);
+  const step = w / (MAX_POINTS - 1);
+  const path = points
+    .map((p, i) => `${i === 0 ? "M" : "L"}${(i * step).toFixed(1)},${(h - (p / max) * (h - 8) - 4).toFixed(1)}`)
+    .join(" ");
+  return (
+    <svg
+      viewBox={`0 0 ${w} ${h}`}
+      preserveAspectRatio="none"
+      className="h-12 w-full rounded-md border border-[var(--bg-active)] bg-[var(--bg)]"
+    >
+      <path
+        d={path}
+        fill="none"
+        stroke={hot ? "var(--danger)" : "var(--accent)"}
+        strokeWidth="1.5"
+        vectorEffect="non-scaling-stroke"
+      />
+    </svg>
+  );
+}
+
 /** 视图 > 系统资源 (egui parity): three rows sampled every 2s — the
  * focused terminal's process tree, the active workspace's terminals,
  * and the whole software (the app tree covers every shell + UI). */
@@ -30,6 +63,10 @@ export default function SysmonPage({ getWsSlots }: { getWsSlots: () => number[] 
   const [tick, setTick] = useState(0);
   const wsRef = useRef(getWsSlots);
   wsRef.current = getWsSlots;
+  // CPU 采样历史（每 scope 最近 60 个点），驱动曲线图。
+  const histRef = useRef<Record<"focused" | "workspace" | "app", number[]>>({
+    focused: [], workspace: [], app: [],
+  });
 
   useEffect(() => {
     let alive = true;
@@ -38,7 +75,16 @@ export default function SysmonPage({ getWsSlots }: { getWsSlots: () => number[] 
       const focused = focusedSlot.value ? [String(focusedSlot.value)] : [];
       const workspace = wsRef.current().map(String);
       invoke<Stats>("resource_stats", { focused, workspace })
-        .then((s) => alive && setData(s))
+        .then((s) => {
+          if (!alive) return;
+          const push = (k: "focused" | "workspace" | "app", v: number | null) => {
+            histRef.current[k] = [...(histRef.current[k] ?? []), v ?? 0].slice(-MAX_POINTS);
+          };
+          push("focused", s.focused?.cpu ?? null);
+          push("workspace", s.workspace?.cpu ?? null);
+          push("app", s.app?.cpu ?? null);
+          setData(s);
+        })
         .catch(() => {});
     };
     poll();
@@ -70,8 +116,8 @@ export default function SysmonPage({ getWsSlots }: { getWsSlots: () => number[] 
         <div className="space-y-3">
           {rows.map((r) => {
             const cpu = r.stat?.cpu ?? null;
-            const frac = cpu === null ? 0 : Math.min(cpu / 100, 1);
             const hot = (cpu ?? 0) >= 80;
+            const points = histRef.current[r.key as "focused" | "workspace" | "app"] ?? [];
             return (
               <div key={r.key} className="card-glow rounded-xl border border-[var(--border)] bg-[var(--bg-panel)] p-4">
                 <div className="mb-2 flex items-center gap-2 text-[12.5px] font-semibold">
@@ -82,24 +128,16 @@ export default function SysmonPage({ getWsSlots }: { getWsSlots: () => number[] 
                       className="ml-auto font-mono text-[13px] font-bold"
                       style={{ color: hot ? "var(--danger)" : "var(--accent)" }}
                     >
-                      {cpu!.toFixed(1)}%
+                      CPU {cpu!.toFixed(1)}%
                     </span>
                   ) : (
                     <span className="ml-auto font-mono text-[12px] text-[var(--text-faint)]">—</span>
                   )}
                 </div>
-                <div className="mb-2 h-1.5 overflow-hidden rounded-full bg-[var(--bg-active)]">
-                  <div
-                    className="h-full rounded-full transition-all duration-500"
-                    style={{
-                      width: `${frac * 100}%`,
-                      background: hot ? "var(--danger)" : "var(--accent)",
-                    }}
-                  />
-                </div>
-                <div className="flex justify-between font-mono text-[11px] text-[var(--text-dim)]">
-                  <span>CPU {cpu === null ? "—" : `${cpu.toFixed(1)}%`}</span>
+                <Sparkline points={points} hot={hot} />
+                <div className="mt-2 flex justify-between font-mono text-[11px] text-[var(--text-dim)]">
                   <span>{T.uMemory} {r.stat ? fmtMem(r.stat.mem) : "—"}</span>
+                  <span>{points.length}/{MAX_POINTS}</span>
                 </div>
               </div>
             );

@@ -1,7 +1,7 @@
 import { useI18n } from '../i18n-context';
 import { useEffect, useState } from "react";
 import QRCode from "qrcode";
-import { FiGlobe, FiWifi, FiCopy, FiPlay, FiSquare, FiRefreshCw } from "react-icons/fi";
+import { FiGlobe, FiWifi, FiCopy, FiPlay, FiSquare, FiRefreshCw, FiCommand } from "react-icons/fi";
 import { invoke } from "../terminal/tauri";
 
 interface RemoteInfo {
@@ -96,25 +96,51 @@ export default function RemotePage({ initialTab = "lan" }: { initialTab?: "lan" 
         </div>
 
         {tab === "lan" && (
-          <>
-            <div className="card-glow rounded-xl border border-[var(--border)] bg-[var(--bg-panel)] p-6">
+          <div className="card-glow rounded-xl border border-[var(--border)] bg-[var(--bg-panel)] p-5">
+            {/* 状态头（设计稿）：绿点 + 标题 + 局域网地址 */}
+            <div className="mb-4 flex items-center gap-2">
+              <span className="h-2 w-2 shrink-0 rounded-full bg-[var(--success)]" />
+              <span className="text-[13px] font-semibold">{T.phoneRemote}</span>
+              <span className="ml-auto rounded-md border border-[var(--border)] px-2 py-0.5 font-mono text-[10.5px] text-[var(--text-dim)]">
+                {info.lanIp}:{info.port}
+              </span>
+            </div>
+            <div className="flex items-start gap-4">
               {lanQr && (
-                <div className="mb-4 flex justify-center">
-                  <img src={lanQr} alt={T.uLanQr} className="rounded-lg" width={220} height={220} />
-                </div>
+                <img
+                  src={lanQr}
+                  alt={T.uLanQr}
+                  className="w-[128px] shrink-0 rounded-lg border border-[var(--border)] bg-white p-1.5"
+                  width={128}
+                  height={128}
+                />
               )}
-              <div className="mb-2 break-all text-center font-mono text-[12px] text-[var(--accent)]">
-                {info.url}
-              </div>
-              <div className="text-center text-[11px] text-[var(--text-faint)]">
-                {T.uLanAddress.replace("{ip}", () => info.lanIp).replace("{port}", String(info.port))}
+              <div className="min-w-0 flex-1">
+                <div className="break-all font-mono text-[12.5px] leading-relaxed text-[var(--accent)]">
+                  {info.url}
+                </div>
+                <div className="mt-2 text-[11px] leading-relaxed text-[var(--text-dim)]">
+                  {T.phoneRemoteHint}
+                </div>
               </div>
             </div>
-            <div className="mt-4 space-y-1 text-[11px] text-[var(--text-faint)]">
+            {/* 虚拟按键（手机页底部工具栏） */}
+            <div className="mt-4 flex items-center gap-1.5 border-t border-[var(--border)] pt-3">
+              <FiCommand size={12} className="shrink-0 text-[var(--text-faint)]" />
+              {["Ctrl C", "Ctrl V", "Tab", "↑", "Enter"].map((k) => (
+                <span
+                  key={k}
+                  className="rounded border border-[var(--border)] bg-[var(--bg)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--text)]"
+                >
+                  {k}
+                </span>
+              ))}
+            </div>
+            <div className="mt-3 space-y-0.5 text-[10.5px] leading-relaxed text-[var(--text-faint)]">
               <div>{T.remoteNote1}</div>
               <div>{T.remoteNote2}</div>
             </div>
-          </>
+          </div>
         )}
 
         {tab === "wan" && (

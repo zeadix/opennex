@@ -46,6 +46,7 @@ function WorkspaceHistoryOverlay({ workspaceId, onClose }: HistoryOverlayProps) 
   const [prompt, setPrompt] = useState<{ title: string; value?: string; onOk: (v: string) => void } | null>(null);
   const [addingFolder, setAddingFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
+  const [q, setQ] = useState("");
   const listRefs = useRef<Record<string, HTMLDivElement | null>>({});
   // Positioning: remembered > caret-follow (setting) > default top-right.
   const follow = loadSettings().followCursor;
@@ -84,6 +85,10 @@ function WorkspaceHistoryOverlay({ workspaceId, onClose }: HistoryOverlayProps) 
     return () => { stale = true; };
   }, [workspaceId]);
 
+  // 设计稿（官网预览图）中的搜索：实时过滤历史行。
+  const needle = q.trim().toLowerCase();
+  const filtered = needle ? hist.filter((h) => h.cmd.toLowerCase().includes(needle)) : hist;
+
   const saveFolders = (next: FavFolder[]) => {
     setFolders(next);
     persistFolders(next);
@@ -98,6 +103,7 @@ function WorkspaceHistoryOverlay({ workspaceId, onClose }: HistoryOverlayProps) 
   };
 
   const activeFolder = () => folders[Math.min(selF, folders.length - 1)] ?? null;
+  const favSet = new Set(activeFolder()?.items ?? []);
 
   const addCmdToFolder = (folderId: string, cmd: string) => {
     saveFolders(
@@ -128,13 +134,13 @@ function WorkspaceHistoryOverlay({ workspaceId, onClose }: HistoryOverlayProps) 
         else setSelI((s) => Math.max(0, s - 1));
       } else if (e.key === "ArrowDown") {
         e.preventDefault();
-        if (col === "hist") setSelH((s) => Math.min(hist.length - 1, s + 1));
+        if (col === "hist") setSelH((s) => Math.min(filtered.length - 1, s + 1));
         else if (col === "folders") setSelF((s) => Math.min(folders.length - 1, s + 1));
         else setSelI((s) => Math.min((activeFolder()?.items.length ?? 1) - 1, s + 1));
       } else if (e.key === "ArrowRight") {
         e.preventDefault();
         if (col === "hist") {
-          setCol(folders.length > 0 ? "folders" : hist.length > 0 ? "hist" : "folders");
+          setCol(folders.length > 0 ? "folders" : filtered.length > 0 ? "hist" : "folders");
         } else if (col === "folders" && (activeFolder()?.items.length ?? 0) > 0) {
           setCol("items");
         }
@@ -145,7 +151,7 @@ function WorkspaceHistoryOverlay({ workspaceId, onClose }: HistoryOverlayProps) 
       } else if (e.key === "Enter") {
         e.preventDefault();
         if (col === "hist") {
-          const cmd = hist[selH]?.cmd;
+          const cmd = filtered[selH]?.cmd;
           if (cmd) insert(cmd);
         } else if (col === "folders") {
           if (folders[selF] && (folders[selF].items.length > 0 || true)) setCol("items");
@@ -158,7 +164,7 @@ function WorkspaceHistoryOverlay({ workspaceId, onClose }: HistoryOverlayProps) 
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hist, folders, col, selH, selF, selI, prompt, addingFolder, onClose]);
+  }, [hist, filtered, q, folders, col, selH, selF, selI, prompt, addingFolder, onClose]);
 
   useEffect(() => {
     const ref = col === "hist" ? listRefs.current.hist : col === "folders" ? listRefs.current.folders : listRefs.current.items;
@@ -176,36 +182,53 @@ function WorkspaceHistoryOverlay({ workspaceId, onClose }: HistoryOverlayProps) 
 
   return (
     <div
-      className={`animate-fade-up fixed z-[6000] flex overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] shadow-2xl ${
+      className={`animate-fade-up fixed z-[6000] flex flex-col overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] shadow-[var(--shadow-lift)] ${
         posStyle ? "" : "right-6 top-14"
       }`}
       style={posStyle}
       onMouseDown={(e) => e.stopPropagation()}
     >
+      {/* ── 搜索（设计稿：⌕ 搜索历史指令…）── */}
+      <div
+        className={`flex items-center gap-2 border-b border-[var(--border)] px-3 py-2 ${
+          pos || follow ? "" : "cursor-move"
+        }`}
+        title={!follow ? T.uDragPosition : undefined}
+        onMouseDown={(e) => {
+          if (follow) return;
+          e.stopPropagation();
+          dragPos(e);
+        }}
+      >
+        <svg viewBox="0 0 12 12" className="h-3 w-3 shrink-0 text-[var(--text-faint)]" aria-hidden="true">
+          <circle cx="5" cy="5" r="3.4" fill="none" stroke="currentColor" strokeWidth="1.2" />
+          <path d="M7.6 7.6L10.6 10.6" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+        </svg>
+        <input
+          value={q}
+          onChange={(e) => { setQ(e.target.value); setSelH(0); }}
+          placeholder={T.searchPh}
+          className="min-w-0 flex-1 bg-transparent text-[12px] text-[var(--text)] outline-none placeholder:text-[var(--text-faint)]"
+          style={{ userSelect: "text" }}
+          onMouseDown={(e) => e.stopPropagation()}
+        />
+      </div>
+
+      <div className="flex">
       {/* ── 指令历史 ── */}
       <div className="flex w-[300px] flex-col border-r border-[var(--border)]">
-        <div
-          className={`flex items-center justify-between border-b border-[var(--border)] px-3 py-1.5 ${
-            pos || follow ? "" : "cursor-move"
-          }`}
-          title={!follow ? T.uDragPosition : undefined}
-          onMouseDown={(e) => {
-            if (follow) return;
-            e.stopPropagation();
-            dragPos(e);
-          }}
-        >
+        <div className="flex items-center justify-between border-b border-[var(--border)] px-3 py-1.5">
           <span className={colHeadCls("hist")}>{T.cmdHistory}</span>
-          <span className="text-[10px] text-[var(--text-faint)]">{T.uHistoryKeys}</span>
+          <span className="text-[10px] text-[var(--text-faint)]">{filtered.length}</span>
         </div>
         <div
           ref={(el) => (listRefs.current.hist = el)}
           className="max-h-[320px] min-h-[140px] overflow-y-auto py-1"
         >
-          {hist.length === 0 ? (
+          {filtered.length === 0 ? (
             <div className="px-4 py-6 text-center text-[12px] text-[var(--text-faint)]">{T.uNoHistory}</div>
           ) : (
-            hist.map((e, i) => (
+            filtered.map((e, i) => (
               <div
                 key={e.id}
                 draggable
@@ -217,7 +240,7 @@ function WorkspaceHistoryOverlay({ workspaceId, onClose }: HistoryOverlayProps) 
                 <span className="w-5 shrink-0 text-right text-[10px] text-[var(--text-faint)]">{i + 1}</span>
                 <span className="min-w-0 flex-1 truncate">{e.cmd}</span>
                 <button
-                  className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
+                  className="shrink-0"
                   title={T.uFavoriteSelected}
                   onClick={(ev) => {
                     ev.stopPropagation();
@@ -230,7 +253,15 @@ function WorkspaceHistoryOverlay({ workspaceId, onClose }: HistoryOverlayProps) 
                     addCmdToFolder(fid, e.cmd);
                   }}
                 >
-                  <FiStar size={12} className="text-[var(--text-faint)] hover:text-[var(--accent)]" />
+                  <FiStar
+                    size={12}
+                    className={
+                      favSet.has(e.cmd)
+                        ? "text-[var(--accent)]"
+                        : "text-[var(--text-faint)] opacity-60 transition-opacity group-hover:opacity-100 hover:text-[var(--accent)]"
+                    }
+                    style={favSet.has(e.cmd) ? { fill: "currentColor" } : undefined}
+                  />
                 </button>
                 <button
                   className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100 hover:text-[var(--danger)]"
@@ -384,6 +415,16 @@ function WorkspaceHistoryOverlay({ workspaceId, onClose }: HistoryOverlayProps) 
             ))
           )}
         </div>
+      </div>
+      </div>
+
+      {/* ── 底部键位提示（设计稿）── */}
+      <div className="flex items-center justify-between border-t border-[var(--border)] bg-[var(--bg-panel)] px-3 py-1.5 text-[10px] text-[var(--text-faint)]">
+        <span>{T.uHistoryKeys}</span>
+        <span className="flex items-center gap-1.5">
+          <FiStar size={9} className="text-[var(--accent)]" />
+          {T.uDragHistory}
+        </span>
       </div>
 
       {prompt && (
