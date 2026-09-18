@@ -57,7 +57,7 @@ export default function LockOverlay({
           placeholder={T.uPassword}
         />
         <button
-          className="rounded-md bg-[var(--accent-dim)] px-3 py-2 text-[12px] text-[var(--accent)] transition-all hover:brightness-125"
+          className="rounded-md bg-[var(--accent-soft)] px-3 py-2 text-[12px] text-[var(--accent)] transition-all hover:brightness-125"
           onClick={submit}
         >
           {mode === "set" ? T.set : T.uUnlockAction}

@@ -37,7 +37,7 @@ export default function PromptDialog({
       onMouseDown={onCancel}
     >
       <div
-        className="animate-fade-up w-[360px] rounded-xl border border-[var(--border)] bg-[var(--bg-elevated)] p-4 shadow-2xl"
+        className="animate-fade-up w-[360px] rounded-2xl border border-[var(--border)] bg-[var(--bg-elevated)] p-4 shadow-[var(--shadow-lift)]"
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="mb-3 text-[13px] font-semibold">{title}</div>

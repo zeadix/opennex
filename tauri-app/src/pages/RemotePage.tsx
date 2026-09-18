@@ -33,7 +33,7 @@ export default function RemotePage({ initialTab = "lan" }: { initialTab?: "lan" 
     invoke<RemoteInfo>("remote_info")
       .then(async (info) => {
         setInfo(info);
-        setLanQr(await QRCode.toDataURL(info.url, { margin: 1, width: 220, color: { dark: "#0b0e14", light: "#d6dbe6" } }));
+        setLanQr(await QRCode.toDataURL(info.url, { margin: 1, width: 220, color: { dark: "#0b0c0f", light: "#ffffff" } }));
       })
       .catch((e) => setError(String(e)));
   }, []);
@@ -56,7 +56,7 @@ export default function RemotePage({ initialTab = "lan" }: { initialTab?: "lan" 
   // QR for the WAN URL once ready.
   useEffect(() => {
     if (tunnel?.state === "ready" && tunnel.url) {
-      QRCode.toDataURL(tunnel.url, { margin: 1, width: 220, color: { dark: "#0b0e14", light: "#d6dbe6" } })
+      QRCode.toDataURL(tunnel.url, { margin: 1, width: 220, color: { dark: "#0b0c0f", light: "#ffffff" } })
         .then(setWanQr)
         .catch(() => {});
     }

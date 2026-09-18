@@ -51,7 +51,7 @@ export default function FloatingWindow({
 
   return (
     <div
-      className="animate-fade-up absolute flex flex-col overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg)] shadow-2xl"
+      className="animate-fade-up absolute flex flex-col overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--bg)] shadow-[var(--shadow-pop)]"
       style={{ left: win.x, top: win.y, width: win.w, height: win.h, zIndex: 7000 + win.z }}
       onMouseDown={() => onFocus(win.id)}
     >

@@ -1,24 +1,31 @@
 @import "tailwindcss";
 
-/* ── OpenNex design tokens ─────────────────────────────────────── */
+/* ── OpenNex design tokens (website parity) ────────────────────── */
 :root {
-  --bg: #0b0e14;
-  --bg-panel: #10141b;
-  --bg-elevated: #171c26;
-  --bg-hover: #1c2230;
-  --bg-active: #232b3b;
-  --border: #222a38;
-  --border-soft: #1a2130;
-  --text: #d7dce7;
-  --text-dim: #8b93a5;
-  --text-faint: #5a6274;
-  --accent: #4fc3f7;
-  --accent-dim: #23465c;
-  --danger: #f07178;
-  --success: #82d99a;
+  --bg: #0b0c0f;
+  --bg-panel: #131519;
+  --bg-elevated: #1b1e24;
+  --bg-hover: #20242c;
+  --bg-active: #ff5a2824;
+  --border: #ffffff14;
+  --border-soft: #ffffff0d;
+  --text: #e8eaee;
+  --text-dim: #8b95a0;
+  --text-faint: #5f6a76;
+  --accent: #ff5a28;
+  --accent-dim: #ff5a2838;
+  --accent-soft: #ff5a2824;
+  --danger: #e5484d;
+  --success: #22c55e;
   --mono: "JetBrains Mono", "Cascadia Code", "Fira Code", ui-monospace, monospace;
-  --radius: 8px;
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 14px;
+  --shadow-pop: 0 1px 2px rgba(0, 0, 0, 0.4), 0 10px 28px rgba(0, 0, 0, 0.38);
+  --shadow-lift: 0 2px 6px rgba(0, 0, 0, 0.45), 0 18px 44px rgba(0, 0, 0, 0.52);
   --flexlayout-splitter-size: 1px;
+  /* flexlayout inherits the UI font instead of the library default. */
+  --fl-font-family: var(--ui-font, "Geist Sans", system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans CJK SC", sans-serif);
 }
 
 html, body, #root {
@@ -26,7 +33,7 @@ html, body, #root {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font-family: var(--ui-font, system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans CJK SC", sans-serif);
+  font-family: var(--ui-font, "Geist Sans", system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans CJK SC", sans-serif);
   font-size: 13px;
   overflow: hidden;
 }
@@ -46,7 +53,7 @@ input, textarea, select, [contenteditable="true"] {
 img, svg { -webkit-user-drag: none; }
 
 ::-webkit-scrollbar { width: 8px; height: 8px; }
-::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--text-faint) 70%, transparent); border-radius: 0; }
+::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--text-faint) 70%, transparent); border-radius: 6px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
 ::-webkit-scrollbar-thumb:active { background: var(--accent); }
 ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; border-radius: 0; }
@@ -201,13 +208,14 @@ img, svg { -webkit-user-drag: none; }
   .workspace-activity-beam { animation: none; opacity: 0.35; }
 }
 
-/* ── Terminal session tabs ──────────────────────────────────────
-   No top corner rounding. */
+/* ── flexlayout tabs: website chip language ─────────────────────
+   Rounded tops everywhere; the focused terminal tab wears the
+   accent wash + accent text (site "active chip" motif). */
+.flexlayout__tab_button { border-radius: 8px 8px 0 0; }
 .term-dock .flexlayout__tab_button {
   padding-top: 2px;
   padding-bottom: 2px;
   font-size: 14px;
-  border-radius: 0;
 }
 .term-dock .flexlayout__tab_button_content {
   line-height: 1.25;
@@ -216,9 +224,17 @@ img, svg { -webkit-user-drag: none; }
   font-size: 14px;
   min-height: 17px;
 }
+.term-dock .flexlayout__tab_button:hover {
+  background: var(--bg-hover);
+}
+.term-dock .flexlayout__tab_button.flexlayout__tab_selected {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-radius: 8px 8px 0 0;
+}
 
 .glow-text {
-  background: linear-gradient(120deg, var(--accent), #a78bfa);
+  background: linear-gradient(120deg, var(--accent), #ff7a4a);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -228,7 +244,7 @@ img, svg { -webkit-user-drag: none; }
   width: 100%;
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
   padding: 6px 10px;
   font-size: 12px;
   color: var(--text);
@@ -246,7 +262,7 @@ img, svg { -webkit-user-drag: none; }
   border-radius: 10px;
   border: 1px solid var(--border);
   background: var(--bg-elevated);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-pop);
 }
 .ctx-item {
   display: flex;

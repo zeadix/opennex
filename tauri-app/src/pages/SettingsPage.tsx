@@ -26,7 +26,8 @@ import { loadWorkspaces, persistWorkspaces, sha256, LOCK_SALT } from "../workspa
 
 // WYSIWYG font lists — every option renders in its own face.
 const UI_FONTS: FontOption[] = [
-  { label: "系统默认", css: "", fallback: "sans" },
+  { label: "系统默认（Geist）", css: "", fallback: "sans" },
+  { label: "Geist Sans（内置）", css: '"Geist Sans"', fallback: "sans" },
   { label: "Noto Sans CJK SC", css: '"Noto Sans CJK SC"', fallback: "sans" },
   { label: "Noto Sans", css: '"Noto Sans"', fallback: "sans" },
   { label: "WenQuanYi Micro Hei", css: '"WenQuanYi Micro Hei"', fallback: "sans" },

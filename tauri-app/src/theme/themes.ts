@@ -50,14 +50,14 @@ export interface Theme {
 export const THEMES: Theme[] = [
   {
     id: "midnight",
-    name: "Midnight",
+    name: "OpenNex Dark",
     dark: true,
     colors: {
-      bg: "#0b0e14", bgPanel: "#10141b", bgElevated: "#171c26",
-      bgHover: "#1c2230", bgActive: "#232b3b", border: "#222a38",
-      text: "#d7dce7", textDim: "#8b93a5", textFaint: "#5a6274",
-      accent: "#4fc3f7", accentDim: "#23465c",
-      danger: "#f07178", success: "#82d99a",
+      bg: "#0b0c0f", bgPanel: "#131519", bgElevated: "#1b1e24",
+      bgHover: "#20242c", bgActive: "#ff5a2824", border: "#ffffff14",
+      text: "#e8eaee", textDim: "#8b95a0", textFaint: "#5f6a76",
+      accent: "#ff5a28", accentDim: "#ff5a2838",
+      danger: "#e5484d", success: "#22c55e",
     },
   },
   {
@@ -158,14 +158,14 @@ export const THEMES: Theme[] = [
   },
   {
     id: "paper",
-    name: "Paper",
+    name: "OpenNex Light",
     dark: false,
     colors: {
-      bg: "#f6f7f9", bgPanel: "#eceef2", bgElevated: "#ffffff",
-      bgHover: "#e2e6ec", bgActive: "#d4dae3", border: "#d4dae3",
-      text: "#2c3340", textDim: "#5f6b7e", textFaint: "#98a2b3",
-      accent: "#0f7fae", accentDim: "#cfe6f2",
-      danger: "#c73e4a", success: "#2e8b57",
+      bg: "#ffffff", bgPanel: "#fbfbfa", bgElevated: "#ffffff",
+      bgHover: "#f6f6f5", bgActive: "#fdeee7", border: "#10121414",
+      text: "#101214", textDim: "#697077", textFaint: "#7a8087",
+      accent: "#f04e17", accentDim: "#fdeee7",
+      danger: "#c73e4a", success: "#1e9e50",
     },
   },
 ];
@@ -228,6 +228,14 @@ export function defaultAnsi(dark: boolean): string[] {
        "#8b93a5", "#d43d4f", "#2e8b57", "#c18401", "#0f6fad", "#8a4fbf", "#0e8a86", "#1d2129"];
 }
 
+/** `#RRGGBB` → `rgba(r,g,b,a)`; non-hex input passes through untouched. */
+function withAlpha(color: string, alpha: number): string {
+  const m = /^#([0-9a-f]{6})$/i.exec(color.trim());
+  if (!m) return color;
+  const n = parseInt(m[1], 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
+}
+
 /** Derive a terminal palette from UI colors (preset themes without an
  * explicit term palette). */
 export function deriveTerm(t: Theme): TermPalette {
@@ -284,6 +292,16 @@ export function applyThemeObject(theme: Theme) {
   for (const [k, v] of Object.entries(theme.colors)) {
     root.style.setProperty(`--${k.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase())}`, v);
   }
+  // Shape/shadow tokens derive from the accent + dark flag so custom and
+  // preset themes stay consistent (website parity: soft two-layer shadows,
+  // translucent accent washes instead of solid tints).
+  root.style.setProperty("--accent-soft", withAlpha(theme.colors.accent, theme.dark ? 0.14 : 0.1));
+  root.style.setProperty("--shadow-pop", theme.dark
+    ? "0 1px 2px rgba(0, 0, 0, 0.4), 0 10px 28px rgba(0, 0, 0, 0.38)"
+    : "0 1px 2px rgba(16, 18, 20, 0.06), 0 10px 28px rgba(16, 18, 20, 0.10)");
+  root.style.setProperty("--shadow-lift", theme.dark
+    ? "0 2px 6px rgba(0, 0, 0, 0.45), 0 18px 44px rgba(0, 0, 0, 0.52)"
+    : "0 2px 6px rgba(16, 18, 20, 0.08), 0 18px 44px rgba(16, 18, 20, 0.14)");
   // FlexLayout declares its private --fl-* variables on each layout;
   // only the public --flexlayout-* inputs inherit from :root.
   const fl = {
