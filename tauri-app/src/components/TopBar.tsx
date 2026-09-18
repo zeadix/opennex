@@ -59,7 +59,8 @@ export default function TopBar({
     swatch?: [string, string, string];
   };
 
-  const menus: { label: string; items: MenuItem[] }[] = [
+  // onClick 存在的菜单是直连按钮（无下拉，点击即执行）。
+  const menus: { label: string; items?: MenuItem[]; onClick?: () => void }[] = [
     {
       label: T.menuWorkspace,
       items: [
@@ -83,11 +84,9 @@ export default function TopBar({
       ],
     },
     {
+      // 局域网/广域网打开的是同一个窗口 —— 直接弹出，无需下拉。
       label: T.menuRemote,
-      items: [
-        { label: T.lan, onClick: () => onPage("remote") },
-        { label: T.wan, onClick: () => onPage("remote-wan") },
-      ],
+      onClick: () => onPage("remote"),
     },
     {
       label: T.theme,
@@ -107,11 +106,16 @@ export default function TopBar({
       })),
     },
     {
+      // 设置按钮排在帮助左边（设计反馈）。
+      label: T.settings,
+      onClick: () => onPage("settings"),
+    },
+    {
       label: T.menuHelp,
       items: [
-        { label: T.about, onClick: () => onPage("about") },
-        { label: T.updateCheck, onClick: () => onPage("update") },
         { label: T.tutorial, onClick: () => onPage("tutorial") },
+        { label: T.updateCheck, onClick: () => onPage("update") },
+        { label: T.about, onClick: () => onPage("about") },
       ],
     },
   ];
@@ -124,53 +128,62 @@ export default function TopBar({
       <span className="glow-text mr-2 font-mono text-[12px] font-bold">OpenNex</span>
       {menus.map((m) => (
         <div key={m.label} className="relative">
-          <button
-            className={`flex items-center rounded px-2 py-1 text-[12.5px] transition-colors ${
-              open === m.label
-                ? "bg-[var(--bg-active)] text-[var(--text)]"
-                : "text-[var(--text-dim)] hover:bg-[var(--bg-hover)] hover:text-[var(--text)]"
-            }`}
-            onClick={() => setOpen(open === m.label ? null : m.label)}
-            onMouseEnter={() => enter(m.label)}
-          >
-            {m.label}
-            <FiChevronDown size={10} className="ml-0.5 opacity-50" />
-          </button>
-          {open === m.label && (
-            <div className="animate-fade-up absolute left-0 top-full z-50 mt-0.5 min-w-[190px] rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] py-1 shadow-xl">
-              {m.items.map((it, i) => (
-                <div
-                  key={i}
-                  onClick={() => {
-                    it.onClick?.();
-                    setOpen(null);
-                  }}
-                  className="flex cursor-pointer items-center justify-between gap-4 px-3 py-1.5 text-[12px] text-[var(--text-dim)] hover:bg-[var(--bg-hover)] hover:text-[var(--text)]"
-                >
-                  <span className="flex min-w-0 items-center gap-2">
-                    {it.swatch && (
-                      <span className="inline-flex shrink-0 overflow-hidden rounded-[3px]">
-                        {it.swatch.map((c, k) => (
-                          <i key={k} className="h-[13px] w-[5px]" style={{ background: c }} />
-                        ))}
+          {m.onClick && !m.items ? (
+            /* 直连按钮：点击即执行，无下拉（远程控制 / 设置） */
+            <button
+              className="flex items-center rounded px-2 py-1 text-[12.5px] text-[var(--text-dim)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text)]"
+              onClick={() => {
+                m.onClick?.();
+                setOpen(null);
+              }}
+              onMouseEnter={() => setOpen(null)}
+            >
+              {m.label}
+            </button>
+          ) : (
+            <>
+              <button
+                className={`flex items-center rounded px-2 py-1 text-[12.5px] transition-colors ${
+                  open === m.label
+                    ? "bg-[var(--bg-active)] text-[var(--text)]"
+                    : "text-[var(--text-dim)] hover:bg-[var(--bg-hover)] hover:text-[var(--text)]"
+                }`}
+                onClick={() => setOpen(open === m.label ? null : m.label)}
+                onMouseEnter={() => enter(m.label)}
+              >
+                {m.label}
+                <FiChevronDown size={10} className="ml-0.5 opacity-50" />
+              </button>
+              {open === m.label && (
+                <div className="animate-fade-up absolute left-0 top-full z-50 mt-0.5 min-w-[190px] rounded-md border border-[var(--border)] bg-[var(--bg-elevated)] py-1 shadow-xl">
+                  {m.items?.map((it, i) => (
+                    <div
+                      key={i}
+                      onClick={() => {
+                        it.onClick?.();
+                        setOpen(null);
+                      }}
+                      className="flex cursor-pointer items-center justify-between gap-4 px-3 py-1.5 text-[12px] text-[var(--text-dim)] hover:bg-[var(--bg-hover)] hover:text-[var(--text)]"
+                    >
+                      <span className="flex min-w-0 items-center gap-2">
+                        {it.swatch && (
+                          <span className="inline-flex shrink-0 overflow-hidden rounded-[3px]">
+                            {it.swatch.map((c, k) => (
+                              <i key={k} className="h-[13px] w-[5px]" style={{ background: c }} />
+                            ))}
+                          </span>
+                        )}
+                        <span className="truncate">{it.label}</span>
                       </span>
-                    )}
-                    <span className="truncate">{it.label}</span>
-                  </span>
-                  {it.checked && <span className="text-[var(--accent)]">✓</span>}
+                      {it.checked && <span className="text-[var(--accent)]">✓</span>}
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
+              )}
+            </>
           )}
         </div>
       ))}
-      {/* 设置：直接打开设置窗口（无下拉） */}
-      <button
-        className="rounded px-2 py-1 text-[12.5px] text-[var(--text-dim)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text)]"
-        onClick={() => onPage("settings")}
-      >
-        {T.settings}
-      </button>
       <div className="flex-1" />
       <button
         onClick={() => onPage("update")}
