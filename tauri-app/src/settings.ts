@@ -21,6 +21,14 @@ export interface Settings {
   copyOnSelect: boolean;
   /** Use the applied theme's font pack instead of the global settings. */
   useThemeFont: boolean;
+  /** 背景图片（data URL；"" = 未设置）。 */
+  bgImageData: string;
+  /** 背景图片不透明度 %（图片层自身浓度）。 */
+  bgImageOpacity: number;
+  /** 背景显示模式：填充 / 适应 / 平铺。 */
+  bgImageFit: "cover" | "contain" | "tile";
+  /** 面板不透明度 %（越低，背景图透出越多）。 */
+  bgImagePanelAlpha: number;
 }
 
 const KEY = "opennex-settings";
@@ -36,6 +44,10 @@ export const defaultSettings: Settings = {
   termFont: "",
   copyOnSelect: true,
   useThemeFont: false,
+  bgImageData: "",
+  bgImageOpacity: 40,
+  bgImageFit: "cover",
+  bgImagePanelAlpha: 75,
 };
 
 export function loadSettings(): Settings {

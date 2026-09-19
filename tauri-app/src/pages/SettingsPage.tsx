@@ -66,6 +66,26 @@ const CATEGORIES = [
   { id: "about", label: "关于" },
 ] as const;
 
+/** 读取图片为 data URL；过大时重采样（最长边 1600，JPEG 0.82）以控制
+ * localStorage 占用。≤2.6MB 的原图（含 GIF 动画）原样保存。 */
+async function readBgImageFile(file: File): Promise<string> {
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(String(fr.result));
+    fr.onerror = () => reject(fr.error);
+    fr.readAsDataURL(file);
+  });
+  if (dataUrl.length <= 2_600_000) return dataUrl;
+  const img = new Image();
+  await new Promise((resolve, reject) => { img.onload = resolve; img.onerror = reject; img.src = dataUrl; });
+  const scale = Math.min(1, 1600 / Math.max(img.width, img.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(img.width * scale));
+  canvas.height = Math.max(1, Math.round(img.height * scale));
+  canvas.getContext("2d")!.drawImage(img, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL("image/jpeg", 0.82);
+}
+
 export default function SettingsPage({
   settings,
   onSettings,
@@ -388,6 +408,99 @@ export default function SettingsPage({
                       </div>
                     ))}
                   </div>
+                </div>
+              </section>
+
+              <section>
+                <h2 className="mb-3 text-[15px] font-semibold">
+                  {lang === "zh" || lang === "zh-TW" ? "背景图片" : "Background image"}
+                </h2>
+                <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-panel)] p-4">
+                  {settings.bgImageData ? (
+                    <img
+                      src={settings.bgImageData}
+                      alt=""
+                      className="mb-3 max-h-28 w-full rounded-lg border border-[var(--border)] object-cover"
+                    />
+                  ) : (
+                    <p className="mb-3 text-[12px] text-[var(--text-faint)]">
+                      {lang === "zh" || lang === "zh-TW" ? "未设置背景图片" : "No background image set"}
+                    </p>
+                  )}
+                  <div className="mb-3 flex flex-wrap items-center gap-2">
+                    <label className="cursor-pointer rounded-md border border-[var(--border)] px-3 py-1.5 text-[12px] hover:bg-[var(--bg-hover)]">
+                      {lang === "zh" || lang === "zh-TW" ? "选择图片" : "Choose image"}
+                      <input
+                        type="file"
+                        accept="image/png,image/jpeg,image/gif,image/webp"
+                        className="hidden"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (f) void readBgImageFile(f).then((d) => onSettings({ bgImageData: d }));
+                          e.target.value = "";
+                        }}
+                      />
+                    </label>
+                    {settings.bgImageData && (
+                      <button
+                        className="rounded-md border border-[var(--border)] px-3 py-1.5 text-[12px] text-[var(--text-dim)] hover:text-[var(--text)]"
+                        onClick={() => onSettings({ bgImageData: "" })}
+                      >
+                        {lang === "zh" || lang === "zh-TW" ? "清除背景" : "Clear background"}
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-[12px] text-[var(--text-dim)]">
+                      {lang === "zh" || lang === "zh-TW" ? "图片不透明度" : "Image opacity"}
+                    </span>
+                    <input
+                      type="range"
+                      min={10}
+                      max={100}
+                      value={settings.bgImageOpacity}
+                      onChange={(e) => onSettings({ bgImageOpacity: Number(e.target.value) })}
+                      className="w-40 accent-[var(--accent)]"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-[12px] text-[var(--text-dim)]">
+                      {lang === "zh" || lang === "zh-TW" ? "面板不透明度" : "Panel opacity"}
+                    </span>
+                    <input
+                      type="range"
+                      min={30}
+                      max={100}
+                      value={settings.bgImagePanelAlpha}
+                      onChange={(e) => onSettings({ bgImagePanelAlpha: Number(e.target.value) })}
+                      className="w-40 accent-[var(--accent)]"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-[12px] text-[var(--text-dim)]">
+                      {lang === "zh" || lang === "zh-TW" ? "显示模式" : "Fit mode"}
+                    </span>
+                    <div className="inline-flex rounded-lg border border-[var(--border)] p-0.5">
+                      {([["cover", "填充"], ["contain", "适应"], ["tile", "平铺"]] as const).map(([v, l2]) => (
+                        <button
+                          key={v}
+                          className={`rounded-md px-3 py-1 text-[12px] transition-colors ${
+                            settings.bgImageFit === v
+                              ? "bg-[var(--accent-dim)] text-[var(--accent)]"
+                              : "text-[var(--text-dim)] hover:text-[var(--text)]"
+                          }`}
+                          onClick={() => onSettings({ bgImageFit: v })}
+                        >
+                          {l2}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <p className="mt-2 text-[11px] leading-relaxed text-[var(--text-faint)]">
+                    {lang === "zh" || lang === "zh-TW"
+                      ? "支持 png / jpg / gif / webp。终端保持不透明以保证可读性。"
+                      : "png / jpg / gif / webp supported. Terminals stay opaque for readability."}
+                  </p>
                 </div>
               </section>
 

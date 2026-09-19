@@ -23,7 +23,7 @@ import { loadMainModel, persistMainModel } from "./dock/mainLayout";
 import { panelTitles, translatePanelTitles } from "./dock/titles";
 import { I18nProvider } from "./i18n-context";
 import { useTheme } from "./theme/useTheme";
-import { getTheme } from "./theme/themes";
+import { applyBackgroundImage, getTheme } from "./theme/themes";
 import { useSettings } from "./settings";
 import { loadLang, saveLang, t, Lang } from "./i18n";
 import { loadShortcuts, matchesBinding } from "./shortcuts/shortcuts";
@@ -603,6 +603,23 @@ export default function App() {
 
   /** UI scale from the effective 界面字号 (13px = 1.0). */
   const uiScale = effFonts.uiFontSize / 13;
+
+  // 全局背景图片：图层 + 半透明面板。主题切换/编辑器预览后需重新应用。
+  const bgCfg = settings.bgImageData
+    ? {
+        data: settings.bgImageData,
+        opacity: settings.bgImageOpacity,
+        fit: settings.bgImageFit,
+        panelAlpha: settings.bgImagePanelAlpha,
+      }
+    : null;
+  useEffect(() => {
+    const reapply = () => applyBackgroundImage(bgCfg, getTheme(themeId));
+    reapply();
+    window.addEventListener("opennex-terminal-theme", reapply);
+    return () => window.removeEventListener("opennex-terminal-theme", reapply);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bgCfg?.data, bgCfg?.opacity, bgCfg?.fit, bgCfg?.panelAlpha, themeId]);
 
   /** Open a page as a floating window (terminals stay in the dock). */
   const openPage = (p: string) => {

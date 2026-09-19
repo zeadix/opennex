@@ -349,3 +349,84 @@ export function applyThemeObject(theme: Theme) {
   // Panes re-read the variables live (theme editor preview).
   window.dispatchEvent(new CustomEvent("opennex-terminal-theme"));
 }
+
+// ---- 全局背景图片（跨所有面板）------------------------------------------
+
+export type BgImageFit = "cover" | "contain" | "tile";
+
+export interface BgImageConfig {
+  /** data URL（"" = 关闭）。 */
+  data: string;
+  /** 图片层不透明度 %。 */
+  opacity: number;
+  fit: BgImageFit;
+  /** 面板不透明度 %：越低，背景图透过面板越多。 */
+  panelAlpha: number;
+}
+
+/** 挂载/更新全局背景图片图层，并把面板色系降为半透明，
+ * 让图片透过所有面板显示（终端保持不透明，保证可读性）。
+ * 主题切换/编辑器预览后需重新调用（App 内已接线）。 */
+export function applyBackgroundImage(cfg: BgImageConfig | null, theme: Theme) {
+  const root = document.documentElement;
+  let layer = document.getElementById("opennex-bg-layer") as HTMLDivElement | null;
+  if (!cfg || !cfg.data) {
+    layer?.remove();
+    applyThemeObject(theme); // 恢复不透明面板
+    return;
+  }
+  const a = Math.min(1, Math.max(0.3, cfg.panelAlpha / 100));
+  root.style.setProperty("--bg", withAlpha(theme.colors.bg, a));
+  root.style.setProperty("--bg-panel", withAlpha(theme.colors.bgPanel, a));
+  root.style.setProperty("--bg-elevated", withAlpha(theme.colors.bgElevated, Math.min(1, a + 0.06)));
+  root.style.setProperty("--bg-hover", withAlpha(theme.colors.bgHover, a));
+  root.style.setProperty("--bg-active", withAlpha(theme.colors.bgActive, Math.min(1, a + 0.06)));
+  // flexlayout 面板底色同步半透明（否则面板会盖住背景图）。
+  const flAlpha: Record<string, string> = {
+    background: withAlpha(theme.colors.bg, a),
+    base: withAlpha(theme.colors.bg, a),
+    "tabset-background": withAlpha(theme.colors.bgElevated, a),
+    "tabset-background-selected": withAlpha(theme.colors.bgElevated, a),
+    "tab-content": withAlpha(theme.colors.bgPanel, a),
+    "border-background": withAlpha(theme.colors.bgElevated, a),
+    "border-tab-content": withAlpha(theme.colors.bgPanel, a),
+    "border-tab-selected-background": withAlpha(theme.colors.bgPanel, a),
+    "1": withAlpha(theme.colors.bgPanel, a),
+    "2": withAlpha(theme.colors.bg, a),
+    "3": withAlpha(theme.colors.bgElevated, a),
+    "5": withAlpha(theme.colors.bgHover, a),
+  };
+  for (const [k, v] of Object.entries(flAlpha)) {
+    root.style.setProperty(`--flexlayout-color-${k}`, v);
+  }
+  // 终端底色同步半透明：背景图透过终端文字区域显示（文字保持可读）。
+  root.style.setProperty(
+    "--term-background",
+    withAlpha(deriveTerm(theme).background, Math.min(1, a)),
+  );
+  if (!layer) {
+    layer = document.createElement("div");
+    layer.id = "opennex-bg-layer";
+    layer.setAttribute("aria-hidden", "true");
+    document.body.prepend(layer);
+  }
+  layer.style.position = "fixed";
+  layer.style.inset = "0";
+  layer.style.zIndex = "0";
+  layer.style.pointerEvents = "none";
+  layer.style.backgroundImage = `url("${cfg.data}")`;
+  layer.style.backgroundSize = cfg.fit === "tile" ? "auto" : cfg.fit;
+  layer.style.backgroundRepeat = cfg.fit === "tile" ? "repeat" : "no-repeat";
+  layer.style.backgroundPosition = "center";
+  layer.style.opacity = String(Math.min(100, Math.max(5, cfg.opacity)) / 100);
+}
+
+/** 背景图片激活时，把终端底色也降为半透明（其余调用路径不受影响）。 */
+export function applyTerminalBackgroundAlpha(alpha: number) {
+  const theme = getTheme(loadThemeId());
+  const term = deriveTerm(theme);
+  document.documentElement.style.setProperty(
+    "--term-background",
+    withAlpha(term.background, alpha),
+  );
+}

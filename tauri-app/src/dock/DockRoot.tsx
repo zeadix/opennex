@@ -509,7 +509,7 @@ export default function DockRoot({
   }
 
   return (
-    <div className="relative h-full w-full">
+    <div className="relative z-[1] h-full w-full">
       <Layout
         model={mainModel}
         factory={mainFactory}

@@ -269,6 +269,8 @@ function WorkspaceTerminalPane({
       fontFamily: getComputedStyle(document.documentElement).getPropertyValue("--mono") || "monospace",
       cursorBlink: true,
       allowProposedApi: true,
+      // 背景图片功能需要 xterm 背景可透明（无背景图时主题底色仍不透明）。
+      allowTransparency: true,
       theme: readTerminalTheme(),
     });
     termRef.current = term;
