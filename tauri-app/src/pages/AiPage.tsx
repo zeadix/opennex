@@ -1,41 +1,84 @@
 import { useI18n } from '../i18n-context';
-import { useRef, useState } from "react";
-import { FiSend, FiCpu, FiPlay, FiSkipForward } from "react-icons/fi";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { FiSend, FiCpu, FiPlay, FiSkipForward, FiPlus, FiTrash2, FiRefreshCw, FiClock } from "react-icons/fi";
 import { invoke } from "../terminal/tauri";
 import { focusedSlot, sendTo } from "../terminal/registry";
+import { addAiTask, getAiTasks, removeAiTask, subscribeAiTasks } from "../aiTasks";
 
 interface Msg {
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "system";
   content: string;
 }
 
-interface AiConfig {
+export interface AiSource {
+  id: string;
+  name: string;
   baseUrl: string;
   apiKey: string;
+}
+
+export interface AiModelRef {
+  /** `${sourceId}::${model}` */
+  id: string;
+  sourceId: string;
   model: string;
 }
 
+export interface AiConfig {
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  sources: AiSource[];
+  models: AiModelRef[];
+  activeModelId: string;
+}
+
 const CFG_KEY = "opennex-ai";
+const DEF_BASE = "https://api.openai.com/v1";
+
+function normalizeAiConfig(raw: any): AiConfig {
+  const c: AiConfig = {
+    baseUrl: DEF_BASE,
+    apiKey: "",
+    model: "gpt-4o-mini",
+    ...raw,
+  };
+  // 迁移：旧的单源字段 → sources/models（保留兼容）。
+  if (!Array.isArray(c.sources) || c.sources.length === 0) {
+    c.sources = [{ id: "default", name: "默认模型源", baseUrl: c.baseUrl || DEF_BASE, apiKey: c.apiKey || "" }];
+  }
+  if (!Array.isArray(c.models) || c.models.length === 0) {
+    const m = String(c.model || "gpt-4o-mini").trim();
+    c.models = m ? [{ id: "default::" + m, sourceId: "default", model: m }] : [];
+  }
+  if (!c.activeModelId || !c.models.some((m) => m.id === c.activeModelId)) {
+    c.activeModelId = c.models[0]?.id ?? "";
+  }
+  return c;
+}
 
 export function loadAiConfig(): AiConfig {
   try {
-    return {
-      baseUrl: "https://api.openai.com/v1",
-      apiKey: "",
-      model: "gpt-4o-mini",
-      ...JSON.parse(localStorage.getItem(CFG_KEY) ?? "{}"),
-    };
+    return normalizeAiConfig(JSON.parse(localStorage.getItem(CFG_KEY) ?? "{}"));
   } catch {
-    return { baseUrl: "https://api.openai.com/v1", apiKey: "", model: "gpt-4o-mini" };
+    return normalizeAiConfig({});
   }
 }
 export function saveAiConfig(c: AiConfig) {
   localStorage.setItem(CFG_KEY, JSON.stringify(c));
 }
 
-export default function AiPage() {
+function normalizeBaseUrl(u: string): string {
+  return String(u || "").replace(/\/+$/, "");
+}
+
+export default function AiPage({ uiSnapshot }: { uiSnapshot?: () => unknown }) {
   const T = useI18n();
   const [cfg, setCfg] = useState<AiConfig>(loadAiConfig);
+  const persistCfg = (c: AiConfig) => {
+    setCfg(c);
+    saveAiConfig(c);
+  };
   const [editing, setEditing] = useState(false);
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
@@ -45,24 +88,92 @@ export default function AiPage() {
   const [agentStep, setAgentStep] = useState(0);
   const [agentLog, setAgentLog] = useState<string[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const aiTasks = useSyncExternalStore(subscribeAiTasks, getAiTasks);
+
+  const activeModel = () => cfg.models.find((m) => m.id === cfg.activeModelId) ?? cfg.models[0] ?? null;
+  const sourceOf = (m: AiModelRef | null | undefined) =>
+    cfg.sources.find((s) => s.id === m?.sourceId) ?? cfg.sources[0] ?? null;
+
+  // ---- 定时任务执行（AI 面板内可见的任务列表） ---------------------------
+  const removeTask = (id: string) => removeAiTask(id);
+
+  // ---- AI 控制界面：解析回复中的 @@ACTION 指令并执行 ---------------------
+  const runActions = (content: string): { display: string; executed: string[] } => {
+    const executed: string[] = [];
+    const rest: string[] = [];
+    for (const line of content.split("\n")) {
+      const t = line.trim();
+      if (!t.startsWith("@@ACTION")) {
+        rest.push(line);
+        continue;
+      }
+      try {
+        const a = JSON.parse(t.slice("@@ACTION".length).trim());
+        if (a.action === "addSchedule" && a.command && Number(a.everySec) > 0) {
+          const slot = a.slot === undefined || a.slot === null ? focusedSlot.value : Number(a.slot);
+          const task = addAiTask({
+            label: `每 ${a.everySec}s · ${a.command}`,
+            command: String(a.command),
+            everySec: Number(a.everySec),
+            slot,
+          });
+          executed.push(`✓ 已创建定时任务：每 ${task.everySec}s 向终端 ${task.slot} 执行「${a.command}」`);
+        } else if (a.action === "stopSchedule" && a.taskId) {
+          removeAiTask(String(a.taskId));
+          executed.push(`✓ 已停止定时任务 ${a.taskId}`);
+        } else if (a.action === "switchModel" && a.model) {
+          const m = cfg.models.find(
+            (x) => x.model === a.model || x.id === a.model || x.id.endsWith("::" + a.model),
+          );
+          if (m) {
+            persistCfg({ ...cfg, activeModelId: m.id });
+            executed.push(`✓ 已切换模型 ${m.model}`);
+          } else {
+            executed.push(`✗ 未找到模型 ${a.model}`);
+          }
+        }
+      } catch {
+        /* 忽略无法解析的指令行 */
+      }
+    }
+    return { display: rest.join("\n").trimEnd(), executed };
+  };
 
   const send = async () => {
     const text = input.trim();
     if (!text || busy) return;
-    const next = [...messages, { role: "user" as const, content: text }];
+    const next: Msg[] = [...messages, { role: "user" as const, content: text }];
     setMessages(next);
     setInput("");
     setBusy(true);
     try {
+      const am = activeModel();
+      const src = sourceOf(am);
+      if (!am || !src) throw new Error("未配置模型源");
+      // 界面快照 + 可用模型/任务/操作规范：让 AI 能理解并控制界面。
+      const snap = typeof uiSnapshot === "function" ? uiSnapshot() : null;
+      const sys = [
+        "你是 OpenNex 终端管理器内置的 AI 助手，可以控制软件界面。",
+        snap ? "当前界面状态(JSON)：" + JSON.stringify(snap) : "",
+        "已添加模型：" + (cfg.models.map((m) => m.model).join(", ") || "无"),
+        "当前定时任务：" + (aiTasks.length ? JSON.stringify(aiTasks.map((t) => ({ id: t.id, everySec: t.everySec, command: t.command }))) : "无"),
+        "要控制界面（例如定时执行命令、停止任务、切换模型），在回复中用单独的行输出指令，每行一条，格式：",
+        '@@ACTION {"action":"addSchedule","everySec":20,"command":"ls","slot":null}',
+        '@@ACTION {"action":"stopSchedule","taskId":"任务id"}',
+        '@@ACTION {"action":"switchModel","model":"模型名"}',
+        "slot 为终端编号（null/省略 = 当前聚焦终端）。除指令行外，用用户的语言正常简洁回答；不要虚构执行结果。",
+      ].filter(Boolean).join("\n");
       const reply = await invoke<string>("ai_chat", {
-        baseUrl: cfg.baseUrl,
-        apiKey: cfg.apiKey,
-        model: cfg.model,
-        messages: next,
+        baseUrl: src.baseUrl,
+        apiKey: src.apiKey,
+        model: am.model,
+        messages: [{ role: "system", content: sys }, ...next],
       });
-      setMessages([...next, { role: "assistant", content: reply }]);
+      const { display, executed } = runActions(reply);
+      const suffix = executed.length ? "\n\n" + executed.join("\n") : "";
+      setMessages([...next, { role: "assistant" as const, content: display + suffix }]);
     } catch (e) {
-      setMessages([...next, { role: "assistant", content: `⚠ ${e}` }]);
+      setMessages([...next, { role: "assistant" as const, content: `⚠ ${e}` }]);
     } finally {
       setBusy(false);
       bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -75,6 +186,9 @@ export default function AiPage() {
   const planGoal = async () => {
     const goal = input.trim();
     if (!goal || busy) return;
+    const am = activeModel();
+    const src = sourceOf(am);
+    if (!am || !src) return;
     setInput("");
     setBusy(true);
     setAgentPlan(null);
@@ -82,9 +196,9 @@ export default function AiPage() {
     setAgentLog([T.uGoalLog.replace("{goal}", () => goal)]);
     try {
       const reply = await invoke<string>("ai_chat", {
-        baseUrl: cfg.baseUrl,
-        apiKey: cfg.apiKey,
-        model: cfg.model,
+        baseUrl: src.baseUrl,
+        apiKey: src.apiKey,
+        model: am.model,
         messages: [
           {
             role: "system",
@@ -110,6 +224,71 @@ export default function AiPage() {
     sendTo(focusedSlot.value, new TextEncoder().encode(cmd + "\r"));
     setAgentLog((l) => [...l, `▶ ${cmd}`]);
     setAgentStep((s) => s + 1);
+  };
+
+  // ---- 模型源 / 模型管理（配置页） --------------------------------------
+  const [fetching, setFetching] = useState<Record<string, boolean>>({});
+  const [fetched, setFetched] = useState<Record<string, string[]>>({});
+  const [fetchErr, setFetchErr] = useState<Record<string, string>>({});
+
+  const setSource = (i: number, patch: Partial<AiSource>) =>
+    setCfg((c) => ({ ...c, sources: c.sources.map((s, k) => (k === i ? { ...s, ...patch } : s)) }));
+
+  const addSource = () =>
+    setCfg((c) => ({
+      ...c,
+      sources: [
+        ...c.sources,
+        { id: "src-" + Date.now().toString(36), name: "新模型源", baseUrl: "http://localhost:11434/v1", apiKey: "" },
+      ],
+    }));
+
+  const removeSource = (i: number) => {
+    const sid = cfg.sources[i]?.id;
+    setCfg((c) => ({
+      ...c,
+      sources: c.sources.filter((_, k) => k !== i),
+      models: c.models.filter((m) => m.sourceId !== sid),
+      activeModelId:
+        cfg.activeModelId && cfg.models.some((m) => m.id === cfg.activeModelId && m.sourceId !== sid)
+          ? c.activeModelId
+          : c.models.filter((m) => m.sourceId !== sid)[0]?.id ?? "",
+    }));
+  };
+
+  const fetchModelsFor = async (sourceId: string) => {
+    const s = cfg.sources.find((x) => x.id === sourceId);
+    if (!s) return;
+    setFetching((m) => ({ ...m, [sourceId]: true }));
+    setFetchErr((m) => ({ ...m, [sourceId]: "" }));
+    try {
+      const list = await invoke<string[]>("ai_models", { baseUrl: s.baseUrl, apiKey: s.apiKey });
+      setFetched((prev) => ({ ...prev, [sourceId]: list }));
+    } catch (e) {
+      setFetchErr((prev) => ({ ...prev, [sourceId]: String(e) }));
+    } finally {
+      setFetching((m) => ({ ...m, [sourceId]: false }));
+    }
+  };
+
+  const toggleModel = (sourceId: string, model: string) => {
+    const id = sourceId + "::" + model;
+    const has = cfg.models.some((m) => m.id === id);
+    const models = has
+      ? cfg.models.filter((m) => m.id !== id)
+      : [...cfg.models, { id, sourceId, model }];
+    const activeModelId =
+      cfg.activeModelId && models.some((m) => m.id === cfg.activeModelId)
+        ? cfg.activeModelId
+        : models[0]?.id ?? "";
+    setCfg({ ...cfg, models, activeModelId });
+    saveAiConfig({ ...cfg, models, activeModelId });
+  };
+
+  const removeModel = (id: string) => {
+    const models = cfg.models.filter((m) => m.id !== id);
+    const activeModelId = cfg.activeModelId === id ? models[0]?.id ?? "" : cfg.activeModelId;
+    persistCfg({ ...cfg, models, activeModelId });
   };
 
   if (tab === "agent") {
@@ -182,36 +361,188 @@ export default function AiPage() {
 
   if (editing) {
     return (
-      <div className="h-full overflow-y-auto px-8 py-6">
-        <div className="mx-auto max-w-[520px] space-y-3">
+      <div className="h-full overflow-y-auto px-6 py-5">
+        <div className="mx-auto max-w-[560px] space-y-4">
           <h2 className="text-[15px] font-semibold">{T.uAiSettings}</h2>
-          <input className="dialog-input" placeholder={T.uApiBaseUrl}
-            value={cfg.baseUrl}
-            onChange={(e) => setCfg({ ...cfg, baseUrl: e.target.value })} />
-          <input className="dialog-input" type="password" placeholder="API Key"
-            value={cfg.apiKey}
-            onChange={(e) => setCfg({ ...cfg, apiKey: e.target.value })} />
-          <input className="dialog-input" placeholder={T.uModelHint}
-            value={cfg.model}
-            onChange={(e) => setCfg({ ...cfg, model: e.target.value })} />
+
+          {/* ── 模型源管理 ── */}
+          <div className="space-y-3">
+            {cfg.sources.map((s, i) => {
+              const list = fetched[i] ?? null;
+              const err = fetchErr[i] ?? "";
+              const loading = !!fetching[i];
+              return (
+                <div key={s.id} className="space-y-2 rounded-lg border border-[var(--border)] bg-[var(--bg-panel)] p-3">
+                  <div className="flex items-center gap-2">
+                    <input
+                      className="dialog-input !w-28"
+                      placeholder={T.uModelHint}
+                      value={s.name}
+                      onChange={(e) => setSource(i, { ...s, name: e.target.value })}
+                    />
+                    <button
+                      className="flex shrink-0 items-center gap-1 rounded-md border border-[var(--border)] px-2.5 py-1 text-[11px] text-[var(--text-dim)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)] disabled:opacity-50"
+                      disabled={loading}
+                      title="从 /models 接口获取可用模型"
+                      onClick={() => fetchModelsFor(s.id)}
+                    >
+                      <FiRefreshCw size={11} className={loading ? "animate-spin" : ""} /> 获取模型列表
+                    </button>
+                    {cfg.sources.length > 1 && (
+                      <button
+                        className="ml-auto text-[var(--text-faint)] transition-colors hover:text-[var(--danger)]"
+                        title="删除此模型源"
+                        onClick={() => removeSource(i)}
+                      >
+                        <FiTrash2 size={13} />
+                      </button>
+                    )}
+                  </div>
+                  <input
+                    className="dialog-input"
+                    placeholder="API Base URL（如 https://api.openai.com/v1）"
+                    value={s.baseUrl}
+                    onChange={(e) => setSource(i, { ...s, baseUrl: e.target.value })}
+                  />
+                  <input
+                    className="dialog-input"
+                    type="password"
+                    placeholder="API Key（本地服务可留空）"
+                    value={s.apiKey}
+                    onChange={(e) => setSource(i, { ...s, apiKey: e.target.value })}
+                  />
+                  {err && <div className="text-[11px] text-[var(--danger)]">⚠ {err}</div>}
+                  {list && (
+                    <div className="max-h-40 space-y-0.5 overflow-y-auto rounded-md border border-[var(--border)] bg-[var(--bg)] p-1.5">
+                      {list.length === 0 && <div className="px-2 py-1 text-[11px] text-[var(--text-faint)]">（空）</div>}
+                      {list.map((m) => {
+                        const id = s.id + "::" + m;
+                        const added = cfg.models.some((x) => x.id === id);
+                        return (
+                          <label
+                            key={m}
+                            className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 font-mono text-[11px] text-[var(--text-dim)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text)]"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={added}
+                              onChange={() => toggleModel(s.id, m)}
+                              className="accent-[var(--accent)]"
+                            />
+                            <span className="min-w-0 flex-1 truncate">{m}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            <button
+              className="flex w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-[var(--border)] px-3 py-1.5 text-[12px] text-[var(--text-dim)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)]"
+              onClick={addSource}
+            >
+              <FiPlus size={12} /> 添加模型源
+            </button>
+          </div>
+
+          {/* ── 已添加模型（对话中可切换）── */}
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-panel)] p-3">
+            <div className="mb-2 text-[11px] font-semibold tracking-wider text-[var(--text-faint)]">
+              已添加模型（对话中可切换）
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {cfg.models.length === 0 && (
+                <span className="text-[11px] text-[var(--text-faint)]">尚未添加模型</span>
+              )}
+              {cfg.models.map((m) => {
+                const src = sourceOf(m);
+                return (
+                  <span
+                    key={m.id}
+                    className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-mono text-[11px] ${
+                      cfg.activeModelId === m.id
+                        ? "border-[var(--accent)] text-[var(--accent)]"
+                        : "border-[var(--border)] text-[var(--text-dim)]"
+                    }`}
+                  >
+                    {m.model}
+                    <i
+                      className="not-italic text-[var(--text-faint)] transition-colors hover:text-[var(--danger)]"
+                      title="移除"
+                      onClick={() => removeModel(m.id)}
+                    >
+                      ✕
+                    </i>
+                  </span>
+                );
+              })}
+            </div>
+            <p className="mt-2 text-[11px] leading-relaxed text-[var(--text-faint)]">
+              勾选获取的模型列表即可添加；对话中可随时切换。
+            </p>
+          </div>
+
           <div className="flex justify-end gap-2">
-            <button className="rounded-md px-3 py-1.5 text-[12px] text-[var(--text-dim)] hover:text-[var(--text)]"
-              onClick={() => setEditing(false)}>{T.uBack}</button>
-            <button className="rounded-md bg-[var(--accent-dim)] px-3 py-1.5 text-[12px] text-[var(--accent)] hover:brightness-125"
-              onClick={() => { saveAiConfig(cfg); setEditing(false); }}>{T.save}</button>
+            <button
+              className="rounded-md px-3 py-1.5 text-[12px] text-[var(--text-dim)] hover:text-[var(--text)]"
+              onClick={() => setEditing(false)}
+            >
+              {T.uBack}
+            </button>
+            <button
+              className="rounded-md bg-[var(--accent-dim)] px-3 py-1.5 text-[12px] text-[var(--accent)] hover:brightness-125"
+              onClick={() => { saveAiConfig(cfg); setEditing(false); }}
+            >
+              {T.save}
+            </button>
           </div>
         </div>
       </div>
     );
   }
 
+  // ---- 对话页 ------------------------------------------------------------
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-2.5">
-        <span className="text-[13px] font-medium">{T.ai} · {cfg.model}</span>
-        <button className="text-[12px] text-[var(--text-dim)] hover:text-[var(--accent)]"
+      <div className="flex items-center justify-between gap-2 border-b border-[var(--border)] px-5 py-2.5">
+        <select
+          className="min-w-0 max-w-[60%] rounded-md border border-[var(--border)] bg-[var(--bg-panel)] px-2 py-1 text-[12px] text-[var(--text)] outline-none"
+          value={cfg.activeModelId}
+          onChange={(e) => persistCfg({ ...cfg, activeModelId: e.target.value })}
+        >
+          {cfg.models.map((m) => {
+            const src = sourceOf(m);
+            return (
+              <option key={m.id} value={m.id}>
+                {m.model} · {src?.name ?? ""}
+              </option>
+            );
+          })}
+        </select>
+        <button className="shrink-0 text-[12px] text-[var(--text-dim)] hover:text-[var(--accent)]"
           onClick={() => setEditing(true)}>{T.uConfigure}</button>
       </div>
+
+      {/* 定时任务列表（AI 创建的定时执行命令） */}
+      {aiTasks.length > 0 && (
+        <div className="border-b border-[var(--border)] px-5 py-2">
+          <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold text-[var(--text-dim)]">
+            <FiClock size={11} /> 定时任务（{aiTasks.length}）
+          </div>
+          <div className="space-y-1">
+            {aiTasks.map((t) => (
+              <div key={t.id} className="flex items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--bg-panel)] px-2.5 py-1.5 text-[11px]">
+                <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${t.enabled ? "bg-[var(--success)]" : "bg-[var(--text-faint)]"}`} />
+                <span className="min-w-0 flex-1 truncate">{t.label}</span>
+                <span className="shrink-0 font-mono text-[10px] text-[var(--text-faint)]">{t.everySec}s</span>
+                <button className="shrink-0 text-[var(--danger)] hover:underline" onClick={() => removeAiTask(t.id)}>停止</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
         {messages.length === 0 && (
           <div className="pt-16 text-center text-[12px] text-[var(--text-faint)]">

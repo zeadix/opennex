@@ -1158,6 +1158,45 @@ async fn ai_chat(
     .map_err(|e| format!("task failed: {e}"))?
 }
 
+/// 拉取 OpenAI 兼容接口的模型列表（/models），供 AI 助手一键获取。
+#[tauri::command]
+async fn ai_models(base_url: String, api_key: String) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut req = ureq::get(format!("{}/models", base_url.trim_end_matches('/')))
+            .timeout(std::time::Duration::from_secs(15));
+        if !api_key.is_empty() {
+            req = req.set("Authorization", &format!("Bearer {api_key}"));
+        }
+        let resp = req.call().map_err(|e| format!("request failed: {e}"))?;
+        let v: serde_json::Value = resp.into_json().map_err(|e| format!("parse failed: {e}"))?;
+        let arr = if v.is_array() {
+            v
+        } else {
+            v.get("data")
+                .cloned()
+                .unwrap_or_else(|| v.get("models").cloned().unwrap_or(json!([])))
+        };
+        let mut out: Vec<String> = Vec::new();
+        if let Some(list) = arr.as_array() {
+            for it in list {
+                let id = it
+                    .get("id")
+                    .and_then(|x| x.as_str())
+                    .map(String::from)
+                    .or_else(|| it.get("name").and_then(|x| x.as_str()).map(String::from));
+                if let Some(id) = id {
+                    if !id.is_empty() && !out.contains(&id) {
+                        out.push(id);
+                    }
+                }
+            }
+        }
+        Ok(out)
+    })
+    .await
+    .map_err(|e| format!("task failed: {e}"))?
+}
+
 pub fn run() {
     let _ = SYS.set(Mutex::new(sysinfo::System::new()));
     let _ = REMOTE_TOKEN.set(uuid::Uuid::new_v4().simple().to_string());
@@ -1189,6 +1228,7 @@ pub fn run() {
             delete_history,
             get_app_info,
             ai_chat,
+            ai_models,
             check_update,
             system_stats,
             resource_stats,

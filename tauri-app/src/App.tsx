@@ -27,8 +27,9 @@ import { applyBackgroundImage, getTheme } from "./theme/themes";
 import { useSettings } from "./settings";
 import { loadLang, saveLang, t, Lang } from "./i18n";
 import { loadShortcuts, matchesBinding } from "./shortcuts/shortcuts";
-import { activityStore, broadcastGroup } from "./terminal/registry";
+import { activityStore, broadcastGroup, focusedSlot } from "./terminal/registry";
 import { checkForUpdates, startUpdateCheck, useUpdates } from "./updates";
+import { startAiTaskTicker } from "./aiTasks";
 import SshPage, { SshHost, loadHosts, saveHosts } from "./pages/SshPage";
 import RemotePage from "./pages/RemotePage";
 import UpdatePage from "./pages/UpdatePage";
@@ -77,6 +78,8 @@ export default function App() {
   const winZ = useRef(1);
   const updates = useUpdates();
   useEffect(startUpdateCheck, []);
+  // AI 定时任务调度器：每秒检查到期的「定时执行命令」任务。
+  useEffect(startAiTaskTicker, []);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<number | null>(null);
   const showToast = (msg: string, ms = 2200) => {
@@ -722,6 +725,14 @@ export default function App() {
       defaultShell={settings.shell || shells[0] || ""}
       workspaces={workspaces}
       activeWsId={activeWsId}
+      uiSnapshot={() => ({
+        workspaces: workspaces.map((w) => ({
+          name: w.name,
+          terminals: w.id === activeWsId ? collectModelTermSlots(termModel) : jsonTermSlots(w.termJson),
+        })),
+        activeWorkspace: workspaces.find((w) => w.id === activeWsId)?.name ?? null,
+        focusedSlot: focusedSlot.value,
+      })}
       onSwitchWorkspace={switchWorkspace}
       onCreateWorkspace={() => createWorkspace()}
       onDeleteWorkspace={deleteWorkspace}

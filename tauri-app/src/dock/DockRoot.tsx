@@ -31,7 +31,7 @@ import {
 import { invoke } from "../terminal/tauri";
 import { t } from "../i18n";
 import type { Lang } from "../i18n";
-import { activityStore, broadcastEnabled, broadcastGroup } from "../terminal/registry";
+import { activityStore, broadcastEnabled, broadcastGroup, focusedSlot } from "../terminal/registry";
 
 export type Page = "terminal" | "ssh" | "history" | "ai" | "settings" | "remote" | "update" | "favorites" | "monitor" | "sysmon" | "quick-settings";
 
@@ -102,7 +102,8 @@ export default function DockRoot({
   onAddTerminalWith: (shell: string) => void;
   shells: string[];
   defaultShell: string;
-  workspaces: { id: number; name: string; locked: boolean; lockHash?: string }[];
+  workspaces: { id: number; name: string; locked: boolean; lockHash?: string; termJson?: unknown }[];
+  uiSnapshot?: () => unknown;
   activities: Record<string, number>;
   activeWsId: number;
   onSwitchWorkspace: (id: number) => void;
@@ -326,7 +327,18 @@ export default function DockRoot({
       return <SysmonPage getWsSlots={() => collectModelTermSlots(termModel)} />;
     }
     if (comp === "ai") {
-      return <AiPage />;
+      return (
+        <AiPage
+          uiSnapshot={() => ({
+            workspaces: workspaces.map((w) => ({
+              name: w.name,
+              terminals: w.id === activeWsId ? collectModelTermSlots(termModel) : jsonTermSlots(w.termJson),
+            })),
+            activeWorkspace: workspaces.find((w) => w.id === activeWsId)?.name ?? null,
+            focusedSlot: focusedSlot.value,
+          })}
+        />
+      );
     }
     if (comp === "history") {
       return <HistoryPage workspaceId={activeWsId} />;
