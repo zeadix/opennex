@@ -368,9 +368,9 @@ export default function AiPage({ uiSnapshot }: { uiSnapshot?: () => unknown }) {
           {/* ── 模型源管理 ── */}
           <div className="space-y-3">
             {cfg.sources.map((s, i) => {
-              const list = fetched[i] ?? null;
-              const err = fetchErr[i] ?? "";
-              const loading = !!fetching[i];
+              const list = fetched[s.id] ?? null;
+              const err = fetchErr[s.id] ?? "";
+              const loading = !!fetching[s.id];
               return (
                 <div key={s.id} className="space-y-2 rounded-lg border border-[var(--border)] bg-[var(--bg-panel)] p-3">
                   <div className="flex items-center gap-2">
