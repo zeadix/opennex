@@ -1162,7 +1162,8 @@ async fn ai_chat(
 #[tauri::command]
 async fn ai_models(base_url: String, api_key: String) -> Result<Vec<String>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let mut req = ureq::get(format!("{}/models", base_url.trim_end_matches('/')))
+        let url = format!("{}/models", base_url.trim_end_matches('/'));
+        let mut req = ureq::get(&url)
             .timeout(std::time::Duration::from_secs(15));
         if !api_key.is_empty() {
             req = req.set("Authorization", &format!("Bearer {api_key}"));
