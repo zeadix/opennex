@@ -273,7 +273,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p bundles
-          find src-tauri/target/release/bundle -type f \( -name "*.exe" -o -name "*.msi" -o -name "*.dmg" -o -name "*.deb" -o -name "*.AppImage" \) -exec cp {} bundles/ \;
+          find tauri-app/src-tauri/target/release/bundle -type f \( -name "*.exe" -o -name "*.msi" -o -name "*.dmg" -o -name "*.deb" -o -name "*.AppImage" \) -exec cp {} bundles/ \;
           ls bundles
 
       - uses: actions/upload-artifact@v4
