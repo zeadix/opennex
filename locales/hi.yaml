@@ -447,11 +447,7 @@ ai:
   agent_stop: रोकें
   agent_close: बंद करें
   agent_continue: जारी रखें
-  agent_approval: 'अनुमोदन मोड:'
   agent_max_steps: 'अधिकतम चरण:'
-  agent_manual: हर चरण की पुष्टि
-  agent_allowlist: स्वीकृत-सूची स्वचालित
-  agent_fullauto: पूर्ण स्वचालित
   agent_phase_thinking: सोच रहा है…
   agent_phase_waiting: अनुमोदन की प्रतीक्षा…
   agent_phase_executing: कमांड चल रही है…
@@ -463,6 +459,13 @@ ai:
   agent_confirm_body: 'AI एजेंट चलाना चाहता है:\n{}'
   agent_confirm_run: चलाएँ
   agent_confirm_cancel: अस्वीकार करें
+  permission_consult: सलाह मोड
+  permission_ask: पूछें मोड
+  permission_free: स्वतंत्र मोड
+  model_limit: 'संदर्भ सीमा (k टोकन):'
+  agent_consult_hint: सलाह मोड में एजेंट उपलब्ध नहीं है
+  run_confirm_title: निष्पादन पुष्टि
+  run_confirm_body: "निष्पादित होगा:\n{}"
 
 
 monitor:

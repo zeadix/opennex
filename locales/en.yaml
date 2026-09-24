@@ -447,11 +447,7 @@ ai:
   agent_stop: Stop
   agent_close: Close
   agent_continue: Continue
-  agent_approval: 'Approval mode:'
   agent_max_steps: 'Max steps:'
-  agent_manual: Confirm each step
-  agent_allowlist: Allowlist auto
-  agent_fullauto: Full auto
   agent_phase_thinking: Thinking…
   agent_phase_waiting: Awaiting approval…
   agent_phase_executing: Command running…
@@ -463,6 +459,13 @@ ai:
   agent_confirm_body: 'The AI agent asks to run:\n{}'
   agent_confirm_run: Run
   agent_confirm_cancel: Decline
+  permission_consult: Consult
+  permission_ask: Ask
+  permission_free: Free
+  model_limit: 'Context limit (k tokens):'
+  agent_consult_hint: Agent unavailable in Consult mode
+  run_confirm_title: Run confirmation
+  run_confirm_body: "About to run:\n{}"
 
 
 monitor:

@@ -1,9 +1,13 @@
 import { useI18n } from '../i18n-context';
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, KeyboardEvent } from "react";
 import { FiSend, FiCpu, FiPlay, FiSkipForward, FiPlus, FiTrash2, FiRefreshCw, FiClock } from "react-icons/fi";
 import { invoke } from "../terminal/tauri";
 import { focusedSlot, sendTo } from "../terminal/registry";
-import { addAiTask, getAiTasks, removeAiTask, subscribeAiTasks } from "../aiTasks";
+import { addAiTask, getAiTasks, removeAiTask, stopAllTasks, subscribeAiTasks } from "../aiTasks";
+import {
+  AI_MODES, DEFAULT_MODEL_LIMIT_KTOKENS, budgetTokens, estimateTokens, fitMessages,
+  nextAiMode, parseAiMode, type AiPermissionMode,
+} from "../aiChat";
 
 interface Msg {
   role: "user" | "assistant" | "system";
@@ -22,6 +26,8 @@ export interface AiModelRef {
   id: string;
   sourceId: string;
   model: string;
+  /** 该模型的上下文预算（k token）；缺省用 DEFAULT_MODEL_LIMIT_KTOKENS。 */
+  limitKTokens?: number;
 }
 
 export interface AiConfig {
@@ -31,6 +37,8 @@ export interface AiConfig {
   sources: AiSource[];
   models: AiModelRef[];
   activeModelId: string;
+  /** AI 全局权限模式。 */
+  permissionMode: AiPermissionMode;
 }
 
 const CFG_KEY = "opennex-ai";
@@ -41,8 +49,10 @@ function normalizeAiConfig(raw: any): AiConfig {
     baseUrl: DEF_BASE,
     apiKey: "",
     model: "gpt-4o-mini",
+    permissionMode: "ask",
     ...raw,
   };
+  c.permissionMode = parseAiMode(c.permissionMode);
   // 迁移：旧的单源字段 → sources/models（保留兼容）。
   if (!Array.isArray(c.sources) || c.sources.length === 0) {
     c.sources = [{ id: "default", name: "默认模型源", baseUrl: c.baseUrl || DEF_BASE, apiKey: c.apiKey || "" }];
@@ -51,6 +61,12 @@ function normalizeAiConfig(raw: any): AiConfig {
     const m = String(c.model || "gpt-4o-mini").trim();
     c.models = m ? [{ id: "default::" + m, sourceId: "default", model: m }] : [];
   }
+  // 限额字段消毒：只保留正数；兼容上一版字段名 limitKChars（本就仅
+  // 存在数小时，值语义一并迁移为 k token）。
+  c.models = c.models.map((m: any) => {
+    const raw = m.limitKTokens ?? m.limitKChars;
+    return { ...m, limitKTokens: Number(raw) > 0 ? Number(raw) : undefined };
+  });
   if (!c.activeModelId || !c.models.some((m) => m.id === c.activeModelId)) {
     c.activeModelId = c.models[0]?.id ?? "";
   }
@@ -90,6 +106,22 @@ export default function AiPage({ uiSnapshot }: { uiSnapshot?: () => unknown }) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const aiTasks = useSyncExternalStore(subscribeAiTasks, getAiTasks);
 
+  // ---- 权限模式（咨询 / 询问 / 自由） ------------------------------------
+  // consult: 纯聊天，无任何终端/任务操作；ask: 关键操作需确认；
+  // free: 全部直接执行。Tab 在面板内循环切换。
+  const mode: AiPermissionMode = cfg.permissionMode;
+  const setMode = (m: AiPermissionMode) => persistCfg({ ...cfg, permissionMode: m });
+  const modeLabel = (m: AiPermissionMode) =>
+    m === "consult" ? T.uModeConsult : m === "ask" ? T.uModeAsk : T.uModeFree;
+  const onTabCycle = (e: KeyboardEvent) => {
+    if (e.key === "Tab") {
+      e.preventDefault();
+      setMode(nextAiMode(mode));
+    }
+  };
+  // 询问模式下 @@ACTION 会操作终端的指令（延时/定时）的待确认队列。
+  const [pendingSchedules, setPendingSchedules] = useState<PendingAction[]>([]);
+
   const activeModel = () => cfg.models.find((m) => m.id === cfg.activeModelId) ?? cfg.models[0] ?? null;
   const sourceOf = (m: AiModelRef | null | undefined) =>
     cfg.sources.find((s) => s.id === m?.sourceId) ?? cfg.sources[0] ?? null;
@@ -97,27 +129,67 @@ export default function AiPage({ uiSnapshot }: { uiSnapshot?: () => unknown }) {
   // ---- 定时任务执行（AI 面板内可见的任务列表） ---------------------------
   const removeTask = (id: string) => removeAiTask(id);
 
-  // ---- AI 控制界面：解析回复中的 @@ACTION 指令并执行 ---------------------
-  const runActions = (content: string): { display: string; executed: string[] } => {
+  // ---- AI 控制界面：解析回复中的 @@ACTION 指令并按权限模式执行 ----------
+  // consult: 全部阻止（仅提示）；ask: 会操作终端的指令（runAt 延时单次、
+  // addSchedule 周期）进待确认队列，其余无害指令直接执行；free: 全部直接执行。
+  type PendingAction = {
+    kind: "once" | "repeat";
+    command: string;
+    slot: number | null;
+    everySec?: number;
+    delaySec?: number;
+  };
+  const pendingLabel = (p: PendingAction) =>
+    p.kind === "once"
+      ? `延后 ${p.delaySec ?? 0}s · ${p.command}`
+      : `每 ${p.everySec ?? 0}s · ${p.command}`;
+  const runActions = (
+    content: string,
+    mode: AiPermissionMode,
+  ): { display: string; executed: string[]; pending: PendingAction[] } => {
     const executed: string[] = [];
     const rest: string[] = [];
+    const pending: PendingAction[] = [];
+    let blocked = false;
     for (const line of content.split("\n")) {
       const t = line.trim();
       if (!t.startsWith("@@ACTION")) {
         rest.push(line);
         continue;
       }
+      if (mode === "consult") {
+        blocked = true;
+        continue;
+      }
       try {
         const a = JSON.parse(t.slice("@@ACTION".length).trim());
-        if (a.action === "addSchedule" && a.command && Number(a.everySec) > 0) {
-          const slot = a.slot === undefined || a.slot === null ? focusedSlot.value : Number(a.slot);
-          const task = addAiTask({
-            label: `每 ${a.everySec}s · ${a.command}`,
+        const slot = a.slot === undefined || a.slot === null ? focusedSlot.value : Number(a.slot);
+        if (a.action === "runAt" && a.command && Number(a.delaySec) >= 0) {
+          const spec: PendingAction = {
+            kind: "once",
             command: String(a.command),
-            everySec: Number(a.everySec),
             slot,
-          });
-          executed.push(`✓ 已创建定时任务：每 ${task.everySec}s 向终端 ${task.slot} 执行「${a.command}」`);
+            delaySec: Number(a.delaySec),
+          };
+          if (mode === "ask") {
+            pending.push(spec);
+          } else {
+            addAiTask(spec);
+            executed.push(`✓ 已安排：${spec.delaySec}s 后向终端 ${spec.slot} 执行「${spec.command}」`);
+          }
+        } else if (a.action === "addSchedule" && a.command && Number(a.everySec) > 0) {
+          const spec: PendingAction = {
+            kind: "repeat",
+            command: String(a.command),
+            slot,
+            everySec: Number(a.everySec),
+          };
+          if (mode === "ask") {
+            pending.push(spec);
+          } else {
+            addAiTask(spec);
+            executed.push(`✓ 已创建定时任务：每 ${spec.everySec}s 向终端 ${spec.slot} 执行「${spec.command}」`);
+          }
         } else if (a.action === "stopSchedule" && a.taskId) {
           removeAiTask(String(a.taskId));
           executed.push(`✓ 已停止定时任务 ${a.taskId}`);
@@ -136,7 +208,9 @@ export default function AiPage({ uiSnapshot }: { uiSnapshot?: () => unknown }) {
         /* 忽略无法解析的指令行 */
       }
     }
-    return { display: rest.join("\n").trimEnd(), executed };
+    let display = rest.join("\n").trimEnd();
+    if (blocked) display += (display ? "\n\n" : "") + `⚠ ${T.uBlockedByConsult}`;
+    return { display, executed, pending };
   };
 
   const send = async () => {
@@ -156,20 +230,29 @@ export default function AiPage({ uiSnapshot }: { uiSnapshot?: () => unknown }) {
         "你是 OpenNex 终端管理器内置的 AI 助手，可以控制软件界面。",
         snap ? "当前界面状态(JSON)：" + JSON.stringify(snap) : "",
         "已添加模型：" + (cfg.models.map((m) => m.model).join(", ") || "无"),
-        "当前定时任务：" + (aiTasks.length ? JSON.stringify(aiTasks.map((t) => ({ id: t.id, everySec: t.everySec, command: t.command }))) : "无"),
-        "要控制界面（例如定时执行命令、停止任务、切换模型），在回复中用单独的行输出指令，每行一条，格式：",
+        "当前任务：" + (aiTasks.length ? JSON.stringify(aiTasks.map((t) => ({ id: t.id, kind: t.kind, everySec: t.everySec, runAtSec: t.runAtSec, command: t.command }))) : "无"),
+        "要控制界面（延时执行、定时执行、停止任务、切换模型），在回复中用单独的行输出指令，每行一条，格式：",
+        '@@ACTION {"action":"runAt","delaySec":5,"command":"top","slot":null}',
         '@@ACTION {"action":"addSchedule","everySec":20,"command":"ls","slot":null}',
         '@@ACTION {"action":"stopSchedule","taskId":"任务id"}',
         '@@ACTION {"action":"switchModel","model":"模型名"}',
+        "runAt：延时单次执行，delaySec 秒后执行一次即自动移除。addSchedule：周期执行，每 everySec 秒一次直到停止。",
+        "涉及多个时间点的编排（如「5 秒后启动 top，运行 3 秒停止，再过 3 秒打印当前目录」）时，必须按时间顺序拆成多条 runAt，delaySec 从现在起累加（例：5、8、11，命令依次为 top、q、pwd）。",
         "slot 为终端编号（null/省略 = 当前聚焦终端）。除指令行外，用用户的语言正常简洁回答；不要虚构执行结果。",
       ].filter(Boolean).join("\n");
       const reply = await invoke<string>("ai_chat", {
         baseUrl: src.baseUrl,
         apiKey: src.apiKey,
         model: am.model,
-        messages: [{ role: "system", content: sys }, ...next],
+        // 上下文预算（按模型的 k token 限额，默认 150k）：system 永久
+        // 保留，历史从最新往前整条装配，只发装得下的最近尾部。
+        messages: [
+          { role: "system", content: sys },
+          ...fitMessages(next, 0, Math.max(budgetTokens(am.limitKTokens) - estimateTokens(sys), 0)),
+        ],
       });
-      const { display, executed } = runActions(reply);
+      const { display, executed, pending } = runActions(reply, mode);
+      if (pending.length) setPendingSchedules((p) => [...p, ...pending]);
       const suffix = executed.length ? "\n\n" + executed.join("\n") : "";
       setMessages([...next, { role: "assistant" as const, content: display + suffix }]);
     } catch (e) {
@@ -224,6 +307,17 @@ export default function AiPage({ uiSnapshot }: { uiSnapshot?: () => unknown }) {
     sendTo(focusedSlot.value, new TextEncoder().encode(cmd + "\r"));
     setAgentLog((l) => [...l, `▶ ${cmd}`]);
     setAgentStep((s) => s + 1);
+  };
+
+  /** 自由模式专用：把剩余计划一次性全部执行（每条仍是逐条写入并回车）。 */
+  const runAll = () => {
+    if (!agentPlan) return;
+    const remaining = agentPlan.slice(agentStep);
+    for (const cmd of remaining) {
+      sendTo(focusedSlot.value, new TextEncoder().encode(cmd + "\r"));
+    }
+    setAgentLog((l) => [...l, ...remaining.map((c) => `▶ ${c}`)]);
+    setAgentStep((s) => s + remaining.length);
   };
 
   // ---- 模型源 / 模型管理（配置页） --------------------------------------
@@ -293,10 +387,13 @@ export default function AiPage({ uiSnapshot }: { uiSnapshot?: () => unknown }) {
 
   if (tab === "agent") {
     return (
-      <div className="flex h-full flex-col">
+      <div className="flex h-full flex-col" onKeyDown={onTabCycle}>
         <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-2.5">
           <span className="flex items-center gap-2 text-[13px] font-medium">
             <FiCpu size={15} className="text-[var(--accent)]" /> {T.agentTitle}
+            <span className="rounded-full border border-[var(--border)] px-2 py-0.5 text-[10px] font-normal text-[var(--text-dim)]">
+              {modeLabel(mode)}
+            </span>
           </span>
           <button className="text-[12px] text-[var(--text-dim)] hover:text-[var(--accent)]" onClick={() => setTab("chat")}>
             {T.uChatMode}
@@ -328,17 +425,27 @@ export default function AiPage({ uiSnapshot }: { uiSnapshot?: () => unknown }) {
                 }`}>
                   <span className="font-mono text-[11px] text-[var(--text-faint)]">#{i + 1}</span>
                   <span className="min-w-0 flex-1 truncate font-mono text-[12px]">{cmd}</span>
-                  {i === agentStep && (
+                  {i === agentStep && mode !== "consult" && (
                     <>
+                      {/* 询问模式：逐步「执行」即逐条确认；自由模式额外提供全部执行。 */}
                       <button className="flex items-center gap-1 rounded-md bg-[var(--accent-dim)] px-2.5 py-1 text-[11px] text-[var(--accent)]"
                         onClick={() => { runStep(cmd); }}>
                         <FiPlay size={11} /> {T.uExecute}
                       </button>
+                      {mode === "free" && (
+                        <button className="flex items-center gap-1 rounded-md border border-[var(--border)] px-2.5 py-1 text-[11px] text-[var(--text-dim)] hover:text-[var(--accent)]"
+                          onClick={runAll}>
+                          {T.uRunAll}
+                        </button>
+                      )}
                       <button className="flex items-center gap-1 rounded-md border border-[var(--border)] px-2.5 py-1 text-[11px] text-[var(--text-dim)]"
                         onClick={() => { setAgentLog((l) => [...l, `⊘ ${T.uSkip}: ${cmd}`]); setAgentStep((s) => s + 1); }}>
                         <FiSkipForward size={11} /> {T.uSkip}
                       </button>
                     </>
+                  )}
+                  {i === agentStep && mode === "consult" && (
+                    <span className="text-[11px] text-[var(--text-faint)]">{T.uAgentBlocked}</span>
                   )}
                 </div>
               ))}
@@ -455,28 +562,50 @@ export default function AiPage({ uiSnapshot }: { uiSnapshot?: () => unknown }) {
               {cfg.models.length === 0 && (
                 <span className="text-[11px] text-[var(--text-faint)]">尚未添加模型</span>
               )}
-              {cfg.models.map((m) => {
-                const src = sourceOf(m);
-                return (
-                  <span
-                    key={m.id}
-                    className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-mono text-[11px] ${
-                      cfg.activeModelId === m.id
-                        ? "border-[var(--accent)] text-[var(--accent)]"
-                        : "border-[var(--border)] text-[var(--text-dim)]"
-                    }`}
+              {cfg.models.map((m) => (
+                <span
+                  key={m.id}
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-mono text-[11px] ${
+                    cfg.activeModelId === m.id
+                      ? "border-[var(--accent)] text-[var(--accent)]"
+                      : "border-[var(--border)] text-[var(--text-dim)]"
+                  }`}
+                >
+                  {m.model}
+                  <label
+                    className="flex items-center gap-1 font-sans text-[10px] text-[var(--text-faint)]"
+                    title={T.uModelLimitHint}
                   >
-                    {m.model}
-                    <i
-                      className="not-italic text-[var(--text-faint)] transition-colors hover:text-[var(--danger)]"
-                      title="移除"
-                      onClick={() => removeModel(m.id)}
-                    >
-                      ✕
-                    </i>
-                  </span>
-                );
-              })}
+                    {T.uModelLimit}
+                    <input
+                      type="number"
+                      min={4}
+                      max={2000}
+                      className="w-14 rounded border border-[var(--border)] bg-[var(--bg-panel)] px-1 text-[11px] text-[var(--text)] outline-none"
+                      value={m.limitKTokens ?? ""}
+                      placeholder={String(DEFAULT_MODEL_LIMIT_KTOKENS)}
+                      onChange={(e) => {
+                        const v = parseInt(e.target.value, 10);
+                        const models = cfg.models.map((x) =>
+                          x.id === m.id
+                            ? { ...x, limitKTokens: Number.isFinite(v) && v > 0 ? v : undefined }
+                            : x,
+                        );
+                        persistCfg({ ...cfg, models });
+                      }}
+                    />
+                    {/* 单位注明：填 150 即 150k token，不是 150 个字符 */}
+                    <span className="font-mono">k</span>
+                  </label>
+                  <i
+                    className="not-italic text-[var(--text-faint)] transition-colors hover:text-[var(--danger)]"
+                    title="移除"
+                    onClick={() => removeModel(m.id)}
+                  >
+                    ✕
+                  </i>
+                </span>
+              ))}
             </div>
             <p className="mt-2 text-[11px] leading-relaxed text-[var(--text-faint)]">
               勾选获取的模型列表即可添加；对话中可随时切换。
@@ -504,7 +633,7 @@ export default function AiPage({ uiSnapshot }: { uiSnapshot?: () => unknown }) {
 
   // ---- 对话页 ------------------------------------------------------------
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col" onKeyDown={onTabCycle}>
       <div className="flex items-center justify-between gap-2 border-b border-[var(--border)] px-5 py-2.5">
         <select
           className="min-w-0 max-w-[60%] rounded-md border border-[var(--border)] bg-[var(--bg-panel)] px-2 py-1 text-[12px] text-[var(--text)] outline-none"
@@ -524,18 +653,26 @@ export default function AiPage({ uiSnapshot }: { uiSnapshot?: () => unknown }) {
           onClick={() => setEditing(true)}>{T.uConfigure}</button>
       </div>
 
-      {/* 定时任务列表（AI 创建的定时执行命令） */}
+      {/* 定时任务列表（AI 创建的延时/定时执行命令），按时间顺序展示 */}
       {aiTasks.length > 0 && (
         <div className="border-b border-[var(--border)] px-5 py-2">
           <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold text-[var(--text-dim)]">
             <FiClock size={11} /> 定时任务（{aiTasks.length}）
+            <button
+              className="ml-auto font-normal text-[var(--danger)] hover:underline"
+              onClick={() => stopAllTasks()}
+            >
+              全部停止
+            </button>
           </div>
           <div className="space-y-1">
             {aiTasks.map((t) => (
               <div key={t.id} className="flex items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--bg-panel)] px-2.5 py-1.5 text-[11px]">
                 <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${t.enabled ? "bg-[var(--success)]" : "bg-[var(--text-faint)]"}`} />
                 <span className="min-w-0 flex-1 truncate">{t.label}</span>
-                <span className="shrink-0 font-mono text-[10px] text-[var(--text-faint)]">{t.everySec}s</span>
+                <span className="shrink-0 rounded border border-[var(--border)] px-1 text-[10px] text-[var(--text-faint)]">
+                  {t.kind === "once" ? `单次 · ${t.slot ?? focusedSlot.value}` : `周期 · ${t.everySec}s`}
+                </span>
                 <button className="shrink-0 text-[var(--danger)] hover:underline" onClick={() => removeAiTask(t.id)}>停止</button>
               </div>
             ))}
@@ -564,7 +701,9 @@ export default function AiPage({ uiSnapshot }: { uiSnapshot?: () => unknown }) {
               </div>
               {m.role === "assistant" && !m.content.startsWith("⚠") && (
                 <button
-                  className="mt-1 rounded-md border border-[var(--border)] px-2 py-1 text-[11px] text-[var(--text-dim)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                  className="mt-1 rounded-md border border-[var(--border)] px-2 py-1 text-[11px] text-[var(--text-dim)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-40"
+                  disabled={mode === "consult"}
+                  title={mode === "consult" ? T.uBlockedByConsult : undefined}
                   onClick={() => {
                     const firstLine = m.content.split("\n").find((l) => l.trim()) ?? "";
                     const ok = sendTo(focusedSlot.value, new TextEncoder().encode(firstLine));
@@ -582,8 +721,53 @@ export default function AiPage({ uiSnapshot }: { uiSnapshot?: () => unknown }) {
           <div ref={bottomRef} />
         </div>
       </div>
+      {/* 询问模式：AI 请求创建定时任务时的确认条 */}
+      {pendingSchedules.length > 0 && (
+        <div className="border-t border-[var(--border)] bg-[var(--bg-panel)] px-5 py-2">
+          <div className="mb-1 text-[11px] text-[var(--text-dim)]">{T.uConfirmSchedule}</div>
+          <div className="space-y-0.5">
+            {pendingSchedules.map((p, i) => (
+              <div key={i} className="truncate font-mono text-[11px] text-[var(--text-dim)]">
+                {pendingLabel(p)} → 终端 {p.slot ?? focusedSlot.value}
+              </div>
+            ))}
+          </div>
+          <div className="mt-1.5 flex gap-2">
+            <button
+              className="rounded-md bg-[var(--accent-dim)] px-3 py-1 text-[11px] text-[var(--accent)] hover:brightness-125"
+              onClick={() => {
+                for (const p of pendingSchedules) {
+                  addAiTask(p);
+                }
+                setPendingSchedules([]);
+              }}
+            >
+              {T.uAllow}
+            </button>
+            <button
+              className="rounded-md border border-[var(--border)] px-3 py-1 text-[11px] text-[var(--text-dim)] hover:text-[var(--danger)]"
+              onClick={() => setPendingSchedules([])}
+            >
+              {T.uDeny}
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="border-t border-[var(--border)] p-3">
         <div className="flex items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--bg-panel)] px-3 py-2 focus-within:border-[var(--accent)]">
+          {/* 权限模式下拉：与输入框同高，左侧；Tab 在面板聚焦时循环切换 */}
+          <select
+            className="shrink-0 self-stretch rounded-md border border-[var(--border)] bg-[var(--bg)] px-1.5 text-[11px] text-[var(--text)] outline-none"
+            value={mode}
+            onChange={(e) => setMode(e.target.value as AiPermissionMode)}
+          >
+            {AI_MODES.map((m) => (
+              <option key={m} value={m}>
+                {modeLabel(m)}
+              </option>
+            ))}
+          </select>
           <input
             className="min-w-0 flex-1 bg-transparent text-[13px] outline-none"
             placeholder={T.uAskHint}

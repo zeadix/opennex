@@ -303,6 +303,28 @@ impl App {
             });
             self.settings_edit.ai_model = model;
 
+            // Per-model context budget in kilo-TOKENS (150 = 150k tokens of
+            // recent conversation); the row shows the
+            // value for the CURRENT model (default when unset) and only
+            // writes an entry when the user actually edits it.
+            let mut limit = crate::ai::context_budget_tokens(
+                &self.settings_edit.ai_model_limits,
+                &self.settings_edit.ai_model,
+            ) / 1000;
+            let mut limit_changed = false;
+            self.settings_row(ui, &ta.model_limit, |ui| {
+                let resp = ui.add_sized(
+                    [180.0, 20.0],
+                    egui::DragValue::new(&mut limit).range(4..=2000).suffix("k"),
+                );
+                limit_changed = resp.changed();
+            });
+            if limit_changed {
+                self.settings_edit
+                    .ai_model_limits
+                    .insert(self.settings_edit.ai_model.clone(), limit);
+            }
+
             let mut max_steps = self.settings_edit.agent_max_steps;
             self.settings_row(ui, &ta.agent_max_steps, |ui| {
                 ui.add_sized(

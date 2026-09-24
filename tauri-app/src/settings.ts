@@ -6,11 +6,13 @@ export interface Settings {
   fontSize: number;
   /** Auto-match command suggestions while typing (egui: auto_match_command). */
   autoMatch: boolean;
+  /** 补全面板来源："auto" 历史+系统合并；"system" 仅 PATH 系统指令；
+   * "history" 仅会话历史。 */
+  suggestSource: "auto" | "system" | "history";
+  /** 指令面板跟随输入光标；关闭=固定位置（可拖拽、跨重启记忆）。 */
+  followCursor: boolean;
   /** Command history capacity (synced to the backend via set_history_cap). */
   historyCap: number;
-  /** Command popups follow the input caret; off = fixed bottom-right
-   * corner, draggable, position remembered across restarts. */
-  followCursor: boolean;
   /** UI font family ("" = system default). */
   uiFont: string;
   /** UI font size in px at scale 1 (13 = default); drives the UI zoom. */
@@ -37,8 +39,9 @@ export const defaultSettings: Settings = {
   shell: "",
   fontSize: 13,
   autoMatch: true,
-  historyCap: 500,
+  suggestSource: "auto",
   followCursor: false,
+  historyCap: 500,
   uiFont: "",
   uiFontSize: 13,
   termFont: "",

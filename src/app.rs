@@ -152,7 +152,17 @@ struct AppSettings {
     ai_api_key: String,
     #[serde(default = "default_ai_model")]
     ai_model: String,
+    /// AI-wide permission mode id ("consult" | "ask" | "free"). Empty
+    /// in settings files written before this existed; App::new migrates
+    /// it from the retired agent approval mode below.
+    #[serde(default)]
+    ai_permission_mode: String,
+    /// Per-model context budget in kilo-characters (model name →
+    /// budget). Models without an entry use ai::DEFAULT_MODEL_CONTEXT_KCHARS.
+    #[serde(default)]
+    ai_model_limits: HashMap<String, usize>,
     /// Agent approval mode id ("manual" | "allowlist" | "full-auto").
+    /// RETIRED: kept only so ai_permission_mode can be migrated from it.
     #[serde(default = "default_agent_approval_mode")]
     agent_approval_mode: String,
     /// Hard step cap for one agent run.
@@ -172,6 +182,20 @@ struct AppSettings {
 
 fn default_agent_approval_mode() -> String {
     "allowlist".into()
+}
+
+/// One-shot migration for settings.json files written before the
+/// AI-wide permission mode existed: derive it from the retired agent
+/// approval mode ("full-auto" → free, everything else → ask). Runs
+/// before first use; persisted with the next settings save.
+fn migrate_ai_permission_mode(settings: &mut AppSettings) {
+    if settings.ai_permission_mode.trim().is_empty() {
+        settings.ai_permission_mode = match settings.agent_approval_mode.as_str() {
+            "full-auto" => "free",
+            _ => "ask",
+        }
+        .to_string();
+    }
 }
 
 fn default_agent_max_steps() -> usize {
@@ -1433,6 +1457,8 @@ impl Default for AppSettings {
             ai_base_url: default_ai_base_url(),
             ai_api_key: String::new(),
             ai_model: default_ai_model(),
+            ai_permission_mode: String::new(),
+            ai_model_limits: HashMap::new(),
             agent_approval_mode: default_agent_approval_mode(),
             agent_max_steps: default_agent_max_steps(),
             remote_port: default_remote_port(),
@@ -2213,8 +2239,10 @@ pub struct App {
     /// Per-terminal startup command editor: (tab id, buffer).
     startup_cmd_dialog: Option<(String, String)>,
     startup_cmd_just_opened: bool,
-    /// PROD guard for "insert & run": (tab id, command) awaiting confirm.
-    ai_exec_confirm: Option<(String, String)>,
+    /// Run guard for "insert & run": (tab id, command, is PROD host)
+    /// awaiting confirm. Fires on PROD hosts always, and in Ask mode
+    /// on every host.
+    ai_exec_confirm: Option<(String, String, bool)>,
     ai_exec_just_opened: bool,
     /// Right-click "AI" menu intent recorded by the tab viewer, consumed
     /// by render_ai_panel on the next dispatch pass.
@@ -2488,7 +2516,8 @@ fn theme_fonts_signature(theme: &crate::theme::ThemeDefinition) -> (String, Stri
 impl App {
     pub fn new(cc: &eframe::CreationContext) -> Self {
         let mut startup_warnings = Vec::new();
-        let settings = read_settings_from(&settings_path(), &mut startup_warnings);
+        let mut settings = read_settings_from(&settings_path(), &mut startup_warnings);
+        migrate_ai_permission_mode(&mut settings);
         let ctx = &cc.egui_ctx.clone();
         // Shell discovery (Windows multi-shell support) + publish the
         // settings' default for create_terminal's fallback path.

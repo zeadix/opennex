@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="utf-8" />
+    <title>cursor-follow test harness</title>
+    <script>
+      // —— 假 Tauri IPC：必须在应用 bundle 执行前就位 ——
+      window.__invokeLog = [];
+      window.__TAURI_INTERNALS__ = {
+        invoke(cmd) {
+          window.__invokeLog.push(cmd);
+          if (cmd === "start_terminal") return Promise.resolve({ session: "s1", wsPort: 19999 });
+          if (cmd === "get_history")
+            return Promise.resolve([
+              { id: 1, cmd: "docker ps -a", hits: 5 },
+              { id: 2, cmd: "git status", hits: 3 },
+              { id: 3, cmd: "kubectl get pods", hits: 2 },
+            ]);
+          if (cmd === "ai_chat")
+            return Promise.resolve(
+              "可以按这个顺序排查：\n1. df -h 总览各分区占用\n2. du -sh /* 2>/dev/null | sort -h 找出大目录\n3. journalctl --disk-usage 查看日志占用\n把结果发给我，我帮你继续定位。",
+            );
+          if (cmd === "list_path_commands")
+            return Promise.resolve(["docker", "docker-compose", "kubectl", "ls", "git", "grep", "curl"]);
+          if (cmd === "list_shells") return Promise.resolve(["bash"]);
+          if (cmd === "list_fonts") return Promise.resolve([]);
+          if (cmd === "ws_port") return Promise.resolve(19999);
+          if (cmd === "session_cwd") return Promise.resolve("/home/user");
+          if (cmd === "session_activities") return Promise.resolve([]);
+          if (cmd === "resource_stats" || cmd === "system_stats") return Promise.resolve({});
+          if (cmd === "get_app_info") return Promise.resolve({ version: "test", currentVersion: "test" });
+          if (cmd === "check_update") return Promise.resolve({ updateAvailable: false });
+          if (cmd === "remote_info") return Promise.resolve({ port: 0 });
+          return Promise.resolve(null);
+        },
+        transformCallback(cb) {
+          return typeof cb === "function" ? cb : undefined;
+        },
+        metadata: { currentWindow: { label: "main" }, currentWebview: { label: "main" } },
+        plugins: {},
+        postMessage() {},
+      };
+      // —— 测试预设：自动补全开 + 清除位置记忆 ——
+      // 跟随模式由 URL 参数控制: ?follow=0 → 固定位置模式; 默认跟随。
+      const follow = new URLSearchParams(location.search).get("follow");
+      const __settings = { autoMatch: true, suggestSource: "auto" };
+      if (follow !== null) __settings.followCursor = follow === "1";
+      localStorage.setItem("opennex-settings", JSON.stringify(__settings));
+      localStorage.removeItem("opennex-suggest-pos");
+      localStorage.removeItem("opennex-palette-pos");
+      localStorage.removeItem("opennex-palette-pin-pos");
+    </script>
+  </head>
+  <body style="margin: 0">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

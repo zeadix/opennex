@@ -368,6 +368,7 @@ export default function DockRoot({
               command={cfg.command}
               name={tn.getName?.()}
               autoMatch={settings.autoMatch}
+              suggestSource={settings.suggestSource}
               followCursor={settings.followCursor}
               copyOnSelect={settings.copyOnSelect}
               onFontSize={onFontSize}

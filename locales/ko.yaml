@@ -447,11 +447,7 @@ ai:
   agent_stop: 중지
   agent_close: 닫기
   agent_continue: 계속
-  agent_approval: '승인 모드:'
   agent_max_steps: '최대 단계:'
-  agent_manual: 단계마다 확인
-  agent_allowlist: 화이트리스트 자동
-  agent_fullauto: 완전 자동
   agent_phase_thinking: 생각 중…
   agent_phase_waiting: 승인 대기 중…
   agent_phase_executing: 명령 실행 중…
@@ -463,6 +459,13 @@ ai:
   agent_confirm_body: 'AI 에이전트가 실행을 요청합니다:\n{}'
   agent_confirm_run: 실행
   agent_confirm_cancel: 거부
+  permission_consult: 상담 모드
+  permission_ask: 확인 모드
+  permission_free: 자유 모드
+  model_limit: '컨텍스트 한도 (k 토큰):'
+  agent_consult_hint: 상담 모드에서는 에이전트를 사용할 수 없습니다
+  run_confirm_title: 실행 확인
+  run_confirm_body: "실행 예정:\n{}"
 
 
 monitor:

@@ -11,9 +11,9 @@ import {
   broadcastEnabled,
   broadcastGroup,
   broadcastInput,
+  cursorBySlot,
   cursorRefreshers,
   focusedSlot,
-  lastCursor,
   registerSocket,
   sockets,
   unregisterSocket,
@@ -115,6 +115,9 @@ interface TerminalPaneProps {
   shell?: string;
   cwd?: string;
   autoMatch?: boolean;
+  /** 补全面板来源：auto=历史+系统合并；system=仅 PATH 命令；history=仅历史。 */
+  suggestSource?: "auto" | "system" | "history";
+  /** 开=补全面板跟随输入光标；关=固定位置（顶部拖拽条可拖、位置记忆）。 */
   followCursor?: boolean;
   copyOnSelect?: boolean;
   onFontSize?: (size: number) => void;
@@ -135,6 +138,7 @@ function WorkspaceTerminalPane({
   shell,
   cwd,
   autoMatch,
+  suggestSource,
   followCursor,
   copyOnSelect,
   onFontSize,
@@ -165,6 +169,14 @@ function WorkspaceTerminalPane({
   } | null>(null);
   const historyRef = useRef<{ id: number; cmd: string; hits: number }[]>([]);
   const pathCmdsRef = useRef<string[]>([]);
+  // 数据源补拉去重：挂载时的首次请求已在途（初始 true），懒加载每来源
+  // 每面板至多补拉一次。
+  const pathCmdsLoadingRef = useRef(true);
+  const histLoadingRef = useRef(true);
+  const pathCmdsEnsuredRef = useRef(false);
+  const histEnsuredRef = useRef(false);
+  const suggestSourceRef = useRef(suggestSource);
+  suggestSourceRef.current = suggestSource;
   const autoMatchRef = useRef(autoMatch);
   autoMatchRef.current = autoMatch;
   const copyOnSelectRef = useRef(copyOnSelect);
@@ -176,8 +188,7 @@ function WorkspaceTerminalPane({
   // Mirrors `suggest` for the one-time key handler inside the effect.
   const suggestRef = useRef(suggest);
   suggestRef.current = suggest;
-  // Remembered overlay position (followCursor off): draggable, restored
-  // across restarts. suggestManual = 本次弹出生命周期内的拖拽覆盖。
+  // 跟随=关 时的固定位置：拖拽后记忆到 localStorage，下次呼出仍在原位。
   const [suggestPos, setSuggestPos] = useState<{ x: number; y: number } | null>(() => {
     try {
       return JSON.parse(localStorage.getItem("opennex-suggest-pos") ?? "null");
@@ -187,21 +198,26 @@ function WorkspaceTerminalPane({
   });
   const [suggestManual, setSuggestManual] = useState<{ x: number; y: number } | null>(null);
   const dragSuggest = (e: React.MouseEvent) => {
-    beginOverlayDrag(e, (x, y) => {
-      const p = { x: Math.max(0, x), y: Math.max(0, y) };
+    if (followCursor) return; // 跟随光标模式：位置由输入光标决定，禁止拖拽
+    const host = hostRef.current;
+    if (!host) return;
+    const hr = host.getBoundingClientRect();
+    const zoom = hr.width > 0 && host.offsetWidth > 0 ? hr.width / host.offsetWidth : 1;
+    beginOverlayDrag(e, (vx, vy) => {
+      // 视口拖拽坐标 → pane 本地（除以缩放）
+      const p = { x: (vx - hr.left) / zoom, y: (vy - hr.top) / zoom };
       setSuggestManual(p);
       setSuggestPos(p);
       localStorage.setItem("opennex-suggest-pos", JSON.stringify(p));
     });
   };
-  // 每一轮弹出重新跟随光标（拖拽只在本次弹层生命周期内生效）。
+  // 每一轮弹出重新可拖（记忆位仍在，本次拖拽覆盖到关闭为止）。
   const prevOpen = useRef(false);
   useEffect(() => {
     const open = !!suggest;
     if (open && !prevOpen.current) setSuggestManual(null);
     prevOpen.current = open;
   }, [suggest]);
-
   // Live theme/font updates without recreating the PTY.
   useEffect(() => {
     const t = termRef.current;
@@ -297,6 +313,10 @@ function WorkspaceTerminalPane({
     let cols = term.cols;
 
     // 字号/字体变化（font effect 与 Ctrl+滚轮）后的重适配入口：
+    // 执行命令后的延迟历史刷新定时器（IIFE 内登记，清理在这里）。
+    let histRefreshTimer: number | undefined;
+    // xterm textarea 的 focus 同步（IIFE 内异步挂载，清理在这里）。
+    let focusCleanup: (() => void) | null = null;
     // fit 重算列数 → 把新 cols/rows 同步给 PTY（经 registry socket）。
     fitRef.current = {
       fitAndSync: () => {
@@ -317,10 +337,12 @@ function WorkspaceTerminalPane({
     (async () => {
       invoke<Array<{ id: number; cmd: string; hits: number }>>("get_history", { workspaceId })
         .then((h) => { if (!disposed) historyRef.current = h; })
-        .catch(() => {});
+        .catch(() => {})
+        .finally(() => { histLoadingRef.current = false; });
       invoke<string[]>("list_path_commands")
         .then((c) => { if (!disposed) pathCmdsRef.current = c; })
-        .catch(() => {});
+        .catch(() => {})
+        .finally(() => { pathCmdsLoadingRef.current = false; });
       // Wait for a REAL layout before spawning the shell: a PTY born at
       // 1–2 columns makes the prompt wrap into garbage that the
       // scrollback then replays forever (the "flooded characters" bug).
@@ -387,13 +409,65 @@ function WorkspaceTerminalPane({
       // Backend already ranks newest-first with re-run counts — sort by hits.
       const rankedHistory = () =>
         [...historyRef.current].sort((a, b) => b.hits - a.hits).map((e) => e.cmd);
+      // 数据源懒加载自愈：首次启动时 PATH 扫描/历史请求可能尚未返回（或
+      // 曾静默失败），输入时发现来源为空就补拉一次，返回后立刻按当前输
+      // 入刷新建议——修复“第一次输入不弹面板，回车一次后才开始弹”。
+      const ensureSources = () => {
+        const src = suggestSourceRef.current ?? "auto";
+        if (src !== "history" && !pathCmdsEnsuredRef.current
+            && pathCmdsRef.current.length === 0 && !pathCmdsLoadingRef.current) {
+          pathCmdsEnsuredRef.current = true;
+          pathCmdsLoadingRef.current = true;
+          invoke<string[]>("list_path_commands")
+            .then((c) => {
+              pathCmdsRef.current = c;
+              updateSuggest();
+            })
+            .catch(() => {})
+            .finally(() => {
+              pathCmdsLoadingRef.current = false;
+            });
+        }
+        if (src !== "system" && !histEnsuredRef.current
+            && historyRef.current.length === 0 && !histLoadingRef.current) {
+          histEnsuredRef.current = true;
+          histLoadingRef.current = true;
+          invoke<Array<{ id: number; cmd: string; hits: number }>>("get_history", { workspaceId })
+            .then((h) => {
+              historyRef.current = h;
+              updateSuggest();
+            })
+            .catch(() => {})
+            .finally(() => {
+              histLoadingRef.current = false;
+            });
+        }
+      };
+      // 执行命令后延迟拉一次历史：后端在输出泵里记录已执行行，历史建议
+      // 立刻能看到刚跑过的命令（此前挂载后从不刷新）。
+      const scheduleHistoryRefresh = () => {
+        window.clearTimeout(histRefreshTimer);
+        histRefreshTimer = window.setTimeout(() => {
+          invoke<Array<{ id: number; cmd: string; hits: number }>>("get_history", { workspaceId })
+            .then((h) => {
+              historyRef.current = h;
+            })
+            .catch(() => {});
+        }, 600);
+      };
       const updateSuggest = () => {
         if (!autoMatchRef.current || suppressMatchRef.current) {
           setSuggest(null);
           return;
         }
         const word = buf.replace(/^\s+/, "");
-        const m = word ? suggestions(word, rankedHistory(), pathCmdsRef.current, 10) : [];
+        // 面板来源可配：auto=历史+系统合并（原行为）；system=仅 PATH；
+        // history=仅会话历史。
+        const src = suggestSourceRef.current ?? "auto";
+        ensureSources();
+        const hist = src === "system" ? [] : rankedHistory();
+        const paths = src === "history" ? [] : pathCmdsRef.current;
+        const m = word ? suggestions(word, hist, paths, 10) : [];
         if (m.length === 0 || (m.length === 1 && m[0] === word)) {
           setSuggest(null);
           return;
@@ -410,7 +484,10 @@ function WorkspaceTerminalPane({
           navigated: false,
         }));
       };
-      // Track the input caret in SCREEN px (palette/overlay positioning).
+      // Track the input caret in PANE-LOCAL px + host viewport rect.
+      // 补全面板在本 pane 内渲染（同一坐标系，天然跟随本终端光标）；
+      // 历史面板用 host 矩形×缩放把本地坐标映射回视口。各 pane 写各
+      // 自的桶，多终端互不覆盖。
       const updateCursorPos = () => {
         try {
           const host = hostRef.current;
@@ -419,9 +496,14 @@ function WorkspaceTerminalPane({
           const dims = (term as any)?._core?._renderService?.dimensions?.css;
           const cw = dims?.cell?.width ?? 9;
           const ch = dims?.cell?.height ?? 20;
-          lastCursor.x = rect.left + 8 + (term.buffer.active.cursorX ?? 0) * cw;
-          lastCursor.y = rect.top + 4 + (term.buffer.active.cursorY ?? 0) * ch;
-          lastCursor.h = ch;
+          const zoom = rect.width > 0 && host.offsetWidth > 0 ? rect.width / host.offsetWidth : 1;
+          cursorBySlot.set(sessionId, {
+            x: 8 + (term.buffer.active.cursorX ?? 0) * cw,
+            y: 4 + (term.buffer.active.cursorY ?? 0) * ch,
+            h: ch,
+            host: { left: rect.left, top: rect.top, w: rect.width, h: rect.height },
+            zoom,
+          });
         } catch {
           /* ignore */
         }
@@ -430,8 +512,11 @@ function WorkspaceTerminalPane({
         // A real keystroke re-arms auto-match after a palette insert.
         suppressMatchRef.current = false;
         for (const ch of data) {
-          if (ch === "\r") buf = "";
-          else if (ch === "\x7f" || ch === "\b") buf = buf.slice(0, -1);
+          if (ch === "\r") {
+            // 即将执行的这行：稍后刷新历史，让刚执行的命令进入建议源。
+            if (buf.trim()) scheduleHistoryRefresh();
+            buf = "";
+          } else if (ch === "\x7f" || ch === "\b") buf = buf.slice(0, -1);
           else if (ch >= " ") buf += ch;
         }
         updateCursorPos();
@@ -447,11 +532,43 @@ function WorkspaceTerminalPane({
       });
       // Keep the tracked caret fresh WITHOUT keystrokes too (shell output
       // redraws, scrolls, pane resizes) — the Alt palette reads it at open.
-      term.onRender(() => updateCursorPos());
+      // 弹层打开时：回显把光标推进后立即重新对齐（键入时刻算的是回显前
+      // 的坐标，可见光标比面板晚一拍）。
+      let lastAppliedCell = "";
+      term.onRender(() => {
+        updateCursorPos();
+        if (suggestRef.current) {
+          const key = `${term.buffer.active.cursorX}|${term.buffer.active.cursorY}`;
+          if (key !== lastAppliedCell) {
+            lastAppliedCell = key;
+            setSuggest((s) => (s ? { ...s } : s));
+          }
+        }
+      });
       term.onScroll(() => updateCursorPos());
       // Alt 面板打开前由 registry 逐一调用，强制刷新光标屏幕坐标。
       cursorRefreshers.add(updateCursorPos);
       (hostRef.current as any)._cursorCleanup = () => cursorRefreshers.delete(updateCursorPos);
+      // 键盘焦点 = 聚焦终端：Tab 切换标签、启动自动聚焦都不经过
+      // mousedown。同步 focusedSlot，指令面板定位/AI 插入等依赖它
+      // 找到「当前终端」（否则面板取不到光标分桶 → 落到固定位置）。
+      // xterm 的 textarea 是异步开放的：轮询到它出现再挂监听。
+      const focusSync = () => { focusedSlot.value = sessionId; };
+      let focusEl: HTMLTextAreaElement | null = null;
+      const focusTimer = window.setInterval(() => {
+        const ta = (term as any)?.textarea as HTMLTextAreaElement | null | undefined;
+        if (ta) {
+          focusEl = ta;
+          ta.addEventListener("focus", focusSync);
+          window.clearInterval(focusTimer);
+        }
+      }, 200);
+      window.setTimeout(() => window.clearInterval(focusTimer), 15_000);
+      focusCleanup = () => {
+        window.clearInterval(focusTimer);
+        window.clearTimeout(focusTimer);
+        focusEl?.removeEventListener("focus", focusSync);
+      };
       // Overlay + search key handling (single dispatcher; suggestRef
       // mirrors the latest overlay state for this one-time handler).
       term.attachCustomKeyEventHandler((e) => {
@@ -690,6 +807,8 @@ function WorkspaceTerminalPane({
       (hostRef.current as any)?._lineSetCleanup?.();
       (hostRef.current as any)?._closeSuggestCleanup?.();
       (hostRef.current as any)?._searchEvtCleanup?.();
+      window.clearTimeout(histRefreshTimer);
+      focusCleanup?.();
       unregisterSocket(sessionId);
       ws?.close();
       search.dispose();
@@ -701,59 +820,73 @@ function WorkspaceTerminalPane({
   return (
     <div
       ref={hostRef}
-      className="absolute inset-0 px-2 py-1"
+      data-term-slot={sessionId}
+      className="absolute inset-0 overflow-hidden px-2 py-1"
       style={{ background: "var(--bg)" }}
       onMouseDown={() => {
         focusedSlot.value = sessionId;
       }}
     >
       {suggest &&
-        createPortal(
-        <div
-          className="animate-fade-up fixed z-[6000] w-[min(480px,calc(100vw-16px))] overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] shadow-2xl"
-          style={
-            suggestManual
-              ? { left: suggestManual.x, top: suggestManual.y }
-              : followCursor && lastCursor.x > 0
-                ? (() => {
-                    // 跟随光标：默认光标行下方、左缘对齐光标；贴底时翻到
-                    // 光标上方，左右贴边时右上角对齐光标 —— 保证弹层
-                    // 完整可见且不遮挡光标行。
-                    const w = Math.min(480, window.innerWidth - 16);
-                    const h = 264;
-                    const lineBottom = lastCursor.y + (lastCursor.h || 20);
-                    const left = Math.max(
-                      4,
-                      Math.min(lastCursor.x, window.innerWidth - w - 4),
-                    );
-                    let top = lineBottom + 4;
-                    if (top + h > window.innerHeight - 4) top = lastCursor.y - h - 6;
-                    top = Math.max(4, Math.min(top, window.innerHeight - h - 4));
-                    return { left, top };
-                  })()
-                : suggestPos
-                  ? { left: suggestPos.x, top: suggestPos.y }
-                  : { right: 12, bottom: 44 }
+        (() => {
+        // 渲染期实时定位（pane 本地坐标系）：
+        //   跟随=开：光标列左对齐、光标行下方，贴底翻上方，夹在 pane 内。
+        //   跟随=关：固定位置（拖拽记忆位 > pane 右下角），顶部拖拽条。
+        // 同一坐标系，无缩放/跨终端换算，不可能锚错终端。
+        const t = termRef.current;
+        const host = hostRef.current;
+        const paneW = host?.clientWidth || 420;
+        const paneH = host?.clientHeight || 260;
+        const dims = (t as any)?._core?._renderService?.dimensions?.css;
+        const cw = dims?.cell?.width ?? 9;
+        const ch = dims?.cell?.height ?? 20;
+        const col = t?.buffer.active.cursorX ?? 0;
+        const row = t?.buffer.active.cursorY ?? 0;
+        const width = Math.max(220, Math.min(480, paneW - 8));
+        const estH = suggest.list.length * 25 + (followCursor ? 26 : 48);
+        let left: number;
+        let top: number;
+        if (followCursor) {
+          left = Math.max(2, Math.min(8 + col * cw, paneW - width - 2));
+          const lineTop = 4 + row * ch;
+          top = lineTop + ch + 2;
+          if (top + estH > paneH - 2) top = lineTop - estH - 2;
+          top = Math.max(2, Math.min(top, Math.max(2, paneH - estH - 2)));
+        } else {
+          const pos = suggestManual ?? suggestPos;
+          if (pos) {
+            left = Math.max(2, Math.min(pos.x, paneW - width - 2));
+            top = Math.max(2, Math.min(pos.y, Math.max(2, paneH - estH - 2)));
+          } else {
+            left = paneW - width - 6;
+            top = Math.max(2, paneH - estH - 8);
           }
+        }
+        return (
+        <div
+          className="animate-fade-up absolute z-[6000] overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] shadow-2xl"
+          style={{ left, top, width }}
           onMouseDown={(e) => e.stopPropagation()}
         >
-          <div
-            className="overlay-grip"
-            title={T.uDragPosition}
-            onMouseDown={(e) => {
-              e.stopPropagation();
-              dragSuggest(e);
-            }}
-          >
-            <svg width="22" height="6" aria-hidden="true">
-              {[3, 11, 19].map((cx) => (
-                <g key={cx}>
-                  <circle cx={cx} cy="1.5" r="1.2" fill="currentColor" />
-                  <circle cx={cx} cy="4.5" r="1.2" fill="currentColor" />
-                </g>
-              ))}
-            </svg>
-          </div>
+          {!followCursor && (
+            <div
+              className="overlay-grip"
+              title={T.uDragPosition}
+              onMouseDown={(e) => {
+                e.stopPropagation();
+                dragSuggest(e);
+              }}
+            >
+              <svg width="22" height="6" aria-hidden="true">
+                {[3, 11, 19].map((cx) => (
+                  <g key={cx}>
+                    <circle cx={cx} cy="1.5" r="1.2" fill="currentColor" />
+                    <circle cx={cx} cy="4.5" r="1.2" fill="currentColor" />
+                  </g>
+                ))}
+              </svg>
+            </div>
+          )}
           <div className="max-h-[220px] overflow-y-auto py-1">
             {suggest.list.map((cmd, i) => (
               <div
@@ -777,23 +910,14 @@ function WorkspaceTerminalPane({
               </div>
             ))}
           </div>
-          <div
-            className="flex cursor-move items-center justify-between border-t border-[var(--border)] px-3 py-1 text-[10px] text-[var(--text-faint)]"
-            title={T.uDragPosition}
-            onMouseDown={(e) => {
-              if (followCursor) return;
-              e.stopPropagation();
-              dragSuggest(e);
-            }}
-          >
+          <div className="flex items-center justify-between border-t border-[var(--border)] px-3 py-1 text-[10px] text-[var(--text-faint)]">
             <span>
               {suggest.navigated ? T.uSuggestNavigated : T.uSuggestPristine}
             </span>
-            {!followCursor && <span className="ml-2 opacity-60">⣿</span>}
           </div>
-        </div>,
-        document.body,
-      )}
+        </div>
+        );
+      })()}
       {searchOpen && (
         <SearchBar
           onSearch={(q) => (q ? searchRef.current?.findNext(q) : searchRef.current?.clearDecorations())}

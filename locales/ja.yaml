@@ -447,11 +447,7 @@ ai:
   agent_stop: 停止
   agent_close: 閉じる
   agent_continue: 続行
-  agent_approval: '承認モード:'
   agent_max_steps: '最大ステップ数:'
-  agent_manual: 毎ステップ確認
-  agent_allowlist: ホワイトリスト自動
-  agent_fullauto: 全自動
   agent_phase_thinking: 考えています…
   agent_phase_waiting: 承認待ち…
   agent_phase_executing: コマンド実行中…
@@ -463,6 +459,13 @@ ai:
   agent_confirm_body: 'AI エージェントが実行を要求しています：\n{}'
   agent_confirm_run: 実行
   agent_confirm_cancel: 拒否
+  permission_consult: 相談モード
+  permission_ask: 確認モード
+  permission_free: 自由モード
+  model_limit: 'コンテキスト上限 (kトークン):'
+  agent_consult_hint: 相談モードではエージェントを使用できません
+  run_confirm_title: 実行確認
+  run_confirm_body: "実行します：\n{}"
 
 
 monitor:

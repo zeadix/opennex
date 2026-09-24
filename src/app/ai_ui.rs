@@ -3,6 +3,7 @@
 //! & run, and snippet saving.
 
 use super::*;
+use crate::app::agent::AiPermissionMode;
 
 /// What the terminal right-click "AI" menu asked for. The menu only
 /// records the intent (it lives inside the terminal-tab borrow scope);
@@ -18,11 +19,38 @@ pub(crate) enum AiCtxAction {
 /// Cap for terminal content sent to the model.
 const MAX_CONTEXT_CHARS: usize = 4000;
 
-/// Turns of history sent with each request (token bound); the system
-/// prompt comes on top of these.
-const MAX_HISTORY_TURNS: usize = 20;
+/// Stable egui Id of the prompt input: keyboard focus on it means the
+/// AI panel owns the keyboard (Tab then cycles the permission mode).
+fn ai_prompt_id() -> egui::Id {
+    egui::Id::new("ai_prompt_input")
+}
+
+/// Width of the permission-mode dropdown (left of the prompt input).
+const MODE_COMBO_WIDTH: f32 = 108.0;
 
 impl App {
+    /// The effective AI-wide permission mode (settings value; the
+    /// startup migration guarantees it is never empty).
+    pub(crate) fn ai_permission_mode(&self) -> AiPermissionMode {
+        AiPermissionMode::from_str(&self.settings.ai_permission_mode)
+    }
+
+    /// Localized label for one permission mode.
+    fn ai_mode_label(&self, mode: AiPermissionMode) -> String {
+        let t = &self.texts.ai;
+        match mode {
+            AiPermissionMode::Consult => t.permission_consult.clone(),
+            AiPermissionMode::Ask => t.permission_ask.clone(),
+            AiPermissionMode::Free => t.permission_free.clone(),
+        }
+    }
+
+    /// Write the mode back to the live settings and persist it.
+    fn ai_set_permission_mode(&mut self, mode: AiPermissionMode) {
+        self.settings.ai_permission_mode = mode.as_str().to_string();
+        let _ = save_settings(&self.settings);
+    }
+
     /// Floating AI panel: drains finished background responses, shows the
     /// transcript and the action buttons. Deferred right-click intents are
     /// picked up here (the dock renders after the dispatch block).
@@ -49,6 +77,16 @@ impl App {
         }
         if !self.show_ai_panel {
             return;
+        }
+        // Tab cycles the permission mode while the AI panel owns the
+        // keyboard (focus on the prompt input). Consumed BEFORE the
+        // panel UI is built, so the TextEdit never sees the key this
+        // frame; egui TextEdits use Tab for focus-change, not indent.
+        if ctx.memory(|m| m.focused()) == Some(ai_prompt_id())
+            && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab))
+        {
+            self.ai_set_permission_mode(self.ai_permission_mode().next());
+            ctx.request_repaint();
         }
         let mut open = true;
         egui::Window::new(&self.texts.ai.panel_title)
@@ -102,14 +140,50 @@ impl App {
                     );
                 }
                 ui.separator();
-                ui.add(
-                    egui::TextEdit::multiline(&mut self.ai_prompt)
-                        .hint_text(&t.prompt_hint)
-                        .desired_rows(2)
-                        .desired_width(ui.available_width()),
-                );
+                ui.horizontal(|ui| {
+                    // Permission mode dropdown, vertically centered in a
+                    // box as tall as the prompt input below.
+                    let row_h = ui.text_style_height(&egui::TextStyle::Body);
+                    let input_h = row_h * 2.0 + 6.0;
+                    let mut mode = self.ai_permission_mode();
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(MODE_COMBO_WIDTH, input_h),
+                        egui::Layout::top_down_justified(egui::Align::Center),
+                        |ui| {
+                            egui::ComboBox::from_id_salt("ai_permission_mode")
+                                .selected_text(self.ai_mode_label(mode))
+                                .width(MODE_COMBO_WIDTH)
+                                .show_ui(ui, |ui| {
+                                    for m in [
+                                        AiPermissionMode::Consult,
+                                        AiPermissionMode::Ask,
+                                        AiPermissionMode::Free,
+                                    ] {
+                                        ui.selectable_value(
+                                            &mut mode,
+                                            m,
+                                            self.ai_mode_label(m),
+                                        );
+                                    }
+                                });
+                        },
+                    );
+                    if mode != self.ai_permission_mode() {
+                        self.ai_set_permission_mode(mode);
+                    }
+                    ui.add_space(4.0);
+                    ui.add(
+                        egui::TextEdit::multiline(&mut self.ai_prompt)
+                            .id(ai_prompt_id())
+                            .hint_text(&t.prompt_hint)
+                            .desired_rows(2)
+                            .desired_width(ui.available_width()),
+                    );
+                });
                 ui.add_space(4.0);
                 let has_answer = self.ai_last_assistant().is_some();
+                let mode = self.ai_permission_mode();
+                let can_operate = mode != AiPermissionMode::Consult;
                 ui.horizontal(|ui| {
                     if ui
                         .add_enabled(!self.ai_busy, egui::Button::new(&t.send))
@@ -126,13 +200,13 @@ impl App {
                     }
                     let has_answer = self.ai_last_assistant().is_some();
                     if ui
-                        .add_enabled(has_answer, egui::Button::new(&t.insert_to_terminal))
+                        .add_enabled(has_answer && can_operate, egui::Button::new(&t.insert_to_terminal))
                         .clicked()
                     {
                         self.ai_insert_response();
                     }
                     if ui
-                        .add_enabled(has_answer, egui::Button::new(&t.insert_run))
+                        .add_enabled(has_answer && can_operate, egui::Button::new(&t.insert_run))
                         .clicked()
                     {
                         self.ai_insert_run_response();
@@ -242,6 +316,13 @@ preserve technical terms, identifiers and formatting."
     /// Fire a background multi-turn request; the reply lands in `ai_rx`
     /// and is drained on later frames. The user turn is pushed BEFORE the
     /// spawn so a failed request still shows what was asked.
+    ///
+    /// History policy: the transcript stores RAW user turns (no terminal
+    /// preamble — that is per-request state and would rot in old turns
+    /// while eating the context budget). The payload is the system prompt
+    /// plus as many NEWEST whole messages as fit the per-model token
+    /// budget; the current terminal context is attached to the newest
+    /// turn only.
     pub(crate) fn ai_send(&mut self, ctx: &egui::Context, system: String, user: String) {
         if self.ai_busy || !self.settings.ai_enabled {
             return;
@@ -254,21 +335,25 @@ preserve technical terms, identifiers and formatting."
             return;
         };
         let preamble = self.ai_context_preamble(&tab);
-        let user_content = if preamble.is_empty() {
-            user
-        } else {
-            format!("{preamble}{user}")
-        };
         self.ai_messages.push(crate::ai::ChatMessage {
             role: "user",
-            content: user_content,
+            content: user,
         });
+        let budget = crate::ai::context_budget_tokens(
+            &self.settings.ai_model_limits,
+            &self.settings.ai_model,
+        )
+        .saturating_sub(crate::ai::estimate_tokens(&system));
         let mut messages = vec![crate::ai::ChatMessage {
             role: "system",
             content: system,
         }];
-        let history_start = self.ai_messages.len().saturating_sub(MAX_HISTORY_TURNS);
-        messages.extend(self.ai_messages[history_start..].iter().cloned());
+        messages.extend(crate::ai::fit_messages(&self.ai_messages, 0, budget));
+        if !preamble.is_empty() {
+            if let Some(last) = messages.last_mut() {
+                last.content = format!("{preamble}{}", last.content);
+            }
+        }
         let cfg = crate::ai::AiConfig {
             base_url: self.settings.ai_base_url.clone(),
             api_key: self.settings.ai_api_key.clone(),
@@ -346,9 +431,13 @@ preserve technical terms, identifiers and formatting."
         }
     }
 
-    /// Insert the latest answer AND run it. On a PROD-marked host this
-    /// detours through the danger confirm dialog instead.
+    /// Insert the latest answer AND run it. Confirmation is required on
+    /// PROD hosts always, and in Ask mode on every host; Consult mode
+    /// never reaches here (button is disabled), but is re-checked.
     pub(crate) fn ai_insert_run_response(&mut self) {
+        if self.ai_permission_mode() == AiPermissionMode::Consult {
+            return;
+        }
         let Some(text) = self.ai_last_assistant() else {
             return;
         };
@@ -360,8 +449,8 @@ preserve technical terms, identifiers and formatting."
             .get(&tab)
             .and_then(|td| td.host.as_ref())
             .is_some_and(|h| h.prod);
-        if is_prod {
-            self.ai_exec_confirm = Some((tab, text));
+        if is_prod || self.ai_permission_mode() == AiPermissionMode::Ask {
+            self.ai_exec_confirm = Some((tab, text, is_prod));
             self.ai_exec_just_opened = true;
         } else {
             self.ai_write_and_run(&tab, &text);
@@ -375,9 +464,10 @@ preserve technical terms, identifiers and formatting."
         }
     }
 
-    /// Danger confirmation for running an AI command on a PROD host.
+    /// Danger confirmation for running an AI command: on PROD hosts
+    /// (always) and in Ask mode (every host).
     pub(crate) fn render_ai_exec_confirm(&mut self, ctx: &egui::Context) {
-        let Some((tab, command)) = self.ai_exec_confirm.clone() else {
+        let Some((tab, command, is_prod)) = self.ai_exec_confirm.clone() else {
             return;
         };
         if std::mem::take(&mut self.ai_exec_just_opened) {
@@ -388,7 +478,7 @@ preserve technical terms, identifiers and formatting."
             self.ai_exec_confirm = None;
             return;
         }
-        let title = self.texts.ai.exec_confirm_title.clone();
+        let t = self.texts.ai.clone();
         let host = self
             .terminals
             .get(&tab)
@@ -396,12 +486,17 @@ preserve technical terms, identifiers and formatting."
             .map(|h| h.addr.clone())
             .unwrap_or_default();
         let preview: String = command.chars().take(300).collect();
-        let body = self
-            .texts
-            .ai
-            .exec_confirm_body
-            .replace("{}", &host)
-            .replace("{}", &preview);
+        // PROD bodies name the host ("{}" twice: host, then command);
+        // the Ask-mode body only shows the command.
+        let (title, body) = if is_prod {
+            let body = t
+                .exec_confirm_body
+                .replacen("{}", &host, 1)
+                .replace("{}", &preview);
+            (t.exec_confirm_title, body)
+        } else {
+            (t.run_confirm_title, t.run_confirm_body.replace("{}", &preview))
+        };
         let confirm_label = self.texts.close_confirm.confirm.clone();
         let cancel_label = self.texts.close_confirm.cancel.clone();
         match self.confirm_dialog_shell(

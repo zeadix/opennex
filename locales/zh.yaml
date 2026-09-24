@@ -447,11 +447,7 @@ ai:
   agent_stop: 停止
   agent_close: 关闭
   agent_continue: 继续
-  agent_approval: '审批模式:'
   agent_max_steps: '最大步数:'
-  agent_manual: 每步确认
-  agent_allowlist: 白名单自动
-  agent_fullauto: 全自动
   agent_phase_thinking: 思考中…
   agent_phase_waiting: 等待审批…
   agent_phase_executing: 命令执行中…
@@ -463,6 +459,13 @@ ai:
   agent_confirm_body: 'AI 代理请求执行：\n{}'
   agent_confirm_run: 执行
   agent_confirm_cancel: 拒绝
+  permission_consult: 咨询模式
+  permission_ask: 询问模式
+  permission_free: 自由模式
+  model_limit: '上下文限额 (k token):'
+  agent_consult_hint: 咨询模式下 AI 代理不可用
+  run_confirm_title: 执行确认
+  run_confirm_body: "即将执行：\n{}"
 
 
 monitor:

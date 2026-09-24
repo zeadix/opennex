@@ -447,11 +447,7 @@ ai:
   agent_stop: Stopp
   agent_close: Schließen
   agent_continue: Weiter
-  agent_approval: 'Freigabemodus:'
   agent_max_steps: 'Max. Schritte:'
-  agent_manual: Jeden Schritt bestätigen
-  agent_allowlist: Allowlist automatisch
-  agent_fullauto: Vollautomatik
   agent_phase_thinking: Denkt nach…
   agent_phase_waiting: Warte auf Freigabe…
   agent_phase_executing: Befehl läuft…
@@ -463,6 +459,13 @@ ai:
   agent_confirm_body: 'Der KI-Agent möchte ausführen:\n{}'
   agent_confirm_run: Ausführen
   agent_confirm_cancel: Ablehnen
+  permission_consult: Beratung
+  permission_ask: Nachfragen
+  permission_free: Frei
+  model_limit: 'Kontextlimit (k Token):'
+  agent_consult_hint: Agent im Beratungsmodus nicht verfügbar
+  run_confirm_title: Ausführungsbestätigung
+  run_confirm_body: "Wird ausgeführt:\n{}"
 
 
 monitor:

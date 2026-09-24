@@ -530,15 +530,10 @@ pub struct AiTexts {
     #[serde(default)]
     pub agent_continue: String,
     #[serde(default)]
-    pub agent_approval: String,
-    #[serde(default)]
     pub agent_max_steps: String,
+    /// Agent-unavailable hint shown in Consult mode.
     #[serde(default)]
-    pub agent_manual: String,
-    #[serde(default)]
-    pub agent_allowlist: String,
-    #[serde(default)]
-    pub agent_fullauto: String,
+    pub agent_consult_hint: String,
     #[serde(default)]
     pub agent_phase_thinking: String,
     #[serde(default)]
@@ -561,6 +556,21 @@ pub struct AiTexts {
     pub agent_confirm_run: String,
     #[serde(default)]
     pub agent_confirm_cancel: String,
+    /// AI-wide permission modes (chat panel dropdown / Tab cycling).
+    #[serde(default)]
+    pub permission_consult: String,
+    #[serde(default)]
+    pub permission_ask: String,
+    #[serde(default)]
+    pub permission_free: String,
+    /// Per-model context budget label (settings page, kilo-chars).
+    #[serde(default)]
+    pub model_limit: String,
+    /// Non-PROD run confirmation (Ask mode). Body "{}": command preview.
+    #[serde(default)]
+    pub run_confirm_title: String,
+    #[serde(default)]
+    pub run_confirm_body: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -1270,11 +1280,8 @@ impl Texts {
                 agent_stop: "停止".into(),
                 agent_close: "关闭".into(),
                 agent_continue: "继续".into(),
-                agent_approval: "审批模式:".into(),
                 agent_max_steps: "最大步数:".into(),
-                agent_manual: "每步确认".into(),
-                agent_allowlist: "白名单自动".into(),
-                agent_fullauto: "全自动".into(),
+                agent_consult_hint: "咨询模式下 AI 代理不可用".into(),
                 agent_phase_thinking: "思考中…".into(),
                 agent_phase_waiting: "等待审批…".into(),
                 agent_phase_executing: "命令执行中…".into(),
@@ -1286,6 +1293,12 @@ impl Texts {
                 agent_confirm_body: "AI 代理请求执行：\n{}".into(),
                 agent_confirm_run: "执行".into(),
                 agent_confirm_cancel: "拒绝".into(),
+                permission_consult: "咨询模式".into(),
+                permission_ask: "询问模式".into(),
+                permission_free: "自由模式".into(),
+                model_limit: "上下文限额 (k token):".into(),
+                run_confirm_title: "执行确认".into(),
+                run_confirm_body: "即将执行：\n{}".into(),
             },
             remote: RemoteTexts {
                 panel_title: "手机远程控制".into(),

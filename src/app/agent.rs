@@ -8,7 +8,59 @@
 
 use serde::Deserialize;
 
-/// How much of the terminal the agent may act on its own.
+/// AI-wide permission mode, shared by the chat panel and the terminal
+/// agent (settings id: "consult" | "ask" | "free").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AiPermissionMode {
+    /// Chat only: no terminal insertion, no command execution at all.
+    Consult,
+    /// Read-only commands run automatically; anything else asks first.
+    #[default]
+    Ask,
+    /// Everything runs automatically (catastrophic patterns stay denied).
+    Free,
+}
+
+impl AiPermissionMode {
+    /// Settings-file serialization (stable ids, not enum names).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AiPermissionMode::Consult => "consult",
+            AiPermissionMode::Ask => "ask",
+            AiPermissionMode::Free => "free",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "consult" => AiPermissionMode::Consult,
+            "free" => AiPermissionMode::Free,
+            _ => AiPermissionMode::Ask,
+        }
+    }
+
+    /// The agent's internal gate level for this mode. Consult never
+    /// reaches the gate — the agent cannot start in that mode.
+    pub fn approval(self) -> ApprovalMode {
+        match self {
+            AiPermissionMode::Consult => ApprovalMode::Manual,
+            AiPermissionMode::Ask => ApprovalMode::Allowlist,
+            AiPermissionMode::Free => ApprovalMode::FullAuto,
+        }
+    }
+
+    /// The mode Tab cycles to next.
+    pub fn next(self) -> Self {
+        match self {
+            AiPermissionMode::Consult => AiPermissionMode::Ask,
+            AiPermissionMode::Ask => AiPermissionMode::Free,
+            AiPermissionMode::Free => AiPermissionMode::Consult,
+        }
+    }
+}
+
+/// How much of the terminal the agent may act on its own. Internal
+/// gate level only — the user-facing setting is [`AiPermissionMode`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ApprovalMode {
     /// Every command needs an explicit user confirmation.
@@ -18,25 +70,6 @@ pub enum ApprovalMode {
     Allowlist,
     /// Everything except Destructive commands runs automatically.
     FullAuto,
-}
-
-impl ApprovalMode {
-    /// Settings-file serialization (stable ids, not enum names).
-    pub fn as_str(self) -> &'static str {
-        match self {
-            ApprovalMode::Manual => "manual",
-            ApprovalMode::Allowlist => "allowlist",
-            ApprovalMode::FullAuto => "full-auto",
-        }
-    }
-
-    pub fn from_str(s: &str) -> Self {
-        match s {
-            "manual" => ApprovalMode::Manual,
-            "full-auto" => ApprovalMode::FullAuto,
-            _ => ApprovalMode::Allowlist,
-        }
-    }
 }
 
 /// Safety classification of one shell command.
@@ -620,18 +653,32 @@ mod tests {
     }
 
     #[test]
-    fn approval_mode_roundtrips_stable_ids() {
+    fn ai_permission_mode_roundtrips_stable_ids() {
         for mode in [
-            ApprovalMode::Manual,
-            ApprovalMode::Allowlist,
-            ApprovalMode::FullAuto,
+            AiPermissionMode::Consult,
+            AiPermissionMode::Ask,
+            AiPermissionMode::Free,
         ] {
-            assert_eq!(ApprovalMode::from_str(mode.as_str()), mode);
+            assert_eq!(AiPermissionMode::from_str(mode.as_str()), mode);
         }
+        // Unknown / empty ids fall back to the safe middle mode.
+        assert_eq!(AiPermissionMode::from_str("legacy"), AiPermissionMode::Ask);
+        assert_eq!(AiPermissionMode::from_str(""), AiPermissionMode::Ask);
+        assert_eq!(AiPermissionMode::default(), AiPermissionMode::Ask);
+    }
+
+    #[test]
+    fn ai_permission_mode_maps_to_gate_levels_and_cycles() {
         assert_eq!(
-            ApprovalMode::from_str("legacy-unknown"),
+            AiPermissionMode::Ask.approval(),
             ApprovalMode::Allowlist
         );
-        assert_eq!(ApprovalMode::default(), ApprovalMode::Allowlist);
+        assert_eq!(AiPermissionMode::Free.approval(), ApprovalMode::FullAuto);
+        assert_eq!(
+            AiPermissionMode::Consult.next(),
+            AiPermissionMode::Ask
+        );
+        assert_eq!(AiPermissionMode::Ask.next(), AiPermissionMode::Free);
+        assert_eq!(AiPermissionMode::Free.next(), AiPermissionMode::Consult);
     }
 }

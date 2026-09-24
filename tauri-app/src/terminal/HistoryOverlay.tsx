@@ -2,7 +2,8 @@ import { useI18n } from '../i18n-context';
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { FiFolder, FiPlus, FiStar, FiTrash2, FiEdit2, FiX } from "react-icons/fi";
 import { invoke } from "./tauri";
-import { cursorRefreshers, focusedSlot, lastCursor, sendTo } from "./registry";
+import { createPortal } from "react-dom";
+import { cursorBySlot, cursorRefreshers, focusedSlot, sendTo } from "./registry";
 import { beginOverlayDrag } from "./TerminalPane";
 import { loadSettings } from "../settings";
 import { FavFolder, loadFolders, newFolderId, persistFolders } from "../favorites";
@@ -48,54 +49,82 @@ function WorkspaceHistoryOverlay({ workspaceId, onClose }: HistoryOverlayProps) 
   const [newFolderName, setNewFolderName] = useState("");
   const [q, setQ] = useState("");
   const listRefs = useRef<Record<string, HTMLDivElement | null>>({});
-  // Positioning: remembered > caret-follow (setting) > default top-right.
+  // 定位模型（设置「指令弹层跟随输入光标」）：
+  //   开 = 每次呼出都锚在「聚焦终端」的输入光标处（光标行下方，贴底
+  //        翻上方，贴边收进视口），不可拖拽；
+  //   关 = 固定位置：顶部拖拽条可拖动，位置记忆到 localStorage，下次
+  //        呼出仍在原位，不跟随光标。
   const follow = loadSettings().followCursor;
-  const [pos, setPos] = useState<{ x: number; y: number } | null>(() => {
+  const overlayRef = useRef<HTMLDivElement | null>(null);
+  const [fixedPos, setFixedPos] = useState<{ x: number; y: number } | null>(() => {
     try {
       return JSON.parse(localStorage.getItem("opennex-palette-pos") ?? "null");
     } catch {
       return null;
     }
   });
-  // 挂载后（首帧绘制前）强制刷新一次光标屏幕坐标：终端可能刚完成
-  // 布局，缓存的 lastCursor 已过期。刷新后立即重定位，用户无感。
-  const [, forcePos] = useState(0);
-  const overlayRef = useRef<HTMLDivElement | null>(null);
-  const [manualPos, setManualPos] = useState<{ x: number; y: number } | null>(null);
   const [anchored, setAnchored] = useState<{ left: number; top: number } | null>(null);
+  const anchoredRef = useRef(anchored);
+  anchoredRef.current = anchored;
   useLayoutEffect(() => {
-    // 打开时（及窗口尺寸变化时）强制刷新光标屏幕坐标再定位：
-    // 默认 光标行下方、左缘对齐光标；贴底改到光标上方，贴右缘改右上角
-    // 对齐 —— 无论如何保持弹层完整可见、不遮挡光标行。
+    if (!follow) {
+      setAnchored(null);
+      return;
+    }
+    // 打开时（及窗口尺寸变化时）刷新光标坐标再定位。
     const compute = () => {
       cursorRefreshers.forEach((fn) => fn());
       const el = overlayRef.current;
-      if (!el || !(follow && lastCursor.x > 0)) {
+
+      // 多终端：取「聚焦终端」分桶里的光标（pane 本地坐标），用宿主
+      // 矩形×缩放映射回视口。聚焦槽位若还没有光标数据（尚未输入），
+      // 退回右上角默认位。
+      const entry = cursorBySlot.get(focusedSlot.value);
+      if (!el || !entry || entry.host.w <= 0) {
         setAnchored(null);
         return;
       }
+      const zoom = entry.zoom || 1;
+      const curX = entry.host.left + entry.x * zoom;
+      const curTop = entry.host.top + entry.y * zoom;
+      const lineH = (entry.h || 20) * zoom;
       const r = el.getBoundingClientRect();
       const vw = window.innerWidth;
       const vh = window.innerHeight;
-      const curX = Math.min(lastCursor.x, vw - r.width - 4);
-      const curTop = lastCursor.y;
-      const curBottom = curTop + (lastCursor.h || 20);
-      let left = curX;
+      let left = Math.min(curX, vw - r.width - 4);
       if (left + r.width > vw - 4) left = curX - r.width;
       left = Math.max(4, Math.min(left, vw - r.width - 4));
-      let top = curBottom + 4;
+      let top = curTop + lineH + 4;
       if (top + r.height > vh - 4) top = Math.max(4, curTop - r.height - 6);
       top = Math.max(4, Math.min(top, vh - r.height - 4));
       setAnchored({ left, top });
     };
     compute();
     window.addEventListener("resize", compute);
-    return () => window.removeEventListener("resize", compute);
+    // 面板打开时光标分桶可能还没就绪（终端尚未输入过/坐标未刷）：
+    // 轮询重定位直到锚到光标，拿到后停止（resize 事件继续维护）。
+    let settled = false;
+    const poll = window.setInterval(() => {
+      if (settled) return;
+      compute();
+      if (anchoredRef.current) {
+        settled = true;
+        window.clearInterval(poll);
+      }
+    }, 250);
+    window.setTimeout(() => window.clearInterval(poll), 3000);
+    return () => {
+      window.removeEventListener("resize", compute);
+      window.clearInterval(poll);
+    };
   }, [follow]);
 
-  const posStyle: React.CSSProperties | undefined = manualPos
-    ? { left: manualPos.x, top: manualPos.y }
-    : anchored ?? (pos ? { left: pos.x, top: pos.y } : undefined);
+  const DEFAULT_POS: React.CSSProperties = { right: 24, top: 56 };
+  const posStyle: React.CSSProperties = follow
+    ? anchored ?? DEFAULT_POS
+    : fixedPos
+      ? { left: fixedPos.x, top: fixedPos.y }
+      : DEFAULT_POS;
 
   useEffect(() => {
     let stale = false;
@@ -200,39 +229,39 @@ function WorkspaceHistoryOverlay({ workspaceId, onClose }: HistoryOverlayProps) 
 
   const items = activeFolder()?.items ?? [];
 
-  return (
+  return createPortal(
     <div
-      className={`animate-fade-up fixed z-[6000] flex flex-col overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] shadow-[var(--shadow-lift)] ${
+      ref={overlayRef}
+      className={`animate-fade-up fixed z-[9500] flex flex-col overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] shadow-[var(--shadow-lift)] ${
         posStyle ? "" : "right-6 top-14"
       }`}
       style={posStyle}
       onMouseDown={(e) => e.stopPropagation()}
     >
-      {/* ── 拖拽把手（明确的拖拽区域）── */}
-      <div
-        className="overlay-grip"
-        title={T.uDragPosition}
-        onMouseDown={(e) => {
-          e.stopPropagation();
-          beginOverlayDrag(e, (x, y) => {
-            const p = { x: Math.max(4, x), y: Math.max(4, y) };
-            setManualPos(p);
-            if (!follow) {
-              setPos(p);
+      {/* ── 拖拽条（仅固定模式）：拖动改变面板位置，记忆到下次 ── */}
+      {!follow && (
+        <div
+          className="overlay-grip"
+          title={T.uDragPosition}
+          onMouseDown={(e) => {
+            e.stopPropagation();
+            beginOverlayDrag(e, (x, y) => {
+              const p = { x: Math.max(4, x), y: Math.max(4, y) };
+              setFixedPos(p);
               localStorage.setItem("opennex-palette-pos", JSON.stringify(p));
-            }
-          });
-        }}
-      >
-        <svg width="22" height="6" aria-hidden="true">
-          {[3, 11, 19].map((cx) => (
-            <g key={cx}>
-              <circle cx={cx} cy="1.5" r="1.2" fill="currentColor" />
-              <circle cx={cx} cy="4.5" r="1.2" fill="currentColor" />
-            </g>
-          ))}
-        </svg>
-      </div>
+            });
+          }}
+        >
+          <svg width="22" height="6" aria-hidden="true">
+            {[3, 11, 19].map((cx) => (
+              <g key={cx}>
+                <circle cx={cx} cy="1.5" r="1.2" fill="currentColor" />
+                <circle cx={cx} cy="4.5" r="1.2" fill="currentColor" />
+              </g>
+            ))}
+          </svg>
+        </div>
+      )}
 
       {/* ── 搜索（设计稿：⌕ 搜索历史指令…）── */}
       <div className="flex items-center gap-2 border-b border-[var(--border)] px-3 py-2">
@@ -475,6 +504,7 @@ function WorkspaceHistoryOverlay({ workspaceId, onClose }: HistoryOverlayProps) 
           onCancel={() => setPrompt(null)}
         />
       )}
-    </div>
+    </div>,
+    document.body,
   );
 }

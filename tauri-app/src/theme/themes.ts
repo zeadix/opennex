@@ -270,8 +270,20 @@ export function cloneAsCustom(src: Theme): Theme {
   };
 }
 
+/** 出厂默认字体包 = 预设主题的「主题字体」；uiFont/termFont 空串即应用
+ * 默认字体栈（Geist Sans / JetBrains Mono）。 */
+export const DEFAULT_FONT_PACK: ThemeFonts = {
+  uiFont: "",
+  uiFontSize: 13,
+  termFont: "",
+  termFontSize: 13,
+};
+
 export function getTheme(id: string): Theme {
-  return allThemes().find((t) => t.id === id) ?? THEMES[0];
+  const t = allThemes().find((t) => t.id === id) ?? THEMES[0];
+  // 预设主题没有字体包时按出厂默认包处理，「使用主题字体」对任何主题
+  // 都有确定语义（预设 = 应用设计字体；自定义 = 编辑器里配置的字体）。
+  return t.font ? t : { ...t, font: { ...DEFAULT_FONT_PACK } };
 }
 
 export function loadThemeId(): string {
@@ -284,6 +296,13 @@ export function applyTheme(id: string) {
   localStorage.setItem(KEY, theme.id);
 }
 
+// Re-entrancy guard for the theme event: applyBackgroundImage re-applies
+// the theme tokens, and App listens to this event to re-run that apply —
+// without the guard a nested applyThemeObject re-dispatches and the two
+// calls chase each other forever (synchronous freeze, e.g. toggling
+// 使用主题字体).
+let dispatchingThemeEvent = false;
+
 /** Apply a theme object's tokens to :root (used by the live editor too).
  * Terminal colors get dedicated --term-* variables so the terminal can
  * diverge from the UI palette. */
@@ -292,6 +311,9 @@ export function applyThemeObject(theme: Theme) {
   for (const [k, v] of Object.entries(theme.colors)) {
     root.style.setProperty(`--${k.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase())}`, v);
   }
+  // Native controls (select popups, scrollbars, form widgets) must match
+  // the theme's light/dark nature, or their default scheme fights the UI.
+  root.style.setProperty("color-scheme", theme.dark ? "dark" : "light");
   // Shape/shadow tokens derive from the accent + dark flag so custom and
   // preset themes stay consistent (website parity: soft two-layer shadows,
   // translucent accent washes instead of solid tints).
@@ -346,8 +368,16 @@ export function applyThemeObject(theme: Theme) {
   root.style.setProperty("--term-cursor", term.cursor);
   root.style.setProperty("--term-selection", term.selection);
   term.ansi.forEach((c, i) => root.style.setProperty(`--term-ansi-${i}`, c));
-  // Panes re-read the variables live (theme editor preview).
-  window.dispatchEvent(new CustomEvent("opennex-terminal-theme"));
+  // Panes re-read the variables live (theme editor preview). Suppressed
+  // when already inside a dispatch — the outer event covers this apply.
+  if (!dispatchingThemeEvent) {
+    dispatchingThemeEvent = true;
+    try {
+      window.dispatchEvent(new CustomEvent("opennex-terminal-theme"));
+    } finally {
+      dispatchingThemeEvent = false;
+    }
+  }
 }
 
 // ---- 全局背景图片（跨所有面板）------------------------------------------

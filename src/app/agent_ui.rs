@@ -7,7 +7,7 @@
 //! step cap, timeout or user stop.
 
 use super::*;
-use crate::app::agent::{ApprovalMode, GateDecision, WaitSignal};
+use crate::app::agent::{AiPermissionMode, ApprovalMode, GateDecision, WaitSignal};
 
 /// Status of one completed step in the transcript.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -120,10 +120,10 @@ pub(crate) fn agent_stop_shortcut_hit(
 }
 
 impl App {
-    /// Effective approval mode for the current agent (PROD hosts are
-    /// always downgraded to Manual).
+    /// Effective approval level for the current agent, derived from the
+    /// AI-wide permission mode (PROD hosts are always downgraded to
+    /// Manual: every command confirms, destructive is denied).
     pub(crate) fn agent_effective_mode(&self) -> ApprovalMode {
-        let mode = ApprovalMode::from_str(&self.settings.agent_approval_mode);
         let prod = self
             .agent
             .as_ref()
@@ -133,7 +133,7 @@ impl App {
         if prod {
             ApprovalMode::Manual
         } else {
-            mode
+            self.ai_permission_mode().approval()
         }
     }
 
@@ -444,6 +444,8 @@ send {\"action\":\"done\"} when it is achieved."
     }
 
     /// Fire the next model call for the agent (independent rx/busy).
+    /// The conversation is fitted into the per-model char budget with
+    /// the system prompt and the GOAL (first two messages) always kept.
     fn agent_spawn_model_call(&mut self) {
         let Some(agent) = self.agent.as_mut() else {
             return;
@@ -453,7 +455,11 @@ send {\"action\":\"done\"} when it is achieved."
             api_key: self.settings.ai_api_key.clone(),
             model: self.settings.ai_model.clone(),
         };
-        let messages = agent.chat.clone();
+        let budget = crate::ai::context_budget_tokens(
+            &self.settings.ai_model_limits,
+            &self.settings.ai_model,
+        );
+        let messages = crate::ai::fit_messages(&agent.chat, 2, budget);
         let (tx, rx) = std::sync::mpsc::channel();
         agent.rx = Some(rx);
         std::thread::spawn(move || {
@@ -468,6 +474,11 @@ send {\"action\":\"done\"} when it is achieved."
             return;
         };
         if goal.is_empty() || self.agent.is_some() {
+            return;
+        }
+        // Consult mode has no execution rights at all (the UI hides the
+        // start controls; this is the belt-and-braces check).
+        if self.ai_permission_mode() == AiPermissionMode::Consult {
             return;
         }
         let mut chat = vec![crate::ai::ChatMessage {
@@ -611,31 +622,20 @@ safer approach."
         ui.label(egui::RichText::new(&t.agent_section).size(10.0).color(weak));
         match self.agent.as_mut() {
             None => {
-                // Goal input + approval mode + start.
+                // Goal input + start. Consult mode has no execution
+                // rights: the agent is unavailable there.
+                if self.ai_permission_mode() == AiPermissionMode::Consult {
+                    ui.label(
+                        egui::RichText::new(&t.agent_consult_hint).size(10.0).color(weak),
+                    );
+                    return;
+                }
                 ui.add(
                     egui::TextEdit::multiline(&mut self.agent_goal)
                         .hint_text(&t.agent_goal_hint)
                         .desired_rows(2)
                         .desired_width(ui.available_width()),
                 );
-                ui.horizontal(|ui| {
-                    ui.label(&t.agent_approval);
-                    let mut mode = ApprovalMode::from_str(&self.settings.agent_approval_mode);
-                    egui::ComboBox::from_id_salt("agent_approval")
-                        .selected_text(self.agent_mode_label(mode))
-                        .show_ui(ui, |ui| {
-                            for m in [
-                                ApprovalMode::Allowlist,
-                                ApprovalMode::Manual,
-                                ApprovalMode::FullAuto,
-                            ] {
-                                ui.selectable_value(&mut mode, m, self.agent_mode_label(m));
-                            }
-                        });
-                    if ApprovalMode::from_str(&self.settings.agent_approval_mode) != mode {
-                        self.settings.agent_approval_mode = mode.as_str().to_string();
-                    }
-                });
                 let can_start = self.settings.ai_enabled && !self.agent_goal.trim().is_empty();
                 if ui
                     .add_enabled(can_start, egui::Button::new(&t.agent_start))
@@ -723,14 +723,6 @@ safer approach."
                 });
                 let _ = tab;
             }
-        }
-    }
-
-    fn agent_mode_label(&self, mode: ApprovalMode) -> String {
-        match mode {
-            ApprovalMode::Manual => self.texts.ai.agent_manual.clone(),
-            ApprovalMode::Allowlist => self.texts.ai.agent_allowlist.clone(),
-            ApprovalMode::FullAuto => self.texts.ai.agent_fullauto.clone(),
         }
     }
 }

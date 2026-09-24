@@ -50,6 +50,17 @@ input, textarea, select, [contenteditable="true"] {
   -webkit-user-select: text;
   user-select: text;
 }
+
+/* Native <select> popups must follow the app theme: without this, the
+   option list can render light-on-light (or dark-on-dark) depending on
+   the engine/system scheme — WebKitGTK in particular. color-scheme is
+   set on :root by applyThemeObject (dark vs light theme); the explicit
+   option colors force theme tokens into the popup list itself. */
+select option,
+select optgroup {
+  background-color: var(--bg-panel);
+  color: var(--text);
+}
 img, svg { -webkit-user-drag: none; }
 
 ::-webkit-scrollbar { width: 8px; height: 8px; }

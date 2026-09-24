@@ -15,16 +15,31 @@ export const focusedSlot = { value: 0 };
  * components outside the dock models (busy dots) can read it freely. */
 export const activityStore: { map: Record<string, number> } = { map: {} };
 
-/** Screen position of the focused terminal's input cursor (px) — lets
- * the auto-match overlay and the Alt palette follow the caret. `h` is
- * the cursor cell height, so popups can sit just below the caret line
- * without covering it. */
-export const lastCursor = { x: 0, y: 0, h: 20 };
-
 /** Per-pane cursor-position refreshers — the Alt palette runs them all
  * right before mounting so it positions against the LIVE caret, not a
  * coordinate cached from the last keystroke/render. */
 export const cursorRefreshers = new Set<() => void>();
+
+/** 每个终端自己的光标位置：pane 本地 px（与终端同一缩放上下文，绝无
+ * 跨空间换算误差）+ 宿主元素可视矩形 + 缩放系数。自动补全面板直接在
+ * pane 内渲染（天然跟随）；历史面板用宿主矩形把本地坐标映射回视口。
+ * 各终端写各自的桶，互不覆盖 —— 多终端下不可能锚错终端。 */
+export const cursorBySlot = new Map<
+  number,
+  {
+    x: number;
+    y: number;
+    h: number;
+    host: { left: number; top: number; w: number; h: number };
+    zoom: number;
+  }
+>();
+
+// DEV 调试出口：浏览器控制台可直接检查光标跟随的实际状态（生产构建剔除）。
+const isDev = Boolean((import.meta as any).env?.DEV) || location.hostname === "localhost";
+if (isDev) {
+  (window as any).__opennexCursorDebug = { cursorBySlot, focusedSlot };
+}
 
 export function registerSocket(slot: number, ws: WebSocket) {
   sockets.set(slot, ws);

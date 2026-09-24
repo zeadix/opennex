@@ -447,11 +447,7 @@ ai:
   agent_stop: Ferma
   agent_close: Chiudi
   agent_continue: Continua
-  agent_approval: 'Modalità approvazione:'
   agent_max_steps: 'Passi max:'
-  agent_manual: Conferma ogni passo
-  agent_allowlist: Allowlist automatica
-  agent_fullauto: Automatico totale
   agent_phase_thinking: Sta pensando…
   agent_phase_waiting: In attesa di approvazione…
   agent_phase_executing: Comando in esecuzione…
@@ -463,6 +459,13 @@ ai:
   agent_confirm_body: "L'agente AI chiede di eseguire:\n{}"
   agent_confirm_run: Esegui
   agent_confirm_cancel: Rifiuta
+  permission_consult: Consultazione
+  permission_ask: Chiedi
+  permission_free: Libero
+  model_limit: 'Limite di contesto (k token):'
+  agent_consult_hint: Agente non disponibile in modalità Consultazione
+  run_confirm_title: Conferma esecuzione
+  run_confirm_body: "Esecuzione imminente:\n{}"
 
 
 monitor:

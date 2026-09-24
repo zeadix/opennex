@@ -448,11 +448,7 @@ ai:
   agent_stop: Arrêter
   agent_close: Fermer
   agent_continue: Continuer
-  agent_approval: 'Mode d''approbation :'
   agent_max_steps: 'Étapes max :'
-  agent_manual: Confirmer chaque étape
-  agent_allowlist: Liste blanche auto
-  agent_fullauto: Automatique total
   agent_phase_thinking: Réflexion…
   agent_phase_waiting: En attente d'approbation…
   agent_phase_executing: Commande en cours…
@@ -464,6 +460,13 @@ ai:
   agent_confirm_body: 'L''agent IA demande à exécuter :\n{}'
   agent_confirm_run: Exécuter
   agent_confirm_cancel: Refuser
+  permission_consult: Conseil
+  permission_ask: Demander
+  permission_free: Libre
+  model_limit: 'Limite de contexte (k tokens) :'
+  agent_consult_hint: Agent indisponible en mode Conseil
+  run_confirm_title: Confirmation d'exécution
+  run_confirm_body: "Exécution imminente :\n{}"
 
 
 monitor:
