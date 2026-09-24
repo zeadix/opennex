@@ -293,7 +293,9 @@ jobs:
           # grep exits 1 when no other tags exist (first release); guard it.
           PREV_TAG=$(git tag --sort=-v:refname | grep -v "${GITHUB_REF_NAME}" | head -1 || true)
           if [ -n "$PREV_TAG" ]; then
-            RAW_SUBJECTS=$(git log --no-merges --pretty=format:'%s' "$PREV_TAG..${GITHUB_REF_NAME}" | head -30)
+            # sed 消费整个流(而不是 head 提前关管道): 提交数 >30 时
+            # git log 会收到 SIGPIPE,pipefail 下整步 141 退出。
+            RAW_SUBJECTS=$(git log --no-merges --pretty=format:'%s' "$PREV_TAG..${GITHUB_REF_NAME}" | sed -n '1,30p')
           else
             RAW_SUBJECTS="首次发布"
           fi
