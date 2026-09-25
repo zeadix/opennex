@@ -556,3 +556,6 @@ update_window:
   log_title: 更新日誌
   recheck: 重新檢查
   no_logs: （此版本未提供更新日誌）
+  migrate_title: Tauri 版已發布
+  migrate_body: 這是 egui 介面的最後一個更新。全新 Tauri 版已發布，新功能將在 Tauri 版繼續。
+  migrate_btn: 前往下載頁

@@ -610,6 +610,10 @@ pub struct UpdateWindowTexts {
     pub log_title: String,
     pub recheck: String,
     pub no_logs: String,
+    /// 迁移公告：Tauri 版已发布（egui 系列末版提示）。
+    pub migrate_title: String,
+    pub migrate_body: String,
+    pub migrate_btn: String,
 }
 
 /// About-window update section strings.
@@ -1093,6 +1097,9 @@ impl Texts {
                 log_title: "更新日志".into(),
                 recheck: "重新检查".into(),
                 no_logs: "（该版本没有提供更新日志）".into(),
+                migrate_title: "Tauri 版已发布".into(),
+                migrate_body: "这是 egui 界面的最后一个更新。全新 Tauri 版已发布，新功能将在 Tauri 版继续。".into(),
+                migrate_btn: "前往下载页".into(),
             },
             theme_editor: ThemeEditorTexts {
                 colors: ColorNameTexts {

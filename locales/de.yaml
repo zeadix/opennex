@@ -555,3 +555,6 @@ update_window:
   log_title: Änderungen
   recheck: Erneut prüfen
   no_logs: (keine Versionshinweise für diese Version)
+  migrate_title: Die Tauri-Edition ist da
+  migrate_body: Dies ist das letzte Update der egui-Oberfläche. Neue Funktionen erscheinen in der Tauri-Edition.
+  migrate_btn: Zur Download-Seite

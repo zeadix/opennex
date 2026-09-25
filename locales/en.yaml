@@ -555,3 +555,6 @@ update_window:
   log_title: What's new
   recheck: Check again
   no_logs: (no release notes for this version)
+  migrate_title: The Tauri edition is here
+  migrate_body: This is the final update of the egui UI. The new Tauri edition carries all future features.
+  migrate_btn: Go to the download page

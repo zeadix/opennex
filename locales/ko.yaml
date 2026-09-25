@@ -555,3 +555,6 @@ update_window:
   log_title: 업데이트 내용
   recheck: 다시 확인
   no_logs: (이 버전의 업데이트 노트 없음)
+  migrate_title: Tauri 에디션 출시
+  migrate_body: egui UI의 마지막 업데이트입니다. 새 기능은 Tauri 에디션에서 계속됩니다.
+  migrate_btn: 다운로드 페이지로

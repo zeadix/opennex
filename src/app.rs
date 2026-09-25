@@ -6814,6 +6814,43 @@ impl eframe::App for App {
                         ui.add_space(8.0);
                     }
 
+                    // 迁移公告：Tauri 版已发布（egui 系列末版），按钮直达
+                    // 官网下载页。位置在更新日志之后，全程可见。
+                    if show_logs {
+                        ui.add_space(4.0);
+                        egui::Frame::default()
+                            .fill(egui::Color32::from_rgba_unmultiplied(255, 90, 40, 26))
+                            .stroke(egui::Stroke::new(1.0, accent))
+                            .corner_radius(6.0)
+                            .inner_margin(egui::Margin::same(8))
+                            .show(ui, |ui| {
+                                ui.set_min_width(ui.available_width());
+                                ui.vertical(|ui| {
+                                    ui.label(
+                                        egui::RichText::new(&uw.migrate_title)
+                                            .size(12.0)
+                                            .strong(),
+                                    );
+                                    ui.label(
+                                        egui::RichText::new(&uw.migrate_body)
+                                            .size(11.5)
+                                            .color(weak),
+                                    );
+                                    // GitHub Releases 页同时列出 egui 与
+                                    // Tauri 两套安装包，由用户自行选择。
+                                    let url = "https://github.com/zeadix/opennex/releases";
+                                    if ui
+                                        .button(
+                                            egui::RichText::new(&uw.migrate_btn).size(11.5),
+                                        )
+                                        .clicked()
+                                    {
+                                        ctx.open_url(egui::OpenUrl::same_tab(url));
+                                    }
+                                });
+                            });
+                    }
+
                     // Progress bar (download only), below the notes.
                     if let UpdateState::Downloading(p) = &self.update_state {
                         let p = *p;
