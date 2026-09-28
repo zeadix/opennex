@@ -269,12 +269,40 @@ jobs:
         working-directory: tauri-app
         run: npm run tauri -- build --bundles deb,appimage
 
-      - name: Collect bundles
+      - name: Collect bundles + manifest
         shell: bash
+        env:
+          R2_PUBLIC_URL: ${{ env.R2_PUBLIC_URL }}
         run: |
           mkdir -p bundles
           find tauri-app/src-tauri/target/release/bundle -type f \( -name "*.exe" -o -name "*.msi" -o -name "*.dmg" -o -name "*.deb" -o -name "*.AppImage" \) -exec cp {} bundles/ \;
-          ls bundles
+          # 统一为无版本号的稳定文件名（版本在目录名里），官网直链永不失效
+          cd bundles
+          for f in *; do
+            case "$f" in
+              *x64-setup.exe) mv "$f" "OpenNex_x64-setup.exe" ;;
+              *x64_en-US.msi) mv "$f" "OpenNex_x64_en-US.msi" ;;
+              *aarch64.dmg)   mv "$f" "OpenNex_aarch64.dmg" ;;
+              *amd64.deb)     mv "$f" "OpenNex_amd64.deb" ;;
+              *amd64.AppImage) mv "$f" "OpenNex_amd64.AppImage" ;;
+            esac
+          done
+          python3 -c "
+          import hashlib, json, glob, os
+          base = os.environ['R2_PUBLIC_URL'].rstrip('/') + '/tauri/latest'
+          out = {'windows': {}, 'macos': {}, 'linux': {}}
+          osmap = {'.exe': ('windows', 'installer'), '.msi': ('windows', 'msi'),
+                   '.dmg': ('macos', 'dmg'), '.deb': ('linux', 'deb'),
+                   '.AppImage': ('linux', 'appimage')}
+          for f in sorted(glob.glob('*')):
+              kind = osmap.get('.' + f.rsplit('.', 1)[-1])
+              if not kind: continue
+              os_name, key = kind
+              sha = hashlib.sha256(open(f, 'rb').read()).hexdigest()
+              out[os_name][key] = {'url': base + '/' + f, 'sha256': sha}
+          json.dump(out, open('tauri-files.json', 'w'), indent=1)
+          "
+          cat tauri-files.json
 
       - uses: actions/upload-artifact@v4
         with:
@@ -339,6 +367,17 @@ jobs:
       - name: List artifacts
         run: find artifacts/ -type f | sort
 
+      - name: Merge Tauri manifests
+        run: |
+          python3 -c "
+          import json, glob
+          merged = {'windows': {}, 'macos': {}, 'linux': {}}
+          for f in glob.glob('artifacts/tauri-*/tauri-files.json'):
+              d = json.load(open(f))
+              for k, v in d.items(): merged[k].update(v)
+          json.dump(merged, open('tauri-files.json', 'w'))
+          "
+
       - name: Install Wrangler
         run: npm install -g wrangler
 
@@ -350,6 +389,14 @@ jobs:
         run: |
           cd artifacts
           for dir in windows macos-aarch64 linux tauri-windows tauri-macos tauri-linux; do
+            # tauri 产物额外镜像到固定别名目录（官网直链不随版本变化）
+            if [[ "$dir" == tauri-* ]]; then
+              for file in "$dir"/*; do
+                [ -f "$file" ] || continue
+                filename=$(basename "$file")
+                wrangler r2 object put "${{ env.R2_BUCKET }}/tauri/latest/${filename}" --file="$file" --remote
+              done
+            fi
             for file in "$dir"/*; do
               [ -f "$file" ] || continue
               filename=$(basename "$file")
@@ -630,6 +677,11 @@ jobs:
 
           current = json.load(open("/tmp/current_entry.json"))
           current["changelog"] = os.environ.get("CHANGELOG", "")
+          # Tauri 客户端产物（三平台安装包）并入 latest.json，供官网下载页展示
+          try:
+              current["tauri"] = json.load(open("tauri-files.json"))
+          except Exception:
+              pass
           try:
               current["changes"] = json.loads(os.environ.get("CHANGES_JSON", "[]"))
           except Exception:
