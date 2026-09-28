@@ -372,7 +372,7 @@ jobs:
           python3 -c "
           import json, glob
           merged = {'windows': {}, 'macos': {}, 'linux': {}}
-          for f in glob.glob('artifacts/tauri-*/tauri-files.json'):
+          for f in glob.glob('artifacts/tauri-*/**/tauri-files.json', recursive=True):
               d = json.load(open(f))
               for k, v in d.items(): merged[k].update(v)
           json.dump(merged, open('tauri-files.json', 'w'))
