@@ -230,6 +230,11 @@ jobs:
           - os: ubuntu-22.04
             artifacts: tauri-linux
     runs-on: ${{ matrix.os }}
+    env:
+      # minisign 私钥：tauri build 用它给更新器产物(.sig)签名；
+      # 缺失时 tauri build 会直接失败（createUpdaterArtifacts: true）。
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
 
@@ -276,18 +281,27 @@ jobs:
         run: |
           mkdir -p bundles
           find tauri-app/src-tauri/target/release/bundle -type f \( -name "*.exe" -o -name "*.msi" -o -name "*.dmg" -o -name "*.deb" -o -name "*.AppImage" \) -exec cp {} bundles/ \;
+          # 更新器产物（createUpdaterArtifacts）：minisign .sig 签名 + macOS 的
+          # .app.tar.gz（应用内更新器实际下载替换的包；DMG 只作官网直链下载）
+          find tauri-app/src-tauri/target/release -type f \( -name "*.app.tar.gz" -o -name "*.sig" \) -not -path "*/deps/*" -exec cp {} bundles/ \;
           # 统一为无版本号的稳定文件名（版本在目录名里），官网直链永不失效
           cd bundles
           for f in *; do
             case "$f" in
               *x64-setup.exe) mv "$f" "OpenNex_x64-setup.exe" ;;
               *x64_en-US.msi) mv "$f" "OpenNex_x64_en-US.msi" ;;
+              *x64-setup.exe.sig) mv "$f" "OpenNex_x64-setup.exe.sig" ;;
+              *x64_en-US.msi.sig) mv "$f" "OpenNex_x64_en-US.msi.sig" ;;
               *aarch64.dmg)   mv "$f" "OpenNex_aarch64.dmg" ;;
+              *.app.tar.gz.sig) mv "$f" "OpenNex.app.tar.gz.sig" ;;
+              *.app.tar.gz)   mv "$f" "OpenNex.app.tar.gz" ;;
               *amd64.deb)     mv "$f" "OpenNex_amd64.deb" ;;
+              *amd64.deb.sig) mv "$f" "OpenNex_amd64.deb.sig" ;;
               *amd64.AppImage) mv "$f" "OpenNex_amd64.AppImage" ;;
+              *amd64.AppImage.sig) mv "$f" "OpenNex_amd64.AppImage.sig" ;;
             esac
           done
-          python3 -c "
+          python3 << 'PYMANIFEST'
           import hashlib, json, glob, os
           base = os.environ['R2_PUBLIC_URL'].rstrip('/') + '/tauri/latest'
           out = {'windows': {}, 'macos': {}, 'linux': {}}
@@ -301,7 +315,24 @@ jobs:
               sha = hashlib.sha256(open(f, 'rb').read()).hexdigest()
               out[os_name][key] = {'url': base + '/' + f, 'sha256': sha}
           json.dump(out, open('tauri-files.json', 'w'), indent=1)
-          "
+          # 应用内更新源清单：平台键 -> {url, signature}（minisign 签名正文）。
+          # publish 侧把三平台合并成 tauri/latest.json 给 tauri-plugin-updater。
+          def upd_entry(binary, sig):
+              if os.path.exists(binary) and os.path.exists(sig):
+                  return {'url': base + '/' + binary,
+                          'signature': open(sig, encoding='utf-8').read().strip()}
+              return None
+          upd = {}
+          for platform_key, (binary, sig) in {
+              'windows-x86_64': ('OpenNex_x64-setup.exe', 'OpenNex_x64-setup.exe.sig'),
+              'darwin-aarch64': ('OpenNex.app.tar.gz', 'OpenNex.app.tar.gz.sig'),
+              'linux-x86_64': ('OpenNex_amd64.AppImage', 'OpenNex_amd64.AppImage.sig'),
+          }.items():
+              entry = upd_entry(binary, sig)
+              if entry: upd[platform_key] = entry
+          json.dump(upd, open('tauri-updater.json', 'w'), indent=1)
+          print('updater platforms:', sorted(upd))
+          PYMANIFEST
           cat tauri-files.json
 
       - uses: actions/upload-artifact@v4
@@ -369,14 +400,20 @@ jobs:
 
       - name: Merge Tauri manifests
         run: |
-          python3 -c "
+          python3 << 'PYMERGE'
           import json, glob
           merged = {'windows': {}, 'macos': {}, 'linux': {}}
           for f in glob.glob('artifacts/tauri-*/**/tauri-files.json', recursive=True):
               d = json.load(open(f))
               for k, v in d.items(): merged[k].update(v)
           json.dump(merged, open('tauri-files.json', 'w'))
-          "
+          # 应用内更新源：合并三平台的 {平台键: {url, signature}}
+          merged_upd = {}
+          for f in glob.glob('artifacts/tauri-*/**/tauri-updater.json', recursive=True):
+              merged_upd.update(json.load(open(f)))
+          json.dump(merged_upd, open('tauri-updater.json', 'w'), indent=1)
+          print('updater platforms:', sorted(merged_upd))
+          PYMERGE
 
       - name: Install Wrangler
         run: npm install -g wrangler
@@ -950,6 +987,48 @@ jobs:
         run: |
           wrangler r2 object put "${{ env.R2_BUCKET }}/latest.json" --file=deploy/latest.json --remote --content-type="application/json"
           wrangler r2 object put "${{ env.R2_BUCKET }}/latest.json.sig" --file=deploy/latest.json.sig --remote --content-type="application/octet-stream"
+
+      - name: Build + upload Tauri updater feed (tauri/latest.json)
+        # tauri-plugin-updater 的静态更新源：应用内「一键更新」查这个文件。
+        # platforms 由三平台的 minisign 签名产物合并而来（tauri-updater.json）；
+        # 私钥签名在构建期完成，这里只组装 version/notes/pub_date/platforms。
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          VERSION: ${{ steps.version.outputs.VERSION }}
+          CHANGES_JSON: ${{ steps.changelog.outputs.changes_json }}
+          CHANGES_EN_JSON: ${{ steps.changelog.outputs.changes_en_json }}
+          PYTHONUTF8: "1"
+        run: |
+          mkdir -p deploy
+          python3 << 'PYFEED'
+          import json, os
+          from datetime import datetime, timezone
+          version = os.environ.get("VERSION", "").lstrip("v")
+          try:
+              platforms = json.load(open("tauri-updater.json"))
+          except Exception:
+              platforms = {}
+          if not platforms:
+              raise SystemExit("::error::tauri-updater.json missing/empty — no signed updater artifacts were collected")
+          def env_changes(name):
+              try:
+                  return json.loads(os.environ.get(name, "[]") or "[]")
+              except Exception:
+                  return []
+          zh = env_changes("CHANGES_JSON")
+          en = [e for e in env_changes("CHANGES_EN_JSON") if e]
+          notes = "\n".join(zh + ([""] + en if en else [])) or "稳定性与内部工程改进。"
+          feed = {
+              "version": version,
+              "notes": notes,
+              "pub_date": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "platforms": platforms,
+          }
+          json.dump(feed, open("deploy/tauri-latest.json", "w"), indent=2, ensure_ascii=False)
+          print(json.dumps(feed, indent=2, ensure_ascii=False))
+          PYFEED
+          wrangler r2 object put "${{ env.R2_BUCKET }}/tauri/latest.json" --file=deploy/tauri-latest.json --remote --content-type="application/json"
 
       - name: Create GitHub Release
         # Archive every release on GitHub: attach all installers as
