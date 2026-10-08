@@ -319,6 +319,10 @@ jobs:
           json.dump(out, open('tauri-files.json', 'w'), indent=1)
           # 应用内更新源清单：平台键 -> {url, signature}（minisign 签名正文）。
           # publish 侧把三平台合并成 tauri/latest.json 给 tauri-plugin-updater。
+          # 平台键必须带安装方式后缀（{os}-{arch}-{installer}）：
+          # 插件先查精确键再回退 {os}-{arch}；deb 安装的应用若回退命中
+          # AppImage 条目，会报 "invalid updater binary format"（v0.1.59）。
+          # deb/rpm 安装的一键更新由插件 pkexec/sudo 提权后 dpkg -i 完成。
           def upd_entry(binary, sig):
               if os.path.exists(binary) and os.path.exists(sig):
                   return {'url': base + '/' + binary,
@@ -326,9 +330,11 @@ jobs:
               return None
           upd = {}
           for platform_key, (binary, sig) in {
-              'windows-x86_64': ('OpenNex_x64-setup.exe', 'OpenNex_x64-setup.exe.sig'),
-              'darwin-aarch64': ('OpenNex.app.tar.gz', 'OpenNex.app.tar.gz.sig'),
-              'linux-x86_64': ('OpenNex_amd64.AppImage', 'OpenNex_amd64.AppImage.sig'),
+              'windows-x86_64-nsis': ('OpenNex_x64-setup.exe', 'OpenNex_x64-setup.exe.sig'),
+              'windows-x86_64-msi': ('OpenNex_x64_en-US.msi', 'OpenNex_x64_en-US.msi.sig'),
+              'darwin-aarch64-app': ('OpenNex.app.tar.gz', 'OpenNex.app.tar.gz.sig'),
+              'linux-x86_64-appimage': ('OpenNex_amd64.AppImage', 'OpenNex_amd64.AppImage.sig'),
+              'linux-x86_64-deb': ('OpenNex_amd64.deb', 'OpenNex_amd64.deb.sig'),
           }.items():
               entry = upd_entry(binary, sig)
               if entry: upd[platform_key] = entry
