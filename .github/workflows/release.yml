@@ -1043,14 +1043,13 @@ jobs:
         # 19 of 54 tags ever got a release. Rerunning the job retries it.
         uses: softprops/action-gh-release@v2
         with:
+          # 每个目录整体匹配、各文件恰好命中一次——旧的按扩展名 glob
+          # 会与 tauri-* 目录重复命中同一文件，重复上传触发
+          # update-a-release-asset 404，publish 整步标红（v0.1.59）
           files: |
-            artifacts/**/*.zip
-            artifacts/**/*.msi
-            artifacts/**/*.tar.gz
-            artifacts/**/*.dmg
-            artifacts/**/*.deb
-            artifacts/**/*.exe
-            artifacts/**/*.AppImage
+            artifacts/windows/*
+            artifacts/macos-aarch64/*
+            artifacts/linux/*
             artifacts/tauri-windows/*
             artifacts/tauri-macos/*
             artifacts/tauri-linux/*
