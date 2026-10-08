@@ -267,7 +267,9 @@ jobs:
       - name: Tauri build (macOS)
         if: runner.os == 'macOS'
         working-directory: tauri-app
-        run: npm run tauri -- build --bundles dmg
+        # app 必须显式打出：createUpdaterArtifacts 只为 app 产物生成
+        # .app.tar.gz + .sig（应用内更新器下载替换的包）；dmg 供官网直链
+        run: npm run tauri -- build --bundles app,dmg
 
       - name: Tauri build (Linux)
         if: runner.os == 'Linux'
