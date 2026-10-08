@@ -1,0 +1,67 @@
+name: Rebuild updater feed
+
+# 手动工具：从 R2 上已有的安装包 + .sig 签名重新组装 tauri/latest.json。
+# 用途：feed 结构损坏 / 平台键规则升级（如 v0.1.59 的 {os}-{arch}-{installer}
+# 后缀修正）时，不必重新发版即可修复线上更新源。
+on:
+  workflow_dispatch:
+
+env:
+  R2_BUCKET: opennex-ci
+  R2_PUBLIC_URL: https://opennex.download.zeadix.com
+
+permissions:
+  contents: read
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Assemble + upload tauri/latest.json
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PYTHONUTF8: "1"
+        run: |
+          npm install -g wrangler
+          BASE="${R2_PUBLIC_URL}/tauri/latest"
+          # 版本与双语 notes 取自 egui latest.json 顶层（与发版同源）
+          curl -fsSL "${R2_PUBLIC_URL}/latest.json" -o /tmp/egui-latest.json
+          for f in OpenNex_x64-setup.exe OpenNex_x64_en-US.msi OpenNex.app.tar.gz OpenNex_amd64.AppImage OpenNex_amd64.deb; do
+            curl -fsSL "${BASE}/${f}.sig" -o "/tmp/${f}.sig"
+          done
+          python3 << 'PYFEED'
+          import json
+          from datetime import datetime, timezone
+          base = "${R2_PUBLIC_URL}/tauri/latest"
+          egui = json.load(open("/tmp/egui-latest.json"))
+          # 平台键必须带安装方式后缀（{os}-{arch}-{installer}）：插件先查精确键
+          # 再回退 {os}-{arch}；deb 安装回退命中 AppImage 会报
+          # "invalid updater binary format"。deb/rpm 的一键更新由插件
+          # pkexec/sudo 提权后 dpkg -i 完成。
+          mapping = {
+              "windows-x86_64-nsis": "OpenNex_x64-setup.exe",
+              "windows-x86_64-msi": "OpenNex_x64_en-US.msi",
+              "darwin-aarch64-app": "OpenNex.app.tar.gz",
+              "linux-x86_64-appimage": "OpenNex_amd64.AppImage",
+              "linux-x86_64-deb": "OpenNex_amd64.deb",
+          }
+          platforms = {}
+          for key, f in mapping.items():
+              sig = open(f"/tmp/{f}.sig", encoding="utf-8").read().strip()
+              assert sig.startswith("dW50cnVzdGVk"), f
+              platforms[key] = {"url": f"{base}/{f}", "signature": sig}
+          changes = egui.get("changes", [])
+          changes_en = [e for e in egui.get("changes_en", []) if e]
+          notes = "\n".join(changes + ([""] + changes_en if changes_en else [])) or "稳定性与内部工程改进。"
+          feed = {
+              "version": egui["version"],
+              "notes": notes,
+              "pub_date": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "platforms": platforms,
+          }
+          json.dump(feed, open("/tmp/tauri-latest.json", "w"), indent=2, ensure_ascii=False)
+          print(json.dumps({"version": feed["version"], "platforms": sorted(platforms)}, indent=1))
+          PYFEED
+          wrangler r2 object put "${R2_BUCKET}/tauri/latest.json" --file=/tmp/tauri-latest.json --remote --content-type="application/json"
+          echo "feed rebuilt."
