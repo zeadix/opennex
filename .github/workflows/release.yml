@@ -580,11 +580,11 @@ jobs:
           if gh_out:
               with open(gh_out, "a") as f:
                   f.write("changes_json<<EOF\n")
-                  f.write(json.dumps(out[:30], ensure_ascii=False) + "\nEOF\n")
+                  f.write(json.dumps(out[:10], ensure_ascii=False) + "\nEOF\n")
                   f.write("changes_en_json<<EOF\n")
-                  f.write(json.dumps(out_en[:30], ensure_ascii=False) + "\nEOF\n")
-          print(json.dumps(out[:30], ensure_ascii=False))
-          print(json.dumps(out_en[:30], ensure_ascii=False))
+                  f.write(json.dumps(out_en[:10], ensure_ascii=False) + "\nEOF\n")
+          print(json.dumps(out[:10], ensure_ascii=False))
+          print(json.dumps(out_en[:10], ensure_ascii=False))
           # Diagnostics: the extraction shipped [] for many releases and
           # the runner environment was the only untested variable. These
           # lines land in the step log (stderr) and make every future
