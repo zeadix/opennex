@@ -21,6 +21,7 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          R2_PUBLIC_URL: ${{ env.R2_PUBLIC_URL }}
           PYTHONUTF8: "1"
         run: |
           npm install -g wrangler
@@ -33,7 +34,8 @@ jobs:
           python3 << 'PYFEED'
           import json
           from datetime import datetime, timezone
-          base = "${R2_PUBLIC_URL}/tauri/latest"
+          import os as _os
+          base = _os.environ["R2_PUBLIC_URL"].rstrip("/") + "/tauri/latest"
           egui = json.load(open("/tmp/egui-latest.json"))
           # 平台键必须带安装方式后缀（{os}-{arch}-{installer}）：插件先查精确键
           # 再回退 {os}-{arch}；deb 安装回退命中 AppImage 会报
