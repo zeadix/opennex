@@ -569,10 +569,31 @@ function WorkspaceTerminalPane({
         window.clearTimeout(focusTimer);
         focusEl?.removeEventListener("focus", focusSync);
       };
+      // IME 组合感知（中文/日文输入法）：WebKitGTK 组合期的 keydown 带
+      // 真实 keyCode（不是标准 229）且 isComposing 时序不可靠，xterm 会
+      // 在非修饰键 keydown 时强制 finalize 组合——预编辑串被当作普通键
+      // 入重发（按空格确认候选时“粘贴”出已输入的拼音字母）。组合期事
+      // 件从 xterm 的 helper textarea 冒泡到 host，这里统一跟踪组合状态；
+      // 组合期所有 keydown 一律 return false：xterm 不再强制 finalize
+      // （组合由 compositionend 一次性提交），终端快捷键与补全面板也不
+      // 会劫持输入法的候选导航（方向键/空格/回车）。
+      let composing = 0;
+      const compHost = hostRef.current;
+      const compStart = () => { composing++; };
+      const compEnd = () => { composing = Math.max(0, composing - 1); };
+      compHost?.addEventListener("compositionstart", compStart);
+      compHost?.addEventListener("compositionend", compEnd);
+      (hostRef.current as any)._compCleanup = () => {
+        compHost?.removeEventListener("compositionstart", compStart);
+        compHost?.removeEventListener("compositionend", compEnd);
+      };
       // Overlay + search key handling (single dispatcher; suggestRef
       // mirrors the latest overlay state for this one-time handler).
       term.attachCustomKeyEventHandler((e) => {
         if (e.type !== "keydown") return true;
+        // IME 组合期：候选导航/确认键不进终端逻辑（含组合期间的
+        // Ctrl+F 等——输入法消耗的按键不会是这些组合）。
+        if (composing > 0 || e.isComposing || e.keyCode === 229) return false;
         if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === "f" || e.key === "F")) {
           if (!disposed) setSearchOpen(true);
           return false;
@@ -802,6 +823,7 @@ function WorkspaceTerminalPane({
       if (cleanup) cleanup();
       (hostRef.current as any)?._wheelCleanup?.();
       (hostRef.current as any)?._keyCleanup2?.();
+      (hostRef.current as any)?._compCleanup?.();
       (hostRef.current as any)?._ctxCleanup?.();
       (hostRef.current as any)?._mouseupCleanup?.();
       (hostRef.current as any)?._lineSetCleanup?.();
