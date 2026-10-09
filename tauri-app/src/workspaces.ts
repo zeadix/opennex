@@ -33,7 +33,9 @@ export function loadWorkspaces(): Workspace[] {
     const raw = JSON.parse(localStorage.getItem(KEY) ?? "[]");
     if (Array.isArray(raw) && raw.length > 0) {
       const list = raw.map((w: any) => ({
-        id: nextId(),
+        // id 必须跨重启稳定:后端命令历史按 workspace id 键控持久化,
+        // 重新编号会让恢复的历史错位到别的工作空间。
+        id: Number.isFinite(w.id) ? Number(w.id) : nextId(),
         name: String(w.name ?? "工作空间"),
         locked: !!w.locked,
         lockHash: w.lockHash,

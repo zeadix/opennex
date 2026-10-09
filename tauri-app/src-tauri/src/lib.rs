@@ -121,12 +121,14 @@ fn lan_ipv4() -> Option<String> {
 /// Input history is deduplicated, ranked and capped within each workspace.
 const HISTORY_CAP_DEFAULT: usize = 500;
 
+#[derive(serde::Serialize, serde::Deserialize)]
 struct HistEntry {
     id: u64,
     cmd: String,
     hits: u32,
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
 struct WorkspaceHistory {
     entries: Vec<HistEntry>,
     cap: usize,
@@ -141,10 +143,37 @@ impl Default for WorkspaceHistory {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, serde::Serialize, serde::Deserialize)]
 struct HistoryStore {
     workspaces: HashMap<u64, WorkspaceHistory>,
     next_id: u64,
+}
+
+/// 历史指令落盘路径(setup 时解析;测试环境未设置 → 持久化 no-op)。
+static HISTORY_PATH: OnceLock<std::path::PathBuf> = OnceLock::new();
+
+/// 历史指令写盘:临时文件 + rename 原子替换,损坏不至于丢旧档。
+/// 由各 mutator 在持锁状态下调用(传 self,勿再抢锁)。
+fn persist_history_snapshot(store: &HistoryStore) {
+    let Some(path) = HISTORY_PATH.get() else { return };
+    let Ok(json) = serde_json::to_string(store) else { return };
+    let tmp = path.with_extension("json.tmp");
+    if std::fs::write(&tmp, json).is_ok() {
+        let _ = std::fs::rename(&tmp, path);
+    }
+}
+
+/// 启动时恢复历史指令(setup 调用一次)。
+fn load_history_from_disk() {
+    let Some(path) = HISTORY_PATH.get() else { return };
+    let Ok(raw) = std::fs::read_to_string(path) else { return };
+    if let Ok(mut store) = serde_json::from_str::<HistoryStore>(&raw) {
+        for h in store.workspaces.values_mut() {
+            h.cap = h.cap.clamp(10, 10_000);
+            h.entries.truncate(h.cap);
+        }
+        *history().lock().unwrap() = store;
+    }
 }
 
 impl HistoryStore {
@@ -164,6 +193,7 @@ impl HistoryStore {
         };
         hist.entries.insert(0, entry);
         hist.entries.truncate(hist.cap);
+        persist_history_snapshot(self);
     }
 
     fn get(&self, workspace_id: u64) -> &[HistEntry] {
@@ -179,18 +209,24 @@ impl HistoryStore {
         };
         let before = hist.entries.len();
         hist.entries.retain(|e| e.id != id);
-        hist.entries.len() != before
+        let changed = hist.entries.len() != before;
+        if changed {
+            persist_history_snapshot(self);
+        }
+        changed
     }
 
     fn set_cap(&mut self, workspace_id: u64, cap: usize) {
         let hist = self.workspaces.entry(workspace_id).or_default();
         hist.cap = cap.clamp(10, 10_000);
         hist.entries.truncate(hist.cap);
+        persist_history_snapshot(self);
     }
 
     fn clear(&mut self, workspace_id: u64) {
         if let Some(hist) = self.workspaces.get_mut(&workspace_id) {
             hist.entries.clear(); // Keep this workspace's configured capacity.
+            persist_history_snapshot(self);
         }
     }
 }
@@ -1230,7 +1266,19 @@ pub fn run() {
         rt.block_on(spawn_ws_server(sessions));
     });
 
-    tauri::Builder::default()
+    use tauri::Manager;
+tauri::Builder::default()
+        .setup(|app| {
+            // 历史指令持久化路径 + 启动恢复(退出不清空)
+            let dir = app
+                .path()
+                .app_data_dir()
+                .unwrap_or_else(|_| std::path::PathBuf::from("."));
+            let _ = std::fs::create_dir_all(&dir);
+            let _ = HISTORY_PATH.set(dir.join("history.json"));
+            load_history_from_disk();
+            Ok(())
+        })
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(state)
