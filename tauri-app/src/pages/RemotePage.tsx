@@ -69,6 +69,29 @@ export default function RemotePage({ initialTab = "lan" }: { initialTab?: "lan" 
     return <div className="p-8 text-[13px] text-[var(--text-faint)]">{T.uLoading}</div>;
   }
 
+  const copyAddr = (url?: string | null) => {
+    if (!url) return;
+    navigator.clipboard.writeText(url).then(
+      () => window.dispatchEvent(
+        new CustomEvent("opennex-toast", { detail: { text: T.uCopiedClipboard, ms: 1200 } }),
+      ),
+      () => {},
+    );
+  };
+  const hostOf = (url: string) => {
+    try { return new URL(url).host; } catch { return url; }
+  };
+  const copyBtn = (url?: string | null) => (
+    <button
+      title={T.uCopyAddress}
+      aria-label={T.uCopyAddress}
+      className="shrink-0 rounded-md border border-[var(--border)] p-1.5 text-[var(--text-dim)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text)]"
+      onClick={() => copyAddr(url)}
+    >
+      <FiCopy size={12} />
+    </button>
+  );
+
   return (
     <div className="h-full overflow-y-auto px-8 py-6">
       <div className="mx-auto max-w-[520px]">
@@ -116,8 +139,11 @@ export default function RemotePage({ initialTab = "lan" }: { initialTab?: "lan" 
                 />
               )}
               <div className="min-w-0 flex-1">
-                <div className="break-all font-mono text-[12.5px] leading-relaxed text-[var(--accent)]">
-                  {info.url}
+                <div className="flex items-start gap-2">
+                  <div className="min-w-0 flex-1 break-all font-mono text-[12.5px] leading-relaxed text-[var(--accent)]">
+                    {info.url}
+                  </div>
+                  {copyBtn(info.url)}
                 </div>
                 <div className="mt-2 text-[11px] leading-relaxed text-[var(--text-dim)]">
                   {T.phoneRemoteHint}
@@ -145,21 +171,43 @@ export default function RemotePage({ initialTab = "lan" }: { initialTab?: "lan" 
 
         {tab === "wan" && (
           <>
-            <div className="card-glow rounded-xl border border-[var(--border)] bg-[var(--bg-panel)] p-6">
+            <div className="card-glow rounded-xl border border-[var(--border)] bg-[var(--bg-panel)] p-5">
               {tunnel?.state === "ready" && tunnel.url ? (
                 <>
-                  {wanQr && (
-                    <div className="mb-4 flex justify-center">
-                      <img src={wanQr} alt={T.uWanQr} className="rounded-lg" width={220} height={220} />
-                    </div>
-                  )}
-                  <div className="mb-2 break-all text-center font-mono text-[12px] text-[var(--accent)]">
-                    {tunnel.url}
+                  {/* 与局域网卡片同构：状态头 + 左二维码右信息 + 底部操作行 */}
+                  <div className="mb-4 flex items-center gap-2">
+                    <span className="h-2 w-2 shrink-0 rounded-full bg-[var(--success)]" />
+                    <span className="text-[13px] font-semibold">{T.phoneRemote}</span>
+                    <span className="ml-auto max-w-[240px] truncate rounded-md border border-[var(--border)] px-2 py-0.5 font-mono text-[10.5px] text-[var(--text-dim)]">
+                      {hostOf(tunnel.url)}
+                    </span>
                   </div>
-                  <div className="flex justify-center gap-2">
+                  <div className="flex items-start gap-4">
+                    {wanQr && (
+                      <img
+                        src={wanQr}
+                        alt={T.uWanQr}
+                        className="w-[128px] shrink-0 rounded-lg border border-[var(--border)] bg-white p-1.5"
+                        width={128}
+                        height={128}
+                      />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-start gap-2">
+                        <div className="min-w-0 flex-1 break-all font-mono text-[12.5px] leading-relaxed text-[var(--accent)]">
+                          {tunnel.url}
+                        </div>
+                        {copyBtn(tunnel.url)}
+                      </div>
+                      <div className="mt-2 text-[11px] leading-relaxed text-[var(--text-dim)]">
+                        {T.uRemoteHint}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-4 flex items-center gap-2 border-t border-[var(--border)] pt-3">
                     <button
                       className="flex items-center gap-1.5 rounded-md border border-[var(--border)] px-3 py-1.5 text-[11px] text-[var(--text-dim)] hover:bg-[var(--bg-hover)] hover:text-[var(--text)]"
-                      onClick={() => navigator.clipboard.writeText(tunnel.url!).catch(() => {})}
+                      onClick={() => copyAddr(tunnel.url)}
                     >
                       <FiCopy size={12} /> {T.uCopyAddress}
                     </button>
@@ -169,6 +217,10 @@ export default function RemotePage({ initialTab = "lan" }: { initialTab?: "lan" 
                     >
                       <FiSquare size={12} /> {T.uStopTunnel}
                     </button>
+                  </div>
+                  <div className="mt-3 space-y-0.5 text-[10.5px] leading-relaxed text-[var(--text-faint)]">
+                    <div>{T.uTunnelSecurity}</div>
+                    <div>{T.uTunnelFirstRun}</div>
                   </div>
                 </>
               ) : tunnel?.state === "downloading" ? (
@@ -213,10 +265,12 @@ export default function RemotePage({ initialTab = "lan" }: { initialTab?: "lan" 
                 </div>
               )}
             </div>
-            <div className="mt-4 space-y-1 text-[11px] text-[var(--text-faint)]">
-              <div>{T.uTunnelSecurity}</div>
-              <div>{T.uTunnelFirstRun}</div>
-            </div>
+            {tunnel?.state !== "ready" && (
+              <div className="mt-4 space-y-1 text-[11px] text-[var(--text-faint)]">
+                <div>{T.uTunnelSecurity}</div>
+                <div>{T.uTunnelFirstRun}</div>
+              </div>
+            )}
           </>
         )}
       </div>

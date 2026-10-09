@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="utf-8" />
+    <title>remote page test harness</title>
+    <script>
+      window.__TAURI_INTERNALS__ = {
+        invoke(cmd) {
+          if (cmd === "remote_info")
+            return Promise.resolve({ url: "http://192.168.1.100:8422/remote", lanIp: "192.168.1.100", port: 8422 });
+          if (cmd === "tunnel_status")
+            return Promise.resolve({ state: "ready", progress: 1, url: "https://demo-example.trycloudflare.com" });
+          return Promise.resolve(null);
+        },
+        transformCallback(cb) { return typeof cb === "function" ? cb : undefined; },
+        metadata: { currentWindow: { label: "main" }, currentWebview: { label: "main" } },
+        plugins: {}, postMessage() {},
+      };
+      localStorage.setItem("lang", "zh");
+    </script>
+  </head>
+  <body style="margin: 0; height: 100vh; background: #0b0c0f">
+    <div id="root" style="height: 100vh"></div>
+    <script type="module" src="/test/remote-mount.tsx"></script>
+  </body>
+</html>

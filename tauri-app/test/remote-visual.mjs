@@ -1,0 +1,12 @@
+import { webkit } from "playwright";
+const b = await webkit.launch({ headless: true });
+const ctx = await b.newContext({ viewport: { width: 760, height: 720 } });
+const page = await ctx.newPage();
+await page.goto("http://localhost:5183/test-remote.html", { waitUntil: "load" });
+await page.waitForTimeout(3000);
+await page.screenshot({ path: "/tmp/remote-lan.png" });
+await page.goto("http://localhost:5183/test-remote.html?tab=wan", { waitUntil: "load" });
+await page.waitForTimeout(3000);
+await page.screenshot({ path: "/tmp/remote-wan.png" });
+console.log("shots done");
+await b.close();
