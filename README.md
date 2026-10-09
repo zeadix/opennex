@@ -61,51 +61,36 @@ AI 自主规划并执行终端任务，全程可介入、可暂停。*AI plans a
 
 | 平台 | 最低要求 | 安装方式 |
 |------|---------|---------|
-| Windows | Windows 10 1809+ | `.msi` 安装包 / `.zip` 便携版 |
-| macOS | macOS 11+ | `.dmg` 安装包 / `.tar.gz` 便携版 |
-| Linux | Ubuntu 20.04+ (glibc 2.31+) | `.deb` 安装包 / `.tar.gz` 便携版 |
+| Windows | Windows 10+ | NSIS 安装包 / MSI |
+| macOS | macOS 12+ (Apple Silicon) | DMG |
+| Linux | Ubuntu 22.04+ (glibc 2.35+) | deb / AppImage |
+
+全部安装包在 [官网](https://opennex.zeadix.com) 或 [GitHub Releases](https://github.com/zeadix/opennex/releases/latest) 下载;应用内置签名校验的一键更新。
 
 ## 开发与测试
 
 ```bash
-# 开发模式（debug 构建，快捷键自动用代码默认值覆盖配置）
-cargo run
+cd tauri-app
 
-# 运行测试
-cargo test --lib
+# 安装前端依赖(首次)
+npm install
 
-# Release 构建
-cargo build --release
+# 开发模式:vite 热重载 + Rust 调试构建(也可直接 ./dev.sh)
+npm run tauri dev
 
-# 代码格式化检查
-cargo fmt --all -- --check
-```
+# 前端类型检查 / 生产构建
+npx tsc --noEmit
+npm run build
 
-### 多平台打包
-
-```bash
-# 需要在对应平台上执行，或通过 GitHub Actions 自动编译
-
-# Linux (.deb + .tar.gz)
-cargo install cargo-deb
-cargo deb --output opennex-<version>-linux-amd64.deb
-tar czf opennex-<version>-linux-x86_64.tar.gz -C target/release opennex
-
-# macOS (.dmg + .tar.gz)
-cargo install cargo-bundle
-cargo bundle --release
-tar czf opennex-<version>-macos-x86_64.tar.gz -C target/release opennex
-
-# Windows (.msi + .zip)
-cargo install cargo-wix
-cargo wix --output opennex-<version>-windows-x86_64.msi
-# 使用 7z 打包便携版
-7z a opennex-<version>-windows-x86_64.zip target/release/opennex.exe
+# 打包(当前平台)
+npm run tauri build
 ```
 
 ### CI/CD 自动发布
 
-推送 `v*.*.*` 格式的 tag 即可触发 GitHub Actions 自动编译三平台并上传到 Cloudflare R2：
+推送 `v*.*.*` 格式的 tag 即可触发 GitHub Actions:三平台打包
+(NSIS+MSI / DMG / DEB+AppImage)、minisign 签名更新包、生成更新源
+`tauri/latest.json` 并上传 R2,同时发布 GitHub Release 并触发官网重建:
 
 ```bash
 git tag v0.2.0
@@ -117,29 +102,14 @@ git push origin v0.2.0
 ```
 opennex/
 ├── .github/workflows/
-│   └── release.yml                # CI/CD: 3-platform build + R2 upload + latest.json
-├── assets/
-│   ├── fonts/                     # Bundled fonts (CJK, Devanagari, Arabic)
-│   └── desktop/                   # Linux .desktop entry
-├── egui_term_local/               # Terminal emulator library (local path dependency)
-│   └── src/
-│       ├── backend/               # PTY backend (alacritty_terminal)
-│       ├── bindings.rs            # Keyboard bindings
-│       └── view.rs                # Terminal rendering
-├── locales/                       # 9 language YAML files (embedded in binary)
-├── src/
-│   ├── main.rs                    # Application entry point
-│   ├── app.rs                     # Main app logic (UI, events, state)
-│   ├── updater.rs                 # Auto-update module
-│   ├── theme.rs                   # Theme system (light/dark)
-│   ├── i18n.rs                    # Internationalization
-│   ├── history_db.rs              # SQLite command history
-│   ├── terminal/                  # Terminal instance wrapper
-│   └── completion/                # Command completion (WIP)
-├── tests/
-│   └── terminal_test.rs
-├── Cargo.toml
-└── Cargo.lock
+│   ├── release.yml                # 发版:三平台打包 + 签名 + R2 + 更新源 + Release
+│   └── rebuild-updater-feed.yml   # 手动工具:从 R2 重组更新源(免发版修复)
+├── assets/icon/                   # 应用图标源图
+├── tauri-app/                     # Tauri 客户端(唯一迭代线)
+│   ├── src/                       # React + TypeScript 前端(xterm.js 终端)
+│   ├── src-tauri/                 # Tauri 2 Rust 后端(PTY/历史/AI 代理/更新器)
+│   └── dev.sh                     # 一键开发启动(vite + cargo run)
+└── research/                      # 技术调研与审计记录
 ```
 
 ## License

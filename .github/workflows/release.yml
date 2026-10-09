@@ -13,211 +13,6 @@ permissions:
   contents: write
 
 jobs:
-  build-windows:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-pc-windows-msvc
-
-      - name: Add MSVC build tools
-        uses: ilammy/msvc-dev-cmd@v1
-
-      - name: Build
-        run: cargo build --release
-
-      - name: Get version
-        id: version
-        shell: bash
-        run: echo "VERSION=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
-
-      - name: Create portable zip
-        shell: bash
-        run: |
-          7z a "opennex-${{ steps.version.outputs.VERSION }}-windows-x86_64.zip" "./target/release/opennex.exe"
-
-      - name: Install WiX Toolset
-        shell: bash
-        run: |
-          # The third-party WixToolset-Action was deleted from GitHub
-          # (repository not found), so install WiX 3.14 directly from the
-          # official wixtoolset releases archive.
-          set -euxo pipefail
-          mkdir -p wixbin
-          # wix314-binaries.zip contains candle.exe + light.exe (no wix.exe).
-          curl -sSL -o wix314.zip \
-            "https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip"
-          unzip -o wix314.zip -d wixbin >/dev/null
-          test -f wixbin/candle.exe && test -f wixbin/light.exe
-          echo "$PWD/wixbin" >> $GITHUB_PATH
-          for f in candle light; do command -v $f >/dev/null 2>&1 || { echo "::error::$f not found in PATH"; exit 1; }; done
-
-      - name: Lint WiX sources
-        shell: bash
-        run: python3 scripts/lint_wix.py wix/main.wxs
-
-      - name: Build MSI installer
-        id: msi
-        shell: bash
-        run: |
-          if [ ! -f wix/main.wxs ]; then
-            echo "::error::wix/main.wxs missing — MSI cannot be built without the template."
-            exit 1
-          fi
-          for f in candle light; do command -v $f >/dev/null 2>&1 || { echo "::error::$f not found in PATH"; exit 1; }; done
-          VERSION_NUM="${GITHUB_REF_NAME#v}"
-          candle -ext WixUIExtension -out "opennex-${GITHUB_REF_NAME}-windows-x86_64.wixobj" wix/main.wxs -dSourcePath="$(pwd)/target/release/opennex.exe" -dVersion="$VERSION_NUM"
-          light -ext WixUIExtension -cultures:en-US \
-            -out "opennex-${GITHUB_REF_NAME}-windows-x86_64.msi" \
-            "opennex-${GITHUB_REF_NAME}-windows-x86_64.wixobj"
-
-      - name: Compute SHA256
-        shell: bash
-        run: |
-          ls -la *.zip *.msi 2>/dev/null || true
-          if [ -f "opennex-${{ steps.version.outputs.VERSION }}-windows-x86_64.zip" ]; then
-            sha256sum "opennex-${{ steps.version.outputs.VERSION }}-windows-x86_64.zip" | awk '{print $1}' > windows-zip.sha256
-          else
-            echo "ERROR: zip file not found!" && exit 1
-          fi
-          if [ -f "opennex-${{ steps.version.outputs.VERSION }}-windows-x86_64.msi" ]; then
-            sha256sum "opennex-${{ steps.version.outputs.VERSION }}-windows-x86_64.msi" | awk '{print $1}' > windows-msi.sha256
-          else
-            echo "::error::msi file not generated — MSI is a required release artifact."
-            exit 1
-          fi
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-build
-          path: |
-            opennex-${{ steps.version.outputs.VERSION }}-windows-x86_64.zip
-            opennex-${{ steps.version.outputs.VERSION }}-windows-x86_64.msi
-            windows-zip.sha256
-            windows-msi.sha256
-
-  build-macos:
-    # NOTE: GitHub retired the macos-13 (Intel) runners — queued jobs on
-    # them never start. All historical "x86_64" macOS artifacts were in
-    # fact ARM builds mislabeled, so nothing is lost by going aarch64-only.
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: aarch64
-            os: macos-latest
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Build
-        run: cargo build --release
-
-      - name: Get version
-        id: version
-        run: echo "VERSION=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
-
-      - name: Create portable tar.gz
-        run: |
-          cd target/release
-          tar czf "../../opennex-${{ steps.version.outputs.VERSION }}-macos-${{ matrix.arch }}.tar.gz" opennex
-
-      - name: Install cargo-bundle
-        id: install_bundle
-        continue-on-error: true
-        # Pin the version and never fail the release: the DMG is optional
-        # (tar.gz is the primary artifact). A transient crates.io index
-        # breakage in cargo-bundle's dep tree (arrayref -> proc-macro1)
-        # must not kill the whole macOS build.
-        run: cargo install cargo-bundle --version 0.11.1
-
-      - name: Create app bundle
-        id: bundle
-        continue-on-error: true
-        if: steps.install_bundle.outcome == 'success'
-        run: cargo bundle --release
-
-      - name: Create DMG installer
-        id: dmg
-        continue-on-error: true
-        if: steps.bundle.outcome == 'success'
-        run: |
-          hdiutil create \
-            "opennex-${{ steps.version.outputs.VERSION }}-macos-${{ matrix.arch }}.dmg" \
-            -srcfolder target/release/bundle/osx/OpenNex.app \
-            -ov -fs HFS+
-
-      - name: Compute SHA256
-        run: |
-          shasum -a 256 "opennex-${{ steps.version.outputs.VERSION }}-macos-${{ matrix.arch }}.tar.gz" | awk '{print $1}' > macos-tar.sha256
-          if [ -f "opennex-${{ steps.version.outputs.VERSION }}-macos-${{ matrix.arch }}.dmg" ]; then
-            shasum -a 256 "opennex-${{ steps.version.outputs.VERSION }}-macos-${{ matrix.arch }}.dmg" | awk '{print $1}' > macos-dmg.sha256
-          fi
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-build-${{ matrix.arch }}
-          path: |
-            opennex-${{ steps.version.outputs.VERSION }}-macos-${{ matrix.arch }}.tar.gz
-            opennex-${{ steps.version.outputs.VERSION }}-macos-${{ matrix.arch }}.dmg
-            macos-tar.sha256
-            macos-dmg.sha256
-
-  build-linux:
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libssl-dev pkg-config libfontconfig-dev
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Build
-        run: cargo build --release
-
-      - name: Get version
-        id: version
-        run: echo "VERSION=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
-
-      - name: Create portable tar.gz
-        run: |
-          cd target/release
-          tar czf "../../opennex-${{ steps.version.outputs.VERSION }}-linux-x86_64.tar.gz" opennex
-
-      - name: Install cargo-deb
-        run: cargo install cargo-deb
-
-      - name: Build DEB package
-        run: |
-          cargo deb --output "opennex-${{ steps.version.outputs.VERSION }}-linux-amd64.deb"
-
-      - name: Compute SHA256
-        run: |
-          sha256sum "opennex-${{ steps.version.outputs.VERSION }}-linux-x86_64.tar.gz" | awk '{print $1}' > linux-tar.sha256
-          sha256sum "opennex-${{ steps.version.outputs.VERSION }}-linux-amd64.deb" | awk '{print $1}' > linux-deb.sha256
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: linux-build
-          path: |
-            opennex-${{ steps.version.outputs.VERSION }}-linux-x86_64.tar.gz
-            opennex-${{ steps.version.outputs.VERSION }}-linux-amd64.deb
-            linux-tar.sha256
-            linux-deb.sha256
-
   build-tauri:
     # Tauri 客户端（opennex/tauri-app）三平台打包：NSIS+MSI / DMG / DEB+AppImage
     strategy:
@@ -350,7 +145,7 @@ jobs:
 
   publish:
     runs-on: ubuntu-latest
-    needs: [build-windows, build-macos, build-linux, build-tauri]
+    needs: [build-tauri]
     steps:
       - uses: actions/checkout@v4
         # FULL history + ALL tags. The default shallow checkout fetches
@@ -366,24 +161,6 @@ jobs:
       - name: Get version
         id: version
         run: echo "VERSION=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
-
-      - name: Download Windows artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: windows-build
-          path: artifacts/windows
-
-      - name: Download macOS artifacts (aarch64)
-        uses: actions/download-artifact@v4
-        with:
-          name: macos-build-aarch64
-          path: artifacts/macos-aarch64
-
-      - name: Download Linux artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: linux-build
-          path: artifacts/linux
 
       - name: Download Tauri artifacts (Windows)
         uses: actions/download-artifact@v4
@@ -433,15 +210,13 @@ jobs:
           VERSION: ${{ steps.version.outputs.VERSION }}
         run: |
           cd artifacts
-          for dir in windows macos-aarch64 linux tauri-windows tauri-macos tauri-linux; do
-            # tauri 产物额外镜像到固定别名目录（官网直链不随版本变化）
-            if [[ "$dir" == tauri-* ]]; then
-              for file in "$dir"/*; do
-                [ -f "$file" ] || continue
-                filename=$(basename "$file")
-                wrangler r2 object put "${{ env.R2_BUCKET }}/tauri/latest/${filename}" --file="$file" --remote
-              done
-            fi
+          for dir in tauri-windows tauri-macos tauri-linux; do
+            # 镜像到固定别名目录（官网/更新器直链不随版本变化）
+            for file in "$dir"/*; do
+              [ -f "$file" ] || continue
+              filename=$(basename "$file")
+              wrangler r2 object put "${{ env.R2_BUCKET }}/tauri/latest/${filename}" --file="$file" --remote
+            done
             for file in "$dir"/*; do
               [ -f "$file" ] || continue
               filename=$(basename "$file")
@@ -662,48 +437,13 @@ jobs:
           VERSION_NUM=$(echo "$VERSION" | sed 's/^v//')
           DATE=$(date -u +%Y-%m-%d)
 
-          # Read SHA256 values. The .sha256 files are produced on the
-          # platform runners — Windows writes CRLF, so strip \r and any
-          # whitespace or the bare control character lands inside the
-          # latest.json heredoc and json.loads dies with "Invalid
-          # control character" (column ~1670).
-          WIN_ZIP_SHA=$(tr -d '\r\n ' < artifacts/windows/windows-zip.sha256 2>/dev/null || true)
-          WIN_MSI_SHA=$(tr -d '\r\n ' < artifacts/windows/windows-msi.sha256 2>/dev/null || true)
-          MAC_ARM_TAR_SHA=$(tr -d '\r\n ' < artifacts/macos-aarch64/macos-tar.sha256 2>/dev/null || true)
-          MAC_ARM_DMG_SHA=$(tr -d '\r\n ' < artifacts/macos-aarch64/macos-dmg.sha256 2>/dev/null || true)
-          LIN_TAR_SHA=$(tr -d '\r\n ' < artifacts/linux/linux-tar.sha256 2>/dev/null || true)
-          LIN_DEB_SHA=$(tr -d '\r\n ' < artifacts/linux/linux-deb.sha256 2>/dev/null || true)
-
           # Build current version entry as JSON — written straight to a
           # file (no bash variable round-trip)
           cat > /tmp/current_entry.json << CURRENTEOF
           {
             "version": "${VERSION_NUM}",
             "date": "${DATE}",
-            "files": {
-              "windows": {
-                "portable": "${R2_PUBLIC_URL}/${VERSION}/opennex-${VERSION}-windows-x86_64.zip",
-                "sha256": "${WIN_ZIP_SHA}",
-                "installer": "${R2_PUBLIC_URL}/${VERSION}/opennex-${VERSION}-windows-x86_64.msi",
-                "installer_sha256": "${WIN_MSI_SHA}"
-              },
-              "macos": {
-                "portable": "${R2_PUBLIC_URL}/${VERSION}/opennex-${VERSION}-macos-aarch64.tar.gz",
-                "sha256": "${MAC_ARM_TAR_SHA}",
-                "installer": "${R2_PUBLIC_URL}/${VERSION}/opennex-${VERSION}-macos-aarch64.dmg",
-                "installer_sha256": "${MAC_ARM_DMG_SHA}",
-                "portable_aarch64": "${R2_PUBLIC_URL}/${VERSION}/opennex-${VERSION}-macos-aarch64.tar.gz",
-                "sha256_aarch64": "${MAC_ARM_TAR_SHA}",
-                "installer_aarch64": "${R2_PUBLIC_URL}/${VERSION}/opennex-${VERSION}-macos-aarch64.dmg",
-                "installer_sha256_aarch64": "${MAC_ARM_DMG_SHA}"
-              },
-              "linux": {
-                "portable": "${R2_PUBLIC_URL}/${VERSION}/opennex-${VERSION}-linux-x86_64.tar.gz",
-                "sha256": "${LIN_TAR_SHA}",
-                "installer": "${R2_PUBLIC_URL}/${VERSION}/opennex-${VERSION}-linux-amd64.deb",
-                "installer_sha256": "${LIN_DEB_SHA}"
-              }
-            }
+            "files": {}
           }
           CURRENTEOF
 
@@ -963,38 +703,12 @@ jobs:
             done < /tmp/versions_to_delete.txt
           fi
 
-      - name: Sign latest.json (ed25519, detached)
-        # Clients refuse unsigned manifests (poisoning protection). The
-        # private key lives in the OPENNEX_UPDATE_SIGNING_KEY secret as a
-        # PKCS#8 PEM whose public half is embedded in the binary.
-        env:
-          OPENNEX_UPDATE_SIGNING_KEY: ${{ secrets.OPENNEX_UPDATE_SIGNING_KEY }}
-        run: |
-          if [ -z "$OPENNEX_UPDATE_SIGNING_KEY" ]; then
-            echo "::error::OPENNEX_UPDATE_SIGNING_KEY secret is missing — clients will REJECT this release's manifest."
-            exit 1
-          fi
-          printf '%s' "$OPENNEX_UPDATE_SIGNING_KEY" > /tmp/signing-key.pem
-          openssl pkeyutl -sign -inkey /tmp/signing-key.pem -rawin \
-            -in deploy/latest.json | base64 -w 0 > deploy/latest.json.sig
-          rm -f /tmp/signing-key.pem
-          # Self-check: verify with the COMMITTED public key (the one
-          # embedded in client binaries) BEFORE anything is uploaded —
-          # a format mismatch here would brick every client's update.
-          openssl pkeyutl -verify \
-            -inkey research/formalization/audit/update-signing-pub.pem \
-            -pubin -rawin -in deploy/latest.json \
-            -sigfile <(base64 -d deploy/latest.json.sig) \
-            || { echo "::error::signature self-check failed"; exit 1; }
-          echo "signature ok: $(wc -c < deploy/latest.json.sig) base64 chars -> $(base64 -d deploy/latest.json.sig | wc -c) raw bytes"
-
       - name: Upload latest.json to R2
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           wrangler r2 object put "${{ env.R2_BUCKET }}/latest.json" --file=deploy/latest.json --remote --content-type="application/json"
-          wrangler r2 object put "${{ env.R2_BUCKET }}/latest.json.sig" --file=deploy/latest.json.sig --remote --content-type="application/octet-stream"
 
       - name: Build + upload Tauri updater feed (tauri/latest.json)
         # tauri-plugin-updater 的静态更新源：应用内「一键更新」查这个文件。
@@ -1053,9 +767,6 @@ jobs:
           # 会与 tauri-* 目录重复命中同一文件，重复上传触发
           # update-a-release-asset 404，publish 整步标红（v0.1.59）
           files: |
-            artifacts/windows/*
-            artifacts/macos-aarch64/*
-            artifacts/linux/*
             artifacts/tauri-windows/*
             artifacts/tauri-macos/*
             artifacts/tauri-linux/*
