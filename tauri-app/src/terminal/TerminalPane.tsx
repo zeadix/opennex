@@ -806,7 +806,8 @@ function WorkspaceTerminalPane({
       const onMouseUp = () => {
         if (!copyOnSelectRef.current) return;
         const sel = term.getSelection();
-        if (!sel) return;
+        // trim: 从空白处单击只产生一个空 cell 的"选区",不能当成复制目标
+        if (!sel || !sel.trim()) return;
         copyText(sel).then((ok) => {
           if (ok) {
             term.focus();
@@ -818,6 +819,26 @@ function WorkspaceTerminalPane({
       };
       host.addEventListener("mouseup", onMouseUp);
       (host as any)._mouseupCleanup = () => host.removeEventListener("mouseup", onMouseUp);
+      // 空白处启动框选:xterm 的 screen 元素只覆盖已渲染的行列,点在
+      // 内容下方的空白时 mousedown 落在宿主上,xterm 从未开始选区——
+      // 之后拖过文字也不会有选区(首点在文字行则正常)。把这类
+      // mousedown 合成一个事件转交给 xterm 的 screen 元素,其坐标换算
+      // 会把行号钳到最后一行,于是从任意空白位置都能正常起选、拖选、
+      // 触发"拖选自动复制"。
+      const screenEl = host.querySelector<HTMLElement>(".xterm-screen");
+      const onMouseDown = (e: MouseEvent) => {
+        if (e.button !== 0 || (e.target as HTMLElement)?.closest?.(".xterm")) return;
+        if (!screenEl || !copyOnSelectRef.current) return;
+        screenEl.dispatchEvent(
+          new MouseEvent("mousedown", {
+            bubbles: true, cancelable: true, view: window,
+            clientX: e.clientX, clientY: e.clientY, button: 0, buttons: 1,
+          }),
+        );
+        e.preventDefault();
+      };
+      host.addEventListener("mousedown", onMouseDown);
+      (host as any)._mousedownFwdCleanup = () => host.removeEventListener("mousedown", onMouseDown);
       // Right-click opens OUR menu (copy/paste), never the webview's.
       const onCtxMenu = (e: MouseEvent) => {
         e.preventDefault();
@@ -852,6 +873,7 @@ function WorkspaceTerminalPane({
       (hostRef.current as any)?._wheelCleanup?.();
       (hostRef.current as any)?._keyCleanup2?.();
       (hostRef.current as any)?._compCleanup?.();
+      (hostRef.current as any)?._mousedownFwdCleanup?.();
       (hostRef.current as any)?._ctxCleanup?.();
       (hostRef.current as any)?._mouseupCleanup?.();
       (hostRef.current as any)?._lineSetCleanup?.();
