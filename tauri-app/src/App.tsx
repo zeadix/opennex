@@ -562,7 +562,7 @@ export default function App() {
   // Sync the history cap to the backend whenever it changes.
   useEffect(() => {
     import("@tauri-apps/api/core")
-      .then((m) => m.invoke("set_history_cap", { workspaceId: activeWsId, cap: settings.historyCap }))
+      .then((m) => m.invoke("set_history_cap", { cap: settings.historyCap }))
       .catch(() => {});
   }, [settings.historyCap, activeWsId]);
 
@@ -760,7 +760,7 @@ export default function App() {
       activities={activities}
     />
       </div>
-      {historyOverlay && <HistoryOverlay workspaceId={activeWsId} onClose={() => setHistoryOverlay(false)} />}
+      {historyOverlay && <HistoryOverlay sessionId={focusedSlot.value ?? 0} onClose={() => setHistoryOverlay(false)} />}
       {toast && (
         <div className="animate-fade-up pointer-events-none fixed left-1/2 top-10 z-[9500] -translate-x-1/2 rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] px-4 py-2 text-[12px] text-[var(--text)] shadow-2xl">
           {toast}

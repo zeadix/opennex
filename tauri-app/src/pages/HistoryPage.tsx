@@ -2,6 +2,7 @@ import { useI18n } from '../i18n-context';
 import { useEffect, useState } from "react";
 import { FiCopy, FiTrash2 } from "react-icons/fi";
 import { invoke } from "../terminal/tauri";
+import { focusedSlot } from "../terminal/registry";
 
 interface HistEntry {
   id: number;
@@ -9,22 +10,27 @@ interface HistEntry {
   hits: number;
 }
 
-export default function HistoryPage({ workspaceId }: { workspaceId: number }) {
-  return <WorkspaceHistoryPage key={workspaceId} workspaceId={workspaceId} />;
+/** 历史指令按【终端】隔离:本页展示当前聚焦终端自己的历史。
+ *  会话由布局恢复重建(槽位号稳定),历史随终端走;关闭终端即清。 */
+export default function HistoryPage() {
+  // registry 值变化不触发重渲;挂载时取当前聚焦终端即可(页签打开时刻的终端)。
+  const [sessionId] = useState(() => focusedSlot.value ?? 0);
+  return <TerminalHistoryPage key={sessionId} sessionId={sessionId} />;
 }
 
-function WorkspaceHistoryPage({ workspaceId }: { workspaceId: number }) {
+function TerminalHistoryPage({ sessionId }: { sessionId: number }) {
   const T = useI18n();
   const [items, setItems] = useState<HistEntry[]>([]);
   const [copied, setCopied] = useState<number | null>(null);
 
   useEffect(() => {
     let stale = false;
-    invoke<HistEntry[]>("get_history", { workspaceId })
+    if (!sessionId) return;
+    invoke<HistEntry[]>("get_history", { sessionId: String(sessionId) })
       .then((list) => { if (!stale) setItems(list); })
       .catch(() => {});
     return () => { stale = true; };
-  }, [workspaceId]);
+  }, [sessionId]);
 
   const copy = async (e: HistEntry) => {
     await navigator.clipboard.writeText(e.cmd);
@@ -32,7 +38,7 @@ function WorkspaceHistoryPage({ workspaceId }: { workspaceId: number }) {
     setTimeout(() => setCopied(null), 1200);
   };
   const remove = (e: HistEntry) => {
-    invoke("delete_history", { workspaceId, id: e.id }).catch(() => {});
+    invoke("delete_history", { sessionId: String(sessionId), id: e.id }).catch(() => {});
     setItems((prev) => prev.filter((x) => x.id !== e.id));
   };
 

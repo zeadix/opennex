@@ -27,15 +27,15 @@ type Col = "hist" | "folders" | "items";
  * Insert puts the command on the terminal's input line WITHOUT executing.
  */
 interface HistoryOverlayProps {
-  workspaceId: number;
+  /** 本终端自己的历史(每终端一份,关闭终端即清) */
+  sessionId: number;
   onClose: () => void;
 }
 
 export default function HistoryOverlay(props: HistoryOverlayProps) {
-  return <WorkspaceHistoryOverlay key={props.workspaceId} {...props} />;
-}
+  return <WorkspaceHistoryOverlay key={props.sessionId} {...props} />;}
 
-function WorkspaceHistoryOverlay({ workspaceId, onClose }: HistoryOverlayProps) {
+function WorkspaceHistoryOverlay({ sessionId, onClose }: HistoryOverlayProps) {
   const T = useI18n();
   const [hist, setHist] = useState<HistEntry[]>([]);
   const [folders, setFolders] = useState<FavFolder[]>(() => loadFolders());
@@ -128,11 +128,11 @@ function WorkspaceHistoryOverlay({ workspaceId, onClose }: HistoryOverlayProps) 
 
   useEffect(() => {
     let stale = false;
-    invoke<HistEntry[]>("get_history", { workspaceId })
+    invoke<HistEntry[]>("get_history", { sessionId: String(sessionId) })
       .then((list) => { if (!stale) setHist(list); })
       .catch(() => { if (!stale) setHist([]); });
     return () => { stale = true; };
-  }, [workspaceId]);
+  }, [sessionId]);
 
   // 设计稿（官网预览图）中的搜索：实时过滤历史行。
   const needle = q.trim().toLowerCase();
@@ -163,7 +163,7 @@ function WorkspaceHistoryOverlay({ workspaceId, onClose }: HistoryOverlayProps) 
   };
 
   const deleteHist = (id: number) => {
-    invoke("delete_history", { workspaceId, id }).catch(() => {});
+    invoke("delete_history", { sessionId: String(sessionId), id }).catch(() => {});
     setHist((prev) => prev.filter((e) => e.id !== id));
   };
 

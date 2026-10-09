@@ -4,6 +4,8 @@ import AboutPage from "./AboutPage";
 import type { Lang } from "../i18n";
 import ShortcutRecorder from "../shortcuts/ShortcutRecorder";
 import FontSelect, { FontOption } from "../components/FontSelect";
+import { focusedSlot } from "../terminal/registry";
+import { invoke } from "../terminal/tauri";
 import {
   DEFAULT_SHORTCUTS,
   SHORTCUT_ACTIONS,
@@ -258,6 +260,19 @@ export default function SettingsPage({
                         </option>
                       ))}
                     </select>
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-[12px] text-[var(--text-dim)]">{T.history}</span>
+                    <button
+                      className="rounded-md border border-[var(--border)] px-2.5 py-1 text-[11px] text-[var(--text-dim)] hover:bg-[var(--bg-hover)] hover:text-[var(--danger)]"
+                      title={T.uDeleteRecord}
+                      onClick={() => {
+                        const sid = focusedSlot.value;
+                        if (sid) void invoke("clear_history", { sessionId: String(sid) });
+                      }}
+                    >
+                      {T.clear}
+                    </button>
                   </div>
                 </div>
               </section>

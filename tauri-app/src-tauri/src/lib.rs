@@ -32,6 +32,8 @@ static SYS: StdOnceLock<Mutex<sysinfo::System>> = StdOnceLock::new();
 struct PtySession {
     /// Immutable owner: reattaching must never move a session between workspaces.
     workspace_id: u64,
+    /// 本终端的稳定 id —— 历史指令按它键控(输出泵在锁外用它记录)。
+    id: String,
     writer: Mutex<Box<dyn std::io::Write + Send>>,
     master: Mutex<Box<dyn MasterPty + Send>>,
     killer: Mutex<Box<dyn portable_pty::ChildKiller + Send + Sync>>,
@@ -145,8 +147,16 @@ impl Default for WorkspaceHistory {
 
 #[derive(Default, serde::Serialize, serde::Deserialize)]
 struct HistoryStore {
-    workspaces: HashMap<u64, WorkspaceHistory>,
+    /// 历史按【终端】隔离:键 = session id(前端稳定的槽位号),
+    /// 每个终端自己的历史;关闭终端即删除该键。
+    sessions: HashMap<String, WorkspaceHistory>,
     next_id: u64,
+}
+
+/// 新终端历史的默认容量;设置里改容量 → 应用到全局默认与全部现有终端。
+static HISTORY_CAP: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(HISTORY_CAP_DEFAULT);
+fn history_cap() -> usize {
+    HISTORY_CAP.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 /// 历史指令落盘路径(setup 时解析;测试环境未设置 → 持久化 no-op)。
@@ -168,7 +178,7 @@ fn load_history_from_disk() {
     let Some(path) = HISTORY_PATH.get() else { return };
     let Ok(raw) = std::fs::read_to_string(path) else { return };
     if let Ok(mut store) = serde_json::from_str::<HistoryStore>(&raw) {
-        for h in store.workspaces.values_mut() {
+        for h in store.sessions.values_mut() {
             h.cap = h.cap.clamp(10, 10_000);
             h.entries.truncate(h.cap);
         }
@@ -177,8 +187,9 @@ fn load_history_from_disk() {
 }
 
 impl HistoryStore {
-    fn record(&mut self, workspace_id: u64, line: String) {
-        let hist = self.workspaces.entry(workspace_id).or_default();
+    fn record(&mut self, session_id: &str, line: String) {
+        let hist = self.sessions.entry(session_id.to_string()).or_default();
+        hist.cap = history_cap();
         let entry = if let Some(pos) = hist.entries.iter().position(|e| e.cmd == line) {
             let mut entry = hist.entries.remove(pos);
             entry.hits = entry.hits.saturating_add(1);
@@ -196,15 +207,15 @@ impl HistoryStore {
         persist_history_snapshot(self);
     }
 
-    fn get(&self, workspace_id: u64) -> &[HistEntry] {
-        self.workspaces
-            .get(&workspace_id)
+    fn get(&self, session_id: &str) -> &[HistEntry] {
+        self.sessions
+            .get(session_id)
             .map(|h| h.entries.as_slice())
             .unwrap_or(&[])
     }
 
-    fn delete(&mut self, workspace_id: u64, id: u64) -> bool {
-        let Some(hist) = self.workspaces.get_mut(&workspace_id) else {
+    fn delete(&mut self, session_id: &str, id: u64) -> bool {
+        let Some(hist) = self.sessions.get_mut(session_id) else {
             return false;
         };
         let before = hist.entries.len();
@@ -216,16 +227,28 @@ impl HistoryStore {
         changed
     }
 
-    fn set_cap(&mut self, workspace_id: u64, cap: usize) {
-        let hist = self.workspaces.entry(workspace_id).or_default();
-        hist.cap = cap.clamp(10, 10_000);
-        hist.entries.truncate(hist.cap);
+    /// 全局容量:设置默认值并应用到全部现有终端(容量是全局设置,
+    /// 历史本身按终端隔离)。
+    fn set_cap(&mut self, cap: usize) {
+        HISTORY_CAP.store(cap.clamp(10, 10_000), std::sync::atomic::Ordering::Relaxed);
+        let cap = history_cap();
+        for hist in self.sessions.values_mut() {
+            hist.cap = cap;
+            hist.entries.truncate(hist.cap);
+        }
         persist_history_snapshot(self);
     }
 
-    fn clear(&mut self, workspace_id: u64) {
-        if let Some(hist) = self.workspaces.get_mut(&workspace_id) {
-            hist.entries.clear(); // Keep this workspace's configured capacity.
+    /// 关闭终端 = 该终端的历史一并删除(用户语义)。
+    fn remove_session(&mut self, session_id: &str) {
+        if self.sessions.remove(session_id).is_some() {
+            persist_history_snapshot(self);
+        }
+    }
+
+    fn clear(&mut self, session_id: &str) {
+        if let Some(hist) = self.sessions.get_mut(session_id) {
+            hist.entries.clear(); // Keep this terminal's configured capacity.
             persist_history_snapshot(self);
         }
     }
@@ -272,8 +295,8 @@ impl LineBuf {
     }
 }
 
-fn record_line(workspace_id: u64, line: String) {
-    history().lock().unwrap().record(workspace_id, line);
+fn record_line(session_id: &str, line: String) {
+    history().lock().unwrap().record(session_id, line);
 }
 
 fn spawn_pty(
@@ -355,6 +378,7 @@ fn spawn_pty(
         display_name,
         PtySession {
             workspace_id,
+            id: session_id.clone(),
             writer: Mutex::new(
                 pair.master
                     .take_writer()
@@ -542,7 +566,7 @@ async fn session_ws(mut socket: WebSocket, sessions: Arc<SessionMap>, sid: Strin
                                 .store(unix_ms(), std::sync::atomic::Ordering::Relaxed);
                         }
                         for line in line_buf.lock().unwrap().feed(&bytes) {
-                            record_line(session.workspace_id, line);
+                            record_line(&session.id, line);
                         }
                         if session.writer.lock().unwrap().write_all(&bytes).is_err() {
                             break;
@@ -710,6 +734,8 @@ fn close_session(state: tauri::State<AppState>, session_id: String) -> Result<()
         let _ = s.killer.lock().unwrap().kill();
     }
     state.sessions.remove(&session_id);
+    // 关闭终端 = 该终端的历史一并删除(每终端一份历史)。
+    history().lock().unwrap().remove_session(&session_id);
     Ok(())
 }
 
@@ -967,11 +993,11 @@ fn ws_port() -> u16 {
 }
 
 #[tauri::command]
-fn get_history(workspace_id: u64) -> Vec<serde_json::Value> {
+fn get_history(session_id: String) -> Vec<serde_json::Value> {
     history()
         .lock()
         .unwrap()
-        .get(workspace_id)
+        .get(&session_id)
         .iter()
         .map(|e| json!({ "id": e.id, "cmd": e.cmd, "hits": e.hits }))
         .collect()
@@ -979,8 +1005,8 @@ fn get_history(workspace_id: u64) -> Vec<serde_json::Value> {
 
 /// Delete only a record belonging to the requested workspace.
 #[tauri::command]
-fn delete_history(workspace_id: u64, id: u64) -> bool {
-    history().lock().unwrap().delete(workspace_id, id)
+fn delete_history(session_id: String, id: u64) -> bool {
+    history().lock().unwrap().delete(&session_id, id)
 }
 
 fn unix_ms() -> u64 {
@@ -1007,13 +1033,13 @@ fn session_activities(state: tauri::State<AppState>) -> serde_json::Value {
 }
 
 #[tauri::command]
-fn set_history_cap(workspace_id: u64, cap: usize) {
-    history().lock().unwrap().set_cap(workspace_id, cap);
+fn set_history_cap(cap: usize) {
+    history().lock().unwrap().set_cap(cap);
 }
 
 #[tauri::command]
-fn clear_history(workspace_id: u64) {
-    history().lock().unwrap().clear(workspace_id);
+fn clear_history(session_id: String) {
+    history().lock().unwrap().clear(&session_id);
 }
 
 #[derive(serde::Deserialize)]
@@ -1315,26 +1341,29 @@ mod workspace_history_tests {
     use super::HistoryStore;
 
     #[test]
-    fn records_hits_and_mutations_are_workspace_local() {
+    fn records_hits_and_mutations_are_terminal_local() {
         let mut store = HistoryStore::default();
-        store.record(1, "pwd".into());
-        store.record(2, "pwd".into());
-        store.record(1, "pwd".into());
-        assert_eq!(store.get(1)[0].hits, 2);
-        assert_eq!(store.get(2)[0].hits, 1);
-        let id = store.get(1)[0].id;
-        assert!(!store.delete(2, id));
-        assert!(store.delete(1, id));
-        assert_eq!(store.get(2).len(), 1);
-        store.set_cap(1, 10);
+        store.record("s1", "pwd".into());
+        store.record("s2", "pwd".into());
+        store.record("s1", "pwd".into());
+        assert_eq!(store.get("s1")[0].hits, 2);
+        assert_eq!(store.get("s2")[0].hits, 1);
+        let id = store.get("s1")[0].id;
+        // 一个终端删不到另一个终端的条目
+        assert!(!store.delete("s2", id));
+        assert!(store.delete("s1", id));
+        assert_eq!(store.get("s2").len(), 1);
+        store.set_cap(10); // 全局容量:应用到所有终端 + 后续新终端
         for i in 0..20 {
-            store.record(1, format!("cmd {i}"));
+            store.record("s1", format!("cmd {i}"));
         }
-        assert_eq!(store.get(1).len(), 10);
-        assert_eq!(store.get(2).len(), 1);
-        store.clear(1);
-        assert!(store.get(1).is_empty());
-        assert_eq!(store.get(2).len(), 1);
+        assert_eq!(store.get("s1").len(), 10);
+        assert_eq!(store.get("s2").len(), 1);
+        store.clear("s1");
+        assert!(store.get("s1").is_empty());
+        // 关闭终端 = 整份历史删除
+        store.remove_session("s2");
+        assert!(store.get("s2").is_empty());
     }
 }
 

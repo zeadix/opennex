@@ -335,7 +335,7 @@ function WorkspaceTerminalPane({
     };
 
     (async () => {
-      invoke<Array<{ id: number; cmd: string; hits: number }>>("get_history", { workspaceId })
+      invoke<Array<{ id: number; cmd: string; hits: number }>>("get_history", { sessionId: String(sessionId) })
         .then((h) => { if (!disposed) historyRef.current = h; })
         .catch(() => {})
         .finally(() => { histLoadingRef.current = false; });
@@ -432,7 +432,7 @@ function WorkspaceTerminalPane({
             && historyRef.current.length === 0 && !histLoadingRef.current) {
           histEnsuredRef.current = true;
           histLoadingRef.current = true;
-          invoke<Array<{ id: number; cmd: string; hits: number }>>("get_history", { workspaceId })
+          invoke<Array<{ id: number; cmd: string; hits: number }>>("get_history", { sessionId: String(sessionId) })
             .then((h) => {
               historyRef.current = h;
               updateSuggest();
@@ -448,7 +448,7 @@ function WorkspaceTerminalPane({
       const scheduleHistoryRefresh = () => {
         window.clearTimeout(histRefreshTimer);
         histRefreshTimer = window.setTimeout(() => {
-          invoke<Array<{ id: number; cmd: string; hits: number }>>("get_history", { workspaceId })
+          invoke<Array<{ id: number; cmd: string; hits: number }>>("get_history", { sessionId: String(sessionId) })
             .then((h) => {
               historyRef.current = h;
             })

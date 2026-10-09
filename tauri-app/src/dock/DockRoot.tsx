@@ -341,7 +341,7 @@ export default function DockRoot({
       );
     }
     if (comp === "history") {
-      return <HistoryPage workspaceId={activeWsId} />;
+      return <HistoryPage />;
     }
     if (comp === "favorites") {
       return <FavoritesPage />;
