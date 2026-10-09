@@ -813,8 +813,12 @@ fn tree_agg(
 }
 
 /// Three-level resource sampling for the 系统资源 panel: focused
-/// terminal, active workspace, and the whole software (the app's own
-/// process tree). `focused`/`workspace` carry SESSION SLOT ids (the
+/// terminal, active workspace, and GLOBAL = every terminal across all
+/// workspaces (sum of each session's shell tree). The UI itself
+/// (opennex-tauri + WebKit processes + tunnels) is deliberately NOT
+/// counted — its footprint dwarfs the shells' and the panel's promise
+/// is "terminal usage", not "whole app" (let alone whole machine).
+/// `focused`/`workspace` carry SESSION SLOT ids (the
 /// frontend's term-N numbers) which map to the session shell pids here
 /// — raw pids from the frontend would be meaningless (and dangerous:
 /// slot 1 is init). CPU% is normalized to the machine's core count so
@@ -858,7 +862,19 @@ fn resource_stats(
     };
     let f = tree(&f_roots);
     let w = tree(&w_roots);
-    let app = tree(&[std::process::id()]);
+    // 全局 = 所有工作空间所有终端的合计(每个会话的 shell 树求和,
+    // 互不重叠)。不含 opennex 自身/WebView/隧道——UI 体积远大于
+    // shell,计入会让"全局"虚高且偏离"终端占用"的语义。
+    let all_roots: Vec<u32> = state
+        .sessions
+        .inner
+        .lock()
+        .unwrap()
+        .values()
+        .map(|s| s.pid)
+        .filter(|&p| p != 0)
+        .collect();
+    let app = tree(&all_roots);
     json!({
         "focused": { "cpu": f.0, "mem": f.1 },
         "workspace": { "cpu": w.0, "mem": w.1 },
