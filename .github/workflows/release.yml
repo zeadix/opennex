@@ -752,39 +752,31 @@ jobs:
           PYFEED
           wrangler r2 object put "${{ env.R2_BUCKET }}/tauri/latest.json" --file=deploy/tauri-latest.json --remote --content-type="application/json"
 
-      - name: Create GitHub Release
-        # Archive every release on GitHub: attach all installers as
-        # release assets for historical download, with the curated
-        # release body (same changes as the client update window). No
-        # longer best-effort: this step runs AFTER R2 + latest.json +
-        # signature are all published, so a failure here only red-flags
-        # the job (nothing already published is rolled back) — a missing
-        # GitHub Release used to be silently skipped, which is why only
-        # 19 of 54 tags ever got a release. Rerunning the job retries it.
-        uses: softprops/action-gh-release@v2
-        with:
-          # 每个目录整体匹配、各文件恰好命中一次——旧的按扩展名 glob
-          # 会与 tauri-* 目录重复命中同一文件，重复上传触发
-          # update-a-release-asset 404，publish 整步标红（v0.1.59）
-          files: |
-            artifacts/tauri-windows/*
-            artifacts/tauri-macos/*
-            artifacts/tauri-linux/*
-          body_path: deploy/release_body.md
-          fail_on_unmatched_files: false
-
-      - name: Enforce release body (softprops skips body updates on reused releases)
-        # Re-publishing an existing tag reuses the old release object and
-        # softprops does NOT overwrite its body — the page would keep the
-        # stale first-run notes forever. gh release edit is idempotent
-        # and always lands the curated body.
+      - name: Create GitHub Release (gh CLI, sequential uploads)
+        # softprops/action-gh-release 并发上传后逐资产 PATCH 元数据,撞上
+        # GitHub 的最终一致性延迟就是 404,整步标红(v0.1.59/60 两次)。
+        # gh release 顺序上传 + 显式 enforce body,行为完全可控;重跑时
+        # release 已存在则 --clobber 覆盖资产(幂等)。
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.version.outputs.VERSION }}
         run: |
+          ls artifacts/tauri-windows artifacts/tauri-macos artifacts/tauri-linux
+          if gh release view "$VERSION" --repo zeadix/opennex >/dev/null 2>&1; then
+            echo "release exists — replacing assets (--clobber)"
+            gh release upload "$VERSION" --repo zeadix/opennex --clobber \
+              artifacts/tauri-windows/* artifacts/tauri-macos/* artifacts/tauri-linux/*
+          else
+            gh release create "$VERSION" --repo zeadix/opennex \
+              --title "OpenNex $VERSION" \
+              --notes-file deploy/release_body.md \
+              artifacts/tauri-windows/* artifacts/tauri-macos/* artifacts/tauri-linux/*
+          fi
+          # 重发/复用 release 时 softprops/gh create 都不覆盖 body——
+          # edit 永远落到最新 curated notes。
           gh release edit "$VERSION" --repo zeadix/opennex \
-            --title "OpenNex $VERSION" \
-            --notes-file deploy/release_body.md && echo "release body applied."
+            --title "OpenNex $VERSION" --notes-file deploy/release_body.md
+          echo "release + assets + body ready."
 
       - name: Trigger website rebuild
         if: success()
