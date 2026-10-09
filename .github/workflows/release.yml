@@ -761,6 +761,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.version.outputs.VERSION }}
         run: |
+          # CI 内部清单在各平台目录同名（tauri-files.json/tauri-updater.json
+          # ×3），作 Release 资产必然重名（422/404，v0.1.60 三连败根因）——
+          # 信息已进 feed 与 latest.json，上传前删除。
+          rm -f artifacts/tauri-*/tauri-files.json artifacts/tauri-*/tauri-updater.json
           ls artifacts/tauri-windows artifacts/tauri-macos artifacts/tauri-linux
           if gh release view "$VERSION" --repo zeadix/opennex >/dev/null 2>&1; then
             echo "release exists — replacing assets (--clobber)"
