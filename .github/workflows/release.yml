@@ -81,6 +81,10 @@ jobs:
           # 更新器产物（createUpdaterArtifacts）：minisign .sig 签名 + macOS 的
           # .app.tar.gz（应用内更新器实际下载替换的包；DMG 只作官网直链下载）
           find tauri-app/src-tauri/target/release -type f \( -name "*.app.tar.gz" -o -name "*.sig" \) -not -path "*/deps/*" -exec cp {} bundles/ \;
+          # Windows 便携版：裸 exe 解压即用（WebView2 由系统提供，与安装版一致）
+          if [[ "$RUNNER_OS" == "Windows" && -f tauri-app/src-tauri/target/release/opennex-tauri.exe ]]; then
+            powershell -NoProfile -Command "Compress-Archive -Force -Path 'tauri-app/src-tauri/target/release/opennex-tauri.exe' -DestinationPath 'bundles/OpenNex_x64_portable.zip'"
+          fi
           # 统一为无版本号的稳定文件名（版本在目录名里），官网直链永不失效
           cd bundles
           for f in *; do
@@ -103,6 +107,7 @@ jobs:
           base = os.environ['R2_PUBLIC_URL'].rstrip('/') + '/tauri/latest'
           out = {'windows': {}, 'macos': {}, 'linux': {}}
           osmap = {'.exe': ('windows', 'installer'), '.msi': ('windows', 'msi'),
+                   '.zip': ('windows', 'portable'),
                    '.dmg': ('macos', 'dmg'), '.deb': ('linux', 'deb'),
                    '.AppImage': ('linux', 'appimage')}
           for f in sorted(glob.glob('*')):
