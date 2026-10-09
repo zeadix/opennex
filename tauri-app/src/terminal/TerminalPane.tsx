@@ -579,8 +579,36 @@ function WorkspaceTerminalPane({
       // 会劫持输入法的候选导航（方向键/空格/回车）。
       let composing = 0;
       const compHost = hostRef.current;
-      const compStart = () => { composing++; };
-      const compEnd = () => { composing = Math.max(0, composing - 1); };
+      const compStart = () => {
+        composing++;
+        // 组合开始时同步清残留：xterm 的 compositionstart 监听在
+        // textarea 层（先于本 host 冒泡监听执行），已把 start 记成
+        // 残留长度——清空 textarea 后把它的 start 校正为 0，本轮
+        // substring 才会从空串起算；快速连打也不串位。
+        try {
+          const ta = (termRef.current as any)?.textarea as HTMLTextAreaElement | undefined;
+          const ch = (termRef.current as any)?._core?._compositionHelper;
+          if (ta && ta.value && ch?._compositionPosition) {
+            ta.value = "";
+            ch._compositionPosition.start = 0;
+          }
+        } catch { /* 私有路径缺失时退回纯 50ms 兜底清理 */ }
+      };
+      const compEnd = () => {
+        composing = Math.max(0, composing - 1);
+        // WebKitGTK 提交组合后不清 helper textarea（xterm 全程依赖
+        // _compositionPosition 的位置记录规避旧文本），残留会让下一轮
+        // 组合的 start/end 与 diff 全部错位——第二次提交把上一次的
+        // 文本一起重发（"一"之后再输"二"出来"一二"）。等 xterm
+        // finalize 的异步读取（setTimeout 0）完成后再清空：start 归零、
+        // diff 快照干净，残留不复存在。清空触发的普通 input 事件不在
+        // xterm 的数据路径上（_handleAnyTextareaChanges 仅由 229
+        // keydown 触发），不会造成误发送/误删除。
+        window.setTimeout(() => {
+          const ta = (termRef.current as any)?.textarea as HTMLTextAreaElement | undefined;
+          if (ta && ta.value && composing === 0) ta.value = "";
+        }, 50);
+      };
       compHost?.addEventListener("compositionstart", compStart);
       compHost?.addEventListener("compositionend", compEnd);
       (hostRef.current as any)._compCleanup = () => {
