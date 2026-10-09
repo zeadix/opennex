@@ -45,6 +45,9 @@
       const follow = new URLSearchParams(location.search).get("follow");
       const __settings = { autoMatch: true, suggestSource: "auto" };
       if (follow !== null) __settings.followCursor = follow === "1";
+      // ?uifs=<px> 覆盖界面字号(App 换算成 CSS zoom,框选错位实测用)
+      const uifs = new URLSearchParams(location.search).get("uifs");
+      if (uifs) __settings.uiFontSize = Number(uifs);
       localStorage.setItem("opennex-settings", JSON.stringify(__settings));
       localStorage.removeItem("opennex-suggest-pos");
       localStorage.removeItem("opennex-palette-pos");

@@ -872,7 +872,7 @@ function WorkspaceTerminalPane({
       ref={hostRef}
       data-term-slot={sessionId}
       className="absolute inset-0 overflow-hidden px-2 py-1"
-      style={{ background: "var(--bg)" }}
+      style={{ background: "var(--bg)", zoom: "var(--ui-zoom-inv, 1)" }}
       onMouseDown={() => {
         focusedSlot.value = sessionId;
       }}

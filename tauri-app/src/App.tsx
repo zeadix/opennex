@@ -591,7 +591,10 @@ export default function App() {
   }, [settings.useThemeFont, settings.uiFont, settings.uiFontSize, settings.termFont, settings.fontSize, themeId, themesV]);
 
   // Font settings: UI family via --ui-font, terminal family via --mono
-  // (panes re-read both on the terminal-style event).
+  // (panes re-read both on the terminal-style event). --ui-zoom-inv 是
+  // 界面缩放的倒数:终端画布用它逃逸 CSS zoom(WebKitGTK 下 xterm 的
+  // 鼠标坐标在 zoom≠1 时不自洽,框选错位),视觉缩放改由
+  // fontSize × uiScale 等效实现。
   useEffect(() => {
     const root = document.documentElement;
     if (effFonts.uiFont) root.style.setProperty("--ui-font", effFonts.uiFont);
@@ -601,6 +604,8 @@ export default function App() {
       effFonts.termFont ||
         '"JetBrains Mono", "Cascadia Code", "Fira Code", ui-monospace, monospace',
     );
+    const inv = effFonts.uiFontSize / 13;
+    root.style.setProperty("--ui-zoom-inv", inv !== 1 ? String(1 / inv) : "1");
     window.dispatchEvent(new CustomEvent("opennex-terminal-theme"));
   }, [effFonts]);
 
@@ -714,7 +719,7 @@ export default function App() {
       onTheme={setThemeId}
       lang={lang}
       onLang={(l: Lang) => { setLang(l); }}
-      fontSize={effFonts.termFontSize}
+      fontSize={Math.round(effFonts.termFontSize * uiScale)}
       onFontSize={(size) => updateSettings({ fontSize: size })}
       shell={settings.shell}
       page={page}
