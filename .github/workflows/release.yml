@@ -24,6 +24,13 @@ jobs:
             artifacts: tauri-macos
           - os: ubuntu-22.04
             artifacts: tauri-linux
+          - os: ubuntu-22.04-arm
+            artifacts: tauri-linux-arm64
+          # 实验性:GitHub 公开仓库的 Windows ARM64 runner。工具链波动
+          # 不得阻塞发版(失败时本腿跳过,x64 照常发布)。
+          - os: windows-11-arm
+            artifacts: tauri-windows-arm64
+            continue-on-error: true
     runs-on: ${{ matrix.os }}
     env:
       # minisign 私钥：tauri build 用它给更新器产物(.sig)签名；
@@ -57,7 +64,8 @@ jobs:
       - name: Tauri build (Windows)
         if: runner.os == 'Windows'
         working-directory: tauri-app
-        run: npm run tauri -- build --bundles msi,nsis
+        # ARM64 腿只打 NSIS(WiX/MSI 对 arm64 不可靠)
+        run: npm run tauri -- build --bundles ${{ contains(matrix.os, 'arm') && 'nsis' || 'msi,nsis' }}
 
       - name: Tauri build (macOS)
         if: runner.os == 'macOS'
@@ -75,6 +83,7 @@ jobs:
         shell: bash
         env:
           R2_PUBLIC_URL: ${{ env.R2_PUBLIC_URL }}
+          MATRIX_OS: ${{ matrix.os }}
         run: |
           mkdir -p bundles
           find tauri-app/src-tauri/target/release/bundle -type f \( -name "*.exe" -o -name "*.msi" -o -name "*.dmg" -o -name "*.deb" -o -name "*.AppImage" \) -exec cp {} bundles/ \;
@@ -82,7 +91,7 @@ jobs:
           # .app.tar.gz（应用内更新器实际下载替换的包；DMG 只作官网直链下载）
           find tauri-app/src-tauri/target/release -type f \( -name "*.app.tar.gz" -o -name "*.sig" \) -not -path "*/deps/*" -exec cp {} bundles/ \;
           # Windows 便携版：裸 exe 解压即用（WebView2 由系统提供，与安装版一致）
-          if [[ "$RUNNER_OS" == "Windows" && -f tauri-app/src-tauri/target/release/opennex-tauri.exe ]]; then
+          if [[ "$RUNNER_OS" == "Windows" && "$MATRIX_OS" != *arm* && -f tauri-app/src-tauri/target/release/opennex-tauri.exe ]]; then
             powershell -NoProfile -Command "Compress-Archive -Force -Path 'tauri-app/src-tauri/target/release/opennex-tauri.exe' -DestinationPath 'bundles/OpenNex_x64_portable.zip'"
           fi
           # 统一为无版本号的稳定文件名（版本在目录名里），官网直链永不失效
@@ -100,18 +109,31 @@ jobs:
               *amd64.deb.sig) mv "$f" "OpenNex_amd64.deb.sig" ;;
               *amd64.AppImage) mv "$f" "OpenNex_amd64.AppImage" ;;
               *amd64.AppImage.sig) mv "$f" "OpenNex_amd64.AppImage.sig" ;;
+              *arm64-setup.exe) mv "$f" "OpenNex_arm64-setup.exe" ;;
+              *arm64-setup.exe.sig) mv "$f" "OpenNex_arm64-setup.exe.sig" ;;
+              *arm64.deb) mv "$f" "OpenNex_aarch64.deb" ;;
+              *arm64.deb.sig) mv "$f" "OpenNex_aarch64.deb.sig" ;;
+              *aarch64.AppImage) mv "$f" "OpenNex_aarch64.AppImage" ;;
+              *aarch64.AppImage.sig) mv "$f" "OpenNex_aarch64.AppImage.sig" ;;
             esac
           done
           python3 << 'PYMANIFEST'
           import hashlib, json, glob, os
           base = os.environ['R2_PUBLIC_URL'].rstrip('/') + '/tauri/latest'
           out = {'windows': {}, 'macos': {}, 'linux': {}}
-          osmap = {'.exe': ('windows', 'installer'), '.msi': ('windows', 'msi'),
-                   '.zip': ('windows', 'portable'),
-                   '.dmg': ('macos', 'dmg'), '.deb': ('linux', 'deb'),
-                   '.AppImage': ('linux', 'appimage')}
+          filemap = {
+              'OpenNex_x64-setup.exe': ('windows', 'installer'),
+              'OpenNex_x64_en-US.msi': ('windows', 'msi'),
+              'OpenNex_x64_portable.zip': ('windows', 'portable'),
+              'OpenNex_arm64-setup.exe': ('windows', 'installer_arm64'),
+              'OpenNex_aarch64.dmg': ('macos', 'dmg'),
+              'OpenNex_amd64.deb': ('linux', 'deb'),
+              'OpenNex_amd64.AppImage': ('linux', 'appimage'),
+              'OpenNex_aarch64.deb': ('linux', 'deb_arm64'),
+              'OpenNex_aarch64.AppImage': ('linux', 'appimage_arm64'),
+          }
           for f in sorted(glob.glob('*')):
-              kind = osmap.get('.' + f.rsplit('.', 1)[-1])
+              kind = filemap.get(f)
               if not kind: continue
               os_name, key = kind
               sha = hashlib.sha256(open(f, 'rb').read()).hexdigest()
@@ -132,9 +154,12 @@ jobs:
           for platform_key, (binary, sig) in {
               'windows-x86_64-nsis': ('OpenNex_x64-setup.exe', 'OpenNex_x64-setup.exe.sig'),
               'windows-x86_64-msi': ('OpenNex_x64_en-US.msi', 'OpenNex_x64_en-US.msi.sig'),
+              'windows-aarch64-nsis': ('OpenNex_arm64-setup.exe', 'OpenNex_arm64-setup.exe.sig'),
               'darwin-aarch64-app': ('OpenNex.app.tar.gz', 'OpenNex.app.tar.gz.sig'),
               'linux-x86_64-appimage': ('OpenNex_amd64.AppImage', 'OpenNex_amd64.AppImage.sig'),
               'linux-x86_64-deb': ('OpenNex_amd64.deb', 'OpenNex_amd64.deb.sig'),
+              'linux-aarch64-appimage': ('OpenNex_aarch64.AppImage', 'OpenNex_aarch64.AppImage.sig'),
+              'linux-aarch64-deb': ('OpenNex_aarch64.deb', 'OpenNex_aarch64.deb.sig'),
           }.items():
               entry = upd_entry(binary, sig)
               if entry: upd[platform_key] = entry
@@ -185,6 +210,19 @@ jobs:
           name: tauri-linux
           path: artifacts/tauri-linux
 
+      - name: Download Tauri artifacts (Linux ARM64)
+        uses: actions/download-artifact@v4
+        with:
+          name: tauri-linux-arm64
+          path: artifacts/tauri-linux-arm64
+
+      - name: Download Tauri artifacts (Windows ARM64)
+        uses: actions/download-artifact@v4
+        with:
+          name: tauri-windows-arm64
+          path: artifacts/tauri-windows-arm64
+        continue-on-error: true
+
       - name: List artifacts
         run: find artifacts/ -type f | sort
 
@@ -215,7 +253,7 @@ jobs:
           VERSION: ${{ steps.version.outputs.VERSION }}
         run: |
           cd artifacts
-          for dir in tauri-windows tauri-macos tauri-linux; do
+          for dir in tauri-windows tauri-macos tauri-linux tauri-windows-arm64 tauri-linux-arm64; do
             # 镜像到固定别名目录（官网/更新器直链不随版本变化）
             for file in "$dir"/*; do
               [ -f "$file" ] || continue
@@ -769,17 +807,17 @@ jobs:
           # CI 内部清单在各平台目录同名（tauri-files.json/tauri-updater.json
           # ×3），作 Release 资产必然重名（422/404，v0.1.60 三连败根因）——
           # 信息已进 feed 与 latest.json，上传前删除。
-          rm -f artifacts/tauri-*/tauri-files.json artifacts/tauri-*/tauri-updater.json
+          rm -f artifacts/tauri-*/tauri-files.json artifacts/tauri-*/tauri-updater.json 2>/dev/null || true
           ls artifacts/tauri-windows artifacts/tauri-macos artifacts/tauri-linux
           if gh release view "$VERSION" --repo zeadix/opennex >/dev/null 2>&1; then
             echo "release exists — replacing assets (--clobber)"
             gh release upload "$VERSION" --repo zeadix/opennex --clobber \
-              artifacts/tauri-windows/* artifacts/tauri-macos/* artifacts/tauri-linux/*
+              artifacts/tauri-windows/* artifacts/tauri-macos/* artifacts/tauri-linux/* artifacts/tauri-windows-arm64/* artifacts/tauri-linux-arm64/*
           else
             gh release create "$VERSION" --repo zeadix/opennex \
               --title "OpenNex $VERSION" \
               --notes-file deploy/release_body.md \
-              artifacts/tauri-windows/* artifacts/tauri-macos/* artifacts/tauri-linux/*
+              artifacts/tauri-windows/* artifacts/tauri-macos/* artifacts/tauri-linux/* artifacts/tauri-windows-arm64/* artifacts/tauri-linux-arm64/*
           fi
           # 重发/复用 release 时 softprops/gh create 都不覆盖 body——
           # edit 永远落到最新 curated notes。

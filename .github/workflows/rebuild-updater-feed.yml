@@ -28,8 +28,8 @@ jobs:
           BASE="${R2_PUBLIC_URL}/tauri/latest"
           # 版本与双语 notes 取自 egui latest.json 顶层（与发版同源）
           curl -fsSL "${R2_PUBLIC_URL}/latest.json" -o /tmp/egui-latest.json
-          for f in OpenNex_x64-setup.exe OpenNex_x64_en-US.msi OpenNex.app.tar.gz OpenNex_amd64.AppImage OpenNex_amd64.deb; do
-            curl -fsSL "${BASE}/${f}.sig" -o "/tmp/${f}.sig"
+          for f in OpenNex_x64-setup.exe OpenNex_x64_en-US.msi OpenNex_arm64-setup.exe OpenNex.app.tar.gz OpenNex_amd64.AppImage OpenNex_amd64.deb OpenNex_aarch64.AppImage OpenNex_aarch64.deb; do
+            curl -fsSL "${BASE}/${f}.sig" -o "/tmp/${f}.sig" 2>/dev/null || echo "-- skip missing ${f}.sig"
           done
           python3 << 'PYFEED'
           import json
@@ -44,13 +44,20 @@ jobs:
           mapping = {
               "windows-x86_64-nsis": "OpenNex_x64-setup.exe",
               "windows-x86_64-msi": "OpenNex_x64_en-US.msi",
+              "windows-aarch64-nsis": "OpenNex_arm64-setup.exe",
               "darwin-aarch64-app": "OpenNex.app.tar.gz",
               "linux-x86_64-appimage": "OpenNex_amd64.AppImage",
               "linux-x86_64-deb": "OpenNex_amd64.deb",
+              "linux-aarch64-appimage": "OpenNex_aarch64.AppImage",
+              "linux-aarch64-deb": "OpenNex_aarch64.deb",
           }
           platforms = {}
           for key, f in mapping.items():
-              sig = open(f"/tmp/{f}.sig", encoding="utf-8").read().strip()
+              try:
+                  sig = open(f"/tmp/{f}.sig", encoding="utf-8").read().strip()
+              except FileNotFoundError:
+                  print("skip (no sig yet):", f)
+                  continue
               assert sig.startswith("dW50cnVzdGVk"), f
               platforms[key] = {"url": f"{base}/{f}", "signature": sig}
           changes = egui.get("changes", [])
