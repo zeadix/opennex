@@ -62,16 +62,30 @@
   new ResizeObserver(doFit).observe(document.getElementById("term"));
   let ws = null, cur = "";
   async function loadSessions() {
-    const r = await fetch("/remote/sessions?k=" + encodeURIComponent(myToken));
-    const list = await r.json();
-    const sel = document.getElementById("sessionSel");
-    sel.innerHTML = "";
-    list.forEach((s) => {
-      const o = document.createElement("option");
-      o.value = s.id; o.textContent = s.name;
-      sel.appendChild(o);
-    });
-    return list;
+    try {
+      const r = await fetch("/remote/sessions?k=" + encodeURIComponent(myToken));
+      if (!r.ok) {
+        term.writeln("\u001b[31m会话列表获取失败（HTTP " + r.status + "，令牌可能已失效，请重新扫码）\u001b[0m");
+        return [];
+      }
+      // 后端返回 {sessions:[...]}；兼容裸数组
+      const data = await r.json();
+      const list = Array.isArray(data) ? data : (data && Array.isArray(data.sessions) ? data.sessions : []);
+      const sel = document.getElementById("sessionSel");
+      sel.innerHTML = "";
+      list.forEach((s) => {
+        const o = document.createElement("option");
+        o.value = s.id; o.textContent = s.name;
+        sel.appendChild(o);
+      });
+      if (!list.length) {
+        term.writeln("\u001b[33m当前没有正在运行的终端会话——请先在软件里新建终端\u001b[0m");
+      }
+      return list;
+    } catch (e) {
+      term.writeln("\u001b[31m会话列表获取失败：" + e + "\u001b[0m");
+      return [];
+    }
   }
   function attach(sessionId) {
     if (ws) { ws.onclose = null; ws.close(); }
@@ -81,6 +95,7 @@
     ws.binaryType = "arraybuffer";
     ws.onmessage = (e) => term.write(new Uint8Array(e.data));
     ws.onopen = () => { doFit(); term.scrollToBottom(); };
+    ws.onclose = () => { term.writeln("\u001b[90m\r\n[连接已断开——会话可能已关闭，刷新页面重试]\u001b[0m"); };
     term.onData((d) => { if (ws && ws.readyState === 1) ws.send(new TextEncoder().encode(d)); });
   }
   document.getElementById("sessionSel").addEventListener("change", (e) => attach(e.target.value));
