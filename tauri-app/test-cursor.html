@@ -9,7 +9,7 @@
       window.__TAURI_INTERNALS__ = {
         invoke(cmd) {
           window.__invokeLog.push(cmd);
-          if (cmd === "start_terminal") return Promise.resolve({ session: "s1", wsPort: 19999 });
+          if (cmd === "start_terminal") return Promise.resolve({ session: "s1", wsPort: Number(new URLSearchParams(location.search).get("wsport")) || 19999 });
           if (cmd === "get_history")
             return Promise.resolve([
               { id: 1, cmd: "docker ps -a", hits: 5 },
