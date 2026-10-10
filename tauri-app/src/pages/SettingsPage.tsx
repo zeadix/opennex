@@ -5,6 +5,7 @@ import type { Lang } from "../i18n";
 import ShortcutRecorder from "../shortcuts/ShortcutRecorder";
 import FontSelect, { FontOption } from "../components/FontSelect";
 import { focusedSlot } from "../terminal/registry";
+import type { ShellInfo } from "../shells";
 import { invoke } from "../terminal/tauri";
 import {
   DEFAULT_SHORTCUTS,
@@ -107,9 +108,9 @@ export default function SettingsPage({
     general: T.sGeneral, appearance: t0.appearance, shortcuts: t0.shortcuts, lock: t0.lockSection, about: t0.about,
   };
   const [cat, setCat] = useState<(typeof CATEGORIES)[number]["id"]>("general");
-  const [shells, setShells] = useState<string[]>([]);
+  const [shells, setShells] = useState<ShellInfo[]>([]);
   useEffect(() => {
-    import("@tauri-apps/api/core").then((m) => m.invoke<string[]>("list_shells")).then(setShells).catch(() => {});
+    import("@tauri-apps/api/core").then((m) => m.invoke<ShellInfo[]>("list_shells")).then(setShells).catch(() => {});
   }, []);
   // Locally installed font families (fontconfig) — merged into the pickers.
   const [localFonts, setLocalFonts] = useState<string[]>([]);
@@ -284,16 +285,17 @@ export default function SettingsPage({
                     <div className="text-[12px] text-[var(--text-faint)]">{T.sShellsReadFail}</div>
                   ) : (
                     <div className="space-y-1.5">
-                      {shells.map((s) => (
-                        <label key={s} className="flex cursor-pointer items-center gap-2.5 text-[13px]">
+                      {shells.map((sh) => (
+                        <label key={sh.program} className="flex cursor-pointer items-center gap-2.5 text-[13px]">
                           <input
                             type="radio"
                             name="shell"
-                            checked={settings.shell === s}
-                            onChange={() => onSettings({ shell: s })}
+                            checked={settings.shell === sh.program}
+                            onChange={() => onSettings({ shell: sh.program })}
                             className="accent-[var(--accent)]"
                           />
-                          <span className="font-mono text-[12px]">{s}</span>
+                          <span className="text-[12px]">{sh.name}</span>
+                          <span className="min-w-0 flex-1 truncate font-mono text-[10.5px] text-[var(--text-faint)]">{sh.program}</span>
                         </label>
                       ))}
                     </div>

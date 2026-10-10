@@ -28,6 +28,7 @@ import { useSettings } from "./settings";
 import { loadLang, saveLang, t, Lang } from "./i18n";
 import { loadShortcuts, matchesBinding } from "./shortcuts/shortcuts";
 import { activityStore, broadcastGroup, focusedSlot } from "./terminal/registry";
+import type { ShellInfo } from "./shells";
 import { checkForUpdates, startUpdateCheck, useUpdates } from "./updates";
 import { startAiTaskTicker } from "./aiTasks";
 import SshPage, { SshHost, loadHosts, saveHosts } from "./pages/SshPage";
@@ -71,7 +72,7 @@ export default function App() {
   const titles = panelTitles(lang);
   const [settings, updateSettings] = useSettings();
   const [sshHosts, setSshHosts] = useState<SshHost[]>(loadHosts);
-  const [shells, setShells] = useState<string[]>([]);
+  const [shells, setShells] = useState<ShellInfo[]>([]);
   const [activities, setActivities] = useState<Record<string, number>>({});
   const [historyOverlay, setHistoryOverlay] = useState(false);
   const [windows, setWindows] = useState<FloatWin[]>([]);
@@ -345,7 +346,7 @@ export default function App() {
 
   useEffect(() => {
     import("@tauri-apps/api/core")
-      .then((m) => m.invoke<string[]>("list_shells"))
+      .then((m) => m.invoke<ShellInfo[]>("list_shells"))
       .then(setShells)
       .catch(() => {});
   }, []);
@@ -725,9 +726,9 @@ export default function App() {
       page={page}
       onOpenPage={openPage}
       onAddTerminal={() => addTerminal()}
-      onAddTerminalWith={(sh) => addTerminal([sh, "-l"])}
+      onAddTerminalWith={(sh) => addTerminal([sh.program, ...sh.args])}
       shells={shells}
-      defaultShell={settings.shell || shells[0] || ""}
+      defaultShell={settings.shell || shells[0]?.program || ""}
       workspaces={workspaces}
       activeWsId={activeWsId}
       uiSnapshot={() => ({

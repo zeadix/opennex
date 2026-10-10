@@ -30,6 +30,7 @@ import {
 } from "./model";
 import { invoke } from "../terminal/tauri";
 import { t } from "../i18n";
+import type { ShellInfo } from "../shells";
 import type { Lang } from "../i18n";
 import { activityStore, broadcastEnabled, broadcastGroup, focusedSlot } from "../terminal/registry";
 
@@ -99,8 +100,8 @@ export default function DockRoot({
   page: Page;
   onOpenPage: (p: Page) => void;
   onAddTerminal: () => void;
-  onAddTerminalWith: (shell: string) => void;
-  shells: string[];
+  onAddTerminalWith: (shell: ShellInfo) => void;
+  shells: ShellInfo[];
   defaultShell: string;
   workspaces: { id: number; name: string; locked: boolean; lockHash?: string; termJson?: unknown }[];
   uiSnapshot?: () => unknown;
@@ -496,19 +497,19 @@ export default function DockRoot({
 
   /** New terminal tab inside the tabset that owns `tabsetId` — default
    * shell, a picked shell, or an SSH host connection. */
-  function onAddTerminalIn(tabsetId: string, sh?: string | null, host?: SshHost) {
+  function onAddTerminalIn(tabsetId: string, sh?: ShellInfo | null, host?: SshHost) {
     const slot = nextSlot();
     const command = host
       ? ["ssh", "-p", String(host.port), `${host.user}@${host.host}`]
       : sh
-        ? [sh, "-l"]
+        ? [sh.program, ...sh.args]
         : null;
     termModel.doAction(
       Actions.addNode(
         {
           type: "tab",
           id: `term-${slot}`,
-          name: host?.name ?? (command ? command[0].split("/").pop()! : `bash ${slot}`),
+          name: host?.name ?? sh?.name ?? (command ? command[0].split(/[\\/]/).pop()! : `bash ${slot}`),
           component: "termpane",
           enableClose: true,
           enableRenderOnDemand: false,
@@ -700,10 +701,10 @@ function ShellPickerMenu({
   style,
 }: {
   lang: Lang;
-  shells: string[];
+  shells: ShellInfo[];
   defaultShell: string;
   sshHosts: SshHost[];
-  onShell: (sh: string | null) => void;
+  onShell: (sh: ShellInfo | null) => void;
   onSsh: (h: SshHost) => void;
   style?: React.CSSProperties;
 }) {
@@ -717,19 +718,19 @@ function ShellPickerMenu({
         className="cursor-pointer px-3 py-1.5 text-[12px] text-[var(--text)] hover:bg-[var(--bg-hover)]"
         onClick={() => onShell(null)}
       >
-        {t(lang).defaultShell} {defaultShell ? `(${defaultShell.split("/").pop()})` : ""}
+        {t(lang).defaultShell} {defaultShell ? `(${defaultShell.split(/[\\/]/).pop()})` : ""}
       </div>
       <div className="my-1 h-px bg-[var(--border)]" />
       <div className="max-h-40 overflow-y-auto">
         {shells
-          .filter((sh) => sh !== defaultShell)
+          .filter((sh) => sh.program !== defaultShell)
           .map((sh) => (
             <div
-              key={sh}
-              className="cursor-pointer px-3 py-1.5 font-mono text-[11px] text-[var(--text-dim)] hover:bg-[var(--bg-hover)] hover:text-[var(--text)]"
+              key={sh.program}
+              className="cursor-pointer px-3 py-1.5 text-[11.5px] text-[var(--text-dim)] hover:bg-[var(--bg-hover)] hover:text-[var(--text)]"
               onClick={() => onShell(sh)}
             >
-              {sh}
+              {sh.name}
             </div>
           ))}
       </div>

@@ -970,21 +970,125 @@ async fn system_stats(state: tauri::State<'_, AppState>) -> Result<serde_json::V
     .map_err(|e| format!("task failed: {e}"))?
 }
 
-#[tauri::command]
-fn list_shells() -> Vec<String> {
-    let mut out: Vec<String> = std::fs::read_to_string("/etc/shells")
-        .unwrap_or_default()
-        .lines()
-        .map(|l| l.trim())
-        .filter(|l| !l.is_empty() && !l.starts_with('#'))
-        .map(|l| l.to_string())
-        .collect();
-    out.sort();
-    out.dedup();
-    if out.is_empty() {
-        out.push("/bin/bash".into());
+/// 一个可创建的终端 shell:展示名 + 程序 + 启动参数。
+#[derive(serde::Serialize, Clone)]
+struct ShellInfo {
+    name: String,
+    program: String,
+    args: Vec<String>,
+}
+
+fn shell_info(name: &str, program: &str, args: &[&str]) -> Option<ShellInfo> {
+    if std::path::Path::new(program).exists() {
+        Some(ShellInfo {
+            name: name.to_string(),
+            program: program.to_string(),
+            args: args.iter().map(|a| a.to_string()).collect(),
+        })
+    } else {
+        None
     }
-    out
+}
+
+/// 跨平台 shell 目录:「新建终端(选择 Shell)」与设置页默认 shell 都用
+/// 它。Windows 上 /etc/shells 不存在,按已知位置 + PATH 探测
+/// cmd / PowerShell 5 / PowerShell 7 / Git Bash / WSL(含发行版枚举);
+/// Unix 读 /etc/shells 并补充常见手动安装位置。登录参数只给 Unix。
+#[tauri::command]
+fn list_shells() -> Vec<ShellInfo> {
+    #[cfg(windows)]
+    {
+        let mut out: Vec<ShellInfo> = Vec::new();
+        let mut push = |name: &str, program: &str, args: &[&str]| {
+            if let Some(info) = shell_info(name, program, args) {
+                if !out.iter().any(|s| s.program.eq_ignore_ascii_case(&info.program)) {
+                    out.push(info);
+                }
+            }
+        };
+        let local = std::env::var("LOCALAPPDATA").unwrap_or_default();
+        let local_git = format!(r"{}\Programs\Git\bin\bash.exe", local);
+        push("Command Prompt", r"C:\Windows\System32\cmd.exe", &[]);
+        push("PowerShell", r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe", &[]);
+        push("PowerShell 7", r"C:\Program Files\PowerShell\7\pwsh.exe", &[]);
+        push("Git Bash", r"C:\Program Files\Git\bin\bash.exe", &["-i", "-l"]);
+        push("Git Bash", r"C:\Program Files (x86)\Git\bin\bash.exe", &["-i", "-l"]);
+        push("Git Bash", &local_git, &["-i", "-l"]);
+        push("WSL", r"C:\Windows\System32\wsl.exe", &[]);
+        // WSL 发行版枚举(尽力而为):wsl -l -q 输出 UTF-16LE。
+        let distros = std::process::Command::new(r"C:\Windows\System32\wsl.exe")
+            .arg("-l")
+            .arg("-q")
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| {
+                let utf16: String = o
+                    .stdout
+                    .chunks_exact(2)
+                    .map(|c| char::from_u32(u16::from_le_bytes([c[0], c[1]]) as u32).unwrap_or('\0'))
+                    .collect();
+                let text = if utf16.contains('\0') || utf16.lines().all(|l| l.trim().is_empty()) {
+                    String::from_utf8_lossy(&o.stdout).into_owned()
+                } else {
+                    utf16
+                };
+                text.lines()
+                    .map(|l| l.trim().trim_matches('\0').to_string())
+                    .filter(|l| !l.is_empty())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        for d in distros {
+            let name = format!("WSL \u{b7} {d}");
+            let args = vec!["-d".to_string(), d];
+            if let Some(exe) = shell_info("WSL", r"C:\Windows\System32\wsl.exe", &[]) {
+                if !out.iter().any(|s| s.name == name) {
+                    out.push(ShellInfo { name, program: exe.program, args });
+                }
+            }
+        }
+        if out.is_empty() {
+            push("PowerShell", "powershell.exe", &[]);
+        }
+        out
+    }
+    #[cfg(not(windows))]
+    {
+        let mut paths: Vec<String> = std::fs::read_to_string("/etc/shells")
+            .unwrap_or_default()
+            .lines()
+            .map(|l| l.trim())
+            .filter(|l| !l.is_empty() && !l.starts_with('#'))
+            .map(|l| l.to_string())
+            .collect();
+        // 手动安装的 shell 常不在 /etc/shells 里(macOS Homebrew 等)
+        for extra in [
+            "/opt/homebrew/bin/fish",
+            "/usr/local/bin/fish",
+            "/usr/local/bin/bash",
+            "/usr/local/bin/zsh",
+            "/usr/bin/fish",
+        ] {
+            if !paths.iter().any(|p| p == extra) {
+                paths.push(extra.to_string());
+            }
+        }
+        paths.sort();
+        paths.dedup();
+        let mut out: Vec<ShellInfo> = paths
+            .iter()
+            .filter_map(|p| shell_info(p.rsplit('/').next().unwrap_or(p), p, &["-l"]))
+            .collect();
+        if out.is_empty() {
+            out.push(ShellInfo {
+                name: "bash".into(),
+                program: "/bin/bash".into(),
+                args: vec!["-l".into()],
+            });
+        }
+        out
+    }
 }
 
 #[tauri::command]
@@ -1338,9 +1442,20 @@ tauri::Builder::default()
 
 #[cfg(test)]
 mod workspace_history_tests {
-    use super::HistoryStore;
+    use super::{list_shells, HistoryStore};
 
     #[test]
+    /// Unix shell 检测探针(--nocapture 查看输出)
+    #[test]
+    fn shells_detected_on_unix() {
+        let shells = list_shells();
+        for s in &shells {
+            println!("{} -> {} {:?}", s.name, s.program, s.args);
+        }
+        assert!(!shells.is_empty(), "至少检测到一个 shell");
+        assert!(shells.iter().all(|s| std::path::Path::new(&s.program).exists()));
+    }
+
     fn records_hits_and_mutations_are_terminal_local() {
         let mut store = HistoryStore::default();
         store.record("s1", "pwd".into());
