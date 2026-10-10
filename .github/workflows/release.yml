@@ -14,8 +14,10 @@ permissions:
 
 jobs:
   build-tauri:
-    # Tauri 客户端（opennex/tauri-app）三平台打包：NSIS+MSI / DMG / DEB+AppImage
+    # Tauri 客户端（opennex/tauri-app）多平台打包
+    # fail-fast: 实验腿(Windows ARM64)失败绝不取消其余平台
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: windows-latest

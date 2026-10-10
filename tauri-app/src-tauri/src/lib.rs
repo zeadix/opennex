@@ -999,22 +999,24 @@ fn list_shells() -> Vec<ShellInfo> {
     #[cfg(windows)]
     {
         let mut out: Vec<ShellInfo> = Vec::new();
-        let mut push = |name: &str, program: &str, args: &[&str]| {
+        // 显式传 out 的普通函数(非闭包):避免闭包长期可变借用,让
+        // 后面的 WSL 发行版循环直接操作 out(此前借用引发 E0499/E0502)。
+        fn push_shell(out: &mut Vec<ShellInfo>, name: &str, program: &str, args: &[&str]) {
             if let Some(info) = shell_info(name, program, args) {
                 if !out.iter().any(|s| s.program.eq_ignore_ascii_case(&info.program)) {
                     out.push(info);
                 }
             }
-        };
+        }
         let local = std::env::var("LOCALAPPDATA").unwrap_or_default();
         let local_git = format!(r"{}\Programs\Git\bin\bash.exe", local);
-        push("Command Prompt", r"C:\Windows\System32\cmd.exe", &[]);
-        push("PowerShell", r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe", &[]);
-        push("PowerShell 7", r"C:\Program Files\PowerShell\7\pwsh.exe", &[]);
-        push("Git Bash", r"C:\Program Files\Git\bin\bash.exe", &["-i", "-l"]);
-        push("Git Bash", r"C:\Program Files (x86)\Git\bin\bash.exe", &["-i", "-l"]);
-        push("Git Bash", &local_git, &["-i", "-l"]);
-        push("WSL", r"C:\Windows\System32\wsl.exe", &[]);
+        push_shell(&mut out, "Command Prompt", r"C:\Windows\System32\cmd.exe", &[]);
+        push_shell(&mut out, "PowerShell", r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe", &[]);
+        push_shell(&mut out, "PowerShell 7", r"C:\Program Files\PowerShell\7\pwsh.exe", &[]);
+        push_shell(&mut out, "Git Bash", r"C:\Program Files\Git\bin\bash.exe", &["-i", "-l"]);
+        push_shell(&mut out, "Git Bash", r"C:\Program Files (x86)\Git\bin\bash.exe", &["-i", "-l"]);
+        push_shell(&mut out, "Git Bash", &local_git, &["-i", "-l"]);
+        push_shell(&mut out, "WSL", r"C:\Windows\System32\wsl.exe", &[]);
         // WSL 发行版枚举(尽力而为):wsl -l -q 输出 UTF-16LE。
         let distros = std::process::Command::new(r"C:\Windows\System32\wsl.exe")
             .arg("-l")
@@ -1041,15 +1043,10 @@ fn list_shells() -> Vec<ShellInfo> {
             .unwrap_or_default();
         for d in distros {
             let name = format!("WSL \u{b7} {d}");
-            let args = vec!["-d".to_string(), d];
-            if let Some(exe) = shell_info("WSL", r"C:\Windows\System32\wsl.exe", &[]) {
-                if !out.iter().any(|s| s.name == name) {
-                    out.push(ShellInfo { name, program: exe.program, args });
-                }
-            }
+            push_shell(&mut out, &name, r"C:\Windows\System32\wsl.exe", &["-d", &d]);
         }
         if out.is_empty() {
-            push("PowerShell", "powershell.exe", &[]);
+            push_shell(&mut out, "PowerShell", "powershell.exe", &[]);
         }
         out
     }
