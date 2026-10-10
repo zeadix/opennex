@@ -605,8 +605,6 @@ export default function App() {
       effFonts.termFont ||
         '"JetBrains Mono", "Cascadia Code", "Fira Code", ui-monospace, monospace',
     );
-    const inv = effFonts.uiFontSize / 13;
-    root.style.setProperty("--ui-zoom-inv", inv !== 1 ? String(1 / inv) : "1");
     window.dispatchEvent(new CustomEvent("opennex-terminal-theme"));
   }, [effFonts]);
 
@@ -713,7 +711,10 @@ export default function App() {
       />
       </div>
       <div className="relative flex min-h-0 flex-1">
-      <div className="min-h-0 flex-1" style={{ zoom: uiScale }}>
+      {/* 终端 dock 区不吃界面 zoom:WebKitGTK 下嵌套/缩放坐标系会让
+          xterm 的 fit 与鼠标坐标错乱(框选/滚轮/点击 TUI 全部失效)。
+          终端的视觉缩放由 fontSize × uiScale 等效实现。 */}
+      <div className="min-h-0 flex-1">
       <DockRoot
       mainModel={mainModel}
       termModel={termModel}
