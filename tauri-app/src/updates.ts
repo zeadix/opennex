@@ -26,6 +26,9 @@ export interface TauriUpdateState {
   progress: number;
   installed: boolean;
   error: string | null;
+  /** 安装方式不支持应用内更新（如 Windows 便携版：无安装器注册，
+   *  更新器找不到匹配平台键）——UI 显示下载引导而非原始错误。 */
+  unsupported: boolean;
 }
 
 interface UpdateState {
@@ -44,6 +47,7 @@ export function releaseNotes(zh: string[], en: string[], lang: string): string[]
 const TAURI_IDLE: TauriUpdateState = {
   available: false, version: "", notes: "",
   downloading: false, progress: 0, installed: false, error: null,
+  unsupported: false,
 };
 
 let state: UpdateState = { current: null, checking: false, result: null, error: null, tauri: TAURI_IDLE };
@@ -76,7 +80,19 @@ async function tauriCheck(): Promise<void> {
     });
   } catch (e) {
     pluginUpdate = null;
-    publishTauri({ available: false, error: String(e) });
+    // 便携版等无安装器注册的场景:更新器报 "none of the fallback
+    // platforms ... were found"。这是环境限制而非故障——UI 只给
+    // 下载引导,不抛原始错误。
+    const msg = String(e);
+    const unsupported =
+      msg.includes("none of the fallback platforms") ||
+      msg.includes("were found in the response") ||
+      msg.includes("TargetsNotFound");
+    publishTauri({
+      available: false,
+      error: unsupported ? null : String(e),
+      unsupported,
+    });
   }
 }
 

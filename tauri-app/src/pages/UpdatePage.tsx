@@ -30,13 +30,14 @@ export default function UpdatePage({ lang }: { lang: string }) {
               : tauri.installed ? T.sRestarting
               : tauri.available ? fmt(T.sNewFound, { v: tauri.version })
               : error ? T.sCheckFailed
+              : tauri.unsupported ? T.sUpdateFallback
               : available ? fmt(T.sNewFound, { v: result!.latest })
               : result ? T.sUpToDate
               : T.sNotChecked}
           </p>
         </header>
-        {error && !tauri.available && <p role="alert" className="break-words text-[12px] text-[var(--danger)]">{error}</p>}
-        {available && (
+        {error && !tauri.available && !tauri.unsupported && <p role="alert" className="break-words text-[12px] text-[var(--danger)]">{error}</p>}
+        {(available || tauri.unsupported) && (
           <section className="space-y-2 rounded border border-[var(--border)] bg-[var(--bg-elevated)] p-3">
             {tauri.downloading ? (
               <div className="space-y-1.5">
@@ -62,7 +63,6 @@ export default function UpdatePage({ lang }: { lang: string }) {
               // 旧通道报有新版本但当前安装方式不能应用内更新（如 0.1.58 之前的
               // 老版本没带更新器插件）——给出官网下载兜底。
               <div className="space-y-1.5">
-                <p className="text-[12px] text-[var(--text-dim)]">{T.sUpdateFallback}</p>
                 <a
                   href={DOWNLOAD_PAGE}
                   target="_blank"
