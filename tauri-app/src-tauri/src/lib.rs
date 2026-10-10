@@ -1071,8 +1071,17 @@ fn list_shells() -> Vec<ShellInfo> {
                 paths.push(extra.to_string());
             }
         }
-        paths.sort();
-        paths.dedup();
+        // 受限 shell(rbash/rksh)对终端应用是陷阱:cd/重定向全被禁,
+        // 且极易与同名正常 shell 混选——一律不进目录。
+        paths.retain(|p| {
+            let n = p.rsplit('/').next().unwrap_or(p);
+            n != "rbash" && n != "rksh"
+        });
+        // 同名 shell 只留一个(/bin 与 /usr/bin 重复;排序保证 /bin 优先)
+        paths.sort_by_key(|p| p.rsplit('/').next().unwrap_or(p).to_string());
+        paths.dedup_by(|a, b| {
+            a.rsplit('/').next().unwrap_or(a) == b.rsplit('/').next().unwrap_or(b)
+        });
         let mut out: Vec<ShellInfo> = paths
             .iter()
             .filter_map(|p| shell_info(p.rsplit('/').next().unwrap_or(p), p, &["-l"]))

@@ -499,6 +499,11 @@ export default function DockRoot({
    * shell, a picked shell, or an SSH host connection. */
   function onAddTerminalIn(tabsetId: string, sh?: ShellInfo | null, host?: SshHost) {
     const slot = nextSlot();
+    // 默认 shell 防御:设置指向的 shell 若已不在检测目录(如受限的
+    // rbash 被下架),忽略之。
+    const effShell = shells.some((s) => s.program === settings.shell)
+      ? settings.shell
+      : null;
     const command = host
       ? ["ssh", "-p", String(host.port), `${host.user}@${host.host}`]
       : sh
@@ -513,7 +518,7 @@ export default function DockRoot({
           component: "termpane",
           enableClose: true,
           enableRenderOnDemand: false,
-          config: { slot, shell: host ? null : settings.shell || null, command },
+          config: { slot, shell: host ? null : effShell, command },
         },
         tabsetId,
         DockLocation.CENTER,

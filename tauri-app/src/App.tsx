@@ -612,6 +612,11 @@ export default function App() {
 
   /** UI scale from the effective 界面字号 (13px = 1.0). */
   const uiScale = effFonts.uiFontSize / 13;
+  // 默认 shell 防御:设置指向的 shell 若已不在检测目录(如受限的
+  // rbash 被下架),忽略之,新终端回退系统默认($SHELL)。
+  const effDefaultShell = shells.some((s) => s.program === settings.shell)
+    ? settings.shell
+    : null;
 
   // 全局背景图片：图层 + 半透明面板。主题切换/编辑器预览后需重新应用。
   const bgCfg = settings.bgImageData
@@ -650,7 +655,7 @@ export default function App() {
           component: "termpane",
           enableClose: true,
           enableRenderOnDemand: false,
-          config: { slot, command: command ?? null, shell: settings.shell || null },
+          config: { slot, command: command ?? null, shell: effDefaultShell },
         },
         termTabsetId(termModel),
         DockLocation.CENTER,
@@ -676,7 +681,7 @@ export default function App() {
           config: {
             slot,
             command: ["ssh", "-p", String(h.port), `${h.user}@${h.host}`],
-            shell: settings.shell || null,
+            shell: effDefaultShell,
           },
         },
         termTabsetId(termModel),
