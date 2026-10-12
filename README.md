@@ -4,6 +4,8 @@
 
 OpenNex 是一款**多窗口堆叠式 AI 终端管理器**——将任何 AI Coding 或 Agent 工具变为可多开、可远程操控的智能工作平台。
 
+![软件全景](docs/screenshots/panorama.png)
+
 | | |
 |---|---|
 | **1000+** | 活动窗口并行运行 |
@@ -56,6 +58,50 @@ AI 自主规划并执行终端任务，全程可介入、可暂停。
 
 **🌐 多语言**
 内置 20+ 国际化语言，一键切换。
+
+## 界面一览
+
+**🤖 AI 助手 · 模型配置**
+
+配置模型 API 与上下文限额，即可启用 AI 助手。
+
+![AI 助手 · 模型配置](docs/screenshots/ai-config.png)
+
+**🤖 AI 助手 · 对话式控制终端**
+
+配置好模型 API 后，可以直接用对话让 AI 在终端中执行指令或排查问题，全程可介入。
+
+![AI 助手 · 对话式控制终端](docs/screenshots/ai-chat-terminal.png)
+
+**🌐 远程控制助手**
+
+手机扫码或浏览器连接即可远程操作终端；通过终端启动的软件同样可以被远程使用。
+
+![远程控制助手](docs/screenshots/remote-control.png)
+
+**🔒 工作区锁定**
+
+临时离开时一键锁定工作区，回来快捷解锁，不怕被他人误操作。
+
+![工作区锁定](docs/screenshots/workspace-lock.png)
+
+**★ 指令收藏夹**
+
+把常用指令收藏进文件夹，随手调用。
+
+![指令收藏夹](docs/screenshots/command-favorites.png)
+
+**↩ 指令自动补全**
+
+输入时自动匹配补全：系统指令 + 当前终端输入过的历史指令。
+
+![指令自动补全](docs/screenshots/auto-complete.png)
+
+**◉ 工作区闲忙指示器**
+
+红色 = 该工作区中还有终端处于活跃状态；绿色 = 所有终端都已空闲，任务执行完毕。
+
+![工作区闲忙指示器](docs/screenshots/idle-busy-indicator.png)
 
 ## 多平台支持
 
