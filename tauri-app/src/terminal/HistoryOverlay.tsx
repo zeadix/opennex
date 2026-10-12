@@ -45,8 +45,6 @@ function WorkspaceHistoryOverlay({ sessionId, onClose }: HistoryOverlayProps) {
   const [selI, setSelI] = useState(0);
   const [dragOver, setDragOver] = useState<string | null>(null);
   const [prompt, setPrompt] = useState<{ title: string; value?: string; onOk: (v: string) => void } | null>(null);
-  const [addingFolder, setAddingFolder] = useState(false);
-  const [newFolderName, setNewFolderName] = useState("");
   const [q, setQ] = useState("");
   const listRefs = useRef<Record<string, HTMLDivElement | null>>({});
   // 定位模型（设置「指令弹层跟随输入光标」）：
@@ -169,11 +167,15 @@ function WorkspaceHistoryOverlay({ sessionId, onClose }: HistoryOverlayProps) {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // 对话框(新建/重命名收藏夹)打开时,所有按键归对话框——
+      // 否则这里的 Enter 分支会把选中命令「执行」并关闭浮层,
+      // 用户在命名框里按回车就变成误执行 + 整框关闭。
+      if (prompt) return;
       // Capture-phase interception: handled keys must not also reach the
       // terminal (arrow keys would drive the shell history under us).
       const handled = ["Escape", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter"].includes(e.key);
       if (handled) e.stopPropagation();
-      if (e.key === "Escape" && !prompt && !addingFolder) {
+      if (e.key === "Escape") {
         e.preventDefault();
         onClose();
       } else if (e.key === "ArrowUp") {
@@ -213,7 +215,7 @@ function WorkspaceHistoryOverlay({ sessionId, onClose }: HistoryOverlayProps) {
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hist, filtered, q, folders, col, selH, selF, selI, prompt, addingFolder, onClose]);
+  }, [hist, filtered, q, folders, col, selH, selF, selI, prompt, onClose]);
 
   useEffect(() => {
     const ref = col === "hist" ? listRefs.current.hist : col === "folders" ? listRefs.current.folders : listRefs.current.items;
@@ -348,29 +350,19 @@ function WorkspaceHistoryOverlay({ sessionId, onClose }: HistoryOverlayProps) {
           <button
             className="text-[var(--text-faint)] hover:text-[var(--accent)]"
             title={T.uNewFolder}
-            onClick={() => { setAddingFolder(true); setNewFolderName(""); }}
+            onClick={() => {
+            setPrompt({
+              title: T.uNewFolder,
+              onOk: (v) => {
+                const name = v.trim();
+                if (name) saveFolders([...folders, { id: newFolderId(), name, items: [] }]);
+              },
+            });
+          }}
           >
             <FiPlus size={12} />
           </button>
         </div>
-        {addingFolder && (
-          <div className="border-b border-[var(--border)] p-2" onMouseDown={(e) => e.stopPropagation()}>
-            <input
-              autoFocus
-              value={newFolderName}
-              onChange={(e) => setNewFolderName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && newFolderName.trim()) {
-                  const f: FavFolder = { id: newFolderId(), name: newFolderName.trim(), items: [] };
-                  saveFolders([...folders, f]);
-                  setAddingFolder(false);
-                } else if (e.key === "Escape") setAddingFolder(false);
-              }}
-              placeholder={T.uFolderName}
-              className="dialog-input !py-1 !text-[11px]"
-            />
-          </div>
-        )}
         <div
           ref={(el) => (listRefs.current.folders = el)}
           className="max-h-[320px] min-h-[140px] overflow-y-auto py-1"

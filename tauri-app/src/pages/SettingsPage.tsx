@@ -227,14 +227,17 @@ export default function SettingsPage({
   return (
     <div className="settings-controls flex h-full">
       {/* 左侧分类栏 */}
-      <div className="w-32 shrink-0 border-r border-[var(--border)] bg-[var(--bg-panel)] py-3">
+      <div className="w-36 shrink-0 overflow-hidden border-r border-[var(--border)] bg-[var(--bg-panel)] py-3">
         {CATEGORIES.map((c) => (
           <div
             key={c.id}
             onClick={() => setCat(c.id)}
             className={`nav-item !rounded-none !px-3 ${cat === c.id ? "active" : ""}`}
           >
-            <span className="text-[12.5px]">{CAT_LABEL[c.id]}</span>
+            {/* 分类名过长时截断省略（德/法语等译文较长），不侵入右侧内容区 */}
+            <span className="block truncate text-[12.5px]" title={CAT_LABEL[c.id]}>
+              {CAT_LABEL[c.id]}
+            </span>
           </div>
         ))}
       </div>
