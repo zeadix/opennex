@@ -4,11 +4,57 @@
 
 OpenNex — **KI-Terminal-Manager mit gestapelten Multi-Fenstern** — macht jedes AI-Coding- oder Agent-Tool zu einer multi-instanzfähigen, fernsteuerbaren Smart-Workstation.
 
+![OpenNex Übersicht](docs/screenshots/panorama.png)
+
 | | |
 |---|---|
 | **1000+** | gleichzeitig aktive Fenster |
 | **20+** | Oberflächensprachen |
 | **3** | native Plattformen (Linux / Windows / macOS) |
+
+## Screenshots
+
+**🤖 KI-Assistent · Modellkonfiguration**
+
+![](docs/screenshots/ai-config.png)
+
+Modell-API und Kontextlimit konfigurieren, um den KI-Assistenten zu aktivieren.
+
+**🤖 KI-Assistent · Terminalgsteuerte Konversation**
+
+![](docs/screenshots/ai-chat-terminal.png)
+
+Nach der API-Konfiguration genügt ein Dialog, damit die KI Befehle im Terminal ausführt oder Probleme untersucht — jederzeit eingreifbar.
+
+**🌐 Fernsteuerungs-Assistent**
+
+![](docs/screenshots/remote-control.png)
+
+Per QR-Code oder Browserverbindung das Terminal fernbedienen; auch im Terminal gestartete Programme sind fernsteuerbar.
+
+**🔒 Arbeitsbereich-Sperre**
+
+![](docs/screenshots/workspace-lock.png)
+
+Arbeitsbereich mit einem Klick sperren, schnell wieder entsperren.
+
+**★ Befehlsfavoriten**
+
+![](docs/screenshots/command-favorites.png)
+
+Häufig genutzte Befehle in Ordnern sammeln, griffbereit zum Aufruf.
+
+**↩ Befehls-Autovervollständigung**
+
+![](docs/screenshots/auto-complete.png)
+
+Passt sich beim Tippen an: Systembefehle plus der Verlauf dieses Terminals.
+
+**◉ Aktivitätsanzeige**
+
+![](docs/screenshots/idle-busy-indicator.png)
+
+Rot = mindestens ein Terminal des Arbeitsbereichs ist aktiv; Grün = alle fertig.
 
 ## Funktionen
 

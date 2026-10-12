@@ -4,11 +4,57 @@
 
 OpenNex — **マルチウィンドウ積層式 AI ターミナルマネージャー** — あらゆる AI コーディング／エージェントツールを、複数起動・遠隔操作可能なスマートなワークステーションに。
 
+![OpenNex 全景](docs/screenshots/panorama.png)
+
 | | |
 |---|---|
 | **1000+** | 同時アクティブウィンドウ |
 | **20+** | UI 言語 |
 | **3** | ネイティブ対応プラットフォーム（Linux / Windows / macOS） |
+
+## スクリーンショット
+
+**🤖 AI アシスタント · モデル設定**
+
+![](docs/screenshots/ai-config.png)
+
+モデル API とコンテキスト上限を設定して AI アシスタントを有効化。
+
+**🤖 AI アシスタント · 対話式ターミナル操作**
+
+![](docs/screenshots/ai-chat-terminal.png)
+
+API を設定すれば、対話で AI にターミナルのコマンド実行や調査を指示。いつでも介入できます。
+
+**🌐 リモート操作アシスタント**
+
+![](docs/screenshots/remote-control.png)
+
+QR コード扫码またはブラウザ接続でターミナルを遠隔操作。ターミナルから起動したソフトも遠隔操作可能。
+
+**🔒 ワークスペースロック**
+
+![](docs/screenshots/workspace-lock.png)
+
+離席時にワンクリックでロック、戻ったらすぐ解錠。
+
+**★ コマンドお気に入り**
+
+![](docs/screenshots/command-favorites.png)
+
+よく使うコマンドをフォルダにまとめてすぐ呼び出し。
+
+**↩ コマンド自動補完**
+
+![](docs/screenshots/auto-complete.png)
+
+入力に合わせて補完：システムコマンド + このターミナルの履歴。
+
+**◉ 繁閒インジケーター**
+
+![](docs/screenshots/idle-busy-indicator.png)
+
+赤 = ワークスペースに実行中のターミナルあり；緑 = すべて完了。
 
 ## 主な機能
 

@@ -4,11 +4,57 @@
 
 OpenNex 是一款**多視窗堆疊式 AI 終端管理器**——將任何 AI Coding 或 Agent 工具變為可多開、可遠端操控的智慧工作平台。
 
+![軟體全景](docs/screenshots/panorama.png)
+
 | | |
 |---|---|
 | **1000+** | 活動視窗並行執行 |
 | **20+** | 介面語言 |
 | **3** | 原生平台（Linux / Windows / macOS） |
+
+## 介面一覽
+
+**🤖 AI 助理 · 模型設定**
+
+![](docs/screenshots/ai-config.png)
+
+設定模型 API 與上下文限額，即可啟用 AI 助理。
+
+**🤖 AI 助理 · 對話式控制終端**
+
+![](docs/screenshots/ai-chat-terminal.png)
+
+設定好模型 API 後，可直接以對話讓 AI 在終端中執行指令或排查問題，全程可介入。
+
+**🌐 遠端控制助理**
+
+![](docs/screenshots/remote-control.png)
+
+手機掃碼或瀏覽器連線即可遠端操作終端；透過終端啟動的軟體同樣可被遠端使用。
+
+**🔒 工作區鎖定**
+
+![](docs/screenshots/workspace-lock.png)
+
+暫時離開時一鍵鎖定工作區，回來快捷解鎖，不怕被他人誤操作。
+
+**★ 指令收藏夾**
+
+![](docs/screenshots/command-favorites.png)
+
+把常用指令收藏進資料夾，隨手調用。
+
+**↩ 指令自動補全**
+
+![](docs/screenshots/auto-complete.png)
+
+輸入時自動匹配補全：系統指令 + 當前終端輸入過的歷史指令。
+
+**◉ 工作區閒忙指示器**
+
+![](docs/screenshots/idle-busy-indicator.png)
+
+紅色 = 該工作區中還有終端處於活躍狀態；綠色 = 所有終端都已空閒，任務執行完畢。
 
 ## 核心特性
 

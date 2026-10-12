@@ -4,11 +4,57 @@
 
 OpenNex — **다중 창 스택형 AI 터미널 매니저** — 어떤 AI 코딩·에이전트 도구든 다중 실행·원격 조작 가능한 스마트 워크스테이션으로 바꿔줍니다.
 
+![전체 화면](docs/screenshots/panorama.png)
+
 | | |
 |---|---|
 | **1000+** | 동시 실행 창 |
 | **20+** | UI 언어 |
 | **3** | 네이티브 플랫폼(Linux / Windows / macOS) |
+
+## 스크린샷
+
+**🤖 AI 어시스턴트 · 모델 설정**
+
+![](docs/screenshots/ai-config.png)
+
+모델 API와 컨텍스트 한도를 설정하면 AI 어시스턴트가 활성화됩니다.
+
+**🤖 AI 어시스턴트 · 대화형 터미널 제어**
+
+![](docs/screenshots/ai-chat-terminal.png)
+
+API를 설정하면 대화로 AI에게 터미널 명령 실행이나 문제 해결을 지시할 수 있습니다. 언제든 개입 가능.
+
+**🌐 원격 제어 도우미**
+
+![](docs/screenshots/remote-control.png)
+
+QR 코드를 스캔하거나 브라우저로 연결해 터미널을 원격 조작. 터미널에서 실행한 소프트웨어도 원격 제어 가능.
+
+**🔒 작업공간 잠금**
+
+![](docs/screenshots/workspace-lock.png)
+
+자리를 비울 때 원클릭 잠금, 돌아오면 빠르게 해제.
+
+**★ 명령 즐겨찾기**
+
+![](docs/screenshots/command-favorites.png)
+
+자주 쓰는 명령을 폴더로 모아 바로 호출.
+
+**↩ 명령 자동 완성**
+
+![](docs/screenshots/auto-complete.png)
+
+입력 시 자동 매칭: 시스템 명령 + 이 터미널의 기록.
+
+**◉ 활동 표시기**
+
+![](docs/screenshots/idle-busy-indicator.png)
+
+빨강 = 작업공간에 실행 중인 터미널 있음; 초록 = 모두 완료.
 
 ## 주요 기능
 

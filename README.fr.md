@@ -4,11 +4,57 @@
 
 OpenNex — **gestionnaire de terminaux IA à fenêtres empilées** — transforme n'importe quel outil de codage IA ou d'agent en station de travail multi-instances pilotable à distance.
 
+![Vue d'ensemble](docs/screenshots/panorama.png)
+
 | | |
 |---|---|
 | **1000+** | fenêtres actives simultanées |
 | **20+** | langues d'interface |
 | **3** | plates-formes natives (Linux / Windows / macOS) |
+
+## Captures d'écran
+
+**🤖 Assistant IA · Configuration du modèle**
+
+![](docs/screenshots/ai-config.png)
+
+Configurez l'API du modèle et les limites de contexte pour activer l'assistant IA.
+
+**🤖 Assistant IA · Contrôle conversationnel du terminal**
+
+![](docs/screenshots/ai-chat-terminal.png)
+
+Une fois l'API configurée, demandez à l'IA d'exécuter des commandes ou de diagnostiquer — intervenez à tout moment.
+
+**🌐 Assistant de contrôle à distance**
+
+![](docs/screenshots/remote-control.png)
+
+Scannez le QR code ou connectez-vous depuis un navigateur pour piloter le terminal ; les logiciels lancés dans le terminal sont aussi télécommandables.
+
+**🔒 Verrouillage de l'espace**
+
+![](docs/screenshots/workspace-lock.png)
+
+Verrouillez votre espace d'un clic pendant votre absence, déverrouillage rapide au retour.
+
+**★ Favoris de commandes**
+
+![](docs/screenshots/command-favorites.png)
+
+Rangez vos commandes fréquentes dans des dossiers, accessibles en un geste.
+
+**↩ Auto-complétion des commandes**
+
+![](docs/screenshots/auto-complete.png)
+
+Suggestion pendant la saisie : commandes système + historique de ce terminal.
+
+**◉ Indicateur actif/occupé**
+
+![](docs/screenshots/idle-busy-indicator.png)
+
+Rouge = au moins un terminal est encore actif ; Vert = tout est terminé.
 
 ## Fonctionnalités clés
 

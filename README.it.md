@@ -4,11 +4,57 @@
 
 OpenNex — **gestore di terminali IA con finestre impilate** — trasforma qualsiasi strumento di coding IA o agente in una workstation multi-istanza controllabile da remoto.
 
+![Panoramica](docs/screenshots/panorama.png)
+
 | | |
 |---|---|
 | **1000+** | finestre attive simultanee |
 | **20+** | lingue dell'interfaccia |
 | **3** | piattaforme native (Linux / Windows / macOS) |
+
+## Screenshot
+
+**🤖 Assistente IA · Configurazione modello**
+
+![](docs/screenshots/ai-config.png)
+
+Configura l'API del modello e i limiti di contesto per attivare l'assistente IA.
+
+**🤖 Assistente IA · Controllo conversazionale del terminale**
+
+![](docs/screenshots/ai-chat-terminal.png)
+
+Con l'API configurata, chiedi all'IA di eseguire comandi o diagnosticare nel terminale — intervenibile in ogni momento.
+
+**🌐 Assistente di controllo remoto**
+
+![](docs/screenshots/remote-control.png)
+
+Scansiona il QR code o connettiti dal browser per operare il terminale; anche i software avviati nel terminale sono controllabili da remoto.
+
+**🔒 Blocco dello spazio di lavoro**
+
+![](docs/screenshots/workspace-lock.png)
+
+Blocca lo spazio con un clic mentre sei via, sblocco rapido al ritorno.
+
+**★ Preferiti dei comandi**
+
+![](docs/screenshots/command-favorites.png)
+
+Raccogli i comandi frequenti in cartelle per un accesso rapido.
+
+**↩ Auto-completamento comandi**
+
+![](docs/screenshots/auto-complete.png)
+
+Suggerisce mentre digiti: comandi di sistema + cronologia di questo terminale.
+
+**◉ Indicatore attività/occupato**
+
+![](docs/screenshots/idle-busy-indicator.png)
+
+Rosso = almeno un terminale è ancora attivo; Verde = tutto completato.
 
 ## Funzionalità principali
 

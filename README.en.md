@@ -4,11 +4,57 @@
 
 OpenNex — **multi-window stacked AI terminal manager** — turning any AI Coding or Agent tool into a multi-instance, remotely controllable smart workstation.
 
+![OpenNex panorama](docs/screenshots/panorama.png)
+
 | | |
 |---|---|
 | **1000+** | concurrent active windows |
 | **20+** | UI languages |
 | **3** | native platforms (Linux / Windows / macOS) |
+
+## Screenshots
+
+**🤖 AI assistant · Model configuration**
+
+![](docs/screenshots/ai-config.png)
+
+Configure the model API and context limits to enable the AI assistant.
+
+**🤖 AI assistant · Conversational terminal control**
+
+![](docs/screenshots/ai-chat-terminal.png)
+
+Once the model API is configured, just ask the AI to run commands or debug issues in your terminal — you can intervene at any time.
+
+**🌐 Remote control helper**
+
+![](docs/screenshots/remote-control.png)
+
+Scan the QR code or connect from a browser to operate your terminal remotely; apps launched inside the terminal can be remote-controlled too.
+
+**🔒 Workspace lock**
+
+![](docs/screenshots/workspace-lock.png)
+
+Lock your workspace with one click while you're away; unlock quickly when you're back.
+
+**★ Command favorites**
+
+![](docs/screenshots/command-favorites.png)
+
+Collect frequently used commands into folders for quick access.
+
+**↩ Command auto-completion**
+
+![](docs/screenshots/auto-complete.png)
+
+Matches as you type: system commands plus this terminal's own history.
+
+**◉ Idle/busy indicator**
+
+![](docs/screenshots/idle-busy-indicator.png)
+
+Red = at least one terminal in the workspace is still busy; green = all terminals are idle and jobs have finished.
 
 ## Key Features
 
