@@ -72,7 +72,7 @@ await ctx.addInitScript(() => {
 });
 const page = await ctx.newPage();
 page.on("console", (m) => console.log("[page]", m.text().slice(0, 120)));
-await page.goto("http://localhost:5184/test-cursor.html?wsport=19998&uifs=13");
+await page.goto("http://localhost:5184/test-cursor.html?wsport=19998&uifs=17");
 await page.waitForTimeout(9000);
 
 await page.screenshot({ path: "/tmp/mouse-debug.png" });
