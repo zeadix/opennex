@@ -76,15 +76,19 @@ export function invalidateShortcutsCache() {
   cache = null;
 }
 
-export function loadShortcuts(): Record<ShortcutAction, string> {
-  if (cache === null) {
-    try {
-      cache = { ...DEFAULT_SHORTCUTS, ...JSON.parse(localStorage.getItem(KEY) ?? "{}") };
-    } catch {
-      cache = { ...DEFAULT_SHORTCUTS };
-    }
+function readShortcutsFromStorage(): Record<ShortcutAction, string> {
+  try {
+    return { ...DEFAULT_SHORTCUTS, ...JSON.parse(localStorage.getItem(KEY) ?? "{}") };
+  } catch {
+    return { ...DEFAULT_SHORTCUTS };
   }
-  return cache;
+}
+
+export function loadShortcuts(): Record<ShortcutAction, string> {
+  // 模块级可变量的 narrowing 不跨语句,用局部中转
+  const current = cache ?? readShortcutsFromStorage();
+  cache = current;
+  return current;
 }
 
 export function saveShortcuts(s: Record<ShortcutAction, string>) {
