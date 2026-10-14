@@ -384,8 +384,24 @@ function WorkspaceTerminalPane({
       ws.binaryType = "arraybuffer";
       registerSocket(sessionId, ws);
       ws.onerror = () => {};
+      // alt-screen(TUI 全屏)跟踪:应用进入/退出全屏时置位。
+      // TUI(opencode 等)开启鼠标上报只为点击按钮,并不处理滚轮
+      // 上报——真实终端的等效体验是把滚轮转成方向键(alternate
+      // scroll)。见下方 attachCustomWheelEventHandler。
+      let altScreen = false;
+      const SEQ_ALT_ON = [27, 91, 63, 49, 48, 52, 57, 104];   // ESC[?1049h
+      const SEQ_ALT_OFF = [27, 91, 63, 49, 48, 52, 57, 108];  // ESC[?1049l
+      const containsSeq = (hay: Uint8Array, needle: number[]) => {
+        outer: for (let i = 0; i <= hay.length - needle.length; i++) {
+          for (let j = 0; j < needle.length; j++) if (hay[i + j] !== needle[j]) continue outer;
+          return true;
+        }
+        return false;
+      };
       ws.onmessage = (ev) => {
         const bytes = new Uint8Array(ev.data as ArrayBuffer);
+        if (containsSeq(bytes, SEQ_ALT_ON)) altScreen = true;
+        else if (containsSeq(bytes, SEQ_ALT_OFF)) altScreen = false;
         // Session-exit sentinel (OSC 777) rides in its own chunk from the
         // pump — swap it for a visible end-of-session line and flip the
         // status badge (sessions now survive detaches, so the socket
@@ -776,6 +792,19 @@ function WorkspaceTerminalPane({
       };
       host.addEventListener("wheel", onWheel, { passive: false });
       (host as any)._wheelCleanup = () => host.removeEventListener("wheel", onWheel);
+      // alt-screen(TUI)下滚轮 → 方向键:opencode 等 TUI 开启鼠标
+      // 上报却不处理滚轮上报,系统终端的等效行为是滚轮发方向键。
+      // 普通回滚缓冲(altScreen=false)完全走 xterm 原生滚动。
+      term.attachCustomWheelEventHandler((e) => {
+        if (!altScreen || e.ctrlKey || Math.abs(e.deltaY) < 1) return true;
+        // 一次 wheel 事件按滚动量换算为多行方向键(单帧可能聚合数百 px)
+        const lines = Math.max(1, Math.min(8, Math.round(Math.abs(e.deltaY) / 50)));
+        const seq = (e.deltaY < 0 ? "\u001b[A" : "\u001b[B").repeat(lines);
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(new TextEncoder().encode(seq));
+        }
+        return false;
+      });
       // 拖选即复制（设置可关）：松开鼠标时把选中文本送入剪贴板。
       // navigator.clipboard 在 WebKitGTK 的非安全上下文里可能不存在，
       // 需要退回 隐藏 textarea + execCommand 的传统路径。
