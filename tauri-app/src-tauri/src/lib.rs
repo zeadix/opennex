@@ -123,14 +123,14 @@ fn lan_ipv4() -> Option<String> {
 /// Input history is deduplicated, ranked and capped within each workspace.
 const HISTORY_CAP_DEFAULT: usize = 500;
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 struct HistEntry {
     id: u64,
     cmd: String,
     hits: u32,
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 struct WorkspaceHistory {
     entries: Vec<HistEntry>,
     cap: usize,
@@ -145,7 +145,7 @@ impl Default for WorkspaceHistory {
     }
 }
 
-#[derive(Default, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
 struct HistoryStore {
     /// 历史按【终端】隔离:键 = session id(前端稳定的槽位号),
     /// 每个终端自己的历史;关闭终端即删除该键。
@@ -162,14 +162,39 @@ fn history_cap() -> usize {
 /// 历史指令落盘路径(setup 时解析;测试环境未设置 → 持久化 no-op)。
 static HISTORY_PATH: OnceLock<std::path::PathBuf> = OnceLock::new();
 
-/// 历史指令写盘:临时文件 + rename 原子替换,损坏不至于丢旧档。
-/// 由各 mutator 在持锁状态下调用(传 self,勿再抢锁)。
+static PERSIST_SERIAL: Mutex<()> = Mutex::new(());
+
+/// 历史指令写盘:临时文件 + rename 原子替换。
+/// 【在后台线程执行】——序列化+写盘曾在输入回车路径上同步执行,
+/// 磁盘繁忙时每次回车加重数十毫秒延迟。调用方只付一次快照 clone。
 fn persist_history_snapshot(store: &HistoryStore) {
     let Some(path) = HISTORY_PATH.get() else { return };
-    let Ok(json) = serde_json::to_string(store) else { return };
+    let snapshot = store.clone();
+    let path = path.clone();
+    std::thread::spawn(move || {
+        let _serial = PERSIST_SERIAL.lock().unwrap();
+        if let Ok(json) = serde_json::to_string(&snapshot) {
+            let tmp = path.with_extension("json.tmp");
+            if std::fs::write(&tmp, json).is_ok() {
+                let _ = std::fs::rename(&tmp, &path);
+            }
+        }
+    });
+}
+
+/// 退出前的同步落盘(兜底最后几条,避免后台线程被退出打断)。
+fn persist_history_now() {
+    let Some(path) = HISTORY_PATH.get() else { return };
+    let json = {
+        let store = history().lock().unwrap();
+        match serde_json::to_string(&*store) {
+            Ok(j) => j,
+            Err(_) => return,
+        }
+    };
     let tmp = path.with_extension("json.tmp");
     if std::fs::write(&tmp, json).is_ok() {
-        let _ = std::fs::rename(&tmp, path);
+        let _ = std::fs::rename(&tmp, &path);
     }
 }
 
@@ -1442,8 +1467,13 @@ tauri::Builder::default()
             tunnel::tunnel_stop,
             tunnel::tunnel_status
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app, event| {
+            if let tauri::RunEvent::Exit = event {
+                persist_history_now();
+            }
+        });
 }
 
 #[cfg(test)]

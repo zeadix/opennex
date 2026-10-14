@@ -67,16 +67,29 @@ export const DEFAULT_SHORTCUTS: Record<ShortcutAction, string> = {
 
 const KEY = "opennex-shortcuts-v2";
 
+// 按键路径上的缓存:loadShortcuts 在每次 keydown 都会被调用,
+// localStorage 同步读 + JSON.parse 不能放在热路径。saveShortcuts
+// 时失效,下次读取重载。
+let cache: Record<ShortcutAction, string> | null = null;
+
+export function invalidateShortcutsCache() {
+  cache = null;
+}
+
 export function loadShortcuts(): Record<ShortcutAction, string> {
-  try {
-    return { ...DEFAULT_SHORTCUTS, ...JSON.parse(localStorage.getItem(KEY) ?? "{}") };
-  } catch {
-    return { ...DEFAULT_SHORTCUTS };
+  if (cache === null) {
+    try {
+      cache = { ...DEFAULT_SHORTCUTS, ...JSON.parse(localStorage.getItem(KEY) ?? "{}") };
+    } catch {
+      cache = { ...DEFAULT_SHORTCUTS };
+    }
   }
+  return cache;
 }
 
 export function saveShortcuts(s: Record<ShortcutAction, string>) {
   localStorage.setItem(KEY, JSON.stringify(s));
+  cache = null;
 }
 
 /** Normalize a KeyboardEvent into a binding string ("Ctrl+Shift+N"). */

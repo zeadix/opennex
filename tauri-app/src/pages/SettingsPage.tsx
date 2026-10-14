@@ -12,6 +12,7 @@ import {
   SHORTCUT_ACTIONS,
   loadShortcuts,
   saveShortcuts,
+  invalidateShortcutsCache,
   ShortcutAction,
 } from "../shortcuts/shortcuts";
 import {
@@ -205,6 +206,7 @@ export default function SettingsPage({
     const next = { ...shortcuts, [action]: binding };
     setShortcuts(next);
     saveShortcuts(next);
+    invalidateShortcutsCache();
   };
 
   // ---- lock management -------------------------------------------------
