@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { SearchAddon } from "@xterm/addon-search";
 import { FiCopy, FiClipboard } from "react-icons/fi";
 import SearchBar from "./SearchBar";
@@ -291,7 +292,12 @@ function WorkspaceTerminalPane({
     });
     termRef.current = term;
     const fit = new FitAddon();
-    term.loadAddon(fit);
+    term.loadAddon(fit)
+    // unicode 11 宽度表:与 opencode 等现代 TUI 的宽度算法对齐,
+    // 避免 emoji/宽字符列错位随内容累积(背景色块乱跑)
+    const unicode11 = new Unicode11Addon();
+    term.loadAddon(unicode11);
+    term.unicode.activeVersion = "11";;
     const search = new SearchAddon();
     searchRef.current = search;
     term.loadAddon(search);
