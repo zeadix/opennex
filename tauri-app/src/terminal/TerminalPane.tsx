@@ -88,13 +88,16 @@ interface StartResult {
   wsPort: number;
 }
 
-const SENTINEL = new TextEncoder().encode("\x1b]777;session-exit\x07");
+/** Session-exit sentinel prefix (OSC 777). The backend appends the
+ * real shell status after it (";exit 0" / ";exit 1" / ";closed"). */
+const SENTINEL_PREFIX = "\x1b]777;session-exit";
 
 /** Byte offset of the session-exit sentinel in a WS chunk (-1 if absent). */
 function findSentinel(hay: Uint8Array): number {
-  outer: for (let i = 0; i + SENTINEL.length <= hay.length; i++) {
-    for (let j = 0; j < SENTINEL.length; j++) {
-      if (hay[i + j] !== SENTINEL[j]) continue outer;
+  const pat = new TextEncoder().encode(SENTINEL_PREFIX);
+  outer: for (let i = 0; i + pat.length <= hay.length; i++) {
+    for (let j = 0; j < pat.length; j++) {
+      if (hay[i + j] !== pat[j]) continue outer;
     }
     return i;
   }
@@ -400,7 +403,11 @@ function WorkspaceTerminalPane({
         if (idx >= 0) {
           if (idx > 0) term.write(bytes.subarray(0, idx));
           if (!disposed) {
-            term.write(`\r\n\x1b[90m[${Tref.current.sessionEnded}]\x1b[0m\r\n`);
+            // 哨兵可携带真实退出状态(";exit N"/";closed")——显示出来
+            const text = new TextDecoder().decode(bytes.subarray(idx));
+            const m = /session-exit;([^\x07\x1b]+)/.exec(text);
+            const detail = m ? ` ${m[1]}` : "";
+            term.write(`\r\n\x1b[90m[${Tref.current.sessionEnded}${detail}]\x1b[0m\r\n`);
           }
           return;
         }

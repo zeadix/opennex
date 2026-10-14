@@ -34,6 +34,10 @@ struct PtySession {
     workspace_id: u64,
     /// 本终端的稳定 id —— 历史指令按它键控(输出泵在锁外用它记录)。
     id: String,
+    /// 子进程退出码(waiter 线程写入;pump 持有同一 Arc 读取,
+    /// 本字段本体在结构体上无读——消除 dead_code 误报)
+    #[allow(dead_code)]
+    exit_status: Arc<Mutex<Option<String>>>,
     writer: Mutex<Box<dyn std::io::Write + Send>>,
     master: Mutex<Box<dyn MasterPty + Send>>,
     killer: Mutex<Box<dyn portable_pty::ChildKiller + Send + Sync>>,
@@ -398,12 +402,14 @@ fn spawn_pty(
     let (bcast, _) = tokio::sync::broadcast::channel::<Vec<u8>>(256);
     let scrollback: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::with_capacity(64 * 1024)));
     let child_pid = child.process_id().unwrap_or(0);
+    let exit_status: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     sessions.insert_named(
         session_id.clone(),
         display_name,
         PtySession {
             workspace_id,
             id: session_id.clone(),
+            exit_status: exit_status.clone(),
             writer: Mutex::new(
                 pair.master
                     .take_writer()
@@ -421,18 +427,29 @@ fn spawn_pty(
     // Output pump: exactly ONE per session, started at spawn — attached
     // sockets come and go, the shell (and this pump) keeps running.
     let s = sessions.get(&session_id).expect("just inserted");
+    let st_ref = exit_status.clone();
     std::thread::spawn(move || {
         pump_reader(
+            session_id.clone(),
+            exit_status.clone(),
             reader,
             s.bcast.clone(),
             scrollback,
             s.kill.clone(),
             s.last_activity_ms.clone(),
+            child_pid,
         );
     });
-    // Waiter thread: reap the child on exit.
+    // Waiter thread: reap the child on exit and record its status
+    // (exit code / signal) for the EOF sentinel.
     std::thread::spawn(move || {
-        let _ = child.wait();
+        let st = child.wait();
+        // portable_pty 的 signal 字段私有:非成功一律报 exit_code
+        *st_ref.lock().unwrap() = Some(match &st {
+            Ok(s) if s.success() => "exit 0".to_string(),
+            Ok(s) => format!("exit {}", s.exit_code()),
+            Err(e) => format!("wait-error {e}"),
+        });
     });
     Ok(())
 }
@@ -441,11 +458,14 @@ fn spawn_pty(
 /// thread. Every chunk appends to the scrollback tail and fans out to
 /// all currently-attached WebSockets.
 fn pump_reader(
+    session_id: String,
+    exit_status: Arc<Mutex<Option<String>>>,
     mut reader: Box<dyn std::io::Read + Send>,
     bcast: tokio::sync::broadcast::Sender<Vec<u8>>,
     scrollback: Arc<Mutex<Vec<u8>>>,
     kill: Arc<Mutex<bool>>,
     activity: Arc<AtomicU64>,
+    child_pid: u32,
 ) {
     let mut buf = [0u8; 65536];
     loop {
@@ -470,11 +490,26 @@ fn pump_reader(
                     // stays alive and scrollback accumulates.
                 }
             }
-            Err(_) => break,
+            Err(e) => {
+                eprintln!("[diag] session {session_id} PTY read error: {e}");
+                break;
+            }
         }
     }
+    // DIAG: 会话输出 EOF——打印子进程退出状态帮助定位
+    eprintln!("[diag] session {session_id} EOF (pid {child_pid})");
     // Session ended: a sentinel lets the frontend print the exit state.
-    let _ = bcast.send(b"\x1b]777;session-exit\x07".to_vec());
+    // 等待 waiter 写入退出状态(最多 500ms),把真实退出码带给前端
+    let mut waited = 0;
+    loop {
+        if waited >= 500 { break; }
+        if exit_status.lock().unwrap().is_some() { break; }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        waited += 50;
+    }
+    let status = exit_status.lock().unwrap().clone().unwrap_or_else(|| "closed".into());
+    let sentinel = format!("\x1b]777;session-exit;{}\x07", status);
+    let _ = bcast.send(sentinel.into_bytes());
 }
 
 #[cfg(test)]
