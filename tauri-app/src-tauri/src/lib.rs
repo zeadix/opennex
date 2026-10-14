@@ -685,12 +685,47 @@ async fn spawn_ws_server(sessions: Arc<SessionMap>) {
         )
         .route("/remote/sessions", get(remote_sessions))
         .with_state(sessions);
-    axum::serve(
-        listener,
-        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
-    )
-    .await
-    .expect("ws server");
+
+    // 手动 accept loop:对每个连接关闭 Nagle(TCP_NODELAY)。
+    // WS 是请求-响应式小包流,Nagle + 客户端延迟 ACK 会让连打时的
+    // 回显叠加最高 40ms 延迟(真实终端的标准做法就是关它)。
+    use hyper_util::rt::TokioExecutor;
+    use tower::util::ServiceExt;
+    loop {
+        let (tcp, remote_addr) = match listener.accept().await {
+            Ok(x) => x,
+            Err(e) => {
+                eprintln!("ws accept: {e}");
+                continue;
+            }
+        };
+        let _ = tcp.set_nodelay(true);
+        let app = app.clone();
+        tokio::spawn(async move {
+            use hyper_util::rt::TokioIo;
+            let io = TokioIo::new(tcp);
+            let svc = hyper::service::service_fn(move |mut req: hyper::http::Request<hyper::body::Incoming>| {
+                let app = app.clone();
+                async move {
+                    // 手动 serve 时不自动注入 ConnectInfo——补上
+                    req.extensions_mut().insert(remote_addr);
+                    let (parts, body) = req.into_parts();
+                    let req = axum::extract::Request::from_parts(parts, axum::body::Body::new(body));
+                    app.clone()
+                        .oneshot(req)
+                        .await
+                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+                }
+            });
+            if let Err(e) = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
+                .serve_connection_with_upgrades(io, svc)
+                .await
+            {
+                eprintln!("ws conn: {e}");
+            }
+        });
+    }
+
 }
 
 /// Block briefly until the WS server thread has bound its port (a
