@@ -770,8 +770,9 @@ async fn spawn_ws_server(sessions: Arc<SessionMap>) {
             let svc = hyper::service::service_fn(move |mut req: hyper::http::Request<hyper::body::Incoming>| {
                 let app = app.clone();
                 async move {
-                    // 手动 serve 时不自动注入 ConnectInfo——补上
-                    req.extensions_mut().insert(remote_addr);
+                    // 手动 serve 时不自动注入 ConnectInfo——按 axum 的
+                    // 连接信息扩展键补上(WebSocketUpgrade 依赖它)
+                    req.extensions_mut().insert(axum::extract::ConnectInfo(remote_addr));
                     let (parts, body) = req.into_parts();
                     let req = axum::extract::Request::from_parts(parts, axum::body::Body::new(body));
                     app.clone()
