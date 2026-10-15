@@ -497,7 +497,14 @@ fn pump_reader(
         }
     }
     // DIAG: 会话输出 EOF——打印子进程退出状态帮助定位
-    eprintln!("[diag] session {session_id} EOF (pid {child_pid})");
+    // 诊断:EOF 前的最后输出(转义可见)+ 真实退出状态,贴回即可定位
+    let tail: String = {
+        let sb = scrollback.lock().unwrap();
+        let start = sb.len().saturating_sub(300);
+        String::from_utf8_lossy(&sb[start..]).replace('\u{1b}', "\\e").replace('\r', "\\r")
+    };
+    let st = exit_status.lock().unwrap().clone().unwrap_or_else(|| "closed".into());
+    eprintln!("[diag] session {session_id} EOF (pid {child_pid}) status={st} tail={tail:?}");
     // Session ended: a sentinel lets the frontend print the exit state.
     // 等待 waiter 写入退出状态(最多 500ms),把真实退出码带给前端
     let mut waited = 0;
