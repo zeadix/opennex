@@ -166,6 +166,22 @@ fn history_cap() -> usize {
 /// 历史指令落盘路径(setup 时解析;测试环境未设置 → 持久化 no-op)。
 static HISTORY_PATH: OnceLock<std::path::PathBuf> = OnceLock::new();
 
+/// 会话诊断日志(定位终端秒退;稳定后移除)
+fn session_diag(msg: &str) {
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("/tmp/opennex-session-diag.log")
+    {
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let _ = writeln!(f, "[{ts}] {msg}");
+    }
+}
+
 static PERSIST_SERIAL: Mutex<()> = Mutex::new(());
 
 /// 历史指令写盘:临时文件 + rename 原子替换。
@@ -402,6 +418,11 @@ fn spawn_pty(
     let (bcast, _) = tokio::sync::broadcast::channel::<Vec<u8>>(256);
     let scrollback: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::with_capacity(64 * 1024)));
     let child_pid = child.process_id().unwrap_or(0);
+    let cwd_used = cwd.as_deref().unwrap_or("HOME/none");
+    session_diag(&format!(
+        "SPAWN session={session_id} shell={:?} args=-l cwd={cwd_used} pid={child_pid}",
+        command.as_ref().map(|c| c[0].clone()).unwrap_or_else(|| "bash".into())
+    ));
     let exit_status: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     sessions.insert_named(
         session_id.clone(),
