@@ -364,12 +364,20 @@ fn spawn_pty(
             pixel_height: 0,
         })
         .map_err(|e| format!("openpty: {e}"))?;
-    // Cross-platform default shell: $SHELL on Unix, PowerShell on Windows
-    // ("/bin/bash" would fail to spawn there).
+    // Cross-platform default shell: $SHELL on Unix; cmd on Windows
+    // (Windows 用户的默认预期是命令提示符,且 GUI 启动时 $SHELL 未设,
+    // 若从 git-bash 会话启动则 $SHELL 会指向 bash——Windows 上一律
+    // 忽略 $SHELL,避免误选)。
     #[cfg(windows)]
-    const FALLBACK_SHELL: &str = "powershell.exe";
+    const FALLBACK_SHELL: &str = "cmd.exe";
     #[cfg(not(windows))]
     const FALLBACK_SHELL: &str = "/bin/bash";
+    #[cfg(windows)]
+    let default_shell = shell
+        .clone()
+        .filter(|sh| !sh.is_empty())
+        .unwrap_or_else(|| FALLBACK_SHELL.into());
+    #[cfg(not(windows))]
     let default_shell = shell
         .clone()
         .filter(|sh| !sh.is_empty())
