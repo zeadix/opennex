@@ -690,20 +690,10 @@ function WorkspaceTerminalPane({
           return false;
         }
         if (e.key === "Enter" && !e.ctrlKey && !e.altKey) {
-          if (sg.navigated) {
-            // Confirm the highlighted entry: delete the typed word
-            // from the line, then insert the full command — NOT
-            // executed (egui confirm_history_entry semantics).
-            e.preventDefault();
-            const del = "\x7f".repeat([...sg.word].length);
-            const bytes = new TextEncoder().encode(del + sg.list[sg.sel]);
-            if (ws && ws.readyState === WebSocket.OPEN) ws.send(bytes);
-            buf = sg.list[sg.sel];
-            setSuggest(null);
-            return false;
-          }
-          // Pristine: the Enter executes the typed line; the onData
-          // handler clears the buffer and the overlay with it.
+          // Enter 永远执行当前输入行。此前「浏览过建议(navigated)时
+          // 回车 = 删掉已输入并插入选中历史指令」极易被感知为误触发:
+          // 用户按 ↑ 本想调 shell 历史、回车本想执行,结果整行被历史
+          // 指令替换。接受建议的交互是 Tab(保留不变)。
           setSuggest(null);
           return true;
         }
