@@ -38,6 +38,9 @@ struct PtySession {
     /// 本字段本体在结构体上无读——消除 dead_code 误报)
     #[allow(dead_code)]
     exit_status: Arc<Mutex<Option<String>>>,
+    /// 备用屏幕(TUI 全屏,如 opencode/vim)期间置位:该期间的回车
+    /// 输入是对话/界面操作,不进指令历史。输出泵检测 1049/1047/47 置位。
+    in_alt_screen: Arc<std::sync::atomic::AtomicBool>,
     writer: Mutex<Box<dyn std::io::Write + Send>>,
     master: Mutex<Box<dyn MasterPty + Send>>,
     killer: Mutex<Box<dyn portable_pty::ChildKiller + Send + Sync>>,
@@ -311,6 +314,10 @@ impl LineBuf {
     fn new() -> Self {
         Self { bytes: Vec::new() }
     }
+    /// 备用屏幕期间丢弃累积(那期间的回车不是 shell 指令)
+    fn clear(&mut self) {
+        self.bytes.clear();
+    }
     /// Feed raw input bytes; returns completed lines (utf8-lossy, trimmed).
     fn feed(&mut self, input: &[u8]) -> Vec<String> {
         let mut lines = Vec::new();
@@ -432,6 +439,7 @@ fn spawn_pty(
         command.as_ref().map(|c| c[0].clone()).unwrap_or_else(|| "bash".into())
     ));
     let exit_status: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+    let in_alt_screen = Arc::new(std::sync::atomic::AtomicBool::new(false));
     sessions.insert_named(
         session_id.clone(),
         display_name,
@@ -439,6 +447,7 @@ fn spawn_pty(
             workspace_id,
             id: session_id.clone(),
             exit_status: exit_status.clone(),
+            in_alt_screen: in_alt_screen.clone(),
             writer: Mutex::new(
                 pair.master
                     .take_writer()
@@ -460,6 +469,7 @@ fn spawn_pty(
     std::thread::spawn(move || {
         pump_reader(
             session_id.clone(),
+            in_alt_screen.clone(),
             exit_status.clone(),
             reader,
             s.bcast.clone(),
@@ -486,8 +496,26 @@ fn spawn_pty(
 /// Blocking PTY -> broadcast pump, run once per session on a worker
 /// thread. Every chunk appends to the scrollback tail and fans out to
 /// all currently-attached WebSockets.
+/// 检测输出块中的备用屏幕进/出序列;Some(true)=进入,Some(false)=退出
+fn alt_screen_signal(chunk: &[u8]) -> Option<bool> {
+    const ON: &[&[u8]] = &[b"\x1b[?1049h", b"\x1b[?1047h", b"\x1b[?47h"];
+    const OFF: &[&[u8]] = &[b"\x1b[?1049l", b"\x1b[?1047l", b"\x1b[?47l"];
+    for seq in ON {
+        if chunk.windows(seq.len()).any(|w| w == *seq) {
+            return Some(true);
+        }
+    }
+    for seq in OFF {
+        if chunk.windows(seq.len()).any(|w| w == *seq) {
+            return Some(false);
+        }
+    }
+    None
+}
+
 fn pump_reader(
     session_id: String,
+    alt: Arc<std::sync::atomic::AtomicBool>,
     exit_status: Arc<Mutex<Option<String>>>,
     mut reader: Box<dyn std::io::Read + Send>,
     bcast: tokio::sync::broadcast::Sender<Vec<u8>>,
@@ -506,6 +534,11 @@ fn pump_reader(
             Ok(n) => {
                 activity::record_output(&activity, unix_ms());
                 let chunk = buf[..n].to_vec();
+                // alt-screen 进/出检测(1049/1047/47):备用屏幕期间的
+                // 回车输入是 TUI 内容(对话等),不计入指令历史
+                if let Some(v) = alt_screen_signal(&chunk) {
+                    alt.store(v, std::sync::atomic::Ordering::Relaxed);
+                }
                 {
                     let mut sb = scrollback.lock().unwrap();
                     sb.extend_from_slice(&chunk);
@@ -558,13 +591,18 @@ mod startup_activity_tests {
         let prompt = b"user@host:~/project$ ";
         let activity = Arc::new(AtomicU64::new(0));
         let scrollback = Arc::new(Mutex::new(Vec::new()));
+        let exit_status: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
         let (sender, mut receiver) = tokio::sync::broadcast::channel(8);
         pump_reader(
+            "test".to_string(),
+            Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            exit_status.clone(),
             Box::new(std::io::Cursor::new(prompt.to_vec())),
             sender,
             scrollback.clone(),
             Arc::new(Mutex::new(false)),
             activity.clone(),
+            0,
         );
         assert_eq!(activity.load(Ordering::Relaxed), 0);
         assert_eq!(*scrollback.lock().unwrap(), prompt);
@@ -661,8 +699,17 @@ async fn session_ws(mut socket: WebSocket, sessions: Arc<SessionMap>, sid: Strin
                                 .last_activity_ms
                                 .store(unix_ms(), std::sync::atomic::Ordering::Relaxed);
                         }
-                        for line in line_buf.lock().unwrap().feed(&bytes) {
-                            record_line(&session.id, line);
+                        // 备用屏幕(TUI 全屏)期间的回车输入是对话/界面
+                        // 操作,不是 shell 指令——不进历史,也不累积行缓冲
+                        if !session
+                            .in_alt_screen
+                            .load(std::sync::atomic::Ordering::Relaxed)
+                        {
+                            for line in line_buf.lock().unwrap().feed(&bytes) {
+                                record_line(&session.id, line);
+                            }
+                        } else {
+                            line_buf.lock().unwrap().clear();
                         }
                         if session.writer.lock().unwrap().write_all(&bytes).is_err() {
                             break;
