@@ -46,6 +46,7 @@ function WorkspaceHistoryOverlay({ sessionId, onClose }: HistoryOverlayProps) {
   const [dragOver, setDragOver] = useState<string | null>(null);
   const [prompt, setPrompt] = useState<{ title: string; value?: string; onOk: (v: string) => void } | null>(null);
   const [q, setQ] = useState("");
+  const [confirmClear, setConfirmClear] = useState(false);
   const listRefs = useRef<Record<string, HTMLDivElement | null>>({});
   // 定位模型（设置「指令弹层跟随输入光标」）：
   //   开 = 每次呼出都锚在「聚焦终端」的输入光标处（光标行下方，贴底
@@ -167,10 +168,10 @@ function WorkspaceHistoryOverlay({ sessionId, onClose }: HistoryOverlayProps) {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      // 对话框(新建/重命名收藏夹)打开时,所有按键归对话框——
+      // 确认框/命名对话框打开时,所有按键归对话框——
       // 否则这里的 Enter 分支会把选中命令「执行」并关闭浮层,
       // 用户在命名框里按回车就变成误执行 + 整框关闭。
-      if (prompt) return;
+      if (prompt || confirmClear) return;
       // Capture-phase interception: handled keys must not also reach the
       // terminal (arrow keys would drive the shell history under us).
       const handled = ["Escape", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter"].includes(e.key);
@@ -215,7 +216,7 @@ function WorkspaceHistoryOverlay({ sessionId, onClose }: HistoryOverlayProps) {
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hist, filtered, q, folders, col, selH, selF, selI, prompt, onClose]);
+  }, [hist, filtered, q, folders, col, selH, selF, selI, prompt, confirmClear, onClose]);
 
   useEffect(() => {
     const ref = col === "hist" ? listRefs.current.hist : col === "folders" ? listRefs.current.folders : listRefs.current.items;
@@ -279,6 +280,15 @@ function WorkspaceHistoryOverlay({ sessionId, onClose }: HistoryOverlayProps) {
           style={{ userSelect: "text" }}
           onMouseDown={(e) => e.stopPropagation()}
         />
+        <button
+          title={T.uClearHistory}
+          aria-label={T.uClearHistory}
+          className="shrink-0 rounded p-1 text-[var(--text-faint)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--danger)]"
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={() => setConfirmClear(true)}
+        >
+          <FiTrash2 size={12} />
+        </button>
       </div>
 
       <div className="flex">
@@ -483,6 +493,40 @@ function WorkspaceHistoryOverlay({ sessionId, onClose }: HistoryOverlayProps) {
           {T.uDragHistory}
         </span>
       </div>
+
+      {confirmClear && (
+        <div
+          className="fixed inset-0 z-[9600] flex items-center justify-center bg-black/50"
+          onMouseDown={() => setConfirmClear(false)}
+        >
+          <div
+            className="animate-fade-up w-[360px] rounded-2xl border border-[var(--border)] bg-[var(--bg-elevated)] p-4 shadow-[var(--shadow-lift)]"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="mb-2 text-[13px] font-semibold">{T.uClearHistory}</div>
+            <p className="mb-4 text-[12px] leading-relaxed text-[var(--text-dim)]">{T.uClearHistoryConfirm}</p>
+            <div className="flex justify-end gap-2">
+              <button
+                className="rounded-md border border-[var(--border)] px-3 py-1.5 text-[12px] text-[var(--text-dim)] hover:bg-[var(--bg-hover)]"
+                onClick={() => setConfirmClear(false)}
+              >
+                {T.cancel}
+              </button>
+              <button
+                className="rounded-md bg-[var(--danger)] px-3 py-1.5 text-[12px] text-white hover:opacity-90"
+                onClick={() => {
+                  invoke("clear_history", { sessionId: String(sessionId) }).catch(() => {});
+                  setHist([]);
+                  setQ("");
+                  setConfirmClear(false);
+                }}
+              >
+                {T.clear}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {prompt && (
         <PromptDialog
