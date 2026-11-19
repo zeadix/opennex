@@ -158,6 +158,9 @@ function WorkspaceTerminalPane({
   const [searchOpen, setSearchOpen] = useState(false);
   const searchRef = useRef<SearchAddon | null>(null);
   /** 字号/字体变化后的重适配入口（big effect 内赋值）。 */
+  /** 重绘补偿入口 ref:终端 effect 内赋值实现,fitAndSync 等跨作用
+   *  域路径经此调用(拖拽/布局 settled 后强制 TUI 全量重绘)。 */
+  const pokeResizeRef = useRef<() => void>(() => {});
   const fitRef = useRef<{ fitAndSync: () => void } | null>(null);
   // Custom right-click menu (copy/paste) — the webview's own context
   // menu is suppressed app-wide, this is the only menu terminals show.
@@ -343,6 +346,7 @@ function WorkspaceTerminalPane({
             rows = term.rows;
             sock.send(JSON.stringify({ type: "resize", cols, rows }));
           }
+          pokeResizeRef.current();
         } catch {
           /* not laid out yet */
         }
@@ -765,8 +769,27 @@ function WorkspaceTerminalPane({
       window.addEventListener("opennex-close-suggest", onCloseSuggest);
       (hostRef.current as any)._closeSuggestCleanup = () =>
         window.removeEventListener("opennex-close-suggest", onCloseSuggest);
-      const sendResize = () => {
-        if (ws && ws.readyState === WebSocket.OPEN && (term.cols !== cols || term.rows !== rows)) {
+      (hostRef.current as any)._pokeCleanup = () => {
+        if (pokeTimer !== null) window.clearTimeout(pokeTimer);
+      };
+      // 拖拽/布局收尾后的「重绘补偿」:中间尺寸的 resize 会让 TUI 按
+      // 中间宽度重绘,留下主题背景色从缝隙里露出的破损帧;settled 后
+      // 补发一次同尺寸 resize(SIGWINCH 同尺寸也会投递),强制 TUI
+      // 全量重绘,把破损帧整体覆盖掉。
+      let pokeTimer: number | null = null;
+      pokeResizeRef.current = () => {
+        if (pokeTimer !== null) window.clearTimeout(pokeTimer);
+        pokeTimer = window.setTimeout(() => {
+          pokeTimer = null;
+          sendResize(true);
+        }, 300);
+      };
+      function sendResize(force = false) {
+        if (
+          ws &&
+          ws.readyState === WebSocket.OPEN &&
+          (force || term.cols !== cols || term.rows !== rows)
+        ) {
           cols = term.cols;
           rows = term.rows;
           // MUST be a TEXT frame: the backend routes Text frames to the
@@ -795,12 +818,15 @@ function WorkspaceTerminalPane({
           const el = hostRef.current;
           if (!el || el.clientWidth < 60 || el.clientHeight < 40) return;
           try {
+            // 先按容器即时 fit(xterm 画布跟随),但 PTY resize 统一走
+            // pokeFinalResize 的 settled 发送:拖拽期间不向 TUI 发中间
+            // 尺寸,避免应用按中间宽度反复重绘出破损帧
             fit.fit();
-            sendResize();
+            pokeResizeRef.current();
           } catch {
             /* zero-size during layout */
           }
-        }, 120);
+        }, 200);
       });
       ro.observe(hostRef.current!);
       ws.onopen = () => sendResize();
@@ -910,6 +936,7 @@ function WorkspaceTerminalPane({
       if (cleanup) cleanup();
       (hostRef.current as any)?._wheelCleanup?.();
       (hostRef.current as any)?._keyCleanup2?.();
+      (hostRef.current as any)?._pokeCleanup?.();
       (hostRef.current as any)?._compCleanup?.();
       (hostRef.current as any)?._mousedownFwdCleanup?.();
       (hostRef.current as any)?._ctxCleanup?.();
