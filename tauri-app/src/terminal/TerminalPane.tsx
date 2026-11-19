@@ -17,6 +17,7 @@ import {
   focusedSlot,
   registerSocket,
   sockets,
+  tuiActiveSlots,
   unregisterSocket,
 } from "./registry";
 
@@ -183,6 +184,11 @@ function WorkspaceTerminalPane({
   suggestSourceRef.current = suggestSource;
   const autoMatchRef = useRef(autoMatch);
   autoMatchRef.current = autoMatch;
+  // TUI 前台标志：终端处于备用屏幕（opencode/vim 等全屏 TUI 程序），
+  // 或 pane 以非 shell 程序启动（command prop 且非已知 shell——SSH/
+  // PowerShell/WSL 等虽走 command 通道但仍是命令行工具，不拦截）。
+  // 置位期间自动匹配与指令面板禁用——TUI 里键入的是界面操作。
+  const tuiActiveRef = useRef(false);
   const copyOnSelectRef = useRef(copyOnSelect);
   copyOnSelectRef.current = copyOnSelect;
   // Latch: a palette/history insert rewrote the input line — auto-match
@@ -473,6 +479,12 @@ function WorkspaceTerminalPane({
           setSuggest(null);
           return;
         }
+        // TUI 前台（opencode/vim 等备用屏幕程序）时键入的是界面操作，
+        // 不是 shell 命令行——禁用自动匹配。
+        if (tuiActiveRef.current) {
+          setSuggest(null);
+          return;
+        }
         const word = buf.replace(/^\s+/, "");
         // 面板来源可配：auto=历史+系统合并（原行为）；system=仅 PATH；
         // history=仅会话历史。
@@ -548,7 +560,30 @@ function WorkspaceTerminalPane({
       // 弹层打开时：回显把光标推进后立即重新对齐（键入时刻算的是回显前
       // 的坐标，可见光标比面板晚一拍）。
       let lastAppliedCell = "";
+      // TUI 前台检测：opencode/vim 等全屏 TUI 程序会切换到备用屏幕
+      // （xterm buffer type = "alternate"），此时键入的是界面操作——禁用自动
+      // 匹配与指令面板，退出后（buffer 回到 "normal"）自动恢复。
+      // 静态判定：pane 以非 shell 程序启动（SSH/PowerShell/WSL 虽走
+      // command 通道但仍是命令行工具，按 basename 白名单豁免）。
+      const isKnownShell = /^(ssh|bash|sh|dash|zsh|fish|cmd|powershell|pwsh|wsl|bash\.exe|sh\.exe|dash\.exe|zsh\.exe|fish\.exe|cmd\.exe|powershell\.exe|pwsh\.exe|wsl\.exe)$/.test(
+        (command?.[0] ?? shell ?? "").split(/[\\/]/).pop()?.toLowerCase() ?? "",
+      );
+      if (command?.length && !isKnownShell) {
+        tuiActiveRef.current = true;
+        tuiActiveSlots.add(sessionId);
+      }
       term.onRender(() => {
+        // 备用屏幕进出同步（零延迟，无需 IPC 轮询）。
+        const alt = (term.buffer.active.type ?? "normal") === "alternate";
+        if (tuiActiveRef.current !== alt) {
+          tuiActiveRef.current = alt;
+          if (alt) {
+            setSuggest(null);
+            tuiActiveSlots.add(sessionId);
+          } else if (!command?.length || isKnownShell) {
+            tuiActiveSlots.delete(sessionId);
+          }
+        }
         updateCursorPos();
         if (suggestRef.current) {
           const key = `${term.buffer.active.cursorX}|${term.buffer.active.cursorY}`;

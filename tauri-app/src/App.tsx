@@ -27,7 +27,7 @@ import { applyBackgroundImage, getTheme } from "./theme/themes";
 import { useSettings } from "./settings";
 import { loadLang, saveLang, t, Lang } from "./i18n";
 import { loadShortcuts, matchesBinding } from "./shortcuts/shortcuts";
-import { activityStore, broadcastGroup, focusedSlot } from "./terminal/registry";
+import { activityStore, broadcastGroup, focusedSlot, tuiActiveSlots } from "./terminal/registry";
 import type { ShellInfo } from "./shells";
 import { checkForUpdates, startUpdateCheck, useUpdates } from "./updates";
 import { startAiTaskTicker } from "./aiTasks";
@@ -490,6 +490,12 @@ export default function App() {
     const onKey = (e: KeyboardEvent) => {
       const bs = loadShortcuts();
       if (matchesBinding(e, bs.historyMenu)) {
+        // TUI 前台（备用屏幕程序运行中）时键入的是界面操作——
+        // 不弹出指令面板。非 shell 程序启动的终端同样拦截。
+        if (tuiActiveSlots.has(focusedSlot.value)) {
+          e.preventDefault();
+          return;
+        }
         e.preventDefault();
         // Exclusive pair: the palette closes the auto-match list.
         window.dispatchEvent(new CustomEvent("opennex-close-suggest"));

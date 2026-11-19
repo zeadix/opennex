@@ -11,6 +11,11 @@ export const broadcastEnabled = { value: false };
 /** The pane the user last clicked/focused — target for "insert". */
 export const focusedSlot = { value: 0 };
 
+/** 每个会话的 TUI 前台标志（备用屏幕程序运行中，如 opencode/vim）。
+ * TerminalPane 写入，指令面板呼出前读取——TUI 里键入的是界面操作，
+ * 不应弹出 shell 指令面板。 */
+export const tuiActiveSlots = new Set<number>();
+
 /** Session slot -> last activity unix ms, mirrored from App's poll so
  * components outside the dock models (busy dots) can read it freely. */
 export const activityStore: { map: Record<string, number> } = { map: {} };
